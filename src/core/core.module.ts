@@ -1,4 +1,7 @@
 import { DynamicModule, Global, Module } from "@nestjs/common";
+import { JwtModule } from "@nestjs/jwt";
+import { PassportModule } from "@nestjs/passport";
+import { baseConfig } from "../config/base.config";
 
 // Import all core modules
 import { AppModeModule } from "./appmode/app.mode.module";
@@ -35,6 +38,12 @@ import { WebsocketModule } from "./websocket/websocket.module";
  */
 function getCoreModules() {
   return [
+    // JWT and Passport for authentication
+    JwtModule.register({
+      secret: baseConfig.jwt.secret,
+      signOptions: { expiresIn: baseConfig.jwt.expiresIn as any },
+    }),
+    PassportModule,
     // 1. Config-dependent but no external connections
     AppModeModule,
     SecurityModule,
@@ -66,6 +75,8 @@ function getCoreModules() {
  */
 function getCoreModuleExports() {
   return [
+    JwtModule,
+    PassportModule,
     Neo4JModule,
     RedisModule,
     CacheModule,

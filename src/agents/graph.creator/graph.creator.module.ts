@@ -12,7 +12,11 @@ export interface GraphCreatorModuleOptions {
   prompt?: string;
 }
 
-@Module({})
+@Module({
+  providers: [GraphCreatorService],
+  exports: [GraphCreatorService],
+  imports: [LLMModule, LoggingModule],
+})
 export class GraphCreatorModule {
   /**
    * Configure the GraphCreatorModule with custom options
@@ -33,12 +37,5 @@ export class GraphCreatorModule {
       exports: [GraphCreatorService],
       imports: [LLMModule, LoggingModule],
     };
-  }
-
-  /**
-   * Use default configuration
-   */
-  static forFeature(): DynamicModule {
-    return this.forRoot();
   }
 }
