@@ -1,31 +1,82 @@
 # @carlonicora/nestjs-neo4jsonapi
 
-A comprehensive NestJS foundation package providing JSON:API compliant APIs, Neo4j graph database integration, Redis caching, LangChain-based AI agents (including GraphRAG), and common utilities for building modern applications.
+A comprehensive NestJS foundation package providing JSON:API compliant APIs, Neo4j graph database integration, Redis caching, LangChain-based AI agents (including GraphRAG), and common utilities for building modern multi-tenant applications.
 
 ## Table of Contents
 
 - [Features](#features)
+- [Architecture](#architecture)
 - [Installation](#installation)
 - [Environment Variables](#environment-variables)
 - [Quick Start](#quick-start)
+- [Company-User Model (B2B & B2C)](#company-user-model-b2b--b2c)
+- [Required Configuration Files](#required-configuration-files)
 - [Core Modules](#core-modules)
 - [Foundation Modules](#foundation-modules)
 - [AI Agents](#ai-agents)
-- [Customizing Agent Prompts (Optional)](#customizing-agent-prompts-optional)
-- [Configuration](#configuration)
-- [Bootstrap Utilities](#bootstrap-utilities)
+- [Security & Authentication](#security--authentication)
+- [Customizing Agent Prompts](#customizing-agent-prompts-optional)
+- [License](#license)
 
 ## Features
 
+- **Dual-Mode Architecture**: Run as **API server** (HTTP endpoints) or **Worker** (background job processing) from the same codebase
 - **JSON:API Compliance**: Full JSON:API specification support with serializers, pagination, and cursor-based navigation
 - **Neo4j Integration**: Graph database operations with Cypher query builder
 - **Redis Caching**: Built-in caching layer with configurable TTLs
+- **Multi-Tenant Architecture**: Support for both B2B (multi-company) and B2C (single invisible company) scenarios
 - **AI Agents**: LangChain-powered agents including GraphRAG for knowledge extraction, summarization, and intelligent responses
-- **Authentication**: JWT-based authentication with role-based access control (RoleId UUIDs)
+- **Authentication**: JWT-based authentication with role-based access control
 - **Background Jobs**: BullMQ integration for async job processing
 - **WebSockets**: Real-time communication support
 - **Tracing**: OpenTelemetry integration for distributed tracing
 - **Logging**: Structured logging with Loki integration
+
+## API & Worker Modes
+
+The library is designed to run in two modes from the same codebase:
+
+### API Mode (HTTP Server)
+- Handles HTTP requests via Fastify
+- WebSocket connections for real-time features
+- Uses `JwtAuthGuard` for authentication
+- Adds jobs to BullMQ queues
+
+### Worker Mode (Background Processing)
+- Processes BullMQ jobs asynchronously
+- Runs scheduled tasks (cron jobs)
+- No HTTP server - just job processing
+- Same configuration and modules as API
+
+### Running Both Modes
+
+```bash
+# Start API server
+node dist/main --mode=api
+
+# Start Worker (in separate process)
+node dist/main --mode=worker
+
+# Or use the npm scripts
+pnpm start:prod       # API mode
+pnpm start:worker:prod # Worker mode
+```
+
+The mode is determined by the `--mode` flag and configured via `getAppMode()` and `getAppModeConfig()`:
+
+## Architecture
+
+The library is organized into four main layers:
+
+```
+@carlonicora/nestjs-neo4jsonapi
+├── common/       # Shared utilities, abstracts, decorators, guards
+├── config/       # Configuration system and tokens
+├── core/         # Infrastructure modules (18 modules)
+├── foundations/  # Domain/business modules (17 modules)
+├── agents/       # AI agent modules (4 modules)
+└── bootstrap/    # Application bootstrap utilities
+```
 
 ## Installation
 
@@ -35,16 +86,16 @@ pnpm add @carlonicora/nestjs-neo4jsonapi
 
 ### Peer Dependencies
 
-The following packages must be installed in your application (they are **not** bundled with the library to avoid version conflicts):
+The following packages must be installed in your application:
 
 ```bash
-pnpm add nestjs-cls zod
+pnpm add @nestjs/common @nestjs/core @nestjs/config @nestjs/event-emitter @nestjs/jwt @nestjs/passport @nestjs/platform-socket.io @nestjs/throttler @nestjs/websockets nestjs-cls zod
 ```
 
-| Package      | Version | Purpose                      |
-| ------------ | ------- | ---------------------------- |
-| `nestjs-cls` | ^6.0.1  | Request-scoped context (CLS) |
-| `zod`        | ^4.0.0  | Schema validation            |
+| Package      | Version  | Purpose                      |
+| ------------ | -------- | ---------------------------- |
+| `nestjs-cls` | ^6.0.1   | Request-scoped context (CLS) |
+| `zod`        | ^4.0.0   | Schema validation            |
 
 **Important**: These are peer dependencies to ensure your application and the library share the same package instances, preventing NestJS dependency injection issues.
 
@@ -89,21 +140,21 @@ JWT_EXPIRES_IN=1h
 CORS_ORIGINS=http://localhost:3001
 CORS_CREDENTIALS=true
 
-# AI Configuration
+# AI Configuration (optional)
 AI_PROVIDER=openai
 AI_API_KEY=sk-...
 AI_MODEL=gpt-4o-mini
 
-# Embedder
+# Embedder (optional)
 EMBEDDER_PROVIDER=openai
 EMBEDDER_API_KEY=sk-...
 EMBEDDER_MODEL=text-embedding-3-small
 
-# Logging (Loki - optional)
+# Logging - Loki (optional)
 LOKI_ENABLED=false
 LOKI_HOST=http://localhost:3100
 
-# Tracing (Tempo - optional)
+# Tracing - Tempo (optional)
 TEMPO_ENABLED=false
 TEMPO_ENDPOINT=http://localhost:4318/v1/traces
 
@@ -141,9 +192,54 @@ ENCRYPTION_KEY=your-32-char-encryption-key
 
 ## Quick Start
 
-### 1. Setup App Module
+### 1. Create Configuration File
 
-The library uses a dynamic module pattern with `AppModeConfig` to support both API and Worker modes:
+```typescript
+// src/config/config.ts
+import { baseConfig, ConfigInterface } from "@carlonicora/nestjs-neo4jsonapi";
+
+export default (): ConfigInterface => {
+  return {
+    ...baseConfig,
+    // Add app-specific config here (optional)
+  };
+};
+```
+
+### 2. Create Company Configurations
+
+The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data:
+
+```typescript
+// src/config/company.configurations.ts
+import { AbstractCompanyConfigurations, Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
+
+export class CompanyConfigurations extends AbstractCompanyConfigurations {
+  constructor(params: { companyId: string; userId: string; language?: string; roles?: string[] }) {
+    super(params);
+  }
+
+  async loadConfigurations(params: { neo4j: Neo4jService }): Promise<void> {
+    if (!this._companyId) return;
+
+    // Load company-specific modules, features, or settings from Neo4j
+    const query = params.neo4j.initQuery({});
+    query.query = `
+      MATCH (company:Company {id: $companyId})
+      OPTIONAL MATCH (company)-[:HAS_MODULE]->(module:Module)
+      RETURN company, collect(module) as modules
+    `;
+
+    const result = await params.neo4j.readOne(query);
+
+    if (result?.modules) {
+      this.setModules(result.modules);
+    }
+  }
+}
+```
+
+### 3. Setup App Module
 
 ```typescript
 // src/app.module.ts
@@ -154,19 +250,25 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { ClsModule } from "nestjs-cls";
 
-// Import from the library
 import {
   AgentsModule,
   AppModeConfig,
   AppModeModule,
-  baseConfig,
   BaseConfigInterface,
   ConfigRateLimitInterface,
   CoreModule,
   FoundationsModule,
 } from "@carlonicora/nestjs-neo4jsonapi";
 
-// App-specific modules
+// App configuration
+import config from "./config/config";
+
+// Define your queue IDs
+enum QueueId {
+  CHUNK = "chunk",
+}
+
+// App-specific feature modules
 import { FeaturesModules } from "src/features/features.modules";
 
 @Module({})
@@ -175,19 +277,25 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
+        // Event emitter for internal events
         EventEmitterModule.forRoot(),
+
+        // App mode configuration (API vs Worker)
         AppModeModule.forRoot(modeConfig),
+
+        // Configuration
         ConfigModule.forRoot({
-          load: [() => baseConfig],
+          load: [config],
           isGlobal: true,
           cache: true,
         }),
-        ConfigModule,
+
+        // Rate limiting
         ThrottlerModule.forRootAsync({
           imports: [ConfigModule],
           inject: [ConfigService],
-          useFactory: (config: ConfigService<BaseConfigInterface>) => {
-            const rateLimitConfig = config.get<ConfigRateLimitInterface>("rateLimit");
+          useFactory: (configService: ConfigService<BaseConfigInterface>) => {
+            const rateLimitConfig = configService.get<ConfigRateLimitInterface>("rateLimit");
             return {
               throttlers: [
                 {
@@ -199,18 +307,34 @@ export class AppModule {
             };
           },
         }),
+
+        // Request-scoped context (CLS) - required for user/company context
         ClsModule.forRoot({
           global: true,
           middleware: { mount: modeConfig.enableControllers },
         }),
+
+        // Scheduled jobs (only enabled in worker mode)
         ...(modeConfig.enableCronJobs ? [ScheduleModule.forRoot()] : []),
-        // Core infrastructure modules
+
+        // ========================================
+        // LIBRARY MODULES
+        // ========================================
+
+        // Core infrastructure (Neo4j, Redis, Cache, Security, etc.)
         CoreModule.forRoot(),
-        // Foundation modules (business domain)
-        FoundationsModule.forRoot(),
-        // AI Agents (contextualiser, graph.creator, responder, summariser)
+
+        // Foundation domain modules (User, Company, Auth, etc.)
+        FoundationsModule.forRoot({
+          chunkQueueIds: [QueueId.CHUNK],
+        }),
+
+        // AI Agents (GraphRAG, Summariser, Responder, etc.)
         AgentsModule.forRoot(),
-        // App-specific features
+
+        // ========================================
+        // YOUR APP-SPECIFIC MODULES
+        // ========================================
         FeaturesModules,
       ],
       global: true,
@@ -220,27 +344,26 @@ export class AppModule {
 }
 ```
 
-### 2. Setup main.ts (Bootstrap)
-
-The bootstrap file handles both API and Worker modes with Fastify:
+### 4. Setup main.ts (Bootstrap)
 
 ```typescript
 // src/main.ts
 import * as dotenv from "dotenv";
 import * as path from "path";
 
+// Load environment variables FIRST
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
-// Initialize tracing before any other imports
+// Initialize tracing BEFORE any other imports
 import { tracingSetup } from "@carlonicora/nestjs-neo4jsonapi";
+tracingSetup.initialize();
+
 import { ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory, Reflector } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { EventEmitter } from "stream";
-tracingSetup.initialize();
 
-// Import from library
 import {
   AppLoggingService,
   AppMode,
@@ -249,7 +372,6 @@ import {
   CacheInterceptor,
   CacheService,
   ConfigApiInterface,
-  ConfigRateLimitInterface,
   CorsService,
   getAppMode,
   getAppModeConfig,
@@ -276,10 +398,14 @@ async function bootstrapAPI(modeConfig: AppModeConfig): Promise<void> {
   await app.register(require("@fastify/multipart"), {
     limits: {
       fileSize: 100 * 1024 * 1024,
+      fieldSize: 10 * 1024 * 1024,
       files: 10,
+      fields: 20,
     },
+    attachFieldsToBody: false,
   });
 
+  // Setup logging
   const loggingService = app.get(AppLoggingService);
   app.useLogger(loggingService);
 
@@ -297,18 +423,21 @@ async function bootstrapAPI(modeConfig: AppModeConfig): Promise<void> {
       return payload;
     });
 
+  // Global filters and pipes
   app.useGlobalFilters(new HttpExceptionFilter(loggingService));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  // Apply interceptors: Tracing -> Cache -> Logging
+  // Apply interceptors in order: Tracing -> Cache -> Logging
   app.useGlobalInterceptors(app.get(TracingInterceptor));
   app.useGlobalInterceptors(new CacheInterceptor(app.get(CacheService), app.get(Reflector), loggingService));
   app.useGlobalInterceptors(app.get(LoggingInterceptor));
 
+  // Setup CORS
   const corsService = app.get(CorsService);
   corsService.validateConfiguration();
   app.enableCors(corsService.getCorsConfiguration());
 
+  // Start server
   const port = configService.get<ConfigApiInterface>("api").port;
   await app.listen(port, "0.0.0.0");
   loggingService.log(`API server started on port ${port}`);
@@ -325,7 +454,9 @@ async function bootstrapAPI(modeConfig: AppModeConfig): Promise<void> {
 }
 
 async function bootstrapWorker(modeConfig: AppModeConfig): Promise<void> {
-  const app = await NestFactory.createApplicationContext(AppModule.forRoot(modeConfig), { logger: ["error", "warn"] });
+  const app = await NestFactory.createApplicationContext(AppModule.forRoot(modeConfig), {
+    logger: ["error", "warn"],
+  });
 
   const loggingService = app.get(AppLoggingService);
   app.useLogger(loggingService);
@@ -357,35 +488,203 @@ async function bootstrap(): Promise<void> {
 bootstrap();
 ```
 
-### 3. (Optional) Extend with App-Specific Config
+## Company-User Model (B2B & B2C)
 
-**This step is only needed if** your application has custom configuration that the library doesn't provide:
+The library implements a flexible multi-tenant architecture that supports both **B2B** (Business-to-Business) and **B2C** (Business-to-Consumer) scenarios through the Company-User relationship.
 
-```typescript
-// src/config/configuration.ts
-import { baseConfig } from "@carlonicora/nestjs-neo4jsonapi";
+### The Relationship
 
-export default () => ({
-  // Library handles all standard config
-  ...baseConfig,
-
-  // Your app-specific config (optional)
-  myApp: {
-    customSetting: process.env.MY_CUSTOM_SETTING || "default",
-    featureFlag: process.env.MY_FEATURE_FLAG === "true",
-  },
-});
+```
+Company (1) <--[BELONGS_TO]-- (*) User
+   |
+   +--[HAS_MODULE]--> Module (features available to company)
+   +--[HAS_FEATURE]--> Feature (feature flags)
 ```
 
-Then use it in your app module:
+### User Entity
 
 ```typescript
-import configuration from "./config/configuration";
+type User = {
+  id: string;
+  email: string;
+  name?: string;
+  password?: string;
+  avatar?: string;
+  isActive: boolean;
+  isDeleted: boolean;
 
-ConfigModule.forRoot({
-  isGlobal: true,
-  load: [configuration],
-}),
+  role?: Role[];      // User's roles within the company
+  company?: Company;  // The company this user belongs to
+  module?: Module[];  // Modules assigned to this specific user
+};
+```
+
+### Company Entity
+
+```typescript
+type Company = {
+  id: string;
+  name: string;
+  logo?: string;
+  isActiveSubscription: boolean;
+  ownerEmail: string;
+  availableTokens: number;
+
+  feature: Feature[];  // Features available to company
+  module: Module[];    // Modules available to company
+};
+```
+
+### Roles and UUIDs
+
+**Important**: All role IDs in the library are UUIDs, not string names. The library provides base system roles that you can extend:
+
+```typescript
+// src/config/roles.ts
+import { SystemRoles } from "@carlonicora/nestjs-neo4jsonapi";
+
+/**
+ * Extend the base SystemRoles with your application-specific roles.
+ * All role IDs MUST be UUIDs.
+ */
+export const AppRoles = {
+  // Base roles from the library
+  ...SystemRoles,
+
+  // Your application-specific roles (UUIDs)
+  Manager: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  Editor: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  Viewer: "c3d4e5f6-a7b8-9012-cdef-123456789012",
+} as const;
+
+export type AppRoleId = (typeof AppRoles)[keyof typeof AppRoles];
+```
+
+The base `SystemRoles` includes:
+- `Administrator`: `"53394cb8-1e87-11ef-8b48-bed54b8f8aba"` - System-wide admin
+- `CompanyAdministrator`: `"2e1eee00-6cba-4506-9059-ccd24e4ea5b0"` - Company-level admin
+
+### B2B Scenario (Multi-Tenant)
+
+In a B2B application, companies are visible and central to the user experience:
+
+- Each company has multiple users
+- Users see company branding, shared data, and collaborate within their company
+- Company administrators manage users, modules, and settings
+- Data is segregated by company
+
+```typescript
+import { SystemRoles } from "@carlonicora/nestjs-neo4jsonapi";
+import { AppRoles } from "./config/roles";
+
+// Example: User registration in B2B
+async function registerB2BUser(email: string, companyId: string) {
+  // User explicitly joins an existing company
+  // Note: roles must be UUIDs, not string names!
+  const user = await userService.create({
+    email,
+    companyId,  // Links to existing company
+    roles: [AppRoles.Viewer],  // UUID: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+  });
+}
+
+// Example: Create company admin
+async function createCompanyAdmin(email: string, companyId: string) {
+  const user = await userService.create({
+    email,
+    companyId,
+    roles: [SystemRoles.CompanyAdministrator],  // UUID from library
+  });
+}
+```
+
+### B2C Scenario (Single User)
+
+In a B2C application, companies are **invisible** but still exist in the database:
+
+- Each user gets their own "personal" company created automatically
+- The company provides data isolation and the same multi-tenant security
+- Users are unaware they have a company - it's an implementation detail
+- This allows future upgrades to B2B (invite team members) without restructuring
+
+```typescript
+import { SystemRoles } from "@carlonicora/nestjs-neo4jsonapi";
+
+// Example: User registration in B2C
+async function registerB2CUser(email: string) {
+  // Create a personal/invisible company for this user
+  const company = await companyService.create({
+    name: `${email}'s workspace`,  // Or generate a UUID
+    ownerEmail: email,
+  });
+
+  // Create user linked to their personal company
+  // They are the administrator of their own space
+  const user = await userService.create({
+    email,
+    companyId: company.id,
+    roles: [SystemRoles.CompanyAdministrator],  // UUID - owner of personal space
+  });
+}
+```
+
+### How the Library Uses This
+
+1. **JWT Token**: Contains `userId`, `companyId`, and `roles`
+2. **JwtAuthGuard**: Validates token and loads company configurations via `COMPANY_CONFIGURATIONS_FACTORY`
+3. **CLS Context**: Stores `companyId` and `userId` for the request lifecycle
+4. **Neo4j Queries**: Automatically scoped to `$companyId` via `initQuery()`
+
+```typescript
+// All queries are automatically company-scoped
+const query = neo4jService.initQuery({ serialiser: UserModel });
+query.query = `
+  MATCH (company:Company {id: $companyId})
+  MATCH (user:User)-[:BELONGS_TO]->(company)
+  RETURN user
+`;
+// $companyId is automatically injected from CLS context
+```
+
+### Benefits
+
+| Benefit | B2B | B2C |
+|---------|-----|-----|
+| Data isolation | Per company | Per user (via invisible company) |
+| User collaboration | Yes | No (single user) |
+| Scalability | Multi-tenant | Same architecture |
+| Future B2B upgrade | Already supported | Easy migration path |
+| Billing | Per company | Per user (mapped to company) |
+
+## Required Configuration Files
+
+### File Structure
+
+```
+your-app/
+├── src/
+│   ├── config/
+│   │   ├── config.ts                 # App configuration
+│   │   ├── company.configurations.ts # Company context loader
+│   │   └── enums/
+│   │       └── queue.id.ts           # Queue identifiers
+│   ├── features/                     # Your app-specific modules
+│   ├── app.module.ts
+│   └── main.ts
+├── .env
+└── package.json
+```
+
+### Queue IDs (if using background jobs)
+
+```typescript
+// src/config/enums/queue.id.ts
+export enum QueueId {
+  CHUNK = "chunk",
+  // Add your custom queue IDs
+  EMAIL = "email",
+  NOTIFICATIONS = "notifications",
+}
 ```
 
 ## Core Modules
@@ -413,60 +712,29 @@ The library includes 18 core infrastructure modules:
 | `AppModeModule`   | Application mode (API/Worker)                    |
 | `DebugModule`     | Debugging utilities                              |
 
-### Security Module - Role-Based Access Control
-
-The security module uses `RoleId` UUID values (not string names):
-
-```typescript
-import { Controller, Get, UseGuards } from "@nestjs/common";
-import { JwtAuthGuard, Roles, RoleId } from "@carlonicora/nestjs-neo4jsonapi";
-
-@Controller("admin")
-@UseGuards(JwtAuthGuard)
-export class AdminController {
-  // Use RoleId enum values (UUIDs), NOT strings
-  @Get("dashboard")
-  @Roles(RoleId.Administrator)
-  async getDashboard() {
-    // Only administrators can access
-  }
-
-  @Get("reports")
-  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
-  async getReports() {
-    // Administrators OR CompanyAdministrators can access
-  }
-}
-```
-
-Available RoleIds:
-
-- `RoleId.Administrator` - System administrator
-- `RoleId.CompanyAdministrator` - Company-level administrator
-
 ## Foundation Modules
 
 The library includes 17 foundation modules for business domain logic:
 
 | Module               | Description                                      |
 | -------------------- | ------------------------------------------------ |
-| `AtomicFactModule`   | Atomic facts management for knowledge graphs     |
-| `AuditModule`        | Audit logging                                    |
+| `UserModule`         | User management with CRUD operations             |
+| `CompanyModule`      | Multi-tenant company management                  |
 | `AuthModule`         | Authentication (login, register, password reset) |
+| `RoleModule`         | Role management                                  |
 | `ChunkModule`        | Document chunk storage and retrieval             |
 | `ChunkerModule`      | Document parsing (PDF, DOCX, XLSX, HTML)         |
-| `CompanyModule`      | Multi-tenant company management                  |
-| `ContentModule`      | Content management                               |
-| `FeatureModule`      | Feature flag management                          |
+| `AtomicFactModule`   | Atomic facts management for knowledge graphs     |
 | `KeyConceptModule`   | Key concepts for knowledge graphs                |
-| `ModuleModule`       | Module/plugin management                         |
+| `ContentModule`      | Content management                               |
 | `NotificationModule` | User notifications                               |
 | `PushModule`         | Push notifications (VAPID)                       |
-| `RelevancyModule`    | Relevancy scoring                                |
-| `RoleModule`         | Role management                                  |
+| `FeatureModule`      | Feature flag management                          |
+| `ModuleModule`       | Module/plugin management                         |
 | `S3Module`           | S3-compatible storage                            |
 | `TokenUsageModule`   | AI token usage tracking                          |
-| `UserModule`         | User management with CRUD operations             |
+| `AuditModule`        | Audit logging                                    |
+| `RelevancyModule`    | Relevancy scoring                                |
 
 ## AI Agents
 
@@ -477,7 +745,7 @@ LangChain-powered agents for intelligent document processing.
 Extracts knowledge graphs from text, including atomic facts and key concept relationships.
 
 ```typescript
-import { GraphCreatorService } from "@carlonicora/nestjs-neo4jsonapi/agents";
+import { GraphCreatorService } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class MyService {
@@ -493,15 +761,14 @@ export class MyService {
 
 ### ContextualiserModule (GraphRAG)
 
-Implements **GraphRAG** (Graph-based Retrieval Augmented Generation) for intelligent context gathering. Unlike traditional RAG, GraphRAG:
+Implements **GraphRAG** (Graph-based Retrieval Augmented Generation) for intelligent context gathering:
 
 - Uses a knowledge graph structure (Neo4j)
 - Traverses atomic facts and key concepts
 - Explores neighbouring nodes for richer context
-- Provides more accurate and contextual responses
 
 ```typescript
-import { ContextualiserService } from "@carlonicora/nestjs-neo4jsonapi/agents";
+import { ContextualiserService } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class MyService {
@@ -518,7 +785,7 @@ export class MyService {
 Generates summaries from document chunks using a map-reduce pattern.
 
 ```typescript
-import { SummariserService } from "@carlonicora/nestjs-neo4jsonapi/agents";
+import { SummariserService } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class MyService {
@@ -537,7 +804,7 @@ export class MyService {
 Generates comprehensive answers based on gathered context.
 
 ```typescript
-import { ResponderService } from "@carlonicora/nestjs-neo4jsonapi/agents";
+import { ResponderService } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class MyService {
@@ -549,11 +816,79 @@ export class MyService {
 }
 ```
 
+## Security & Authentication
+
+### Using Guards
+
+```typescript
+import { Controller, Get, UseGuards } from "@nestjs/common";
+import { JwtAuthGuard, AdminJwtAuthGuard, OptionalJwtAuthGuard, Roles, SystemRoles } from "@carlonicora/nestjs-neo4jsonapi";
+import { AppRoles } from "./config/roles";
+
+@Controller("api/resources")
+export class ResourceController {
+  // Requires valid JWT token
+  @Get()
+  @UseGuards(JwtAuthGuard)
+  async getResources() { ... }
+
+  // Requires Administrator role (uses AdminJwtAuthGuard)
+  @Get("admin")
+  @UseGuards(AdminJwtAuthGuard)
+  async getAdminResources() { ... }
+
+  // JWT is optional - works for both authenticated and anonymous users
+  @Get("public")
+  @UseGuards(OptionalJwtAuthGuard)
+  async getPublicResources() { ... }
+
+  // Requires specific roles (UUIDs)
+  @Get("restricted")
+  @UseGuards(JwtAuthGuard)
+  @Roles(SystemRoles.Administrator, SystemRoles.CompanyAdministrator)
+  async getRestrictedResources() { ... }
+
+  // Using your custom app roles
+  @Get("managers-only")
+  @UseGuards(JwtAuthGuard)
+  @Roles(AppRoles.Manager, SystemRoles.Administrator)
+  async getManagerResources() { ... }
+}
+```
+
+### Accessing User Context
+
+```typescript
+import { Injectable } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
+import { CompanyConfigurationsInterface } from "@carlonicora/nestjs-neo4jsonapi";
+
+@Injectable()
+export class MyService {
+  constructor(private readonly cls: ClsService) {}
+
+  async doSomething() {
+    // Access current user/company context
+    const userId = this.cls.get("userId");
+    const companyId = this.cls.get("companyId");
+    const roles = this.cls.get("roles");
+    const language = this.cls.get("language");
+
+    // Access company configurations (loaded by JwtAuthGuard)
+    const config = this.cls.get<CompanyConfigurationsInterface>("companyConfigurations");
+
+    if (config?.hasModule("premium-feature")) {
+      // User's company has access to premium feature
+    }
+  }
+}
+```
+
 ## Customizing Agent Prompts (Optional)
 
-The library includes default prompts optimized for Italian legal documents. **Customization is entirely optional** - the library works out of the box.
+The library includes default prompts. Customization is entirely optional.
 
-### Available Prompts (11 total)
+### Available Prompts
 
 | Agent              | Prompt                                   | Purpose                               |
 | ------------------ | ---------------------------------------- | ------------------------------------- |
@@ -563,168 +898,34 @@ The library includes default prompts optimized for Italian legal documents. **Cu
 | **Contextualiser** | `CONTEXTUALISER_KEYCONCEPTS_PROMPT`      | Score key concepts                    |
 | **Contextualiser** | `CONTEXTUALISER_ATOMICFACTS_PROMPT`      | Evaluate atomic facts                 |
 | **Contextualiser** | `CONTEXTUALISER_CHUNK_PROMPT`            | Assess text chunks                    |
-| **Contextualiser** | `CONTEXTUALISER_CHUNK_VECTOR_PROMPT`     | Vector-based chunk assessment         |
 | **Responder**      | `RESPONDER_ANSWER_PROMPT`                | Generate final answers                |
 | **Summariser**     | `SUMMARISER_MAP_PROMPT`                  | Summarize individual chunks           |
 | **Summariser**     | `SUMMARISER_COMBINE_PROMPT`              | Combine summaries                     |
 | **Summariser**     | `SUMMARISER_TLDR_PROMPT`                 | Create TLDR                           |
 
-### Recommended: Create a Prompts Folder
-
-```
-your-app/
-├── src/
-│   ├── prompts/
-│   │   ├── index.ts                    # Re-exports all prompts
-│   │   ├── graph-creator.prompt.ts     # Custom graph creator prompt
-│   │   ├── contextualiser/
-│   │   │   ├── question-refiner.prompt.ts
-│   │   │   ├── rational-plan.prompt.ts
-│   │   │   └── ...
-│   │   └── summariser/
-│   │       ├── map.prompt.ts
-│   │       └── ...
-```
-
-### Define Custom Prompts
-
-```typescript
-// src/prompts/graph-creator.prompt.ts
-export const graphCreatorPrompt = `
-You are an intelligent assistant that extracts structured knowledge from text.
-
-## Domain Context: Medical Documents
-
-Focus on extracting:
-- Medical terminology and procedures
-- Patient-doctor relationships
-- Diagnosis and treatment information
-...
-`;
-```
-
-### Pass to Module
+### Custom Prompts Example
 
 ```typescript
 // src/app.module.ts
-import { graphCreatorPrompt } from "./prompts/graph-creator.prompt";
-import { questionRefinerPrompt } from "./prompts/contextualiser/question-refiner.prompt";
-
-@Module({
-  imports: [
-    // Option 1: Customize individual modules
-    GraphCreatorModule.forRoot({
-      prompt: graphCreatorPrompt,
-    }),
-
-    ContextualiserModule.forRoot({
-      prompts: {
-        questionRefiner: questionRefinerPrompt,
-        // Other prompts use defaults if not specified
-      },
-    }),
-
-    // Option 2: Customize via centralized AgentsModule
-    AgentsModule.forRoot({
-      prompts: {
-        graphCreator: graphCreatorPrompt,
-        contextualiser: {
-          questionRefiner: questionRefinerPrompt,
-        },
-        summariser: {
-          map: customMapPrompt,
-        },
-      },
-    }),
-  ],
-})
-export class AppModule {}
-```
-
-### Access Default Prompts for Reference
-
-```typescript
-import { defaultGraphCreatorPrompt, defaultResponderAnswerPrompt } from "@carlonicora/nestjs-neo4jsonapi/agents";
-
-// Use as a base and extend
-const customPrompt =
-  defaultGraphCreatorPrompt +
-  `
-## Additional Instructions
-- Your domain-specific additions here
-`;
-```
-
-## Configuration
-
-### BaseConfigInterface
-
-The library provides `BaseConfigInterface` with 16 configuration domains:
-
-```typescript
-interface BaseConfigInterface {
-  environment: ConfigEnvironmentInterface; // api | worker
-  api: ConfigApiInterface; // URL, port, environment
-  app: ConfigAppInterface; // Frontend URL
-  neo4j: ConfigNeo4jInterface; // Database connection
-  redis: ConfigRedisInterface; // Cache/queue connection
-  cache: ConfigCacheInterface; // Cache settings
-  cors: ConfigCorsInterface; // CORS policy
-  jwt: ConfigJwtInterface; // JWT settings
-  vapid: ConfigVapidInterface; // Push notification keys
-  email: ConfigEmailInterface; // Email provider
-  logging: ConfigLoggingInterface; // Loki logging
-  tempo: ConfigTempoInterface; // Distributed tracing
-  s3: ConfigS3Interface; // Object storage
-  ai: ConfigAiInterface; // AI/LLM settings
-  rateLimit: ConfigRateLimitInterface; // Rate limiting
-  encryption: ConfigEncryptionInterface; // Data encryption
-  stripe: ConfigStripeInterface; // Payment processing
-}
-```
-
-### Injection Tokens
-
-Use injection tokens for optional dependencies:
-
-```typescript
-import {
-  NEO4J_CONFIG,
-  REDIS_CONFIG,
-  AI_CONFIG,
-  COMPANY_CONFIGURATIONS_FACTORY,
-} from "@carlonicora/nestjs-neo4jsonapi/config";
-```
-
-## Bootstrap Utilities
-
-Helper functions for application bootstrap:
-
-```typescript
-import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
-  app.setGlobalPrefix("api/v1");
-  app.enableCors();
-
-  await app.listen(process.env.API_PORT || 3000);
-}
-
-bootstrap();
+AgentsModule.forRoot({
+  prompts: {
+    graphCreator: "Your custom graph creator prompt...",
+    contextualiser: {
+      questionRefiner: "Your custom question refiner prompt...",
+    },
+    summariser: {
+      map: "Your custom map prompt...",
+    },
+  },
+}),
 ```
 
 ## License
 
-MIT
+This project is licensed under GPL v3 for open source use.
+
+For commercial/closed-source licensing, contact: [@carlonicora](https://github.com/carlonicora)
 
 ## Author
 
 Carlo Nicora - [@carlonicora](https://github.com/carlonicora)
-
-## Commercial Licensing
-
-This project is licensed under GPL v3 for open source use.
-For commercial/closed-source licensing, contact: [@carlonicora](https://github.com/carlonicora)
