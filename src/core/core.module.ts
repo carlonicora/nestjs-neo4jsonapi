@@ -1,6 +1,8 @@
-import { DynamicModule, Global, Module } from "@nestjs/common";
+import { DynamicModule, Global, Module, Provider, Type } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
+import { AbstractCompanyConfigurations } from "../common";
+import { COMPANY_CONFIGURATIONS_FACTORY, CompanyConfigurationsFactory } from "../common/tokens";
 import { baseConfig } from "../config/base.config";
 
 // Import all core modules
@@ -95,6 +97,17 @@ function getCoreModuleExports() {
 }
 
 /**
+ * Options for CoreModule.forRoot()
+ */
+export interface CoreModuleOptions {
+  /**
+   * CompanyConfigurations class that extends AbstractCompanyConfigurations.
+   * This class will be used to create configuration instances for each request.
+   */
+  companyConfigurations?: Type<AbstractCompanyConfigurations>;
+}
+
+/**
  * CoreModule - Centralized module that provides all core infrastructure
  *
  * All services use `baseConfig` directly - no DI token injection needed.
@@ -103,7 +116,7 @@ function getCoreModuleExports() {
  * ```typescript
  * @Module({
  *   imports: [
- *     CoreModule.forRoot(),
+ *     CoreModule.forRoot({ companyConfigurations: MyCompanyConfigurations }),
  *   ],
  * })
  * export class AppModule {}
@@ -115,11 +128,38 @@ export class CoreModule {
   /**
    * Configure CoreModule with all core infrastructure modules
    */
-  static forRoot(): DynamicModule {
+  static forRoot(options?: CoreModuleOptions): DynamicModule {
+    const providers: Provider[] = [];
+
+    // Create factory provider for company configurations
+    if (options?.companyConfigurations) {
+      const ConfigClass = options.companyConfigurations;
+      providers.push({
+        provide: COMPANY_CONFIGURATIONS_FACTORY,
+        useValue: (async (params) => {
+          const config = new ConfigClass({
+            companyId: params.companyId,
+            userId: params.userId,
+            language: params.language,
+            roles: params.roles,
+          });
+          await config.loadConfigurations({ neo4j: params.neo4j });
+          return config;
+        }) as CompanyConfigurationsFactory,
+      });
+    } else {
+      // Provide null as default so @Optional() works correctly
+      providers.push({
+        provide: COMPANY_CONFIGURATIONS_FACTORY,
+        useValue: null,
+      });
+    }
+
     return {
       module: CoreModule,
       imports: getCoreModules(),
-      exports: getCoreModuleExports(),
+      providers,
+      exports: [...getCoreModuleExports(), COMPANY_CONFIGURATIONS_FACTORY],
       global: true,
     };
   }

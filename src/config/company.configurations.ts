@@ -15,6 +15,6 @@ export { AbstractCompanyConfigurations };
  */
 export class CompanyConfigurations extends AbstractCompanyConfigurations {
   loadConfigurations(_params: { neo4j: any }): Promise<void> {
-    throw new Error("CompanyConfigurations.loadConfigurations must be implemented by the consuming application");
+    return;
   }
 }

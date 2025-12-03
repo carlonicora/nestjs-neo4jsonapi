@@ -1,9 +1,15 @@
 import { InjectQueue } from "@nestjs/bullmq";
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import axios from "axios";
 import { Queue } from "bullmq";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { ClsService } from "nestjs-cls";
+import {
+  COMPANY_CONFIGURATIONS_FACTORY,
+  CompanyConfigurationsFactory,
+  CompanyConfigurationsInterface,
+} from "../../../common/tokens";
 import { CompanyConfigurations } from "../../../config/company.configurations";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
@@ -28,7 +34,20 @@ export class CompanyService {
     private readonly cls: ClsService,
     private readonly neo4j: Neo4jService,
     private readonly versionService: VersionService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Get the company configurations factory from the global CoreModule provider.
+   * Returns null if not configured.
+   */
+  private getCompanyConfigFactory(): CompanyConfigurationsFactory | null {
+    try {
+      return this.moduleRef.get<CompanyConfigurationsFactory>(COMPANY_CONFIGURATIONS_FACTORY, { strict: false });
+    } catch {
+      return null;
+    }
+  }
 
   async validate(params: { companyId: string }) {
     const company = await this.companyRepository.findByCompanyId({
@@ -130,12 +149,23 @@ export class CompanyService {
       if (!company) throw new HttpException(`Forbidden`, HttpStatus.FORBIDDEN);
       this.cls.set("companyId", company.id);
 
-      const companyConfigurations = new CompanyConfigurations({
-        companyId: company.id,
-        userId: "",
-      });
-      await companyConfigurations.loadConfigurations({ neo4j: this.neo4j });
-      this.cls.set<CompanyConfigurations>("companyConfigurations", companyConfigurations);
+      let companyConfigurations: CompanyConfigurationsInterface;
+      const companyConfigFactory = this.getCompanyConfigFactory();
+      if (companyConfigFactory) {
+        companyConfigurations = await companyConfigFactory({
+          companyId: company.id,
+          userId: "",
+          neo4j: this.neo4j,
+        });
+      } else {
+        const config = new CompanyConfigurations({
+          companyId: company.id,
+          userId: "",
+        });
+        await config.loadConfigurations({ neo4j: this.neo4j });
+        companyConfigurations = config;
+      }
+      this.cls.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
     }
   }
 
