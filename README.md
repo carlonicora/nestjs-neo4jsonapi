@@ -208,11 +208,15 @@ export default (): ConfigInterface => {
 
 ### 2. Create Company Configurations
 
-The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data:
+The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data. This class is instantiated for each authenticated request and provides company-specific context (modules, features, settings) to your application.
 
 ```typescript
 // src/config/company.configurations.ts
 import { AbstractCompanyConfigurations, Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
+
+// Import your app-specific entities if needed
+import { Configuration } from "src/features/configurations/entities/configuration.entity";
+import { ConfigurationModel } from "src/features/configurations/entities/configuration.model";
 
 export class CompanyConfigurations extends AbstractCompanyConfigurations {
   constructor(params: { companyId: string; userId: string; language?: string; roles?: string[] }) {
@@ -223,21 +227,23 @@ export class CompanyConfigurations extends AbstractCompanyConfigurations {
     if (!this._companyId) return;
 
     // Load company-specific modules, features, or settings from Neo4j
-    const query = params.neo4j.initQuery({});
+    const query = params.neo4j.initQuery({ serialiser: ConfigurationModel });
     query.query = `
-      MATCH (company:Company {id: $companyId})
-      OPTIONAL MATCH (company)-[:HAS_MODULE]->(module:Module)
-      RETURN company, collect(module) as modules
+      MATCH (configuration:Configuration {id: $companyId})<-[:HAS_CONFIGURATION]-(company:Company)
+      OPTIONAL MATCH (company)-[:HAS_MODULE]-(configuration_module:Module)
+      RETURN configuration, configuration_module
     `;
 
-    const result = await params.neo4j.readOne(query);
+    const configuration: Configuration = await params.neo4j.readOne(query);
 
-    if (result?.modules) {
-      this.setModules(result.modules);
+    if (configuration && configuration.module) {
+      this.setModules(configuration.module);
     }
   }
 }
 ```
+
+**Important**: You must pass your `CompanyConfigurations` class to `CoreModule.forRoot()` so the library can instantiate it when loading user context (see Step 3 below).
 
 ### 3. Setup App Module
 
@@ -268,7 +274,8 @@ enum QueueId {
   CHUNK = "chunk",
 }
 
-// App-specific feature modules
+// App-specific modules
+import { CompanyConfigurations } from "src/config/company.configurations";
 import { FeaturesModules } from "src/features/features.modules";
 
 @Module({})
@@ -322,7 +329,8 @@ export class AppModule {
         // ========================================
 
         // Core infrastructure (Neo4j, Redis, Cache, Security, etc.)
-        CoreModule.forRoot(),
+        // Pass your CompanyConfigurations class to enable company-specific context
+        CoreModule.forRoot({ companyConfigurations: CompanyConfigurations }),
 
         // Foundation domain modules (User, Company, Auth, etc.)
         FoundationsModule.forRoot({
@@ -343,6 +351,18 @@ export class AppModule {
   }
 }
 ```
+
+#### CoreModule.forRoot() Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `companyConfigurations` | `Type<AbstractCompanyConfigurations>` | No | Your custom class extending `AbstractCompanyConfigurations`. When provided, the library uses this class to load company-specific context (modules, features, settings) for each authenticated request. If not provided, a minimal stub is used. |
+
+#### FoundationsModule.forRoot() Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `chunkQueueIds` | `string[]` | Yes | Queue IDs for the ChunkModule to register with BullMQ for document processing. |
 
 ### 4. Setup main.ts (Bootstrap)
 
