@@ -1,7 +1,7 @@
-import { AIMessage, BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import { Injectable } from "@nestjs/common";
-import { ClsService } from "nestjs-cls";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { ModelService } from "../../llm/services/model.service";
@@ -46,6 +46,8 @@ interface LLMCallParams<T> {
   stopSequences?: string[];
   maxHistoryMessages?: number;
   validateInput?: boolean; // Optional flag to enable input validation (default: false)
+  tools?: DynamicStructuredTool[]; // Optional tools to bind to the LLM
+  maxToolIterations?: number; // Max tool call iterations (default: 5)
 }
 
 /**
@@ -70,10 +72,7 @@ interface StructuredOutputResponse<T> {
 export class LLMService {
   private _sessionTokens: SessionUsage;
 
-  constructor(
-    private readonly clsService: ClsService,
-    private readonly modelService: ModelService,
-  ) {
+  constructor(private readonly modelService: ModelService) {
     this._sessionTokens = {
       input: 0,
       output: 0,
@@ -319,6 +318,8 @@ export class LLMService {
    * @param params.metadata - Optional metadata for LangSmith tracking
    * @param params.stopSequences - Optional stop sequences
    * @param params.validateInput - Optional flag to enable input validation (default: false)
+   * @param params.tools - Optional array of tools to bind to the LLM
+   * @param params.maxToolIterations - Optional max tool call iterations (default: 5)
    *
    * @returns Promise resolving to parsed output + token usage metadata
    * @throws {Error} If LLM call fails or returns invalid structured output
@@ -384,20 +385,6 @@ export class LLMService {
         temperature: params.temperature,
       });
 
-      // Add structured output enforcement (includes built-in retry logic)
-      // Note: withStructuredOutput has built-in retry with exponential backoff (default: 3 attempts)
-      const structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
-        includeRaw: true,
-      });
-
-      const chain = prompt.pipe(structuredLlm);
-
-      // Build invocation parameters
-      const invocationParams: Record<string, any> = {
-        ...params.inputParams,
-        chat_history: historyMessages,
-      };
-
       // Build config options for the invocation
       const configOptions: Record<string, any> = {};
       if (params.maxTokens) configOptions.maxTokens = params.maxTokens;
@@ -405,15 +392,114 @@ export class LLMService {
       if (params.metadata) configOptions.metadata = params.metadata;
       if (params.timeout) configOptions.timeout = params.timeout;
 
-      // Invoke with inputParams + chat_history + config
-      const response = (Object.keys(configOptions).length > 0
-        ? await chain.invoke(invocationParams, configOptions)
-        : await chain.invoke(invocationParams)) as unknown as StructuredOutputResponse<T>;
+      // Track token usage across tool iterations
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
 
-      // Extract token usage with type guard
+      // Build initial messages for the conversation
+      const conversationMessages: BaseMessage[] = await prompt.formatMessages({
+        ...params.inputParams,
+        chat_history: historyMessages,
+      });
+
+      // If tools are provided, handle tool calling loop
+      if (params.tools && params.tools.length > 0) {
+        const maxIterations = params.maxToolIterations ?? 5;
+
+        // Build tool map for execution
+        const toolMap = new Map<string, DynamicStructuredTool>();
+        for (const tool of params.tools) {
+          toolMap.set(tool.name, tool);
+        }
+
+        // Bind tools to model
+        const modelWithTools = baseModel.bindTools(params.tools);
+
+        // Tool calling loop
+        for (let iteration = 0; iteration < maxIterations; iteration++) {
+          // Call model with tools
+          const toolResponse =
+            Object.keys(configOptions).length > 0
+              ? await modelWithTools.invoke(conversationMessages, configOptions)
+              : await modelWithTools.invoke(conversationMessages);
+
+          // Track token usage
+          const responseUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
+          if (responseUsage) {
+            totalInputTokens += responseUsage.input_tokens ?? 0;
+            totalOutputTokens += responseUsage.output_tokens ?? 0;
+          }
+
+          // Check for tool calls
+          const toolCalls = (toolResponse as AIMessage).tool_calls ?? [];
+
+          if (toolCalls.length === 0) {
+            // No more tool calls - break to get final structured response
+            break;
+          }
+
+          // Add AI message with tool calls to conversation
+          conversationMessages.push(toolResponse);
+
+          // Execute each tool call
+          for (const toolCall of toolCalls) {
+            const tool = toolMap.get(toolCall.name);
+
+            console.log(`[LLMService] Tool call: ${toolCall.name}`, {
+              args: toolCall.args,
+              toolCallId: toolCall.id,
+            });
+
+            if (!tool) {
+              console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
+              conversationMessages.push(
+                new ToolMessage({
+                  content: `Tool "${toolCall.name}" not found`,
+                  tool_call_id: toolCall.id ?? "",
+                }),
+              );
+              continue;
+            }
+
+            try {
+              const result = await tool.invoke(toolCall.args);
+              const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+              console.log(`[LLMService] Tool result: ${toolCall.name}`, {
+                resultPreview: resultStr.substring(0, 200),
+              });
+              conversationMessages.push(
+                new ToolMessage({
+                  content: resultStr,
+                  tool_call_id: toolCall.id ?? "",
+                }),
+              );
+            } catch (error) {
+              console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
+              conversationMessages.push(
+                new ToolMessage({
+                  content: `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
+                  tool_call_id: toolCall.id ?? "",
+                }),
+              );
+            }
+          }
+        }
+      }
+
+      // Get final structured response (unified path for both tool and non-tool flows)
+      const structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
+        includeRaw: true,
+      });
+
+      const response = (await structuredLlm.invoke(
+        conversationMessages,
+        Object.keys(configOptions).length > 0 ? configOptions : undefined,
+      )) as unknown as StructuredOutputResponse<T>;
+
+      // Extract token usage with type guard (includes tool iteration tokens)
       const raw = isValidRaw(response.raw) ? response.raw : undefined;
-      const input = raw?.usage_metadata?.input_tokens ?? 0;
-      const output = raw?.usage_metadata?.output_tokens ?? 0;
+      const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
+      const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
 
       // Update session tracking
       this._sessionTokens.input += input;
