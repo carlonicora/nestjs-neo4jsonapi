@@ -9,6 +9,7 @@ A comprehensive NestJS foundation package providing JSON:API compliant APIs, Neo
 - [Installation](#installation)
 - [Environment Variables](#environment-variables)
 - [Quick Start](#quick-start)
+- [Advanced Setup (Custom Bootstrap)](#advanced-setup-custom-bootstrap)
 - [Company-User Model (B2B & B2C)](#company-user-model-b2b--b2c)
 - [Required Configuration Files](#required-configuration-files)
 - [Core Modules](#core-modules)
@@ -191,6 +192,104 @@ ENCRYPTION_KEY=your-32-char-encryption-key
 ```
 
 ## Quick Start
+
+The library provides a `bootstrap()` function that handles all the complexity of setting up a NestJS application. You only need to provide your app-specific configuration.
+
+### 1. Create Company Configurations
+
+The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data:
+
+```typescript
+// src/config/company.configurations.ts
+import { AbstractCompanyConfigurations, Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
+
+export class CompanyConfigurations extends AbstractCompanyConfigurations {
+  constructor(params: { companyId: string; userId: string; language?: string; roles?: string[] }) {
+    super(params);
+  }
+
+  async loadConfigurations(params: { neo4j: Neo4jService }): Promise<void> {
+    if (!this._companyId) return;
+
+    // Load company-specific modules, features, or settings from Neo4j
+    const query = params.neo4j.initQuery();
+    query.query = `
+      MATCH (company:Company {id: $companyId})-[:HAS_MODULE]->(module:Module)
+      RETURN module
+    `;
+
+    const result = await params.neo4j.read(query);
+    if (result?.length) {
+      this.setModules(result);
+    }
+  }
+}
+```
+
+### 2. Create Your Features Module
+
+```typescript
+// src/features/features.modules.ts
+import { Module } from "@nestjs/common";
+// Import your app-specific feature modules
+
+@Module({
+  imports: [
+    // Your feature modules here
+  ],
+})
+export class FeaturesModules {}
+```
+
+### 3. Bootstrap Your Application
+
+```typescript
+// src/main.ts
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Load environment variables FIRST (before any library imports)
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
+
+import { bootstrap } from "@carlonicora/nestjs-neo4jsonapi";
+import { CompanyConfigurations } from "./config/company.configurations";
+import { FeaturesModules } from "./features/features.modules";
+
+bootstrap({
+  companyConfigurations: CompanyConfigurations,
+  queueIds: ["chunk"],
+  appModules: [FeaturesModules],
+  i18n: {
+    fallbackLanguage: "it",
+    path: path.join(__dirname, "i18n"),
+  },
+});
+```
+
+That's it! The `bootstrap()` function handles:
+- Tracing initialization
+- API vs Worker mode detection (via `--mode=api` or `--mode=worker` CLI args)
+- Fastify adapter with multipart support
+- Global validation pipes, exception filters, and interceptors
+- Rate limiting, CORS, and caching
+- Graceful shutdown handlers
+
+### Bootstrap Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `companyConfigurations` | `Type<AbstractCompanyConfigurations>` | Yes | Your custom class extending `AbstractCompanyConfigurations` |
+| `queueIds` | `string[]` | Yes | Queue IDs for background job processing with BullMQ |
+| `appModules` | `(Type<any> \| DynamicModule)[]` | Yes | Your app-specific feature modules |
+| `i18n` | `I18nOptions` | No | i18n configuration (fallbackLanguage, path) |
+| `prompts` | `AgentPromptsOptions` | No | Custom prompts for AI agents |
+| `config` | `() => Record<string, any>` | No | Custom config that extends baseConfig |
+
+---
+
+## Advanced Setup (Custom Bootstrap)
+
+If you need more control over the bootstrap process, you can manually configure the AppModule and main.ts.
 
 ### 1. Create Configuration File
 

@@ -1,28 +1,43 @@
 /**
  * Bootstrap utilities for NestJS applications
  *
- * This module provides helper functions and utilities for bootstrapping
- * NestJS applications with the library's core modules.
+ * This module provides the `bootstrap()` function for simplified application setup,
+ * plus helper functions for custom bootstrapping scenarios.
  *
- * Example usage in your main.ts:
+ * ## Simplified Bootstrap (Recommended)
  *
  * ```typescript
- * import { getAppMode, getAppModeConfig } from '@carlonicora/nestjs-neo4jsonapijsonapi/bootstrap';
- * import { AppMode } from '@carlonicora/nestjs-neo4jsonapijsonapi/core';
- * import { AppModule } from './app.module';
+ * // main.ts
+ * import * as dotenv from "dotenv";
+ * dotenv.config({ path: "path/to/.env" });
  *
- * async function main() {
- *   const mode = getAppMode();
- *   const modeConfig = getAppModeConfig(mode);
+ * import { bootstrap } from "@carlonicora/nestjs-neo4jsonapi";
+ * import { CompanyConfigurations } from "./config/company.configurations";
+ * import { FeaturesModules } from "./features/features.modules";
  *
- *   if (mode === AppMode.WORKER) {
- *     // Create worker application context
- *   } else {
- *     // Create API application with Fastify
- *   }
+ * bootstrap({
+ *   companyConfigurations: CompanyConfigurations,
+ *   queueIds: ["chunk"],
+ *   appModules: [FeaturesModules],
+ *   i18n: { fallbackLanguage: "it", path: "./src/i18n" },
+ * });
+ * ```
+ *
+ * ## Custom Bootstrap (Advanced)
+ *
+ * For custom scenarios, use the individual utilities:
+ *
+ * ```typescript
+ * import { getAppMode, getAppModeConfig, AppMode } from "@carlonicora/nestjs-neo4jsonapi";
+ *
+ * const mode = getAppMode();
+ * const modeConfig = getAppModeConfig(mode);
+ *
+ * if (mode === AppMode.WORKER) {
+ *   // Custom worker setup
+ * } else {
+ *   // Custom API setup
  * }
- *
- * main();
  * ```
  */
 
@@ -30,68 +45,10 @@ import { AppMode, AppModeConfig } from "../core/appmode/constants/app.mode.const
 
 export { AppMode, AppModeConfig };
 
-/**
- * Get the application mode from command line arguments
- * Supports: --mode=api, --mode=worker, --api, --worker
- * Defaults to API mode
- */
-export function getAppMode(): AppMode {
-  const modeArg = process.argv.find((arg) => arg.startsWith("--mode="));
-  if (modeArg) {
-    const mode = modeArg.split("=")[1];
-    if (mode === "worker") return AppMode.WORKER;
-    if (mode === "api") return AppMode.API;
-  }
+// Bootstrap function and options
+export { bootstrap } from "./bootstrap";
+export { BootstrapOptions, I18nOptions } from "./bootstrap.options";
+export { createAppModule } from "./app.module.factory";
 
-  if (process.argv.includes("--worker")) return AppMode.WORKER;
-  if (process.argv.includes("--api")) return AppMode.API;
-
-  return AppMode.API;
-}
-
-/**
- * Get the application mode configuration
- */
-export function getAppModeConfig(mode: AppMode): AppModeConfig {
-  switch (mode) {
-    case AppMode.API:
-      return {
-        mode: AppMode.API,
-        enableControllers: true,
-        enableWorkers: false,
-        enableCronJobs: false,
-      };
-    case AppMode.WORKER:
-      return {
-        mode: AppMode.WORKER,
-        enableControllers: false,
-        enableWorkers: true,
-        enableCronJobs: true,
-      };
-    default:
-      throw new Error(`Unknown app mode: ${mode}`);
-  }
-}
-
-/**
- * Standard FastifyAdapter options for API applications
- */
-export const defaultFastifyOptions = {
-  routerOptions: {
-    ignoreTrailingSlash: true,
-  },
-  bodyLimit: 100 * 1024 * 1024, // 100MB
-};
-
-/**
- * Standard multipart options for file uploads
- */
-export const defaultMultipartOptions = {
-  limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB
-    fieldSize: 10 * 1024 * 1024, // 10MB
-    files: 10,
-    fields: 20,
-  },
-  attachFieldsToBody: false,
-};
+// Re-export defaults (functions and constants)
+export { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeConfig } from "./defaults";
