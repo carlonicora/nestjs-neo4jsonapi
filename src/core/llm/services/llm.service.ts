@@ -445,11 +445,6 @@ export class LLMService {
           for (const toolCall of toolCalls) {
             const tool = toolMap.get(toolCall.name);
 
-            console.log(`[LLMService] Tool call: ${toolCall.name}`, {
-              args: toolCall.args,
-              toolCallId: toolCall.id,
-            });
-
             if (!tool) {
               console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
               conversationMessages.push(
@@ -464,9 +459,6 @@ export class LLMService {
             try {
               const result = await tool.invoke(toolCall.args);
               const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-              console.log(`[LLMService] Tool result: ${toolCall.name}`, {
-                resultPreview: resultStr.substring(0, 200),
-              });
               conversationMessages.push(
                 new ToolMessage({
                   content: resultStr,
