@@ -4,7 +4,6 @@ import { PassportModule } from "@nestjs/passport";
 import { baseConfig } from "../config/base.config";
 
 // Import all core modules
-import { AppModeModule } from "./appmode/app.mode.module";
 import { BlockNoteModule } from "./blocknote/blocknote.module";
 import { CacheModule } from "./cache/cache.module";
 import { CorsModule } from "./cors/cors.module";
@@ -45,7 +44,6 @@ function getCoreModules() {
     }),
     PassportModule,
     // 1. Config-dependent but no external connections
-    AppModeModule,
     SecurityModule,
     CorsModule.forRoot(),
     VersionModule.forRoot(),
@@ -81,7 +79,6 @@ function getCoreModuleExports() {
     RedisModule,
     CacheModule,
     SecurityModule,
-    AppModeModule,
     EmailModule,
     CorsModule,
     VersionModule,
@@ -89,7 +86,6 @@ function getCoreModuleExports() {
     WebsocketModule,
     LLMModule,
     BlockNoteModule,
-    MigratorModule,
     DebugModule,
     JsonApiModule,
     TracingModule,
