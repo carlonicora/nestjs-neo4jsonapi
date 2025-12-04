@@ -1,9 +1,6 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import {
-  ContextualiserContext,
-  ContextualiserContextState,
-} from "../../contextualiser/contexts/contextualiser.context";
+import { z } from "zod";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
@@ -11,8 +8,11 @@ import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { AtomicFact } from "../../../foundations/atomicfact/entities/atomic.fact.entity";
 import { AtomicFactRepository } from "../../../foundations/atomicfact/repositories/atomicfact.repository";
+import {
+  ContextualiserContext,
+  ContextualiserContextState,
+} from "../../contextualiser/contexts/contextualiser.context";
 import { CONTEXTUALISER_ATOMICFACTS_PROMPT } from "../../prompts/prompt.tokens";
-import { z } from "zod";
 
 export const defaultAtomicFactsPrompt = `
 As an intelligent assistant, your primary objective is to evaluate the atomic facts provided, to determine whether they are contextually relevant to the user question.
@@ -53,7 +53,6 @@ const outputSchema = z.object({
   chunksToAnalyse: z.array(z.string()).describe(`List of chunk IDs to analyse`),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   question: z.string().describe("The user question"),
   rationalPlan: z.string().describe("The rational plan to use to answer the user question"),
@@ -148,6 +147,7 @@ export class AtomicFactsNodeService {
         };
 
         const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+          inputSchema: inputSchema,
           inputParams: inputParams,
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],

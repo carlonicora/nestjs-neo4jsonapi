@@ -1,15 +1,15 @@
-import { Injectable, Optional, Inject } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import {
-  ContextualiserContext,
-  ContextualiserContextState,
-} from "../../contextualiser/contexts/contextualiser.context";
+import { z } from "zod";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
 import { ChunkRepository } from "../../../foundations/chunk/repositories/chunk.repository";
-import { z } from "zod";
+import {
+  ContextualiserContext,
+  ContextualiserContextState,
+} from "../../contextualiser/contexts/contextualiser.context";
 import { CONTEXTUALISER_CHUNK_PROMPT } from "../../prompts/prompt.tokens";
 
 export const defaultChunkPrompt = `
@@ -72,7 +72,6 @@ const outputSchema = z.object({
 `),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   question: z.string().describe("The question asked by the user"),
   rationalPlan: z
@@ -143,6 +142,7 @@ export class ChunkNodeService {
         };
 
         const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+          inputSchema: inputSchema,
           inputParams: inputParams,
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],

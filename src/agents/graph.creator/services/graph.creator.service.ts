@@ -1,9 +1,9 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
-import { ChunkAnalysisInterface } from "../../graph.creator/interfaces/chunk.analysis.interface";
+import { z } from "zod";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { ChunkAnalysisInterface } from "../../graph.creator/interfaces/chunk.analysis.interface";
 import { GRAPH_CREATOR_PROMPT } from "../../prompts/prompt.tokens";
-import { z } from "zod";
 
 export const prompt = `
 You are an intelligent assistant that extracts structured knowledge from text.
@@ -24,62 +24,36 @@ If the text contains:
 - Return EMPTY keyConceptsRelationships array: []
 - Do NOT attempt to extract anything from garbage text
 
-## Domain Context: Italian Legal System
-
-**This analysis is specialized for the Italian Law System and legal practice management.**
-
-When extracting information, pay special attention to:
-- **Italian legal terminology**: procedimento, sentenza, tribunale, giudice, dreamer, procura, citazione, ricorso, decreto, ordinanza
-- **Legal document types**: atto di matrimonio, atto di nascita, contratto, rogito notarile, verbale, certificato
-- **Italian government entities**: comune, prefettura, questura, tribunale, corte d'appello, cassazione, ministero
-- **Legal references**: codice civile, codice penale, legge, decreto legislativo, d.p.r., articoli
-- **Italian places and jurisdictions**: città, provincia, regione, circoscrizione
-- **Legal parties**: parte civile, imputato, ricorrente, convenuto, attore, resistente
-- **Legal procedures**: udienza, notifica, deposito, iscrizione a ruolo, termine, prescrizione
-
-Extract these Italian legal terms as key concepts when they appear in the text.
-
 ## Definitions
 
 **Atomic Fact**: A single, indivisible statement containing **ONE action, ONE event, or ONE relationship**. Each atomic fact must represent the smallest unit of meaningful information that cannot be broken down further.
 
 **CRITICAL: ONE ACTION PER FACT**
 - Each atomic fact must contain ONLY ONE verb/action
-- If a sentence contains multiple actions connected by "e" (and), "ma" (but), commas, split it into separate atomic facts
+- If a sentence contains multiple actions connected by "and", "but", commas, split it into separate atomic facts
 - Each action, decision, or event gets its own atomic fact
 
 **Examples of CORRECT Atomic Facts (one action each):**
-- ✅ "Il presidente rileva l'ambiguità della notifica"
-- ✅ "Il presidente concede termine fino al 15/2/2023"
-- ✅ "Il presidente rinvia l'udienza al 29/3/2023"
-- ✅ "Andrea Ciampaglia was born in Rieti on 03.04.1985"
-- ✅ "The marriage was celebrated in Greccio on 28.12.2019"
+- ✅ "The president detects the ambiguity of the notification"
+- ✅ "The president grants an extension until 15/2/2023"
+- ✅ "The president postpones the hearing to 29/3/2023"
+- ✅ "Joe Bauer was born in London on 03.04.1985"
 
 **Examples of INCORRECT Atomic Facts (multiple actions - MUST BE SPLIT):**
-- ❌ "Il presidente rileva l'ambiguità della notifica, concede termine fino al 15/2/2023 e rinvia l'udienza al 29/3/2023"
-  → WRONG: Contains 3 actions (rileva, concede, rinvia) - must be split into 3 atomic facts
-- ❌ "Andrea was born in Rome and studied at university"
+- ❌ "The president detects the ambiguity of the notification, grants an extension until 15/2/2023 and postpones the hearing to 29/3/2023"
+  → WRONG: Contains 3 actions (detects, grants, postpones) - must be split into 3 atomic facts
+- ❌ "Joe Bauer was born in London and studied at university"
   → WRONG: Contains 2 actions (was born, studied) - must be split into 2 atomic facts
-
-**Legal Significance Hierarchy (for Italian legal documents):**
-1. **CRITICAL - Always extract:** Substantive legal actions (decisions, orders, rulings, rights, obligations)
-   - Examples: sentenza emessa, termine concesso, udienza rinviata, notifica effettuata
-2. **IMPORTANT - Extract when relevant:** Legal parties, dates, deadlines, legal references
-   - Examples: nomi delle parti, date delle udienze, termini, riferimenti normativi
-3. **IGNORE - Do not extract:** Administrative details, procedural timestamps, document formatting
-   - Examples: ora di chiusura del verbale, numero di pagina, formato del documento
 
 **Key Concept**: ONLY semantically meaningful entities - proper nouns, specific terms, named entities:
 
 **VALID Key Concepts (extract these):**
-- **Proper names**: "andrea ciampaglia", "roberta scialpi", "giuseppe verdi", "mario rossi"
-- **Places**: "greccio", "rieti", "velletri", "roma", "milano", "tribunale di roma"
-- **Organizations**: "comune di greccio", "ufficio dello stato civile", "ministero", "corte d'appello", "tribunale"
-- **Complete dates with legal significance**: "28.12.2019", "15/2/2023", "29/3/2023", "03.04.1985", "15 gennaio 2023"
-  - ✅ ONLY extract dates that are legally significant (udienza dates, deadlines, birth dates, event dates)
-  - ✅ Include time ONLY when paired with a date AND legally relevant: "29/3/2023 alle 10.40"
-- **Italian legal terms**: "matrimonio", "atto", "registro", "contratto", "sentenza", "procedimento", "ricorso", "citazione", "decreto", "ordinanza", "giudice", "dreamer", "parte civile", "imputato", "notifica", "udienza", "termine"
-- **Legal references**: "codice civile", "articolo 2043", "d.p.r. 445/2000", "legge 104/1992"
+- **Proper names**: "joe bauer", "mike modano", ...
+- **Places**: "london", "italy", "rome", "washington", ...
+- **Organizations**: "microsoft", "apple", "phlow", "united nations", "tribunale di roma", ...
+- **Complete dates with legal significance**: "28.12.2019", "15/2/2023", "29/3/2023", "03.04.1985", "15 january 2023"
+  - ✅ ONLY extract dates that are significant to the atomic fact
+  - ✅ Include time ONLY when paired with a date AND relevant to the atomic fact: "29/3/2023 alle 10.40"
 - **Acronyms**: "upu", "nlp", "api", "crm", "d.p.r.", "c.c.", "c.p." (always lowercase)
 - **Technical terms**: "knowledge base", "semantic search", "blockchain"
 - **Products/systems**: "kubernetes", "microsoft", "s3"
@@ -100,21 +74,20 @@ Extract these Italian legal terms as key concepts when they appear in the text.
 
 1. **Evaluate text quality** - Is this intelligible text or garbage? If garbage, return empty arrays.
 2. **Check for markdown headers** - If text starts with ##, ###, etc., note the complete header text
-3. **Decompose compound sentences** - If a sentence contains multiple actions/verbs (connected by "e", "ma", commas):
+3. **Decompose compound sentences** - If a sentence contains multiple actions/verbs (connected by "and", "but", commas):
    - Break it into separate atomic facts
    - Each action gets its own atomic fact
-   - Example: "Il presidente rileva l'ambiguità, concede termine e rinvia l'udienza" → 3 atomic facts
+   - Example: "The president detects the ambiguity, grants an extension and postpones the hearing" → 3 atomic facts
 4. **Extract atomic facts** - Only from intelligible, meaningful text. ONE ACTION PER FACT.
-5. **Filter by legal significance** - Prioritize substantive legal actions, ignore administrative details
-6. **MANDATORY: Create summary atomic fact** - Must include the markdown header if present. Example: "Recommendation 1 focuses on improving UPU service standards" (key concepts: "recommendation 1", "upu", "service standards")
-7. **Identify key concepts** - Only SEMANTICALLY MEANINGFUL entities (names, places, legally significant dates, organizations, legal terms)
-8. **Create relationships** - Between valid key concepts based on how they connect in atomic facts
+5. **MANDATORY: Create summary atomic fact** - Must include the markdown header if present. Example: "Recommendation 1 focuses on improving UPU service standards" (key concepts: "recommendation 1", "upu", "service standards")
+6. **Identify key concepts** - Only SEMANTICALLY MEANINGFUL entities (names, places, significant dates, organizations, legal terms)
+7. **Create relationships** - Between valid key concepts based on how they connect in atomic facts
 
 ## Atomic Fact Rules
 
 **CRITICAL: ONE ACTION/EVENT PER ATOMIC FACT**
 - Each atomic fact must contain ONLY ONE verb/action
-- If you see multiple verbs in a sentence (e.g., "rileva", "concede", "rinvia"), create separate atomic facts for each
+- If you see multiple verbs in a sentence (e.g., "detects", "grants", "postpones"), create separate atomic facts for each
 - Use the subject from the original sentence for each split fact
 - Each atomic fact must be a complete, grammatically correct sentence
 
@@ -123,17 +96,12 @@ Extract these Italian legal terms as key concepts when they appear in the text.
 2. Count them - if more than one, decomposition is required
 3. Create one atomic fact per action, maintaining the subject
 4. Example:
-   - Input: "Il presidente rileva l'ambiguità della notifica, concede termine fino al 15/2/2023 e rinvia l'udienza al 29/3/2023"
-   - Actions found: "rileva" (1), "concede" (2), "rinvia" (3) = 3 actions
+   - Input: "The president detects the ambiguity, grants an extension and postpones the hearing"
+   - Actions found: "detects" (1), "grants" (2), "postpones" (3) = 3 actions
    - Output: 3 atomic facts:
-     1. "Il presidente rileva l'ambiguità della notifica"
-     2. "Il presidente concede termine fino al 15/2/2023"
-     3. "Il presidente rinvia l'udienza al 29/3/2023"
-
-**Focus on legal significance:**
-- Prioritize substantive legal actions and decisions
-- Ignore administrative/procedural details (e.g., "verbale chiuso alle 12.40")
-- If no meaningful facts can be extracted, return empty array
+     1. "The president detects the ambiguity"
+     2. "The president grants an extension"
+     3. "The president postpones the hearing"
 
 ## Key Concept Rules
 
@@ -165,17 +133,9 @@ Extract these Italian legal terms as key concepts when they appear in the text.
 
 - **DECOMPOSE compound sentences** - Always split sentences with multiple actions into separate atomic facts
 - Focus on extracting **named entities** and **specific domain terminology**
-- **Prioritize Italian legal terminology** - legal terms, procedures, document types, and references are critical key concepts
-- **Apply legal significance filter:**
-  - ✅ Extract: substantive legal actions (sentenze, decisioni, ordinanze, nomine, concessioni, rinvii)
-  - ✅ Extract: legally significant dates and deadlines (date di udienze, termini, scadenze)
-  - ❌ Ignore: administrative timestamps (ora di chiusura verbale, ora di firma)
-  - ❌ Ignore: procedural details without legal consequence
 - Ignore filler words, articles, prepositions, conjunctions
-- Pay special attention to proper names, places, legally significant dates, organizations, and legal entities
-- Extract complete legal references (e.g., "articolo 2043 codice civile", not just "articolo")
+- Pay special attention to proper names, places, significant dates, organizations, and legal entities
 - Terms mentioned in the same sentence or paragraph are typically related
-- **Each action by a legal actor (presidente, giudice, dreamer) should be a separate atomic fact**
 
 ## CRITICAL: Quality over Quantity
 
@@ -193,8 +153,8 @@ Extract these Italian legal terms as key concepts when they appear in the text.
 4. NEVER create compound atomic facts with multiple actions
 
 **Remember:**
-- ❌ WRONG: "Il presidente rileva, concede e rinvia" (3 actions in 1 fact)
-- ✅ RIGHT: Three separate facts - one for "rileva", one for "concede", one for "rinvia"
+- ❌ WRONG: "The president detects, grants and postpones" (3 actions in 1 fact)
+- ✅ RIGHT: Three separate facts - one for "detects", one for "grants", one for "postpones"
 
 ## **Strictly follow the above instructions. Evaluate text quality first, then decompose compound sentences. Begin.**
 `;
@@ -206,12 +166,12 @@ const outputSchema = z.object({
         keyConcepts: z
           .array(z.string())
           .describe(
-            `Only semantically meaningful entities: proper names (people, organizations), places, legally significant dates (with full date like "15/2/2023", NOT isolated times like "12.40"), Italian legal terms (notifica, udienza, sentenza, termine, presidente). Preserve exact characters. NO common nouns, NO isolated times without dates, NO administrative timestamps. Examples: "andrea ciampaglia", "tribunale di roma", "15/2/2023", "notifica", "presidente" - NOT "verbale", "12.40", "player", "thing"`,
+            `Only semantically meaningful entities: proper names (people, organizations), places, significant dates (with full date like "15/2/2023", NOT isolated times like "12.40"). Preserve exact characters. NO common nouns, NO isolated times without dates, NO administrative timestamps. Examples: "andrea ciampaglia", "tribunale di roma", "15/2/2023", "notifica", "presidente" - NOT "verbale", "12.40", "player", "thing"`,
           ),
         atomicFact: z
           .string()
           .describe(
-            `A single, indivisible fact containing ONLY ONE action/event/relationship. Each fact must have exactly ONE verb. If source text has multiple actions (e.g., "rileva, concede e rinvia"), split into separate atomic facts. NO compound sentences. Examples: "Il presidente rileva l'ambiguità della notifica" (one action: rileva). NOT: "Il presidente rileva l'ambiguità e concede termine" (two actions - must split).`,
+            `A single, indivisible fact containing ONLY ONE action/event/relationship. Each fact must have exactly ONE verb. If source text has multiple actions (e.g., "detects, grants and postpones"), split into separate atomic facts. NO compound sentences. Examples: "The president detects the ambiguity of the notification" (one action: detects). NOT: "The president detects the ambiguity and grants an extension" (two actions - must split).`,
           ),
       }),
     )
@@ -229,7 +189,6 @@ const outputSchema = z.object({
     .describe(`List of all the key concepts in the atomic facts and their relationships to one another`),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   content: z.string().describe("The content to analyse"),
 });
@@ -434,6 +393,7 @@ export class GraphCreatorService {
     });
 
     const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+      inputSchema: inputSchema,
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],

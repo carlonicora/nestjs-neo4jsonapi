@@ -1,16 +1,16 @@
 import { Document } from "@langchain/core/documents";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { Injectable, Optional, Inject } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { UsageMetadata } from "../../../common/interfaces/langchain.usage.interface";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
-import { SUMMARISER_MAP_PROMPT, SUMMARISER_COMBINE_PROMPT, SUMMARISER_TLDR_PROMPT } from "../../prompts/prompt.tokens";
+import { SUMMARISER_COMBINE_PROMPT, SUMMARISER_MAP_PROMPT, SUMMARISER_TLDR_PROMPT } from "../../prompts/prompt.tokens";
 
 export const defaultMapPrompt = `Summarize the following content in Italian using clean markdown formatting.
 
 IMPORTANT: Output ONLY the summary content directly. Do NOT include:
-- Introductory phrases like "Ecco un riassunto" or "Here is a summary"
+- Introductory phrases like "Here is a summary"
 - Meta-commentary about what you're doing
 - Unnecessary horizontal rules or separators
 
@@ -23,7 +23,7 @@ export const defaultCombinePrompt = `Based on the following summaries, write a c
 {text}
 
 IMPORTANT: Output ONLY the summary content directly. Do NOT include:
-- Introductory phrases like "Ecco un riassunto" or "Here is a summary"
+- Introductory phrases like "Here is a summary"
 - Meta-commentary about what you're doing
 - Unnecessary horizontal rules or separators
 - Any reference to the fact that you are synthesizing summaries

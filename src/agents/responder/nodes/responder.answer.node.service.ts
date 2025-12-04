@@ -1,8 +1,8 @@
-import { Injectable, Logger, Optional, Inject } from "@nestjs/common";
-import { ResponderContext, ResponderContextState } from "../../responder/contexts/responder.context";
-import { LLMService } from "../../../core/llm/services/llm.service";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { z } from "zod";
+import { LLMService } from "../../../core/llm/services/llm.service";
 import { RESPONDER_ANSWER_PROMPT } from "../../prompts/prompt.tokens";
+import { ResponderContext, ResponderContextState } from "../../responder/contexts/responder.context";
 
 export const defaultAnswerPrompt = `
 As an intelligent assistant, your primary objective is to answer questions based on information within a text.
@@ -294,7 +294,6 @@ Format Requirements:
   ),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   question: z.string().describe("The question asked by the user"),
   annotations: z.string().describe("A set of annotations to provide additional context"),
@@ -330,6 +329,7 @@ export class ResponderAnswerNodeService {
     };
 
     const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+      inputSchema: inputSchema,
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],

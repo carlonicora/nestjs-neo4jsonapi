@@ -1,15 +1,15 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import {
-  ContextualiserContext,
-  ContextualiserContextState,
-} from "../../contextualiser/contexts/contextualiser.context";
+import { z } from "zod";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { KeyConcept } from "../../../foundations/keyconcept/entities/key.concept.entity";
 import { KeyConceptRepository } from "../../../foundations/keyconcept/repositories/keyconcept.repository";
+import {
+  ContextualiserContext,
+  ContextualiserContextState,
+} from "../../contextualiser/contexts/contextualiser.context";
 import { CONTEXTUALISER_KEYCONCEPTS_PROMPT } from "../../prompts/prompt.tokens";
-import { z } from "zod";
 
 export const defaultKeyConceptsPrompt = `
 As an intelligent assistant, your primary objective is to score a list of key concepts in relation to the user question.
@@ -60,7 +60,6 @@ const outputSchema = z.object({
     .describe(`List of relevant keyConcepts to the question and plan`),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   question: z.string().describe("The user question"),
   rationalPlan: z.string().describe("The rational plan to use to answer the user question"),
@@ -134,6 +133,7 @@ export class KeyConceptsNodeService {
     };
 
     const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+      inputSchema: inputSchema,
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],

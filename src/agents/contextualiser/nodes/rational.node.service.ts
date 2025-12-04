@@ -1,13 +1,13 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { z } from "zod";
+import { LLMService } from "../../../core/llm/services/llm.service";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
-import { LLMService } from "../../../core/llm/services/llm.service";
-import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CONTEXTUALISER_RATIONAL_PROMPT } from "../../prompts/prompt.tokens";
-import { z } from "zod";
 
 export const defaultRationalPlanPrompt = `
 As an intelligent assistant, your primary objective is to answer the question by gathering supporting facts from a given article.
@@ -49,7 +49,6 @@ const outputSchema = z.object({
     .describe(`The rational plan that will be used to provide a comprehensive answer to the user question`),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   question: z.string().describe("The user question"),
   analysis: z.string().optional().describe("The analysis of previous questions"),
@@ -77,6 +76,7 @@ export class RationalNodeService {
     };
 
     const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+      inputSchema: inputSchema,
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],

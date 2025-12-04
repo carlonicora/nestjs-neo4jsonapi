@@ -1,13 +1,13 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { z } from "zod";
+import { LLMService } from "../../../core/llm/services/llm.service";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
-import { LLMService } from "../../../core/llm/services/llm.service";
-import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CONTEXTUALISER_QUESTION_REFINER_PROMPT } from "../../prompts/prompt.tokens";
-import { z } from "zod";
 
 export const defaultQuestionRefinerPrompt = `
 Your task: Create a single, focused question that captures the user's current intent based on the conversation history.
@@ -63,7 +63,6 @@ const outputSchema = z.object({
     ),
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const inputSchema = z.object({
   chatHistory: z
     .array(
@@ -104,6 +103,7 @@ export class QuestionRefinerNodeService {
     };
 
     const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+      inputSchema: inputSchema,
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
