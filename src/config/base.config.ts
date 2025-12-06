@@ -1,6 +1,7 @@
 import { BaseConfigInterface } from "./interfaces/base.config.interface";
 import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
+import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
 
 /**
@@ -37,6 +38,12 @@ export interface BaseConfigOptions {
    * These are the Neo4j labels used for content nodes (e.g., ["Article", "Document"]).
    */
   contentTypes?: ConfigContentTypesInterface;
+
+  /**
+   * Job names for BullMQ processors.
+   * Defines the job names that processors use to match incoming jobs.
+   */
+  jobNames?: ConfigJobNamesInterface;
 }
 
 /**
@@ -212,6 +219,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     prompts: options?.prompts ?? {},
     chunkQueues: options?.chunkQueues ?? { queueIds: [] },
     contentTypes: options?.contentTypes ?? { types: [] },
+    jobNames: options?.jobNames ?? { process: {}, notifications: {} },
   };
   return config;
 }

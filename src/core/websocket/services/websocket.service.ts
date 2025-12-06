@@ -1,6 +1,7 @@
-import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { Server, Socket } from "socket.io";
+import { APP_MODE_TOKEN, AppMode, AppModeConfig } from "../../appmode/constants/app.mode.constant";
 import { RedisClientStorageService } from "../../redis/services/redis.client.storage.service";
 import { RedisMessagingService } from "../../redis/services/redis.messaging.service";
 
@@ -21,10 +22,10 @@ import { RedisMessagingService } from "../../redis/services/redis.messaging.serv
 export class WebSocketService implements OnModuleInit {
   private server: Server | null = null;
   private clients: Map<string, Socket[]> = new Map();
-  private readonly appMode = process.env.APP_MODE || "api";
 
   constructor(
     private readonly eventEmitter: EventEmitter2,
+    @Inject(APP_MODE_TOKEN) private readonly appModeConfig: AppModeConfig,
     @Optional() private readonly redisClientStorage?: RedisClientStorageService,
     @Optional() private readonly redisMessaging?: RedisMessagingService,
   ) {}
@@ -75,7 +76,7 @@ export class WebSocketService implements OnModuleInit {
   }
 
   async broadcast(event: string, data: any) {
-    if (this.appMode === "worker") {
+    if (this.appModeConfig.mode === AppMode.WORKER) {
       if (this.redisMessaging?.publishBroadcastNotification) {
         await this.redisMessaging.publishBroadcastNotification(event, data);
       }
@@ -92,7 +93,7 @@ export class WebSocketService implements OnModuleInit {
   }
 
   async sendMessageToCompany(companyId: string, event: string, data: any) {
-    if (this.appMode === "worker") {
+    if (this.appModeConfig.mode === AppMode.WORKER) {
       if (this.redisMessaging?.publishCompanyNotification) {
         await this.redisMessaging.publishCompanyNotification(companyId, event, data);
       }
@@ -118,7 +119,7 @@ export class WebSocketService implements OnModuleInit {
   }
 
   async sendMessageToUser(userId: string, event: string, data: any) {
-    if (this.appMode === "worker") {
+    if (this.appModeConfig.mode === AppMode.WORKER) {
       if (this.redisMessaging?.publishUserNotification) {
         await this.redisMessaging.publishUserNotification(userId, event, data);
       }

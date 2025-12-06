@@ -374,6 +374,7 @@ The `config` function returns an object that is merged with `baseConfig`. Availa
 |--------|------|-------------|
 | `chunkQueues.queueIds` | `string[]` | Queue IDs for BullMQ registration (for background job processing) |
 | `contentTypes.types` | `string[]` | Neo4j labels for content types (used in multi-label content queries) |
+| `jobNames` | `{ process: Record<string, string>, notifications?: Record<string, string> }` | Job names for BullMQ processors (maps content types to job names) |
 | `prompts.*` | Various | Custom AI agent prompts (see [Customizing Agent Prompts](#customizing-agent-prompts-optional)) |
 
 ---
@@ -387,6 +388,7 @@ If you need more control over the bootstrap process, you can manually configure 
 ```typescript
 // src/config/config.ts
 import { baseConfig } from "@carlonicora/nestjs-neo4jsonapi";
+import { JobName } from "./enums/job.name";
 import { QueueId } from "./enums/queue.id";
 // Import your content type metas
 import { articleMeta } from "src/features/article/entities/article.meta";
@@ -406,6 +408,8 @@ export default () => ({
       // Add your content type labels here
     ],
   },
+  // Register job names for BullMQ processors
+  jobNames: JobName,
 });
 ```
 
@@ -414,8 +418,25 @@ export default () => ({
 export enum QueueId {
   CHUNK = "chunk",
   DOCUMENT = "document",
-  // Add your custom queue IDs here
+  ARTICLE = "article",
+  // Add your custom queue IDs here (lowercase of content type labelName)
 }
+```
+
+```typescript
+// src/config/enums/job.name.ts
+export const JobName = {
+  process: {
+    chunk: "process_chunk",
+    Document: "process_document",
+    Article: "process_article",
+    // Keys match content type labelName (e.g., "Article", "Document")
+    // Values are the job names used by processors
+  },
+  notifications: {
+    // Optional notification job names
+  },
+} as const;
 ```
 
 ### 2. Create Company Configurations
@@ -896,17 +917,35 @@ your-app/
 └── package.json
 ```
 
-### Queue IDs (if using background jobs)
+### Queue IDs and Job Names (if using background jobs)
+
+Queue IDs must match the lowercase version of your content type `labelName`:
 
 ```typescript
 // src/config/enums/queue.id.ts
 export enum QueueId {
-  CHUNK = "chunk",
-  // Add your custom queue IDs
-  EMAIL = "email",
-  NOTIFICATIONS = "notifications",
+  CHUNK = "chunk",        // Required - used by ChunkProcessor
+  ARTICLE = "article",    // For Article content type (labelName: "Article")
+  DOCUMENT = "document",  // For Document content type (labelName: "Document")
+  // Add queue IDs for each content type (lowercase of labelName)
 }
 ```
+
+Job names map content types to processor job names:
+
+```typescript
+// src/config/enums/job.name.ts
+export const JobName = {
+  process: {
+    chunk: "process_chunk",      // Required - used by ChunkProcessor
+    Article: "process_article",  // Key = labelName, value = job name
+    Document: "process_document",
+  },
+  notifications: {},
+} as const;
+```
+
+**Convention**: After chunk processing completes, `ChunkService` automatically queues a job to `labelName.toLowerCase()` queue with job name from `jobNames.process[labelName]`.
 
 ## Core Modules
 

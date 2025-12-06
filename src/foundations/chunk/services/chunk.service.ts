@@ -1,12 +1,16 @@
 import { Document } from "@langchain/core/documents";
+import { getQueueToken } from "@nestjs/bullmq";
 import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { ModuleRef } from "@nestjs/core";
 import { Queue } from "bullmq";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { GraphCreatorService } from "../../../agents/graph.creator/services/graph.creator.service";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.creator.interface";
-import { JobName } from "../../../config/enums/job.name";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
@@ -22,6 +26,8 @@ import { TokenUsageService } from "../../tokenusage/services/tokenusage.service"
 
 @Injectable()
 export class ChunkService {
+  private readonly jobNames: ConfigJobNamesInterface;
+
   constructor(
     private readonly logger: AppLoggingService,
     private readonly tracer: TracingService,
@@ -33,7 +39,11 @@ export class ChunkService {
     private readonly graphGeneratorService: GraphCreatorService,
     private readonly keyConceptRepository: KeyConceptRepository,
     private readonly tokenUsageService: TokenUsageService,
-  ) {}
+    private readonly moduleRef: ModuleRef,
+    configService: ConfigService<BaseConfigInterface>,
+  ) {
+    this.jobNames = configService.get("jobNames", { infer: true }) ?? { process: {}, notifications: {} };
+  }
 
   private isDeadlockError(error: any): boolean {
     const errorMessage = error?.message || error?.toString() || "";
@@ -287,34 +297,42 @@ export class ChunkService {
 
     this.tracer.addSpanEvent("Update Chunk Status");
 
+    const nextJobType = this.jobNames.process[params.type];
     this.logger.debug("Chunk processing completed, queuing next job", "ChunkService", {
       chunkId: params.chunkId,
       hadAnalysis: !!chunkAnalysis,
-      nextJobType: JobName.process[params.type],
+      nextJobType,
       relationshipId: params.id,
     });
 
     this.tracer.endSpan();
 
-    await this.selectQueue(params.type).add(JobName.process[params.type], {
+    const queue = this.selectQueue(params.type);
+    await queue.add(nextJobType, {
       id: params.id,
       companyId: params.companyId,
       userId: params.userId,
     });
   }
 
+  /**
+   * Dynamically selects the queue based on content type.
+   * Uses convention: labelName.toLowerCase() = queue ID
+   * e.g., "Article" -> "article" queue
+   */
   private selectQueue(type: string): Queue {
-    switch (type) {
-      // case judgementMeta.labelName:
-      //   return this.judgementQueue;
-      // case documentMeta.labelName:
-      //   return this.documentQueue;
-      // case articleMeta.labelName:
-      //   return this.articleQueue;
-      // case hyperlinkMeta.labelName:
-      //   return this.hyperlinkQueue;
-      default:
-        throw new Error(`No queue found for type ${type}`);
+    const queueName = type.toLowerCase();
+    try {
+      const queue = this.moduleRef.get<Queue>(getQueueToken(queueName), { strict: false });
+      if (!queue) {
+        throw new Error(`Queue "${queueName}" not found for content type "${type}"`);
+      }
+      return queue;
+    } catch (error) {
+      this.logger.error(`Failed to get queue for type "${type}": ${error.message}`, "ChunkService");
+      throw new Error(
+        `No queue found for type ${type}. Ensure queue "${queueName}" is registered in chunkQueues.queueIds config.`,
+      );
     }
   }
 }

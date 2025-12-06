@@ -27,7 +27,7 @@ export class PdfService {
   private defaultProcessingOptions: PdfProcessingOptions = {
     enableOCR: false, // Disabled by default for performance
     ocrConfidenceThreshold: 0.6, // Lowered for scanned documents (was 0.8)
-    ocrLanguage: "ita", // Italian by default
+    ocrLanguage: "eng", // English by default
     ocrImagePreprocessing: false, // Disabled by default - damages clean scans
     detectTables: true,
     detectImages: true,

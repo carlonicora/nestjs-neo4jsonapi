@@ -8,7 +8,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
 
-export const defaultMapPrompt = `Summarize the following content in Italian using clean markdown formatting.
+export const defaultMapPrompt = `Summarize the following content using clean markdown formatting.
 
 IMPORTANT: Output ONLY the summary content directly. Do NOT include:
 - Introductory phrases like "Here is a summary"
@@ -19,7 +19,7 @@ Just write the summary content itself.
 
 {context}`;
 
-export const defaultCombinePrompt = `Based on the following summaries, write a consolidated summary in Italian that integrates all the main themes and key points.
+export const defaultCombinePrompt = `Based on the following summaries, write a consolidated summary that integrates all the main themes and key points.
 
 {text}
 

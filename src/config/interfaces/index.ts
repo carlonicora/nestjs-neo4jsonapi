@@ -13,6 +13,7 @@ export * from "./config.cors.interface";
 export * from "./config.email.interface";
 export * from "./config.encryption.interface";
 export * from "./config.environment.interface";
+export * from "./config.job.names.interface";
 export * from "./config.jwt.interface";
 export * from "./config.logging.interface";
 export * from "./config.neo4j.interface";

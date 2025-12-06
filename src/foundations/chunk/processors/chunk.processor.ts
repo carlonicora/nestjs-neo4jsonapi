@@ -1,21 +1,26 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
+import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
-import { JobName } from "../../../config/enums/job.name";
 import { QueueId } from "../../../config/enums/queue.id";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { ChunkService } from "../../chunk/services/chunk.service";
 
 @Processor(QueueId.CHUNK, { concurrency: 50, lockDuration: 1000 * 60 })
 export class ChunkProcessor extends WorkerHost {
+  private readonly chunkJobName: string;
+
   constructor(
     private readonly logger: AppLoggingService,
     private readonly tracer: TracingService,
     private readonly clsService: ClsService,
     private readonly chunkService: ChunkService,
+    configService: ConfigService<BaseConfigInterface>,
   ) {
     super();
+    this.chunkJobName = configService.get("jobNames", { infer: true })?.process?.chunk ?? "process_chunk";
   }
 
   @OnWorkerEvent("active")
@@ -34,7 +39,7 @@ export class ChunkProcessor extends WorkerHost {
   }
 
   async process(job: Job): Promise<void> {
-    if (job.name !== JobName.process.chunk) {
+    if (job.name !== this.chunkJobName) {
       throw new Error(`Job ${job.name} not handled by ChunkProcessor`);
     }
 

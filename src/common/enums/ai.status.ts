@@ -3,6 +3,5 @@ export enum AiStatus {
   InProgress = "in_progress",
   Completed = "completed",
   Failed = "failed",
-  AnalysingCounterparts = "analysing_counterparts",
   Summarising = "summarising",
 }
