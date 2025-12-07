@@ -4,12 +4,12 @@ import { NestFactory, Reflector } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { EventEmitter } from "stream";
 
+import { HttpExceptionFilter } from "../common/filters/http-exception.filter";
 import { BaseConfigInterface, ConfigApiInterface, ConfigRateLimitInterface } from "../config";
 import { AppMode, AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CacheInterceptor } from "../core/cache/interceptors/cache.interceptor";
 import { CacheService } from "../core/cache/services/cache.service";
 import { CorsService } from "../core/cors/services/cors.service";
-import { HttpExceptionFilter } from "../common/filters/http-exception.filter";
 import { LoggingInterceptor } from "../core/logging/interceptors/logging.interceptor";
 import { AppLoggingService } from "../core/logging/services/logging.service";
 import { TracingInterceptor } from "../core/tracing/interceptors/tracing.interceptor";
@@ -36,11 +36,9 @@ import { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeC
  * dotenv.config({ path: "path/to/.env" });
  *
  * import { bootstrap } from "@carlonicora/nestjs-neo4jsonapi";
- * import { CompanyConfigurations } from "./config/company.configurations";
  * import { FeaturesModules } from "./features/features.modules";
  *
  * bootstrap({
- *   companyConfigurations: CompanyConfigurations,
  *   queueIds: ["chunk"],
  *   appModules: [FeaturesModules],
  *   i18n: { fallbackLanguage: "it", path: "./src/i18n" },

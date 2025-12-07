@@ -104,6 +104,7 @@ export class CompanyRepository implements OnModuleInit {
   async create(params: {
     companyId: string;
     name: string;
+    configurations?: string;
     availableTokens?: number;
     featureIds?: string[];
     moduleIds?: string[];
@@ -113,6 +114,7 @@ export class CompanyRepository implements OnModuleInit {
     query.queryParams = {
       companyId: params.companyId,
       name: params.name,
+      configurations: params.configurations ?? "",
       availableTokens: params.availableTokens ?? 0,
       featureIds: params.featureIds ?? [],
       moduleIds: params.moduleIds ?? [],
@@ -121,6 +123,7 @@ export class CompanyRepository implements OnModuleInit {
     query.query = `
       CREATE (company:Company {id: $companyId})
       SET company.name=$name,
+        company.configurations=$configurations,
         company.availableTokens=$availableTokens,
         company.createdAt=datetime(),
         company.updatedAt=datetime()
@@ -143,6 +146,7 @@ export class CompanyRepository implements OnModuleInit {
   async update(params: {
     companyId: string;
     name: string;
+    configurations?: string;
     logo?: string;
     availableTokens?: number;
     featureIds?: string[];
@@ -176,6 +180,7 @@ export class CompanyRepository implements OnModuleInit {
 
     const updateParams: string[] = [];
     updateParams.push("company.name = $name");
+    updateParams.push("company.configurations = $configurations");
     if (params.logo !== undefined) updateParams.push("company.logo = $logo");
     if (params.availableTokens !== undefined) updateParams.push("company.availableTokens = $availableTokens");
     updateParams.push("company.updatedAt = datetime()");
@@ -186,6 +191,7 @@ export class CompanyRepository implements OnModuleInit {
     query.queryParams = {
       companyId: params.companyId,
       name: params.name,
+      configurations: params.configurations ?? "",
       logo: params.logo ?? "",
       availableTokens: params.availableTokens ?? 0,
       featureIds: params.featureIds ?? [],
@@ -208,12 +214,14 @@ export class CompanyRepository implements OnModuleInit {
     query.queryParams = {
       companyId: randomUUID(),
       name: params.name,
+      configurations: "",
     };
 
     query.query = `
       CREATE (company:Company {
         id: $companyId, 
         name: $name, 
+        configurations: $configurations,
         createdAt: datetime(), 
         updatedAt: datetime()
       }) RETURN company

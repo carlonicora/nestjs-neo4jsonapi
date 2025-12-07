@@ -12,6 +12,10 @@ export class CompanyPostAttributesDTO {
   @IsOptional()
   @IsNumber()
   availableTokens?: number;
+
+  @IsOptional()
+  @IsString()
+  configurations?: string;
 }
 
 export class CompanyPostRelationshipsDTO {

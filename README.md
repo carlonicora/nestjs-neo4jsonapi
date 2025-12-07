@@ -38,12 +38,14 @@ A comprehensive NestJS foundation package providing JSON:API compliant APIs, Neo
 The library is designed to run in two modes from the same codebase:
 
 ### API Mode (HTTP Server)
+
 - Handles HTTP requests via Fastify
 - WebSocket connections for real-time features
 - Uses `JwtAuthGuard` for authentication
 - Adds jobs to BullMQ queues
 
 ### Worker Mode (Background Processing)
+
 - Processes BullMQ jobs asynchronously
 - Runs scheduled tasks (cron jobs)
 - No HTTP server - just job processing
@@ -90,24 +92,28 @@ pnpm add @carlonicora/nestjs-neo4jsonapi
 If you want to use the package as a git submodule (for development or before npm release):
 
 **1. Add the submodule**
+
 ```bash
 cd /path/to/your-project
 git submodule add https://github.com/carlonicora/nestjs-neo4jsonapi packages/nestjs-neo4jsonapi
 ```
 
 **2. Verify it worked**
+
 ```bash
 git submodule status
 # Should show: <commit-sha> packages/nestjs-neo4jsonapi (heads/master)
 ```
 
 **3. Commit the submodule**
+
 ```bash
 git add .gitmodules packages/nestjs-neo4jsonapi
 git commit -m "Add nestjs-neo4jsonapi as submodule"
 ```
 
 **4. Update your `package.json`** (e.g., `apps/api/package.json`)
+
 ```json
 {
   "dependencies": {
@@ -117,6 +123,7 @@ git commit -m "Add nestjs-neo4jsonapi as submodule"
 ```
 
 **5. Ensure `pnpm-workspace.yaml` includes packages**
+
 ```yaml
 packages:
   - "apps/*"
@@ -124,12 +131,14 @@ packages:
 ```
 
 **6. Install and build**
+
 ```bash
 pnpm install
 cd packages/nestjs-neo4jsonapi && pnpm build && cd ../..
 ```
 
 **For CI/CD (GitHub Actions)**, add `submodules: recursive` to your checkout step:
+
 ```yaml
 - uses: actions/checkout@v4
   with:
@@ -137,6 +146,7 @@ cd packages/nestjs-neo4jsonapi && pnpm build && cd ../..
 ```
 
 **Cloning a project with submodules:**
+
 ```bash
 # When cloning fresh
 git clone --recurse-submodules https://github.com/your/repo.git
@@ -153,10 +163,10 @@ The following packages must be installed in your application:
 pnpm add @nestjs/common @nestjs/core @nestjs/config @nestjs/event-emitter @nestjs/jwt @nestjs/passport @nestjs/platform-socket.io @nestjs/throttler @nestjs/websockets nestjs-cls zod
 ```
 
-| Package      | Version  | Purpose                      |
-| ------------ | -------- | ---------------------------- |
-| `nestjs-cls` | ^6.0.1   | Request-scoped context (CLS) |
-| `zod`        | ^4.0.0   | Schema validation            |
+| Package      | Version | Purpose                      |
+| ------------ | ------- | ---------------------------- |
+| `nestjs-cls` | ^6.0.1  | Request-scoped context (CLS) |
+| `zod`        | ^4.0.0  | Schema validation            |
 
 **Important**: These are peer dependencies to ensure your application and the library share the same package instances, preventing NestJS dependency injection issues.
 
@@ -255,38 +265,7 @@ ENCRYPTION_KEY=your-32-char-encryption-key
 
 The library provides a `bootstrap()` function that handles all the complexity of setting up a NestJS application. You only need to provide your app-specific configuration.
 
-### 1. Create Company Configurations
-
-The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data:
-
-```typescript
-// src/config/company.configurations.ts
-import { AbstractCompanyConfigurations, Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
-
-export class CompanyConfigurations extends AbstractCompanyConfigurations {
-  constructor(params: { companyId: string; userId: string; language?: string; roles?: string[] }) {
-    super(params);
-  }
-
-  async loadConfigurations(params: { neo4j: Neo4jService }): Promise<void> {
-    if (!this._companyId) return;
-
-    // Load company-specific modules, features, or settings from Neo4j
-    const query = params.neo4j.initQuery();
-    query.query = `
-      MATCH (company:Company {id: $companyId})-[:HAS_MODULE]->(module:Module)
-      RETURN module
-    `;
-
-    const result = await params.neo4j.read(query);
-    if (result?.length) {
-      this.setModules(result);
-    }
-  }
-}
-```
-
-### 2. Create Your Features Module
+### 1. Create Your Features Module
 
 ```typescript
 // src/features/features.modules.ts
@@ -334,12 +313,10 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 import { bootstrap } from "@carlonicora/nestjs-neo4jsonapi";
-import { CompanyConfigurations } from "./config/company.configurations";
 import config from "./config/config"; // Optional: only if you have custom config
 import { FeaturesModules } from "./features/features.modules";
 
 bootstrap({
-  companyConfigurations: CompanyConfigurations,
   appModules: [FeaturesModules],
   i18n: {
     fallbackLanguage: "en",
@@ -350,6 +327,7 @@ bootstrap({
 ```
 
 That's it! The `bootstrap()` function handles:
+
 - Tracing initialization
 - API vs Worker mode detection (via `--mode=api` or `--mode=worker` CLI args)
 - Fastify adapter with multipart support
@@ -359,23 +337,22 @@ That's it! The `bootstrap()` function handles:
 
 ### Bootstrap Options
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `companyConfigurations` | `Type<AbstractCompanyConfigurations>` | Yes | Your custom class extending `AbstractCompanyConfigurations` |
-| `appModules` | `(Type<any> \| DynamicModule)[]` | Yes | Your app-specific feature modules |
-| `i18n` | `I18nOptions` | No | i18n configuration (fallbackLanguage, path) |
-| `config` | `() => Record<string, any>` | No | Custom config that extends baseConfig (merged with library defaults) |
+| Option       | Type                             | Required | Description                                                          |
+| ------------ | -------------------------------- | -------- | -------------------------------------------------------------------- |
+| `appModules` | `(Type<any> \| DynamicModule)[]` | Yes      | Your app-specific feature modules                                    |
+| `i18n`       | `I18nOptions`                    | No       | i18n configuration (fallbackLanguage, path)                          |
+| `config`     | `() => Record<string, any>`      | No       | Custom config that extends baseConfig (merged with library defaults) |
 
 ### Configuration Options (via `config`)
 
 The `config` function returns an object that is merged with `baseConfig`. Available options:
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `chunkQueues.queueIds` | `string[]` | Queue IDs for BullMQ registration (for background job processing) |
-| `contentTypes.types` | `string[]` | Neo4j labels for content types (used in multi-label content queries) |
-| `jobNames` | `{ process: Record<string, string>, notifications?: Record<string, string> }` | Job names for BullMQ processors (maps content types to job names) |
-| `prompts.*` | Various | Custom AI agent prompts (see [Customizing Agent Prompts](#customizing-agent-prompts-optional)) |
+| Option                 | Type                                                                          | Description                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `chunkQueues.queueIds` | `string[]`                                                                    | Queue IDs for BullMQ registration (for background job processing)                              |
+| `contentTypes.types`   | `string[]`                                                                    | Neo4j labels for content types (used in multi-label content queries)                           |
+| `jobNames`             | `{ process: Record<string, string>, notifications?: Record<string, string> }` | Job names for BullMQ processors (maps content types to job names)                              |
+| `prompts.*`            | Various                                                                       | Custom AI agent prompts (see [Customizing Agent Prompts](#customizing-agent-prompts-optional)) |
 
 ---
 
@@ -439,46 +416,7 @@ export const JobName = {
 } as const;
 ```
 
-### 2. Create Company Configurations
-
-The library uses an abstract `CompanyConfigurations` class that you must extend to load company-specific data. This class is instantiated for each authenticated request and provides company-specific context (modules, features, settings) to your application.
-
-```typescript
-// src/config/company.configurations.ts
-import { AbstractCompanyConfigurations, Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
-
-// Import your app-specific entities if needed
-import { Configuration } from "src/features/configurations/entities/configuration.entity";
-import { ConfigurationModel } from "src/features/configurations/entities/configuration.model";
-
-export class CompanyConfigurations extends AbstractCompanyConfigurations {
-  constructor(params: { companyId: string; userId: string; language?: string; roles?: string[] }) {
-    super(params);
-  }
-
-  async loadConfigurations(params: { neo4j: Neo4jService }): Promise<void> {
-    if (!this._companyId) return;
-
-    // Load company-specific modules, features, or settings from Neo4j
-    const query = params.neo4j.initQuery({ serialiser: ConfigurationModel });
-    query.query = `
-      MATCH (configuration:Configuration {id: $companyId})<-[:HAS_CONFIGURATION]-(company:Company)
-      OPTIONAL MATCH (company)-[:HAS_MODULE]-(configuration_module:Module)
-      RETURN configuration, configuration_module
-    `;
-
-    const configuration: Configuration = await params.neo4j.readOne(query);
-
-    if (configuration && configuration.module) {
-      this.setModules(configuration.module);
-    }
-  }
-}
-```
-
-**Important**: You must pass your `CompanyConfigurations` class to `CoreModule.forRoot()` so the library can instantiate it when loading user context (see Step 3 below).
-
-### 3. Setup App Module
+### 2. Setup App Module
 
 ```typescript
 // src/app.module.ts
@@ -503,7 +441,6 @@ import {
 import config from "./config/config";
 
 // App-specific modules
-import { CompanyConfigurations } from "src/config/company.configurations";
 import { FeaturesModules } from "src/features/features.modules";
 
 @Module({})
@@ -557,8 +494,6 @@ export class AppModule {
         // ========================================
 
         // Core infrastructure (Neo4j, Redis, Cache, Security, etc.)
-        // Pass your CompanyConfigurations class to enable company-specific context
-        CoreModule.forRoot({ companyConfigurations: CompanyConfigurations }),
 
         // Foundation domain modules (User, Company, Auth, etc.)
         // Queues are configured via baseConfig.chunkQueues in config.ts
@@ -580,13 +515,7 @@ export class AppModule {
 }
 ```
 
-#### CoreModule.forRoot() Options
-
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `companyConfigurations` | `Type<AbstractCompanyConfigurations>` | No | Your custom class extending `AbstractCompanyConfigurations`. When provided, the library uses this class to load company-specific context (modules, features, settings) for each authenticated request. If not provided, a minimal stub is used. |
-
-### 4. Setup main.ts (Bootstrap)
+### 3. Setup main.ts (Bootstrap)
 
 ```typescript
 // src/main.ts
@@ -755,9 +684,9 @@ type User = {
   isActive: boolean;
   isDeleted: boolean;
 
-  role?: Role[];      // User's roles within the company
-  company?: Company;  // The company this user belongs to
-  module?: Module[];  // Modules assigned to this specific user
+  role?: Role[]; // User's roles within the company
+  company?: Company; // The company this user belongs to
+  module?: Module[]; // Modules assigned to this specific user
 };
 ```
 
@@ -772,8 +701,8 @@ type Company = {
   ownerEmail: string;
   availableTokens: number;
 
-  feature: Feature[];  // Features available to company
-  module: Module[];    // Modules available to company
+  feature: Feature[]; // Features available to company
+  module: Module[]; // Modules available to company
 };
 ```
 
@@ -803,6 +732,7 @@ export type AppRoleId = (typeof AppRoles)[keyof typeof AppRoles];
 ```
 
 The base `SystemRoles` includes:
+
 - `Administrator`: `"53394cb8-1e87-11ef-8b48-bed54b8f8aba"` - System-wide admin
 - `CompanyAdministrator`: `"2e1eee00-6cba-4506-9059-ccd24e4ea5b0"` - Company-level admin
 
@@ -825,8 +755,8 @@ async function registerB2BUser(email: string, companyId: string) {
   // Note: roles must be UUIDs, not string names!
   const user = await userService.create({
     email,
-    companyId,  // Links to existing company
-    roles: [AppRoles.Viewer],  // UUID: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+    companyId, // Links to existing company
+    roles: [AppRoles.Viewer], // UUID: "c3d4e5f6-a7b8-9012-cdef-123456789012"
   });
 }
 
@@ -835,7 +765,7 @@ async function createCompanyAdmin(email: string, companyId: string) {
   const user = await userService.create({
     email,
     companyId,
-    roles: [SystemRoles.CompanyAdministrator],  // UUID from library
+    roles: [SystemRoles.CompanyAdministrator], // UUID from library
   });
 }
 ```
@@ -856,7 +786,7 @@ import { SystemRoles } from "@carlonicora/nestjs-neo4jsonapi";
 async function registerB2CUser(email: string) {
   // Create a personal/invisible company for this user
   const company = await companyService.create({
-    name: `${email}'s workspace`,  // Or generate a UUID
+    name: `${email}'s workspace`, // Or generate a UUID
     ownerEmail: email,
   });
 
@@ -865,7 +795,7 @@ async function registerB2CUser(email: string) {
   const user = await userService.create({
     email,
     companyId: company.id,
-    roles: [SystemRoles.CompanyAdministrator],  // UUID - owner of personal space
+    roles: [SystemRoles.CompanyAdministrator], // UUID - owner of personal space
   });
 }
 ```
@@ -890,13 +820,13 @@ query.query = `
 
 ### Benefits
 
-| Benefit | B2B | B2C |
-|---------|-----|-----|
-| Data isolation | Per company | Per user (via invisible company) |
-| User collaboration | Yes | No (single user) |
-| Scalability | Multi-tenant | Same architecture |
-| Future B2B upgrade | Already supported | Easy migration path |
-| Billing | Per company | Per user (mapped to company) |
+| Benefit            | B2B               | B2C                              |
+| ------------------ | ----------------- | -------------------------------- |
+| Data isolation     | Per company       | Per user (via invisible company) |
+| User collaboration | Yes               | No (single user)                 |
+| Scalability        | Multi-tenant      | Same architecture                |
+| Future B2B upgrade | Already supported | Easy migration path              |
+| Billing            | Per company       | Per user (mapped to company)     |
 
 ## Required Configuration Files
 
@@ -924,9 +854,9 @@ Queue IDs must match the lowercase version of your content type `labelName`:
 ```typescript
 // src/config/enums/queue.id.ts
 export enum QueueId {
-  CHUNK = "chunk",        // Required - used by ChunkProcessor
-  ARTICLE = "article",    // For Article content type (labelName: "Article")
-  DOCUMENT = "document",  // For Document content type (labelName: "Document")
+  CHUNK = "chunk", // Required - used by ChunkProcessor
+  ARTICLE = "article", // For Article content type (labelName: "Article")
+  DOCUMENT = "document", // For Document content type (labelName: "Document")
   // Add queue IDs for each content type (lowercase of labelName)
 }
 ```
@@ -937,8 +867,8 @@ Job names map content types to processor job names:
 // src/config/enums/job.name.ts
 export const JobName = {
   process: {
-    chunk: "process_chunk",      // Required - used by ChunkProcessor
-    Article: "process_article",  // Key = labelName, value = job name
+    chunk: "process_chunk", // Required - used by ChunkProcessor
+    Article: "process_article", // Key = labelName, value = job name
     Document: "process_document",
   },
   notifications: {},
@@ -1121,7 +1051,6 @@ export class ResourceController {
 ```typescript
 import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import { CompanyConfigurationsInterface } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class MyService {
@@ -1133,9 +1062,6 @@ export class MyService {
     const companyId = this.cls.get("companyId");
     const roles = this.cls.get("roles");
     const language = this.cls.get("language");
-
-    // Access company configurations (loaded by JwtAuthGuard)
-    const config = this.cls.get<CompanyConfigurationsInterface>("companyConfigurations");
 
     if (config?.hasModule("premium-feature")) {
       // User's company has access to premium feature
@@ -1150,19 +1076,19 @@ The library includes default prompts. Customization is entirely optional.
 
 ### Available Prompts
 
-| Agent              | Config Key                                   | Purpose                               |
-| ------------------ | -------------------------------------------- | ------------------------------------- |
-| **GraphCreator**   | `prompts.graphCreator`                       | Extract atomic facts and key concepts |
-| **Contextualiser** | `prompts.contextualiser.questionRefiner`     | Refine user questions                 |
-| **Contextualiser** | `prompts.contextualiser.rationalPlan`        | Create rational plans                 |
-| **Contextualiser** | `prompts.contextualiser.keyConceptExtractor` | Score key concepts                    |
-| **Contextualiser** | `prompts.contextualiser.atomicFactsExtractor`| Evaluate atomic facts                 |
-| **Contextualiser** | `prompts.contextualiser.chunk`               | Assess text chunks                    |
-| **Contextualiser** | `prompts.contextualiser.chunkVector`         | Vector-based chunk retrieval          |
-| **Responder**      | `prompts.responder`                          | Generate final answers                |
-| **Summariser**     | `prompts.summariser.map`                     | Summarize individual chunks           |
-| **Summariser**     | `prompts.summariser.combine`                 | Combine summaries                     |
-| **Summariser**     | `prompts.summariser.tldr`                    | Create TLDR                           |
+| Agent              | Config Key                                    | Purpose                               |
+| ------------------ | --------------------------------------------- | ------------------------------------- |
+| **GraphCreator**   | `prompts.graphCreator`                        | Extract atomic facts and key concepts |
+| **Contextualiser** | `prompts.contextualiser.questionRefiner`      | Refine user questions                 |
+| **Contextualiser** | `prompts.contextualiser.rationalPlan`         | Create rational plans                 |
+| **Contextualiser** | `prompts.contextualiser.keyConceptExtractor`  | Score key concepts                    |
+| **Contextualiser** | `prompts.contextualiser.atomicFactsExtractor` | Evaluate atomic facts                 |
+| **Contextualiser** | `prompts.contextualiser.chunk`                | Assess text chunks                    |
+| **Contextualiser** | `prompts.contextualiser.chunkVector`          | Vector-based chunk retrieval          |
+| **Responder**      | `prompts.responder`                           | Generate final answers                |
+| **Summariser**     | `prompts.summariser.map`                      | Summarize individual chunks           |
+| **Summariser**     | `prompts.summariser.combine`                  | Combine summaries                     |
+| **Summariser**     | `prompts.summariser.tldr`                     | Create TLDR                           |
 
 ### Custom Prompts Example
 

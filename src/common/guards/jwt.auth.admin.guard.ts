@@ -3,13 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
-import {
-  COMPANY_CONFIGURATIONS_FACTORY,
-  CompanyConfigurationsFactory,
-  CompanyConfigurationsInterface,
-  SYSTEM_ROLES,
-  SystemRolesInterface,
-} from "../tokens";
+import { SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
 
 @Injectable()
 export class AdminJwtAuthGuard extends AuthGuard("jwt") implements CanActivate {
@@ -18,9 +12,9 @@ export class AdminJwtAuthGuard extends AuthGuard("jwt") implements CanActivate {
     private reflector: Reflector,
     private readonly neo4j: Neo4jService,
     @Optional()
-    @Inject(COMPANY_CONFIGURATIONS_FACTORY)
-    private readonly companyConfigFactory?: CompanyConfigurationsFactory,
-    @Optional() @Inject(SYSTEM_ROLES) private readonly systemRoles?: SystemRolesInterface,
+    @Optional()
+    @Inject(SYSTEM_ROLES)
+    private readonly systemRoles?: SystemRolesInterface,
   ) {
     super();
   }
@@ -32,17 +26,6 @@ export class AdminJwtAuthGuard extends AuthGuard("jwt") implements CanActivate {
     if (!authorizationHeader) return false;
 
     const isAuthenticated = (await super.canActivate(context)) as boolean;
-
-    if (isAuthenticated && request.user && this.companyConfigFactory) {
-      const companyConfigurations = await this.companyConfigFactory({
-        companyId: request.user.companyId ?? request.headers["x-companyid"],
-        userId: request.user.userId,
-        language: request.headers["x-language"],
-        roles: request.user.roles,
-        neo4j: this.neo4j,
-      });
-      this.cls.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
-    }
 
     return isAuthenticated;
   }

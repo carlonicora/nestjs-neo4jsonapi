@@ -28,6 +28,7 @@ export class CompanySerialiser extends AbstractJsonApiSerialiser implements Json
   create(): JsonApiDataInterface {
     this.attributes = {
       name: "name",
+      configurations: "configurations",
       logoUrl: "logo",
       logo: async (data: Company) => {
         if (!data.logo) return undefined;
@@ -41,8 +42,6 @@ export class CompanySerialiser extends AbstractJsonApiSerialiser implements Json
       licenseExpirationDate: (data: Company) => data.licenseExpirationDate?.toISOString(),
     };
 
-    const companyConfigurationModel = this.configService.get("companyConfigurationModel");
-
     this.relationships = {
       feature: {
         name: `features`,
@@ -52,12 +51,6 @@ export class CompanySerialiser extends AbstractJsonApiSerialiser implements Json
         name: `modules`,
         data: this.serialiserFactory.create(ModuleModel),
       },
-      ...(companyConfigurationModel && {
-        configuration: {
-          name: `configurations`,
-          data: this.serialiserFactory.create(companyConfigurationModel),
-        },
-      }),
     };
 
     return super.create();

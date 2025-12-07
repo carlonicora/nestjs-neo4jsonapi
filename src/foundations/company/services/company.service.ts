@@ -5,12 +5,6 @@ import axios from "axios";
 import { Queue } from "bullmq";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { ClsService } from "nestjs-cls";
-import {
-  COMPANY_CONFIGURATIONS_FACTORY,
-  CompanyConfigurationsFactory,
-  CompanyConfigurationsInterface,
-} from "../../../common/tokens";
-import { CompanyConfigurations } from "../../../config/company.configurations";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -36,18 +30,6 @@ export class CompanyService {
     private readonly versionService: VersionService,
     private readonly moduleRef: ModuleRef,
   ) {}
-
-  /**
-   * Get the company configurations factory from the global CoreModule provider.
-   * Returns null if not configured.
-   */
-  private getCompanyConfigFactory(): CompanyConfigurationsFactory | null {
-    try {
-      return this.moduleRef.get<CompanyConfigurationsFactory>(COMPANY_CONFIGURATIONS_FACTORY, { strict: false });
-    } catch {
-      return null;
-    }
-  }
 
   async validate(params: { companyId: string }) {
     const company = await this.companyRepository.findByCompanyId({
@@ -77,6 +59,7 @@ export class CompanyService {
     return this.companyRepository.create({
       companyId: params.data.id,
       name: params.data.attributes.name,
+      configurations: params.data.attributes.configurations,
       availableTokens: params.data.attributes.availableTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
     });
@@ -86,6 +69,7 @@ export class CompanyService {
     await this.companyRepository.create({
       companyId: params.data.id,
       name: params.data.attributes.name,
+      configurations: params.data.attributes.configurations,
       availableTokens: params.data.attributes.availableTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       moduleIds: params.data.relationships?.modules?.data.map((module) => module.id),
@@ -101,6 +85,7 @@ export class CompanyService {
     await this.companyRepository.update({
       companyId: params.data.id,
       name: params.data.attributes.name,
+      configurations: params.data.attributes.configurations,
       logo: params.data.attributes.logo,
       availableTokens: params.data.attributes.availableTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
@@ -148,24 +133,6 @@ export class CompanyService {
       const company = await this.companyRepository.findSingle();
       if (!company) throw new HttpException(`Forbidden`, HttpStatus.FORBIDDEN);
       this.cls.set("companyId", company.id);
-
-      let companyConfigurations: CompanyConfigurationsInterface;
-      const companyConfigFactory = this.getCompanyConfigFactory();
-      if (companyConfigFactory) {
-        companyConfigurations = await companyConfigFactory({
-          companyId: company.id,
-          userId: "",
-          neo4j: this.neo4j,
-        });
-      } else {
-        const config = new CompanyConfigurations({
-          companyId: company.id,
-          userId: "",
-        });
-        await config.loadConfigurations({ neo4j: this.neo4j });
-        companyConfigurations = config;
-      }
-      this.cls.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
     }
   }
 

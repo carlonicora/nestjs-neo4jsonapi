@@ -16,6 +16,10 @@ export class CompanyPutAttributesDTO {
   @IsOptional()
   @IsNumber()
   availableTokens?: number;
+
+  @IsOptional()
+  @IsString()
+  configurations?: string;
 }
 
 export class CompanyPutRelationshipsDTO {

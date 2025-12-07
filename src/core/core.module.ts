@@ -1,9 +1,7 @@
-import { DynamicModule, Global, Module, Provider, Type } from "@nestjs/common";
+import { DynamicModule, Global, Module, Provider } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
-import { AbstractCompanyConfigurations } from "../common";
-import { COMPANY_CONFIGURATIONS_FACTORY, CompanyConfigurationsFactory } from "../common/tokens";
 import { BaseConfigInterface, ConfigJwtInterface } from "../config/interfaces";
 
 // Import all core modules
@@ -111,12 +109,6 @@ function getCoreModuleExports() {
  */
 export interface CoreModuleOptions {
   /**
-   * CompanyConfigurations class that extends AbstractCompanyConfigurations.
-   * This class will be used to create configuration instances for each request.
-   */
-  companyConfigurations?: Type<AbstractCompanyConfigurations>;
-
-  /**
    * Queue IDs to register with BullMQ.
    * The library's CHUNK queue is always registered automatically.
    * Pass additional queue IDs here for app-specific queues.
@@ -134,7 +126,6 @@ export interface CoreModuleOptions {
  * @Module({
  *   imports: [
  *     CoreModule.forRoot({
- *       companyConfigurations: MyCompanyConfigurations,
  *       queueIds: ['my-queue-1', 'my-queue-2'],
  *     }),
  *   ],
@@ -151,35 +142,11 @@ export class CoreModule {
   static forRoot(options?: CoreModuleOptions): DynamicModule {
     const providers: Provider[] = [];
 
-    // Create factory provider for company configurations
-    if (options?.companyConfigurations) {
-      const ConfigClass = options.companyConfigurations;
-      providers.push({
-        provide: COMPANY_CONFIGURATIONS_FACTORY,
-        useValue: (async (params) => {
-          const config = new ConfigClass({
-            companyId: params.companyId,
-            userId: params.userId,
-            language: params.language,
-            roles: params.roles,
-          });
-          await config.loadConfigurations({ neo4j: params.neo4j });
-          return config;
-        }) as CompanyConfigurationsFactory,
-      });
-    } else {
-      // Provide null as default so @Optional() works correctly
-      providers.push({
-        provide: COMPANY_CONFIGURATIONS_FACTORY,
-        useValue: null,
-      });
-    }
-
     return {
       module: CoreModule,
       imports: getCoreModules(options?.queueIds ?? []),
       providers,
-      exports: [...getCoreModuleExports(), COMPANY_CONFIGURATIONS_FACTORY],
+      exports: [...getCoreModuleExports()],
       global: true,
     };
   }

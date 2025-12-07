@@ -9,6 +9,7 @@ export type Company = Entity & {
   isActiveSubscription: boolean;
   ownerEmail: string;
   availableTokens: number;
+  configurations?: string;
 
   licenseExpirationDate?: Date;
 

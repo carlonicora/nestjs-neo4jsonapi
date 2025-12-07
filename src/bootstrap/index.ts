@@ -12,11 +12,9 @@
  * dotenv.config({ path: "path/to/.env" });
  *
  * import { bootstrap } from "@carlonicora/nestjs-neo4jsonapi";
- * import { CompanyConfigurations } from "./config/company.configurations";
  * import { FeaturesModules } from "./features/features.modules";
  *
  * bootstrap({
- *   companyConfigurations: CompanyConfigurations,
  *   queueIds: ["chunk"],
  *   appModules: [FeaturesModules],
  *   i18n: { fallbackLanguage: "it", path: "./src/i18n" },
@@ -46,9 +44,9 @@ import { AppMode, AppModeConfig } from "../core/appmode/constants/app.mode.const
 export { AppMode, AppModeConfig };
 
 // Bootstrap function and options
+export { createAppModule } from "./app.module.factory";
 export { bootstrap } from "./bootstrap";
 export { BootstrapOptions, I18nOptions } from "./bootstrap.options";
-export { createAppModule } from "./app.module.factory";
 
 // Re-export defaults (functions and constants)
 export { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeConfig } from "./defaults";

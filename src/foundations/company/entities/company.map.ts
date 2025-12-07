@@ -6,6 +6,7 @@ export const mapCompany = (params: { data: any; record: any; entityFactory: Enti
   return {
     ...mapEntity({ record: params.data }),
     name: params.data.name,
+    configurations: params.data.configurations,
     logo: params.data.logo,
     logoUrl: params.data.logoUrl,
     availableTokens: params.data.availableTokens ?? 0,

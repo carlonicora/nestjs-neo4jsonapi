@@ -3,14 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
-import { ModuleDefinition } from "../decorators/module.decorator";
-import {
-  COMPANY_CONFIGURATIONS_FACTORY,
-  CompanyConfigurationsFactory,
-  CompanyConfigurationsInterface,
-  SYSTEM_ROLES,
-  SystemRolesInterface,
-} from "../tokens";
+import { SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
@@ -19,9 +12,9 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     private reflector: Reflector,
     private readonly neo4j: Neo4jService,
     @Optional()
-    @Inject(COMPANY_CONFIGURATIONS_FACTORY)
-    private readonly companyConfigFactory?: CompanyConfigurationsFactory,
-    @Optional() @Inject(SYSTEM_ROLES) private readonly systemRoles?: SystemRolesInterface,
+    @Optional()
+    @Inject(SYSTEM_ROLES)
+    private readonly systemRoles?: SystemRolesInterface,
   ) {
     super();
   }
@@ -33,19 +26,6 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     if (!authorizationHeader) return false;
 
     const isAuthenticated = (await super.canActivate(context)) as boolean;
-
-    if (isAuthenticated && request.user && this.companyConfigFactory) {
-      const companyConfigurations = await this.companyConfigFactory({
-        companyId: request.user.companyId ?? request.headers["x-companyid"],
-        userId: request.user.userId,
-        language: request.headers["x-language"],
-        roles: request.user.roles,
-        neo4j: this.neo4j,
-      });
-      this.cls.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
-
-      this._validateModuleDefinition(request.user, context);
-    }
 
     return isAuthenticated;
   }
@@ -82,19 +62,6 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
       const adminRole = this.systemRoles?.Administrator ?? "administrator";
       if (!requiredRoles.includes(adminRole)) requiredRoles.push(adminRole);
       if (!requiredRoles.some((role) => user.roles.includes(role))) throw new HttpException("Unauthorised", 401);
-    }
-  }
-
-  private _validateModuleDefinition(user: any, context: any): void {
-    const moduleDefinition: ModuleDefinition | undefined =
-      this.reflector.get<ModuleDefinition>("moduleDefinition", context.getHandler()) ||
-      this.reflector.get<ModuleDefinition>("moduleDefinition", context.getClass());
-
-    if (moduleDefinition) {
-      const companyConfigurations = this.cls.get<CompanyConfigurationsInterface>("companyConfigurations");
-      if (!companyConfigurations) throw new HttpException("Unauthorised", 401);
-
-      if (!companyConfigurations.hasModule(moduleDefinition.module)) throw new HttpException("Unauthorised", 401);
     }
   }
 }

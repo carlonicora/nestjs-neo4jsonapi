@@ -1,5 +1,4 @@
 import { DynamicModule, Type } from "@nestjs/common";
-import { AbstractCompanyConfigurations } from "../common/abstracts/abstract.company.configuration";
 
 /**
  * i18n configuration options
@@ -25,13 +24,6 @@ export interface I18nOptions {
  * a NestJS application with the library's infrastructure.
  */
 export interface BootstrapOptions {
-  /**
-   * CompanyConfigurations class that extends AbstractCompanyConfigurations.
-   * This class will be used to create configuration instances for each request.
-   * Required for multi-tenant applications.
-   */
-  companyConfigurations: Type<AbstractCompanyConfigurations>;
-
   /**
    * App-specific feature modules to import.
    * These are your application's domain modules.

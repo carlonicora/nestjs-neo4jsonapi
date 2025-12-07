@@ -7,12 +7,12 @@ import { ClsModule } from "nestjs-cls";
 import { AcceptLanguageResolver, HeaderResolver, I18nModule, QueryResolver } from "nestjs-i18n";
 import * as path from "path";
 
-import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
-import { AppModeModule } from "../core/appmode/app.mode.module";
-import { CoreModule } from "../core/core.module";
-import { FoundationsModule } from "../foundations/foundations.modules";
 import { AgentsModule } from "../agents/agents.modules";
 import { baseConfig, BaseConfigInterface, ConfigRateLimitInterface } from "../config";
+import { AppModeModule } from "../core/appmode/app.mode.module";
+import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
+import { CoreModule } from "../core/core.module";
+import { FoundationsModule } from "../foundations/foundations.modules";
 import { BootstrapOptions } from "./bootstrap.options";
 
 /**
@@ -106,7 +106,6 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
 
           // Library's core infrastructure modules
           CoreModule.forRoot({
-            companyConfigurations: options.companyConfigurations,
             queueIds,
           }),
 

@@ -1,13 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
-import { Job } from "bullmq";
 import { ModuleRef } from "@nestjs/core";
+import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
-import {
-  COMPANY_CONFIGURATIONS_FACTORY,
-  CompanyConfigurationsFactory,
-  CompanyConfigurationsInterface,
-} from "../../../common/tokens";
-import { CompanyConfigurations } from "../../../config/company.configurations";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CompanyRepository } from "../../company/repositories/company.repository";
@@ -22,18 +16,6 @@ export class CompanyProcessor extends WorkerHost {
     private readonly moduleRef: ModuleRef,
   ) {
     super();
-  }
-
-  /**
-   * Get the company configurations factory from the global CoreModule provider.
-   * Returns null if not configured.
-   */
-  private getCompanyConfigFactory(): CompanyConfigurationsFactory | null {
-    try {
-      return this.moduleRef.get<CompanyConfigurationsFactory>(COMPANY_CONFIGURATIONS_FACTORY, { strict: false });
-    } catch {
-      return null;
-    }
   }
 
   @OnWorkerEvent("active")
@@ -57,24 +39,6 @@ export class CompanyProcessor extends WorkerHost {
     await this.cls.run(async () => {
       this.cls.set("companyId", job.data.companyId);
       this.cls.set("userId", job.data.userId);
-
-      let configurations: CompanyConfigurationsInterface;
-      const companyConfigFactory = this.getCompanyConfigFactory();
-      if (companyConfigFactory) {
-        configurations = await companyConfigFactory({
-          companyId: job.data.companyId,
-          userId: job.data.userId,
-          neo4j: this.neo4j,
-        });
-      } else {
-        const config = new CompanyConfigurations({
-          companyId: job.data.companyId,
-          userId: job.data.userId,
-        });
-        await config.loadConfigurations({ neo4j: this.neo4j });
-        configurations = config;
-      }
-      this.cls.set<CompanyConfigurationsInterface>("companyConfigurations", configurations);
 
       await this.deleteFullCompany({ companyId: job.data.companyId });
     });

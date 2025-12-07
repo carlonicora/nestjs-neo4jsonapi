@@ -3,18 +3,12 @@ import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { randomUUID } from "crypto";
 import { RoleId } from "../../../common/constants/system.roles";
-import {
-  COMPANY_CONFIGURATIONS_FACTORY,
-  CompanyConfigurationsFactory,
-  CompanyConfigurationsInterface,
-} from "../../../common/tokens";
 import { EmailService } from "../../../core/email/services/email.service";
 import { checkPassword, hashPassword, SecurityService } from "../../../core/security/services/security.service";
 import { AuthPostLoginDataDTO } from "../../auth/dtos/auth.post.login.dto";
 
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
-import { CompanyConfigurations } from "../../../config/company.configurations";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
@@ -47,18 +41,6 @@ export class AuthService {
 
   private get appConfig(): ConfigAppInterface {
     return this.configService.get<ConfigAppInterface>("app");
-  }
-
-  /**
-   * Get the company configurations factory from the global CoreModule provider.
-   * Returns null if not configured.
-   */
-  private getCompanyConfigFactory(): CompanyConfigurationsFactory | null {
-    try {
-      return this.moduleRef.get<CompanyConfigurationsFactory>(COMPANY_CONFIGURATIONS_FACTORY, { strict: false });
-    } catch {
-      return null;
-    }
   }
 
   async findCurrentAuth(): Promise<JsonApiDataInterface> {
@@ -111,25 +93,6 @@ export class AuthService {
     if (auth.user.company?.id) {
       this.clsService.set("companyId", auth.user.company.id);
       this.clsService.set("userId", auth.user.id);
-
-      let companyConfigurations: CompanyConfigurationsInterface;
-      const companyConfigFactory = this.getCompanyConfigFactory();
-
-      if (companyConfigFactory) {
-        companyConfigurations = await companyConfigFactory({
-          companyId: auth.user.company.id,
-          userId: auth.user.id,
-          neo4j: this.neo4j,
-        });
-      } else {
-        const config = new CompanyConfigurations({
-          companyId: auth.user.company.id,
-          userId: auth.user.id,
-        });
-        await config.loadConfigurations({ neo4j: this.neo4j });
-        companyConfigurations = config;
-      }
-      this.clsService.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
     }
 
     return await this.builder.buildSingle(AuthModel, auth);
@@ -274,24 +237,6 @@ export class AuthService {
     if (!user) return;
 
     this.clsService.set("companyId", user.company.id);
-
-    let companyConfigurations: CompanyConfigurationsInterface;
-    const companyConfigFactory = this.getCompanyConfigFactory();
-    if (companyConfigFactory) {
-      companyConfigurations = await companyConfigFactory({
-        companyId: user.company.id,
-        userId: user.id,
-        neo4j: this.neo4j,
-      });
-    } else {
-      const config = new CompanyConfigurations({
-        companyId: user.company.id,
-        userId: user.id,
-      });
-      await config.loadConfigurations({ neo4j: this.neo4j });
-      companyConfigurations = config;
-    }
-    this.clsService.set<CompanyConfigurationsInterface>("companyConfigurations", companyConfigurations);
 
     user = await this.repository.startResetPassword({ userId: user.id });
 

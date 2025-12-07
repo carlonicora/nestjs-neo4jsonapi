@@ -42,5 +42,4 @@ export interface BaseConfigInterface {
   chunkQueues: ConfigChunkQueuesInterface;
   contentTypes: ConfigContentTypesInterface;
   jobNames: ConfigJobNamesInterface;
-  companyConfigurationModel?: any;
 }
