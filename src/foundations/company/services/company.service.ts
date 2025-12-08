@@ -5,6 +5,7 @@ import axios from "axios";
 import { Queue } from "bullmq";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { QueueId } from "../../../config/enums/queue.id";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -24,7 +25,7 @@ export class CompanyService {
   constructor(
     private readonly builder: JsonApiService,
     private readonly companyRepository: CompanyRepository,
-    @InjectQueue(`${process.env.QUEUE}_company`) private readonly queue: Queue,
+    @InjectQueue(QueueId.COMPANY) private readonly queue: Queue,
     private readonly cls: ClsService,
     private readonly neo4j: Neo4jService,
     private readonly versionService: VersionService,
