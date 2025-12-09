@@ -161,6 +161,7 @@
     "@nestjs/core": "^11.1.9",
     "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/jwt": "^11.0.1",
+    "@fastify/multipart": "^9.0.0",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-fastify": "^11.1.9",
     "@nestjs/platform-socket.io": "^11.1.9",
