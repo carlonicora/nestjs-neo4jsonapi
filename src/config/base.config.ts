@@ -88,7 +88,11 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       env: process.env.ENV || "development",
     },
     app: {
-      url: process.env.APP_URL ? process.env.APP_URL.trim().replace(/\/+$/, "") : "http://localhost:3000",
+      url: process.env.APP_URL
+        ? process.env.APP_URL.endsWith("/")
+          ? process.env.APP_URL
+          : `${process.env.APP_URL}/`
+        : "http://localhost:3000",
     },
     neo4j: {
       uri: process.env.NEO4J_URI || "",
