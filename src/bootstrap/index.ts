@@ -17,7 +17,7 @@
  * bootstrap({
  *   queueIds: ["chunk"],
  *   appModules: [FeaturesModules],
- *   i18n: { fallbackLanguage: "it", path: "./src/i18n" },
+ *   i18n: { fallbackLanguage: "en", path: "./src/i18n" },
  * });
  * ```
  *

@@ -192,7 +192,7 @@ export class AuthService {
       roleIds: [RoleId.CompanyAdministrator],
     });
 
-    const link: string = `${this.appConfig.url}it/activation/${user.code}`;
+    const link: string = `${this.appConfig.url}en/activation/${user.code}`;
 
     await this.emailService.sendEmail(
       "activationEmail",
@@ -240,7 +240,7 @@ export class AuthService {
 
     user = await this.repository.startResetPassword({ userId: user.id });
 
-    const link: string = `${this.appConfig.url}it/reset/${user.code}`;
+    const link: string = `${this.appConfig.url}en/reset/${user.code}`;
 
     await this.emailService.sendEmail(
       "resetEmail",

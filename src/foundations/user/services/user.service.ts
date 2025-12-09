@@ -210,7 +210,7 @@ export class UserService {
   async sendInvitationEmail(params: { userId: string }): Promise<void> {
     const user = await this.db.resetCode({ userId: params.userId });
 
-    const link: string = `${this.appConfig.url}it/invitation/${user.code}`;
+    const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
 
     await this.emailService.sendEmail(
       "invitationEmail",
@@ -253,7 +253,7 @@ export class UserService {
     if (params.forceCompanyAdmin) await this.db.makeCompanyAdmin({ userId: params.data.id });
 
     if (params.data.attributes.sendInvitationEmail) {
-      const link: string = `${this.appConfig.url}it/invitation/${user.code}`;
+      const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
       await this.emailService.sendEmail(
         params.data.attributes.sendInvitationEmail ? "invitationEmail" : "activationEmail",
         {
@@ -290,7 +290,7 @@ export class UserService {
     });
 
     if (params.data.attributes.sendInvitationEmail) {
-      const link: string = `${this.appConfig.url}it/invitation/${user.code}`;
+      const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
       await this.emailService.sendEmail(
         params.data.attributes.sendInvitationEmail ? "invitationEmail" : "activationEmail",
         {
