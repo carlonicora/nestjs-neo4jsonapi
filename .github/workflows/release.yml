@@ -26,11 +26,13 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build
 
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
         run: pnpm dlx semantic-release
