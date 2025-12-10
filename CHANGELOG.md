@@ -1,3 +1,9 @@
+## [1.0.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.0.1...v1.0.2) (2025-12-10)
+
+### 🐛 Bug Fixes
+
+* add NPM_CONFIG_PROVENANCE env var for OIDC ([8b0787e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8b0787ef010694498354270375b6f3b0b0455fc0))
+
 ## [1.0.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.0.0...v1.0.1) (2025-12-10)
 
 ### 🐛 Bug Fixes
