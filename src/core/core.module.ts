@@ -74,6 +74,7 @@ function getCoreModules(queueIds: string[] = []) {
     LLMModule,
     BlockNoteModule,
     MigratorModule,
+    VersionModule,
   ];
 }
 
@@ -101,6 +102,7 @@ function getCoreModuleExports() {
     TracingModule,
     LoggingModule,
     QueueModule,
+    VersionModule,
   ];
 }
 
