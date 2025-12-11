@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.1.0...v1.2.0) (2025-12-11)
+
+### 🚀 Features
+
+* create extendability in content module ([142db56](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/142db5615be23df478df8ece30475d902577de44))
+
 ## [1.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.0.3...v1.1.0) (2025-12-11)
 
 ### 🚀 Features
