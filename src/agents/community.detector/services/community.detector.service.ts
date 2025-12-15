@@ -129,15 +129,17 @@ export class CommunityDetectorService {
   private async projectGraph(graphName: string): Promise<void> {
     const query = this.neo4j.initQuery();
 
+    // GDS cypher projection needs parameters passed via configuration
     query.query += `
       CALL gds.graph.project.cypher(
         $graphName,
-        'MATCH (kc:KeyConcept)<-[:HAS_KEY_CONCEPT]-()-[:HAS_CHUNK]->()-[:HAS_CHUNK|BELONGS_TO*1..2]->(company)
+        'MATCH (kc:KeyConcept)<-[:HAS_KEY_CONCEPT]-()-[:HAS_CHUNK]->()-[:HAS_CHUNK|BELONGS_TO*1..2]->(company:Company)
          WHERE company.id = $companyId
          RETURN DISTINCT id(kc) AS id',
         'MATCH (kc1:KeyConcept)<-[:RELATES_TO]-(rel:KeyConceptRelationship)-[:RELATES_TO]->(kc2:KeyConcept)
          MATCH (rel)-[:BELONGS_TO]->(company:Company {id: $companyId})
-         RETURN id(kc1) AS source, id(kc2) AS target, rel.weight AS weight'
+         RETURN id(kc1) AS source, id(kc2) AS target, rel.weight AS weight',
+        { parameters: { companyId: $companyId } }
       )
       YIELD graphName, nodeCount, relationshipCount
       RETURN graphName, nodeCount, relationshipCount
