@@ -1,0 +1,108 @@
+/**
+ * Resolve relative import path between two modules
+ *
+ * @param params - From and to directories and modules
+ * @returns Relative import path
+ *
+ * @example
+ * From: src/features/comment
+ * To: src/foundations/user
+ * Result: "../../foundations/user"
+ */
+export function resolveImportPath(params: {
+  fromDir: string;
+  fromModule: string;
+  toDir: string;
+  toModule: string;
+}): string {
+  const { fromDir, fromModule, toDir, toModule } = params;
+
+  // If in same directory, just go up one level and into the module
+  if (fromDir === toDir) {
+    return `../${toModule}`;
+  }
+
+  // Different directories: go up to src, then down to target
+  // From: src/features/comment → need to go up 2 levels to reach src
+  // To: src/foundations/user → then go down into foundations/user
+  const upLevels = 2; // Always 2: one for module folder, one for directory folder
+  const up = "../".repeat(upLevels);
+  const down = `${toDir}/${toModule}`;
+
+  return `${up}${down}`;
+}
+
+/**
+ * Resolve import path for entity file
+ *
+ * @param params - From and to module info
+ * @returns Import path to entity file
+ *
+ * @example
+ * resolveEntityImportPath({ fromDir: "features", fromModule: "comment", toDir: "foundations", toModule: "user" })
+ * // Returns: "../../foundations/user/entities/user.entity"
+ */
+export function resolveEntityImportPath(params: {
+  fromDir: string;
+  fromModule: string;
+  toDir: string;
+  toModule: string;
+}): string {
+  const basePath = resolveImportPath(params);
+  return `${basePath}/entities/${params.toModule}.entity`;
+}
+
+/**
+ * Resolve import path for meta file
+ *
+ * @param params - From and to module info
+ * @returns Import path to meta file
+ *
+ * @example
+ * resolveMetaImportPath({ fromDir: "features", fromModule: "comment", toDir: "foundations", toModule: "user" })
+ * // Returns: "../../foundations/user/entities/user.meta"
+ */
+export function resolveMetaImportPath(params: {
+  fromDir: string;
+  fromModule: string;
+  toDir: string;
+  toModule: string;
+}): string {
+  const basePath = resolveImportPath(params);
+  return `${basePath}/entities/${params.toModule}.meta`;
+}
+
+/**
+ * Resolve import path for DTO file
+ *
+ * @param params - From and to module info
+ * @returns Import path to DTO file
+ *
+ * @example
+ * resolveDtoImportPath({ fromDir: "features", fromModule: "comment", toDir: "features", toModule: "discussion" })
+ * // Returns: "../discussion/dtos/discussion.dto"
+ */
+export function resolveDtoImportPath(params: {
+  fromDir: string;
+  fromModule: string;
+  toDir: string;
+  toModule: string;
+}): string {
+  const basePath = resolveImportPath(params);
+  return `${basePath}/dtos/${params.toModule}.dto`;
+}
+
+/**
+ * Resolve import path relative to module root
+ * Used for imports within the same module
+ *
+ * @param subpath - Subpath within module (e.g., "entities/comment", "services/comment.service")
+ * @returns Relative import path
+ *
+ * @example
+ * resolveModuleInternalPath("entities/comment")
+ * // Returns: "../entities/comment"
+ */
+export function resolveModuleInternalPath(subpath: string): string {
+  return `../${subpath}`;
+}
