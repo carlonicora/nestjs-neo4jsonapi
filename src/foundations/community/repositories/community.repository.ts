@@ -367,8 +367,16 @@ export class CommunityRepository implements OnModuleInit {
       RETURN community.level AS level, COUNT(community) AS count
       ORDER BY level ASC
     `;
-    const result = await this.neo4j.readMany(query);
-    return (result as unknown as { level: number; count: number }[]) ?? [];
+    // Use raw read() to avoid entity serialization - we just need counts
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record) => {
+      const level = record.get("level");
+      const count = record.get("count");
+      return {
+        level: level?.toNumber?.() ?? level ?? 0,
+        count: count?.toNumber?.() ?? count ?? 0,
+      };
+    });
   }
 
   /**
