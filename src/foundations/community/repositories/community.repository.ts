@@ -264,8 +264,13 @@ export class CommunityRepository implements OnModuleInit {
       MATCH (community:Community {id: $communityId})-[:HAS_MEMBER]->(keyconcept:KeyConcept)
       RETURN keyconcept.id AS id, keyconcept.value AS value, keyconcept.description AS description
     `;
-    const result = await this.neo4j.readMany(query);
-    return result as unknown as { id: string; value: string; description?: string }[];
+    // Use raw read() to avoid entity serialization - we just need properties
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record) => ({
+      id: record.get("id"),
+      value: record.get("value"),
+      description: record.get("description") ?? undefined,
+    }));
   }
 
   /**
@@ -283,8 +288,16 @@ export class CommunityRepository implements OnModuleInit {
       WHERE kc1.value < kc2.value
       RETURN kc1.value AS keyConcept1, kc2.value AS keyConcept2, rel.weight AS weight
     `;
-    const result = await this.neo4j.readMany(query);
-    return result as unknown as { keyConcept1: string; keyConcept2: string; weight: number }[];
+    // Use raw read() to avoid entity serialization - we just need properties
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record) => {
+      const weight = record.get("weight");
+      return {
+        keyConcept1: record.get("keyConcept1"),
+        keyConcept2: record.get("keyConcept2"),
+        weight: weight?.toNumber?.() ?? weight ?? 1.0,
+      };
+    });
   }
 
   /**
