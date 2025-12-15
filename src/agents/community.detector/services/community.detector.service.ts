@@ -98,8 +98,13 @@ export class CommunityDetectorService {
       RETURN count(DISTINCT kc) AS count
     `;
 
-    const result = await this.neo4j.readOne(query);
-    return result?.count?.toNumber?.() ?? result?.count ?? 0;
+    // Use raw read() to avoid entity serialization - we just need a count
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    if (result.records.length > 0) {
+      const count = result.records[0].get("count");
+      return count?.toNumber?.() ?? count ?? 0;
+    }
+    return 0;
   }
 
   /**
@@ -169,10 +174,14 @@ export class CommunityDetectorService {
 
     query.queryParams = { ...query.queryParams, graphName };
 
-    const result = await this.neo4j.readOne(query);
+    // Use raw read() to avoid entity serialization
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    const record = result.records[0];
+    const nodeCount = record?.get("nodeCount")?.toNumber?.() ?? record?.get("nodeCount") ?? 0;
+    const relationshipCount = record?.get("relationshipCount")?.toNumber?.() ?? record?.get("relationshipCount") ?? 0;
 
     this.logger.debug(
-      `Graph projected: ${result?.nodeCount || 0} nodes, ${result?.relationshipCount || 0} relationships`,
+      `Graph projected: ${nodeCount} nodes, ${relationshipCount} relationships`,
       "CommunityDetectorService",
     );
   }
@@ -196,11 +205,14 @@ export class CommunityDetectorService {
 
     query.queryParams = { ...query.queryParams, graphName, resolution };
 
-    const results = await this.neo4j.readMany(query);
+    // Use raw read() to avoid entity serialization
+    const result = await this.neo4j.read(query.query, query.queryParams);
 
     const communityAssignments = new Map<string, number>();
-    for (const row of results as any[]) {
-      communityAssignments.set(row.keyConceptId, row.communityId);
+    for (const record of result.records) {
+      const keyConceptId = record.get("keyConceptId");
+      const communityId = record.get("communityId")?.toNumber?.() ?? record.get("communityId");
+      communityAssignments.set(keyConceptId, communityId);
     }
 
     return communityAssignments;
