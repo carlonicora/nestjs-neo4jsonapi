@@ -1,3 +1,9 @@
+## [1.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.3.1...v1.4.0) (2025-12-15)
+
+### 🚀 Features
+
+* add generator ([46fccbe](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/46fccbe431d6fbdfcc88b509bce7026821ea6728))
+
 ## [1.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.3.0...v1.3.1) (2025-12-15)
 
 ### 📦 Code Refactoring
