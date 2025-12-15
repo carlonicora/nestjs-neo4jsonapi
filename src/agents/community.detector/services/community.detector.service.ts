@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
+import { CommunitySummariserService } from "../../community.summariser/services/community.summariser.service";
 
 interface CommunityDetectionResult {
   level: number;
@@ -26,6 +27,7 @@ export class CommunityDetectorService {
     private readonly neo4j: Neo4jService,
     private readonly logger: AppLoggingService,
     private readonly communityRepository: CommunityRepository,
+    private readonly summariserService: CommunitySummariserService,
   ) {}
 
   /**
@@ -395,13 +397,19 @@ export class CommunityDetectorService {
       // If no related communities, leave as orphan for next full detection
     }
 
-    // Mark affected communities as stale for re-summarization
+    // Generate summaries for affected communities
     if (affectedCommunityIds.size > 0) {
-      await this.communityRepository.markAsStale(Array.from(affectedCommunityIds));
       this.logger.log(
-        `Assigned KeyConcepts to ${affectedCommunityIds.size} communities, marked as stale`,
+        `Assigned KeyConcepts to ${affectedCommunityIds.size} communities, generating summaries`,
         "CommunityDetectorService",
       );
+
+      for (const communityId of affectedCommunityIds) {
+        const community = await this.communityRepository.findById(communityId);
+        if (community) {
+          await this.summariserService.generateSummary(community);
+        }
+      }
     }
   }
 }
