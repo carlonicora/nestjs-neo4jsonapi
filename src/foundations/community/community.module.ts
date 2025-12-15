@@ -7,7 +7,7 @@ import { CommunityService } from "./services/community.service";
 @Module({
   controllers: [],
   providers: [CommunityService, CommunityRepository],
-  exports: [],
+  exports: [CommunityService, CommunityRepository],
   imports: [],
 })
 export class CommunityModule implements OnModuleInit {
