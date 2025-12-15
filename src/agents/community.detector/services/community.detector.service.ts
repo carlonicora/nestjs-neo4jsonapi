@@ -359,4 +359,49 @@ export class CommunityDetectorService {
       );
     }
   }
+
+  /**
+   * Incrementally assign KeyConcepts from a content to existing communities
+   * Called after document processing completes
+   */
+  async assignKeyConceptsToCommunities(contentId: string, label: string): Promise<void> {
+    this.logger.debug(`Assigning KeyConcepts from ${label}:${contentId} to communities`, "CommunityDetectorService");
+
+    // Find KeyConcepts from this content that aren't in any community yet
+    const orphanKeyConceptIds = await this.communityRepository.findOrphanKeyConceptsForContent(contentId, label);
+
+    if (orphanKeyConceptIds.length === 0) {
+      this.logger.debug("No orphan KeyConcepts to assign", "CommunityDetectorService");
+      return;
+    }
+
+    this.logger.debug(`Found ${orphanKeyConceptIds.length} orphan KeyConcepts to assign`, "CommunityDetectorService");
+
+    const affectedCommunityIds = new Set<string>();
+
+    for (const keyConceptId of orphanKeyConceptIds) {
+      // Find communities with related KeyConcepts
+      const relatedCommunities = await this.communityRepository.findCommunitiesByRelatedKeyConcepts(keyConceptId);
+
+      if (relatedCommunities.length > 0) {
+        // Assign to community with highest affinity (totalWeight)
+        const bestCommunity = relatedCommunities[0];
+        await this.communityRepository.addMemberToCommunity(bestCommunity.communityId, keyConceptId);
+        affectedCommunityIds.add(bestCommunity.communityId);
+
+        const msg = `Assigned KeyConcept ${keyConceptId} to community ${bestCommunity.communityId} (weight: ${bestCommunity.totalWeight})`;
+        this.logger.debug(msg, "CommunityDetectorService");
+      }
+      // If no related communities, leave as orphan for next full detection
+    }
+
+    // Mark affected communities as stale for re-summarization
+    if (affectedCommunityIds.size > 0) {
+      await this.communityRepository.markAsStale(Array.from(affectedCommunityIds));
+      this.logger.log(
+        `Assigned KeyConcepts to ${affectedCommunityIds.size} communities, marked as stale`,
+        "CommunityDetectorService",
+      );
+    }
+  }
 }

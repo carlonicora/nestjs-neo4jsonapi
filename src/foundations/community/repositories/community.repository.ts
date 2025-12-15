@@ -404,4 +404,75 @@ export class CommunityRepository implements OnModuleInit {
     `;
     return this.neo4j.readOne(query);
   }
+
+  /**
+   * Find communities that contain KeyConcepts related to a given KeyConcept
+   * Returns affinity scores based on relationship count and weight
+   */
+  async findCommunitiesByRelatedKeyConcepts(keyConceptId: string): Promise<
+    {
+      communityId: string;
+      memberCount: number;
+      relationshipCount: number;
+      totalWeight: number;
+    }[]
+  > {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, keyConceptId };
+    query.query += `
+      MATCH (kc:KeyConcept {id: $keyConceptId})
+      MATCH (kc)<-[:RELATES_TO]-(rel:KeyConceptRelationship)-[:RELATES_TO]->(relatedKc:KeyConcept)
+      MATCH (community:Community)-[:HAS_MEMBER]->(relatedKc)
+      MATCH (community)-[:BELONGS_TO]->(company)
+      WITH community, rel, relatedKc
+      RETURN community.id AS communityId,
+             community.memberCount AS memberCount,
+             count(DISTINCT relatedKc) AS relationshipCount,
+             sum(coalesce(rel.weight, 1.0)) AS totalWeight
+      ORDER BY totalWeight DESC
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record) => {
+      const relationshipCount = record.get("relationshipCount");
+      const totalWeight = record.get("totalWeight");
+      const memberCount = record.get("memberCount");
+      return {
+        communityId: record.get("communityId"),
+        memberCount: memberCount?.toNumber?.() ?? memberCount ?? 0,
+        relationshipCount: relationshipCount?.toNumber?.() ?? relationshipCount ?? 0,
+        totalWeight: totalWeight?.toNumber?.() ?? totalWeight ?? 0,
+      };
+    });
+  }
+
+  /**
+   * Add a single KeyConcept to an existing community
+   */
+  async addMemberToCommunity(communityId: string, keyConceptId: string): Promise<void> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, communityId, keyConceptId };
+    query.query += `
+      MATCH (community:Community {id: $communityId})
+      MATCH (keyconcept:KeyConcept {id: $keyConceptId})
+      MERGE (community)-[:HAS_MEMBER]->(keyconcept)
+      SET community.memberCount = community.memberCount + 1,
+          community.updatedAt = datetime()
+    `;
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Find KeyConcepts from a content that are not in any community
+   */
+  async findOrphanKeyConceptsForContent(contentId: string, label: string): Promise<string[]> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, contentId };
+    query.query += `
+      MATCH (content:${label} {id: $contentId})-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(kc:KeyConcept)
+      WHERE NOT EXISTS { (kc)<-[:HAS_MEMBER]-(:Community) }
+      RETURN DISTINCT kc.id AS keyConceptId
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record) => record.get("keyConceptId"));
+  }
 }
