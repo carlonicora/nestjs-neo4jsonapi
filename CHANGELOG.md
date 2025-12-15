@@ -1,3 +1,9 @@
+## [1.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.3.0...v1.3.1) (2025-12-15)
+
+### 📦 Code Refactoring
+
+* split discord auth from discord user ([578e996](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/578e996a1e84cc8863cee076ae91b0397f06679e))
+
 ## [1.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.2.1...v1.3.0) (2025-12-15)
 
 ### 🚀 Features
