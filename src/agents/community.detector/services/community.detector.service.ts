@@ -189,21 +189,20 @@ export class CommunityDetectorService {
   /**
    * Run Louvain community detection algorithm
    */
-  private async runLouvain(graphName: string, resolution: number): Promise<Map<string, number>> {
+  private async runLouvain(graphName: string, _resolution: number): Promise<Map<string, number>> {
     const query = this.neo4j.initQuery();
 
+    // Note: OpenGDS doesn't support 'resolution' parameter, using basic Louvain
     query.query += `
       CALL gds.louvain.stream($graphName, {
-        relationshipWeightProperty: 'weight',
-        includeIntermediateCommunities: false,
-        resolution: $resolution
+        relationshipWeightProperty: 'weight'
       })
       YIELD nodeId, communityId
       WITH gds.util.asNode(nodeId) AS node, communityId
       RETURN node.id AS keyConceptId, communityId
     `;
 
-    query.queryParams = { ...query.queryParams, graphName, resolution };
+    query.queryParams = { ...query.queryParams, graphName };
 
     // Use raw read() to avoid entity serialization
     const result = await this.neo4j.read(query.query, query.queryParams);
