@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.4.0...v1.4.1) (2025-12-15)
+
+### 🐛 Bug Fixes
+
+* correct foundation generator ([7980244](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7980244b437462657bea5bb952ab390dcd3f3e00))
+
 ## [1.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.3.1...v1.4.0) (2025-12-15)
 
 ### 🚀 Features
