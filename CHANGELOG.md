@@ -1,3 +1,29 @@
+## [1.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.4.1...v1.5.0) (2025-12-16)
+
+### 🚀 Features
+
+* add drift methodology ([13281f0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/13281f0495b99849480908b37a199d0e12e59254))
+* add drift to responder ([1ff378b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1ff378b4f2e3d57025d17d4d2bafc21f4794be93))
+* add key concept count check before community detection and implement counting method ([377cf38](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/377cf3804296cad7ff57ff5b1b94762078d037ca))
+* enhance KeyConceptRepository by adding ModelService and dynamic vector dimensions ([aec6bb9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/aec6bb93f565e42c204db09ffacd8b4286b067cf))
+* implement incremental assignment of KeyConcepts to existing communities ([4a14986](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4a149865fe3fcc3e0de3716fd9d6307cf43bb454))
+* integrate CommunitySummariserService for community summary generation ([96c3ae3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/96c3ae39434c9ca83afaa9e0a1fa24b5197dad73))
+
+### 🐛 Bug Fixes
+
+* add DriftModule to ResponderModule imports ([0976a78](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0976a78af1615214ac737dc0c57929d33f5698b1))
+* add parameters to GDS cypher projection in projectGraph method ([438322f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/438322f42fe8a7f33c08e1972304f6ed60681866))
+* add validateRelationships parameter to Neo4j query for community detection ([a41b453](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a41b453206b465f06e32bdcde4de0f9569c28d91))
+* change community retrieval from read to write operation ([a115a9a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a115a9ad767b3e638a0b203a5c89cd7d83559db1))
+* correct community exports ([9982b51](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9982b513f8bf68e07ee2e970f6c9d284c2f48873))
+* ensure integer limits in community repository queries ([6a7d923](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6a7d923492081db96c6f593f5f37386796145ba1))
+* handle potential null values in community detection and migration services ([1490f94](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1490f94ec7cd0748d91b80ef307e0cac3c2321b0))
+* optimize community level count retrieval to avoid entity serialization ([789596c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/789596c0b311321139465407fab6f59045b04d9f))
+* optimize community member retrieval to avoid entity serialization ([5a853d7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5a853d797186c8743c9f057e904c97e62eb54dc1))
+* optimize Neo4j read operations to avoid entity serialization in community detection methods ([aef55a2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/aef55a2dc29542ebb0ff78f2811a64731be03e1d))
+* remove unsupported resolution parameter from Louvain algorithm query ([9bed811](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9bed8110acc59df1a9c62e9a1a51d3c772b041ca))
+* update Louvain resolutions to only support single level detection ([68456d2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/68456d2ff116727cd8a449a63b85045abb7251bf))
+
 ## [1.4.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.4.0...v1.4.1) (2025-12-15)
 
 ### 🐛 Bug Fixes
