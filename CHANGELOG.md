@@ -1,3 +1,9 @@
+## [1.5.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.5.0...v1.5.1) (2025-12-16)
+
+### 💎 Styles
+
+* correct file structure ([7d1da72](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7d1da72e89b03c458807ad4d112b99dfdb3ca339))
+
 ## [1.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.4.1...v1.5.0) (2025-12-16)
 
 ### 🚀 Features
