@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as path from "path";
 
 /**
@@ -23,38 +22,20 @@ export function isFoundationImport(directory: string): boolean {
 /**
  * Check if a related entity uses the NEW structure (Descriptor pattern)
  *
- * Detection: Check if .meta.ts file exists
- * - If exists → OLD structure (uses entityMeta pattern)
- * - If not exists → NEW structure (uses EntityDescriptor.model pattern)
+ * IMPORTANT: As of the circular dependency fix, we ALWAYS generate .meta.ts files
+ * for all entities. This means all entities now use the OLD structure (meta pattern)
+ * to avoid circular imports between entities that reference each other.
  *
  * @param params - Directory and module name of the related entity
- * @returns True if NEW structure (no .meta.ts file), false if OLD structure
+ * @returns Always false - all entities now use meta pattern
  *
- * @example
- * isNewEntityStructure({ directory: "@foundation", moduleName: "user" })
- * // Checks: packages/nestjs-neo4jsonapi/src/foundations/user/entities/user.meta.ts
- *
- * isNewEntityStructure({ directory: "features", moduleName: "character" })
- * // Checks: apps/api/src/features/character/entities/character.meta.ts
+ * @deprecated This function now always returns false. All entities use meta pattern.
  */
 export function isNewEntityStructure(params: { directory: string; moduleName: string }): boolean {
-  const { directory, moduleName } = params;
-
-  let metaFilePath: string;
-
-  if (isFoundationImport(directory)) {
-    // Foundation module: check in nestjs-neo4jsonapi package
-    metaFilePath = path.resolve(
-      process.cwd(),
-      `packages/nestjs-neo4jsonapi/src/foundations/${moduleName}/entities/${moduleName}.meta.ts`,
-    );
-  } else {
-    // Feature module: check in apps/api
-    metaFilePath = path.resolve(process.cwd(), `apps/api/src/${directory}/${moduleName}/entities/${moduleName}.meta.ts`);
-  }
-
-  // NEW structure if .meta.ts file does NOT exist
-  return !fs.existsSync(metaFilePath);
+  // Always return false - we now generate .meta.ts files for ALL entities
+  // This prevents circular dependencies when entities reference each other
+  void params; // Suppress unused parameter warning
+  return false;
 }
 
 /**

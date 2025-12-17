@@ -7,6 +7,7 @@ import { mapRelationships } from "./transformers/relationship-mapper";
 import { generateNestedRoutes } from "./transformers/nested-route-generator";
 import { validateJsonSchema, validationPassed, formatValidationErrors } from "./validators/json-schema-validator";
 import { generateEntityFile } from "./templates/entity.template";
+import { generateMetaFile } from "./templates/meta.template";
 import { generateModuleFile } from "./templates/module.template";
 import { generateServiceFile } from "./templates/service.template";
 import { generateRepositoryFile } from "./templates/repository.template";
@@ -108,6 +109,11 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   const basePath = `apps/api/src/${jsonSchema.targetDir}/${names.kebabCase}`;
 
   const filesToWrite: FileToWrite[] = [
+    // Meta (must be generated before entity to avoid circular dependencies)
+    {
+      path: path.resolve(process.cwd(), `${basePath}/entities/${names.kebabCase}.meta.ts`),
+      content: generateMetaFile(templateData),
+    },
     // Entity
     {
       path: path.resolve(process.cwd(), `${basePath}/entities/${names.kebabCase}.ts`),
