@@ -4,7 +4,7 @@ import { AuthController } from "./controllers/auth.controller";
 
 import { modelRegistry } from "../../common/registries/registry";
 import { CompanyModule } from "../company/company.module";
-import { DiscordUserModule } from "../discord-user/discord.module";
+import { DiscordUserModule } from "../discord-user/discord-user.module";
 import { UserModule } from "../user/user.module";
 import { AuthDiscordController } from "./controllers/auth.discord.controller";
 import { AuthCodeModel } from "./entities/auth.code.model";

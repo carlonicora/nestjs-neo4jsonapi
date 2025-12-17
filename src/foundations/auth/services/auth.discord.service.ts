@@ -4,10 +4,10 @@ import axios from "axios";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { AuthService } from "..";
-import { RoleId } from "../../../common";
 import { BaseConfigInterface, ConfigApiInterface } from "../../../config";
 import { ConfigDiscordInterface } from "../../../config/interfaces/config.discord.interface";
 import { CompanyRepository } from "../../company";
+import { DiscordUserService } from "../../discord-user";
 import { DiscordUser } from "../../discord-user/entities/discord-user";
 import { DiscordUserRepository } from "../../discord-user/repositories/discord-user.repository";
 import { discordUser } from "../../discord-user/types/discord.user.type";
@@ -18,6 +18,7 @@ export class AuthDiscordService {
   constructor(
     private readonly userRepository: UserRepository,
     private readonly discordUserRepository: DiscordUserRepository,
+    private readonly discordUserService: DiscordUserService,
     private readonly companyRepository: CompanyRepository,
     private readonly authService: AuthService,
     private readonly config: ConfigService<BaseConfigInterface>,
@@ -47,30 +48,10 @@ export class AuthDiscordService {
     } else {
       const id = randomUUID();
       const companyId = randomUUID();
+      await this.discordUserService.create({ userId: id, companyId: companyId, userDetails: params.userDetails });
 
-      await this.companyRepository.create({
-        companyId: companyId,
-        name: `${params.userDetails.username}`,
-      });
       this.clsService.set("companyId", companyId);
-
-      await this.userRepository.create({
-        userId: id,
-        email: params.userDetails.email,
-        name: params.userDetails.username,
-        password: randomUUID(),
-        companyId: companyId,
-        avatar: params.userDetails.avatar,
-        roleIds: [RoleId.CompanyAdministrator],
-      });
       this.clsService.set("userId", id);
-
-      await this.discordUserRepository.create({
-        id: id,
-        discordId: params.userDetails.id,
-        name: params.userDetails.username,
-        user: id,
-      });
 
       user = await this.userRepository.findByUserId({ userId: id });
     }
