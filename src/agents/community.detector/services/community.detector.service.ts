@@ -4,11 +4,6 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
 import { CommunitySummariserService } from "../../community.summariser/services/community.summariser.service";
 
-interface CommunityDetectionResult {
-  level: number;
-  communities: Map<number, string[]>; // communityId -> keyConceptIds
-}
-
 interface DetectedCommunity {
   id: string;
   level: number;
