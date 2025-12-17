@@ -3,12 +3,15 @@ import { ConfigModule, ConfigService } from "@nestjs/config";
 import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerModule } from "@nestjs/throttler";
+import { GatewayIntentBits } from "discord.js";
+import { NecordModule } from "necord";
 import { ClsModule } from "nestjs-cls";
 import { AcceptLanguageResolver, HeaderResolver, I18nModule, QueryResolver } from "nestjs-i18n";
 import * as path from "path";
 
 import { AgentsModule } from "../agents/agents.modules";
-import { baseConfig, BaseConfigInterface, ConfigRateLimitInterface } from "../config";
+import { baseConfig, BaseConfigInterface, ConfigDiscordInterface, ConfigRateLimitInterface } from "../config";
+import { DiscordModule } from "../foundations/discord/discord.module";
 import { AppModeModule } from "../core/appmode/app.mode.module";
 import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
@@ -117,8 +120,28 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // Library's AI agents (prompts configured via baseConfig.prompts)
           AgentsModule,
 
-          // User's app-specific modules
+          // User's app-specific modules (MUST be before NecordModule so Necord can discover handlers)
           ...options.appModules,
+
+          // Discord bot (only in worker mode when token is configured)
+          // IMPORTANT: Must be AFTER appModules so Necord can discover decorated handlers
+          ...(modeConfig.enableCronJobs && process.env.DISCORD_TOKEN
+            ? [
+                NecordModule.forRootAsync({
+                  imports: [ConfigModule],
+                  inject: [ConfigService],
+                  useFactory: (config: ConfigService<BaseConfigInterface>) => {
+                    const discord = config.get<ConfigDiscordInterface>("discord");
+                    return {
+                      token: discord.token,
+                      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+                      development: discord.devGuildId ? [discord.devGuildId] : false,
+                    };
+                  },
+                }),
+                DiscordModule,
+              ]
+            : []),
         ],
         global: true,
         controllers: [],

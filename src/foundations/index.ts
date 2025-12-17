@@ -13,6 +13,8 @@ export * from "./chunk";
 export * from "./chunker";
 export * from "./company";
 export * from "./content";
+export * from "./discord";
+export * from "./discord-user";
 export * from "./feature";
 export * from "./keyconcept";
 export * from "./module";
