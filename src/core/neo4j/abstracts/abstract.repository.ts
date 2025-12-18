@@ -249,8 +249,6 @@ export abstract class AbstractRepository<
       ${this.buildReturnStatement()}
     `;
 
-    console.log(query.query, query.queryParams);
-
     return this._validateForbidden({
       response: await this.neo4j.readOne(query),
       searchField: "id",
