@@ -4,9 +4,8 @@ import axios from "axios";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { AuthService } from "..";
-import { BaseConfigInterface, ConfigApiInterface } from "../../../config";
+import { BaseConfigInterface, ConfigApiInterface, ConfigAppInterface } from "../../../config";
 import { ConfigDiscordInterface } from "../../../config/interfaces/config.discord.interface";
-import { CompanyRepository } from "../../company";
 import { DiscordUserService } from "../../discord-user";
 import { DiscordUser } from "../../discord-user/entities/discord-user";
 import { DiscordUserRepository } from "../../discord-user/repositories/discord-user.repository";
@@ -19,7 +18,6 @@ export class AuthDiscordService {
     private readonly userRepository: UserRepository,
     private readonly discordUserRepository: DiscordUserRepository,
     private readonly discordUserService: DiscordUserService,
-    private readonly companyRepository: CompanyRepository,
     private readonly authService: AuthService,
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly clsService: ClsService,
@@ -64,7 +62,7 @@ export class AuthDiscordService {
       authId: token.data.attributes.refreshToken,
     });
 
-    return `${process.env.APP_URL}/auth?code=${authCodeId}`;
+    return `${this.config.get<ConfigAppInterface>("app").url}auth?code=${authCodeId}`;
   }
 
   async exchangeCodeForToken(code: string): Promise<string> {
