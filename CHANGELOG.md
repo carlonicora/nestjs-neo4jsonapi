@@ -1,3 +1,10 @@
+## [1.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.9.1...v1.10.0) (2025-12-21)
+
+### 🚀 Features
+
+* enhance relationship properties support in DTOs and services ([915cd5b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/915cd5b6be59338d40468ac4770ea44a51d32a22))
+* implement relationship properties support for DTOs and entities ([a9dbb31](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a9dbb31c1daa67c5261df6d0ac2976b3c26e3862))
+
 ## [1.9.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.9.0...v1.9.1) (2025-12-21)
 
 ### 📦 Code Refactoring
