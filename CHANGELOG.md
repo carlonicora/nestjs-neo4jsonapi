@@ -1,3 +1,9 @@
+## [1.9.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.9.0...v1.9.1) (2025-12-21)
+
+### 📦 Code Refactoring
+
+* update entity references from Descriptor to Meta in controller and DTO templates ([f512fce](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f512fceb0e454bab6bd27b0a8591dbf96581d6fe))
+
 ## [1.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.8.1...v1.9.0) (2025-12-20)
 
 ### 🚀 Features
