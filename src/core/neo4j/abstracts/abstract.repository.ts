@@ -145,7 +145,8 @@ export abstract class AbstractRepository<
     for (const [name, rel] of Object.entries(relationships)) {
       const relatedNodeName = `${nodeName}_${name}`;
       const relAlias = `${nodeName}_${name}_relationship`;
-      const isOptional = rel.cardinality === "many";
+      // Use OPTIONAL MATCH for: many cardinality OR optional single relationships (required: false)
+      const isOptional = rel.cardinality === "many" || rel.required === false;
       const matchType = isOptional ? "OPTIONAL MATCH" : "MATCH";
 
       // Use named relationship pattern when fields exist to capture edge properties
@@ -215,7 +216,7 @@ export abstract class AbstractRepository<
 
     query.queryParams = {
       ...query.queryParams,
-      term: params.term,
+      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
     };
 
     if (params.term && this.descriptor.fulltextIndexName) {

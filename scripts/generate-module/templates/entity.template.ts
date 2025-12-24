@@ -35,7 +35,7 @@ function getMetaImportPath(rel: DescriptorRelationship): string {
  * @returns Generated TypeScript code
  */
 export function generateEntityFile(data: TemplateData): string {
-  const { names, endpoint, nodeName, labelName, fields, relationships } = data;
+  const { names, fields, relationships } = data;
 
   // Build imports
   const libraryImports = ["defineEntity", "Entity"];
@@ -96,6 +96,11 @@ export function generateEntityFile(data: TemplateData): string {
       parts.push(`relationship: "${rel.relationship}"`);
       parts.push(`cardinality: "${rel.cardinality}"`);
 
+      // Add required: false for optional single relationships (uses OPTIONAL MATCH in queries)
+      if (!rel.required) {
+        parts.push(`required: false`);
+      }
+
       if (rel.contextKey) {
         parts.push(`contextKey: "${rel.contextKey}"`);
       }
@@ -131,6 +136,9 @@ export function generateEntityFile(data: TemplateData): string {
     importLines.push(`import { ${items.join(", ")} } from "${importPath}";`);
   }
 
+  // Own meta import (for spreading into descriptor)
+  importLines.push(`import { ${names.camelCase}Meta } from "./${names.kebabCase}.meta";`);
+
   return `${importLines.join("\n")}
 
 /**
@@ -145,7 +153,7 @@ ${fields
   .join("\n")}
 ${data.isCompanyScoped ? "  company: Company;\n" : ""}${relationships
   .map((rel) => {
-    const optional = rel.nullable ? "?" : "";
+    const optional = !rel.required ? "?" : "";
     const type = rel.cardinality === "many" ? `${rel.relatedEntity.name}[]` : rel.relatedEntity.name;
     return `  ${rel.key}${optional}: ${type};`;
   })
@@ -159,10 +167,7 @@ ${data.isCompanyScoped ? "  company: Company;\n" : ""}${relationships
  * Auto-generates mapper, serialiser, constraints, and indexes.
  */
 export const ${names.pascalCase}Descriptor = defineEntity<${names.pascalCase}>()({
-  type: "${endpoint}",
-  endpoint: "${endpoint}",
-  nodeName: "${nodeName}",
-  labelName: "${labelName}",
+  ...${names.camelCase}Meta,
 ${!data.isCompanyScoped ? "\n  isCompanyScoped: false,\n" : ""}
   fields: {
 ${fieldDefinitions}

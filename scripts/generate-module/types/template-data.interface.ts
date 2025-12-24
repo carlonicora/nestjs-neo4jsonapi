@@ -43,7 +43,7 @@ export interface DescriptorRelationship {
   cardinality: "one" | "many";
   contextKey?: string; // e.g., "userId" for Author
   dtoKey?: string; // e.g., "editors", "topics"
-  nullable: boolean;
+  required: boolean;
   relatedEntity: {
     name: string; // e.g., "User"
     directory: string; // e.g., "foundations"

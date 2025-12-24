@@ -87,6 +87,8 @@ export interface RelationshipDef {
   relationship: string;
   /** Cardinality: 'one' for single, 'many' for collection */
   cardinality: "one" | "many";
+  /** Whether the relationship is required. If false, uses OPTIONAL MATCH in queries */
+  required?: boolean;
   /** Context key for relationships whose value comes from CLS context (e.g., 'userId' for author) */
   contextKey?: string;
   /** DTO key override for the relationships object (e.g., 'topics' instead of relationship key 'topic') */

@@ -108,7 +108,7 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     cardinality,
     contextKey,
     dtoKey,
-    nullable: rel.nullable,
+    required: !rel.nullable,
     relatedEntity: {
       name: rel.name,
       directory: rel.directory,

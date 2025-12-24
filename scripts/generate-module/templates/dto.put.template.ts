@@ -136,7 +136,7 @@ export class ${wrapperDtoName} {
         const wrapperDtoName = `${names.pascalCase}${toPascalCase(dtoKey)}RelationshipDTO`;
         decorators.push("@ValidateNested()");
 
-        if (rel.nullable) {
+        if (!rel.required) {
           decorators.push("@IsOptional()");
         } else {
           decorators.push("@IsDefined()");
@@ -144,7 +144,7 @@ export class ${wrapperDtoName} {
 
         decorators.push(`@Type(() => ${wrapperDtoName})`);
 
-        const optional = rel.nullable ? "?" : "";
+        const optional = !rel.required ? "?" : "";
         return `  ${decorators.join("\n  ")}\n  ${dtoKey}${optional}: ${wrapperDtoName};`;
       } else {
         // Regular relationship without fields
@@ -157,7 +157,7 @@ export class ${wrapperDtoName} {
           decorators.push("@ValidateNested()");
         }
 
-        if (rel.nullable) {
+        if (!rel.required) {
           decorators.push("@IsOptional()");
         } else {
           decorators.push("@IsDefined()");
@@ -165,7 +165,7 @@ export class ${wrapperDtoName} {
 
         decorators.push(`@Type(() => ${dtoClass})`);
 
-        const optional = rel.nullable ? "?" : "";
+        const optional = !rel.required ? "?" : "";
         return `  ${decorators.join("\n  ")}\n  ${dtoKey}${optional}: ${dtoClass};`;
       }
     })

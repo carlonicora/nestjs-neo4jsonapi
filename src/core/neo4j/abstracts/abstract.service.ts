@@ -14,10 +14,13 @@ export interface JsonApiDTOData {
   id: string;
   type: string;
   attributes?: Record<string, any>;
-  relationships?: Record<string, {
-    data: Array<{ id: string; type: string }> | { id: string; type: string } | null;
-    meta?: Record<string, any>;
-  }>;
+  relationships?: Record<
+    string,
+    {
+      data: Array<{ id: string; type: string }> | { id: string; type: string } | null;
+      meta?: Record<string, any>;
+    }
+  >;
 }
 
 /**
