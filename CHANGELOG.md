@@ -1,3 +1,9 @@
+## [1.11.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.10.0...v1.11.0) (2025-12-24)
+
+### 🚀 Features
+
+* update relationship handling to use 'required' instead of 'nullable' in DTOs and entities ([d2900e0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d2900e0ce24baf456b1a42c98862be0a65b629f7))
+
 ## [1.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.9.1...v1.10.0) (2025-12-21)
 
 ### 🚀 Features
