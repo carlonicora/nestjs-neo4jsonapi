@@ -382,4 +382,101 @@ export abstract class AbstractService<
       paginator,
     );
   }
+
+  /**
+   * Add items to a to-many relationship from JSON:API DTO
+   *
+   * @example
+   * ```typescript
+   * // Add photographs to a contact sheet with edge properties
+   * await service.addToRelationshipFromDTO({
+   *   id: 'contact-sheet-123',
+   *   relationship: 'photograph',
+   *   data: [
+   *     { id: 'photo-1', type: 'photographs', meta: { position: 1, selected: true } },
+   *     { id: 'photo-2', type: 'photographs', meta: { position: 2 } }
+   *   ]
+   * });
+   * ```
+   */
+  async addToRelationshipFromDTO(params: {
+    id: string;
+    relationship: keyof R & string;
+    data: JsonApiDTORelationshipItem | JsonApiDTORelationshipItem[];
+  }): Promise<JsonApiDataInterface> {
+    const relationshipDef = this.descriptor.relationships[params.relationship];
+
+    if (!relationshipDef) {
+      throw new BadRequestException(`Unknown relationship: ${params.relationship}`);
+    }
+
+    // Normalize data to array
+    const dataArray = Array.isArray(params.data) ? params.data : [params.data];
+
+    // Build items with edge properties
+    const items = dataArray.map((item) => {
+      const edgeProps: Record<string, any> = {};
+
+      // Extract edge properties from meta if relationship has fields
+      if (relationshipDef.fields && relationshipDef.fields.length > 0 && item.meta) {
+        for (const field of relationshipDef.fields) {
+          if (field.name in item.meta) {
+            edgeProps[field.name] = item.meta[field.name];
+          } else if (field.default !== undefined) {
+            edgeProps[field.name] = field.default;
+          } else if (field.required) {
+            throw new BadRequestException(
+              `Missing required edge property '${field.name}' for relationship item '${item.id}'`,
+            );
+          }
+        }
+      }
+
+      return { id: item.id, edgeProps };
+    });
+
+    await this.repository.addToRelationship({
+      id: params.id,
+      relationship: params.relationship,
+      items,
+    });
+
+    return this.findById({ id: params.id });
+  }
+
+  /**
+   * Remove items from a to-many relationship
+   *
+   * @example
+   * ```typescript
+   * // Remove photographs from a contact sheet
+   * await service.removeFromRelationshipFromDTO({
+   *   id: 'contact-sheet-123',
+   *   relationship: 'photograph',
+   *   data: [
+   *     { id: 'photo-1', type: 'photographs' },
+   *     { id: 'photo-2', type: 'photographs' }
+   *   ]
+   * });
+   * ```
+   */
+  async removeFromRelationshipFromDTO(params: {
+    id: string;
+    relationship: keyof R & string;
+    data: { id: string; type: string }[];
+  }): Promise<JsonApiDataInterface> {
+    const relationshipDef = this.descriptor.relationships[params.relationship];
+
+    if (!relationshipDef) {
+      throw new BadRequestException(`Unknown relationship: ${params.relationship}`);
+    }
+
+    await this.repository.removeFromRelationship({
+      id: params.id,
+      relationship: params.relationship,
+      itemIds: params.data.map((item) => item.id),
+    });
+
+    return this.findById({ id: params.id });
+  }
 }

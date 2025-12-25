@@ -15,6 +15,7 @@ import { generateControllerFile } from "./templates/controller.template";
 import { generateBaseDTOFile } from "./templates/dto.base.template";
 import { generatePostDTOFile } from "./templates/dto.post.template";
 import { generatePutDTOFile } from "./templates/dto.put.template";
+import { generateRelationshipDTOFile } from "./templates/dto.relationship.template";
 import { writeFiles, FileToWrite } from "./utils/file-writer";
 import { registerModule } from "./utils/module-registrar";
 import { normalizeCypherType, getTsType, getValidationDecorators, CypherType } from "./utils/type-utils";
@@ -160,6 +161,15 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       content: generatePutDTOFile(templateData),
     },
   ];
+
+  // Add relationship DTO file if there are MANY relationships
+  const relationshipDTOContent = generateRelationshipDTOFile(templateData);
+  if (relationshipDTOContent) {
+    filesToWrite.push({
+      path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.relationship.dto.ts`),
+      content: relationshipDTOContent,
+    });
+  }
 
   // 5. Write files
   console.log(`\n📝 Writing ${filesToWrite.length} files...\n`);

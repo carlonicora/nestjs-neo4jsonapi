@@ -754,4 +754,133 @@ export abstract class AbstractRepository<
 
     await this.neo4j.writeOne(query);
   }
+
+  /**
+   * Add items to a to-many relationship
+   *
+   * @param id - The parent entity ID
+   * @param relationship - The relationship key (must match a key in descriptor.relationships)
+   * @param items - Array of items to add with optional edge properties
+   */
+  async addToRelationship(params: {
+    id: string;
+    relationship: keyof R & string;
+    items: { id: string; edgeProps?: Record<string, any> }[];
+  }): Promise<void> {
+    if (params.items.length === 0) return;
+
+    const { labelName } = this.descriptor.model;
+    const rel = this.descriptor.relationships[params.relationship];
+
+    if (!rel) {
+      throw new HttpException(`Unknown relationship: ${params.relationship}`, HttpStatus.BAD_REQUEST);
+    }
+
+    if (rel.cardinality !== "many") {
+      throw new HttpException(
+        `addToRelationship only works with 'many' cardinality relationships`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const query = this.neo4j.initQuery();
+
+    // Build items array with edge properties
+    const itemsWithProps = params.items.map((item) => ({
+      id: item.id,
+      edgeProps: item.edgeProps || {},
+    }));
+
+    query.queryParams = {
+      ...query.queryParams,
+      parentId: params.id,
+      items: itemsWithProps,
+    };
+
+    // Match pattern based on direction
+    const matchClause = this.descriptor.isCompanyScoped
+      ? `MATCH (parent:${labelName} {id: $parentId})-[:BELONGS_TO]->(company)`
+      : `MATCH (parent:${labelName} {id: $parentId})`;
+
+    const relPattern =
+      rel.direction === "out"
+        ? `-[r:${rel.relationship}]->`
+        : `<-[r:${rel.relationship}]-`;
+
+    // Build SET clause for edge properties if the relationship has fields
+    let setClause = "";
+    if (rel.fields && rel.fields.length > 0) {
+      const fieldSets = rel.fields.map((f) => `r.${f.name} = item.edgeProps.${f.name}`);
+      setClause = `SET ${fieldSets.join(", ")}, r.createdAt = COALESCE(r.createdAt, datetime()), r.updatedAt = datetime()`;
+    } else {
+      setClause = `SET r.createdAt = COALESCE(r.createdAt, datetime()), r.updatedAt = datetime()`;
+    }
+
+    // Build query: UNWIND items, match related entity, MERGE relationship
+    query.query += `
+      ${matchClause}
+      UNWIND $items AS item
+      MATCH (related:${rel.model.labelName} {id: item.id})${this.descriptor.isCompanyScoped ? "-[:BELONGS_TO]->(company)" : ""}
+      MERGE (parent)${relPattern}(related)
+      ${setClause}
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Remove items from a to-many relationship
+   *
+   * @param id - The parent entity ID
+   * @param relationship - The relationship key (must match a key in descriptor.relationships)
+   * @param itemIds - Array of item IDs to remove from the relationship
+   */
+  async removeFromRelationship(params: {
+    id: string;
+    relationship: keyof R & string;
+    itemIds: string[];
+  }): Promise<void> {
+    if (params.itemIds.length === 0) return;
+
+    const { labelName } = this.descriptor.model;
+    const rel = this.descriptor.relationships[params.relationship];
+
+    if (!rel) {
+      throw new HttpException(`Unknown relationship: ${params.relationship}`, HttpStatus.BAD_REQUEST);
+    }
+
+    if (rel.cardinality !== "many") {
+      throw new HttpException(
+        `removeFromRelationship only works with 'many' cardinality relationships`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      parentId: params.id,
+      itemIds: params.itemIds,
+    };
+
+    // Match pattern based on direction
+    const matchClause = this.descriptor.isCompanyScoped
+      ? `MATCH (parent:${labelName} {id: $parentId})-[:BELONGS_TO]->(company)`
+      : `MATCH (parent:${labelName} {id: $parentId})`;
+
+    const relPattern =
+      rel.direction === "out"
+        ? `-[r:${rel.relationship}]->`
+        : `<-[r:${rel.relationship}]-`;
+
+    query.query += `
+      ${matchClause}
+      MATCH (parent)${relPattern}(related:${rel.model.labelName})
+      WHERE related.id IN $itemIds
+      DELETE r
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
 }

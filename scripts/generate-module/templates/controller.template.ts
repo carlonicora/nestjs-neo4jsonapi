@@ -1,5 +1,7 @@
 import { TemplateData } from "../types/template-data.interface";
 import { isFoundationImport, FOUNDATION_PACKAGE, resolveMetaImportPath } from "../transformers/import-resolver";
+import { toPascalCase } from "../transformers/name-transformer";
+import { getManyRelationships } from "./dto.relationship.template";
 
 /**
  * Generate controller file content with CRUD and nested routes
@@ -58,6 +60,68 @@ export function generateControllerFile(data: TemplateData): string {
 
   const metaImportsCode = importLines.length > 0 ? `\n${importLines.join("\n")}\n` : "";
 
+  // Get MANY relationships for add/remove endpoints
+  const manyRelationships = getManyRelationships(data.relationships);
+
+  // Build meta imports for MANY relationship endpoints (to access their endpoint)
+  for (const rel of manyRelationships) {
+    if (rel.isNewStructure) {
+      // NEW structure: import Descriptor
+      if (rel.importPath && rel.descriptorName) {
+        if (!newDescriptorImportPaths.has(rel.importPath)) {
+          newDescriptorImportPaths.set(rel.importPath, []);
+        }
+        if (!newDescriptorImportPaths.get(rel.importPath)!.includes(rel.descriptorName)) {
+          newDescriptorImportPaths.get(rel.importPath)!.push(rel.descriptorName);
+        }
+      }
+    } else {
+      // OLD structure: import meta
+      const path = isFoundationImport(rel.relatedEntity.directory)
+        ? FOUNDATION_PACKAGE
+        : resolveMetaImportPath({
+            fromDir: targetDir,
+            fromModule: names.kebabCase,
+            toDir: rel.relatedEntity.directory,
+            toModule: rel.relatedEntity.kebabCase,
+          });
+      if (!oldMetaImportPaths.has(path)) {
+        oldMetaImportPaths.set(path, []);
+      }
+      if (!oldMetaImportPaths.get(path)!.includes(rel.model)) {
+        oldMetaImportPaths.get(path)!.push(rel.model);
+      }
+    }
+  }
+
+  // Regenerate combined import lines after adding MANY relationship imports
+  importLines.length = 0;
+  for (const [path, items] of oldMetaImportPaths.entries()) {
+    importLines.push(`import { ${items.join(", ")} } from "${path}";`);
+  }
+  for (const [path, items] of newDescriptorImportPaths.entries()) {
+    importLines.push(`import { ${items.join(", ")} } from "${path}";`);
+  }
+
+  const combinedMetaImportsCode = importLines.length > 0 ? `\n${importLines.join("\n")}\n` : "";
+
+  // Build relationship DTO import
+  const hasRelationshipDTOs = manyRelationships.length > 0;
+  const relationshipDTOImport = hasRelationshipDTOs
+    ? `import {
+${manyRelationships
+  .map((rel) => {
+    const dtoKey = rel.dtoKey || rel.key;
+    const pascalDtoKey = toPascalCase(dtoKey);
+    return `  ${names.pascalCase}${pascalDtoKey}AddDTO,
+  ${names.pascalCase}${pascalDtoKey}AddSingleDTO,
+  ${names.pascalCase}${pascalDtoKey}RemoveDTO,`;
+  })
+  .join("\n")}
+} from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.relationship.dto";
+`
+    : "";
+
   // Generate nested route methods
   // The route.path is pre-computed by nested-route-generator with correct endpoint access pattern
   const nestedRouteMethods = nestedRoutes
@@ -87,6 +151,87 @@ export function generateControllerFile(data: TemplateData): string {
     )
     .join("\n");
 
+  // Generate relationship add/remove endpoint methods for MANY relationships
+  const relationshipEndpointMethods = manyRelationships
+    .map((rel) => {
+      const dtoKey = rel.dtoKey || rel.key;
+      const pascalDtoKey = toPascalCase(dtoKey);
+      const pascalKey = toPascalCase(rel.key);
+
+      // Determine the endpoint accessor based on structure type
+      const endpointAccessor = rel.isNewStructure
+        ? `${rel.descriptorName}.model.endpoint`
+        : `${rel.model}.endpoint`;
+
+      return `
+  // Batch add ${dtoKey}
+  @Post(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}\`)
+  async add${pascalDtoKey}(
+    @Req() req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
+    @Body() body: ${names.pascalCase}${pascalDtoKey}AddDTO,
+  ) {
+    const response = await this.${names.camelCase}Service.addToRelationshipFromDTO({
+      id: ${names.camelCase}Id,
+      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      data: body.data,
+    });
+    reply.send(response);
+  }
+
+  // Batch remove ${dtoKey}
+  @Delete(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}\`)
+  async remove${pascalDtoKey}(
+    @Req() req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
+    @Body() body: ${names.pascalCase}${pascalDtoKey}RemoveDTO,
+  ) {
+    const response = await this.${names.camelCase}Service.removeFromRelationshipFromDTO({
+      id: ${names.camelCase}Id,
+      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      data: body.data,
+    });
+    reply.send(response);
+  }
+
+  // Single add ${rel.key}
+  @Post(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}/:${rel.key}Id\`)
+  async add${pascalKey}(
+    @Req() req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
+    @Param("${rel.key}Id") ${rel.key}Id: string,
+    @Body() body: ${names.pascalCase}${pascalDtoKey}AddSingleDTO,
+  ) {
+    const response = await this.${names.camelCase}Service.addToRelationshipFromDTO({
+      id: ${names.camelCase}Id,
+      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      data: { id: ${rel.key}Id, type: ${endpointAccessor}, meta: body.data?.meta },
+    });
+    reply.send(response);
+  }
+
+  // Single remove ${rel.key}
+  @Delete(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}/:${rel.key}Id\`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove${pascalKey}(
+    @Req() req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
+    @Param("${rel.key}Id") ${rel.key}Id: string,
+  ) {
+    await this.${names.camelCase}Service.removeFromRelationshipFromDTO({
+      id: ${names.camelCase}Id,
+      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      data: [{ id: ${rel.key}Id, type: ${endpointAccessor} }],
+    });
+    reply.send();
+  }`;
+    })
+    .join("\n");
+
   return `import {
   Body,
   Controller,
@@ -110,9 +255,10 @@ import {
   CacheService,
   JsonApiDTOData,
   JwtAuthGuard,
-} from "@carlonicora/nestjs-neo4jsonapi";${metaImportsCode}
+} from "@carlonicora/nestjs-neo4jsonapi";${combinedMetaImportsCode}
 import { ${names.pascalCase}PostDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.post.dto";
 import { ${names.pascalCase}PutDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.put.dto";
+${relationshipDTOImport}
 import { ${names.pascalCase}Descriptor } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}";
 import { ${names.camelCase}Meta } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}.meta";
 import { ${names.pascalCase}Service } from "src/${targetDir}/${names.kebabCase}/services/${names.kebabCase}.service";
@@ -210,6 +356,7 @@ export class ${names.pascalCase}Controller {
     await this.cacheService.invalidateByElement(${names.camelCase}Meta.endpoint, ${names.camelCase}Id);
   }
 ${nestedRouteMethods}
+${relationshipEndpointMethods}
 }
 `;
 }
