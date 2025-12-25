@@ -1,3 +1,10 @@
+## [1.13.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.12.0...v1.13.0) (2025-12-25)
+
+### 🚀 Features
+
+* enhance relationship handling to support edge properties for both SINGLE and MANY cardinalities ([d22cab3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d22cab33383cb8c307d1d7a40704c3a361a2b8a3))
+* implement add/remove methods for MANY relationships with edge properties in repository and service ([877d8cd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/877d8cd9e7e62b8600b8c99942dc427ca4fb66af))
+
 ## [1.12.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.11.0...v1.12.0) (2025-12-24)
 
 ### 🚀 Features
