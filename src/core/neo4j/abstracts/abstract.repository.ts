@@ -802,10 +802,7 @@ export abstract class AbstractRepository<
       ? `MATCH (parent:${labelName} {id: $parentId})-[:BELONGS_TO]->(company)`
       : `MATCH (parent:${labelName} {id: $parentId})`;
 
-    const relPattern =
-      rel.direction === "out"
-        ? `-[r:${rel.relationship}]->`
-        : `<-[r:${rel.relationship}]-`;
+    const relPattern = rel.direction === "out" ? `-[r:${rel.relationship}]->` : `<-[r:${rel.relationship}]-`;
 
     // Build SET clause for edge properties if the relationship has fields
     let setClause = "";
@@ -869,10 +866,7 @@ export abstract class AbstractRepository<
       ? `MATCH (parent:${labelName} {id: $parentId})-[:BELONGS_TO]->(company)`
       : `MATCH (parent:${labelName} {id: $parentId})`;
 
-    const relPattern =
-      rel.direction === "out"
-        ? `-[r:${rel.relationship}]->`
-        : `<-[r:${rel.relationship}]-`;
+    const relPattern = rel.direction === "out" ? `-[r:${rel.relationship}]->` : `<-[r:${rel.relationship}]-`;
 
     query.query += `
       ${matchClause}

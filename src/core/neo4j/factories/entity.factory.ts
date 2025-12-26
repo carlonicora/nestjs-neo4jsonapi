@@ -11,7 +11,7 @@ export class EntityFactory {
     const nodeMap = new Map<string, any>();
     const rootEntityIds = new Set<string>();
 
-    for (const [, record] of params.records.entries()) {
+    for (const record of params.records) {
       const rootEntity = this.createOrMerge({
         model: params.model,
         record,
@@ -36,6 +36,7 @@ export class EntityFactory {
         finalResults.push(obj);
       }
     });
+
     return finalResults;
   }
 

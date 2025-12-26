@@ -373,11 +373,7 @@ export class JsonApiService {
    * Build minimal data array with per-item meta for MANY relationships with edge properties.
    * If the relationship has perItemMeta flag, adds meta from the EdgePropsMap to each item.
    */
-  private buildMinimalDataWithPerItemMeta(
-    serialisedData: any[],
-    relationship?: any,
-    parentEntity?: any,
-  ): any[] {
+  private buildMinimalDataWithPerItemMeta(serialisedData: any[], relationship?: any, parentEntity?: any): any[] {
     if (relationship?.perItemMeta && relationship?.edgePropsKey && parentEntity) {
       const edgePropsMap = parentEntity[relationship.edgePropsKey];
       return serialisedData.map((result) => {
