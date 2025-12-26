@@ -1,3 +1,9 @@
+## [1.13.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.13.0...v1.13.1) (2025-12-26)
+
+### 📦 Code Refactoring
+
+* streamline code for clarity and performance in various services ([55d9118](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/55d91183e05caf5610216d92f65b4cceb2985142))
+
 ## [1.13.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.12.0...v1.13.0) (2025-12-25)
 
 ### 🚀 Features
