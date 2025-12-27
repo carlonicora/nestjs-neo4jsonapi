@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, OnModuleInit } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
@@ -40,6 +41,7 @@ export abstract class AbstractRepository<
   constructor(
     protected readonly neo4j: Neo4jService,
     protected readonly securityService: SecurityService,
+    protected readonly clsService: ClsService,
   ) {}
 
   async onModuleInit() {
@@ -96,6 +98,9 @@ export abstract class AbstractRepository<
     const { nodeName, labelName } = this.descriptor.model;
     const { isCompanyScoped } = this.descriptor;
 
+    const companyId = this.clsService.get("companyId");
+    const currentUserId = this.clsService.get("userId");
+
     // Generic entities - no company filtering
     if (!isCompanyScoped) {
       return `
@@ -111,7 +116,7 @@ export abstract class AbstractRepository<
       OR EXISTS {
         MATCH (${nodeName})-[:BELONGS_TO]-(company)
       }
-      WITH ${nodeName}${options?.blockCompanyAndUser ? `` : `, company, currentUser`}
+      WITH ${nodeName}${options?.blockCompanyAndUser ? `` : `${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}`}
     `;
   }
 
@@ -288,6 +293,27 @@ export abstract class AbstractRepository<
       searchField: "id",
       searchValue: params.id,
     });
+  }
+
+  /**
+   * Find entities by ID list
+   */
+  async findByIds(params: { ids: string[] }): Promise<T[]> {
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      ids: params.ids,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      WHERE ${this.descriptor.model.nodeName}.id IN $ids
+      ${this.buildReturnStatement()}
+    `;
+
+    return this.neo4j.readMany(query);
   }
 
   /**

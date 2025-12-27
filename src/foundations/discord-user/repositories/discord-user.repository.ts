@@ -1,12 +1,13 @@
 import { Injectable } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import { AbstractRepository, Neo4jService, SecurityService } from "../../../core";
 import { DiscordUser, DiscordUserDescriptor } from "../entities/discord-user";
 
 @Injectable()
 export class DiscordUserRepository extends AbstractRepository<DiscordUser, typeof DiscordUserDescriptor.relationships> {
   protected readonly descriptor = DiscordUserDescriptor;
-  constructor(neo4j: Neo4jService, securityService: SecurityService) {
-    super(neo4j, securityService);
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
   }
 
   protected buildReturnStatement(): string {

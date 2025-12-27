@@ -10,6 +10,7 @@ export function generateRepositoryFile(data: TemplateData): string {
   const { names, targetDir } = data;
 
   return `import { Injectable } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import {
   AbstractRepository,
   Neo4jService,
@@ -22,8 +23,8 @@ import { ${names.pascalCase}Descriptor } from "src/${targetDir}/${names.kebabCas
 export class ${names.pascalCase}Repository extends AbstractRepository<${names.pascalCase}, typeof ${names.pascalCase}Descriptor.relationships> {
   protected readonly descriptor = ${names.pascalCase}Descriptor;
 
-  constructor(neo4j: Neo4jService, securityService: SecurityService) {
-    super(neo4j, securityService);
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
   }
 
   // Inherited methods:
