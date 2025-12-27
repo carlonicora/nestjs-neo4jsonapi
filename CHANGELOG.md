@@ -1,3 +1,9 @@
+## [1.14.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.14.0...v1.14.1) (2025-12-27)
+
+### 🐛 Bug Fixes
+
+* update Brevo SDK usage for email sending with new authentication method ([d00b986](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d00b986822f118f9379420c564e1af202e506e03))
+
 ## [1.14.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.13.1...v1.14.0) (2025-12-27)
 
 ### 🚀 Features
