@@ -63,12 +63,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       );
     }
 
+    // Extract the error detail message for both the JSON:API errors array and the top-level message field
+    const errorDetail =
+      typeof message === "string" ? message : (message as any)?.message || "An error occurred";
+
     const errorResponse = {
+      message: errorDetail, // Top-level message for easy frontend consumption
       errors: [
         {
           status: status.toString(),
           title: HttpStatus[status] || "Unknown Error",
-          detail: typeof message === "string" ? message : (message as any)?.message || "An error occurred",
+          detail: errorDetail,
           source: {
             pointer: request.url,
           },
