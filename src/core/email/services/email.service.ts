@@ -96,12 +96,13 @@ export class EmailService {
     }
   }
   private async sendEmailWithBrevo(to: string | string[], subject: string, html: string): Promise<void> {
-    const brevo = require("@getbrevo/brevo");
-    const apiInstance = new brevo.TransactionalEmailsApi();
+    const { TransactionalEmailsApi, TransactionalEmailsApiApiKeys, SendSmtpEmail } = require("@getbrevo/brevo");
+    const apiInstance = new TransactionalEmailsApi();
 
-    apiInstance.authentications.apiKey.apiKey = this.emailConfig.emailApiKey;
+    // Brevo SDK v3 uses setApiKey method for authentication
+    apiInstance.setApiKey(TransactionalEmailsApiApiKeys.apiKey, this.emailConfig.emailApiKey);
 
-    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    const sendSmtpEmail = new SendSmtpEmail();
 
     sendSmtpEmail.subject = subject;
     sendSmtpEmail.htmlContent = html;
@@ -112,6 +113,7 @@ export class EmailService {
       await apiInstance.sendTransacEmail(sendSmtpEmail);
     } catch (error) {
       console.error(error);
+      throw error;
     }
   }
 
