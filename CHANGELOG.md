@@ -1,3 +1,13 @@
+## [1.16.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.15.0...v1.16.0) (2025-12-28)
+
+### 🚀 Features
+
+* enhance buildReturnStatement to aggregate edge properties for MANY relationships ([428eb74](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/428eb747c9f34e9a03f77665f2547d0b0bf5a76f))
+
+### 📚 Documentation
+
+* remove duplicate organization from valid key concepts in documentation ([2fa4401](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2fa4401abaccedfc6f16bacf7b1c2d0d40f34363))
+
 ## [1.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.14.1...v1.15.0) (2025-12-27)
 
 ### 🚀 Features
