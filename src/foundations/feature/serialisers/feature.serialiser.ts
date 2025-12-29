@@ -21,7 +21,7 @@ export class FeatureSerialiser extends AbstractJsonApiSerialiser implements Json
   create(): JsonApiDataInterface {
     this.attributes = {
       name: "name",
-      isProduction: "isProduction",
+      isCore: "isCore",
     };
 
     this.relationships = {

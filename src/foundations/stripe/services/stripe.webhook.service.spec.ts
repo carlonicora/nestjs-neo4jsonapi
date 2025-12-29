@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeWebhookService, WebhookEventData } from "./stripe.webhook.service";
 import { StripeService } from "./stripe.service";
-import { AppLoggingService } from "../../logging/services/logging.service";
+import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { createMockStripeClient, MockStripeClient } from "../__tests__/mocks/stripe.mock";
 import {
   MOCK_WEBHOOK_EVENT,
@@ -74,11 +74,7 @@ describe("StripeWebhookService", () => {
 
       expect(stripeService.getClient).toHaveBeenCalled();
       expect(stripeService.getWebhookSecret).toHaveBeenCalled();
-      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(
-        mockPayload,
-        mockSignature,
-        mockWebhookSecret,
-      );
+      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(mockPayload, mockSignature, mockWebhookSecret);
       expect(result).toEqual(MOCK_WEBHOOK_EVENT);
     });
 
@@ -115,9 +111,7 @@ describe("StripeWebhookService", () => {
         throw timestampError;
       });
 
-      expect(() => service.constructEvent(mockPayload, mockSignature)).toThrow(
-        "Timestamp outside the tolerance zone",
-      );
+      expect(() => service.constructEvent(mockPayload, mockSignature)).toThrow("Timestamp outside the tolerance zone");
     });
 
     it("should construct different event types", () => {
@@ -140,11 +134,7 @@ describe("StripeWebhookService", () => {
 
       service.constructEvent(exactPayload, exactSignature);
 
-      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(
-        exactPayload,
-        exactSignature,
-        mockWebhookSecret,
-      );
+      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(exactPayload, exactSignature, mockWebhookSecret);
     });
   });
 

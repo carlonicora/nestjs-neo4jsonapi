@@ -3,6 +3,6 @@ import { Module } from "../../module/entities/module.entity";
 
 export type Feature = Entity & {
   name: string;
-  isProduction: boolean;
+  isCore: boolean;
   module: Module[];
 };

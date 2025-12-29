@@ -5,6 +5,9 @@ import { AppLoggingService } from "@carlonicora/nestjs-neo4jsonapi";
 import { WebhookEventRepository } from "../repositories/webhook-event.repository";
 import { SubscriptionService } from "../services/subscription.service";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
+import { SubscriptionRepository } from "../repositories/subscription.repository";
+import { InvoiceRepository } from "../repositories/invoice.repository";
+import { NotificationService } from "../services/notification.service";
 
 export interface WebhookJobData {
   webhookEventId: string;
@@ -19,6 +22,9 @@ export class WebhookProcessor extends WorkerHost {
     private readonly webhookEventRepository: WebhookEventRepository,
     private readonly subscriptionService: SubscriptionService,
     private readonly billingCustomerRepository: BillingCustomerRepository,
+    private readonly subscriptionRepository: SubscriptionRepository,
+    private readonly invoiceRepository: InvoiceRepository,
+    private readonly notificationService: NotificationService,
     private readonly logger: AppLoggingService,
   ) {
     super();
@@ -116,7 +122,39 @@ export class WebhookProcessor extends WorkerHost {
 
     if (eventType === "invoice.payment_failed") {
       this.logger.warn(`Payment failed for invoice ${invoice.id} (customer: ${stripeCustomerId})`);
-      // TODO: Trigger payment failure notification
+
+      // Find the invoice in our database
+      const localInvoice = await this.invoiceRepository.findByStripeInvoiceId({
+        stripeInvoiceId: invoice.id,
+      });
+
+      if (localInvoice) {
+        // Update invoice status to failed and increment attempt count
+        await this.invoiceRepository.updateByStripeInvoiceId({
+          stripeInvoiceId: invoice.id,
+          status: "uncollectible",
+          attemptCount: invoice.attempt_count ?? 0,
+          attempted: true,
+        });
+
+        // Send payment failure notification
+        try {
+          await this.notificationService.sendPaymentFailedEmail({
+            stripeCustomerId,
+            stripeInvoiceId: invoice.id,
+            amount: invoice.amount_due / 100, // Convert cents to dollars
+            currency: invoice.currency,
+            errorMessage: invoice.last_finalization_error?.message,
+          });
+        } catch (error) {
+          this.logger.error(
+            `Failed to send payment failure notification for invoice ${invoice.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          );
+          // Don't throw - we don't want to fail the webhook processing just because email failed
+        }
+      } else {
+        this.logger.warn(`Invoice ${invoice.id} not found in local database - skipping notification`);
+      }
     }
 
     // In Stripe v20, subscription is nested under parent.subscription_details
@@ -138,7 +176,16 @@ export class WebhookProcessor extends WorkerHost {
   ): Promise<void> {
     if (eventType === "customer.deleted") {
       this.logger.warn(`Customer ${customer.id} was deleted in Stripe`);
-      // TODO: Handle customer deletion
+
+      // Cancel all active subscriptions for this customer
+      const canceledCount = await this.subscriptionRepository.cancelAllByStripeCustomerId({
+        stripeCustomerId: customer.id,
+      });
+
+      this.logger.log(`Canceled ${canceledCount} subscription(s) for deleted customer ${customer.id}`);
+
+      // Note: We keep the BillingCustomer record for historical/accounting purposes
+      // The customer record remains in the database with all their billing history
     }
 
     if (eventType === "customer.updated" && "email" in customer) {
@@ -153,7 +200,30 @@ export class WebhookProcessor extends WorkerHost {
   private async handlePaymentIntentEvent(eventType: string, paymentIntent: Stripe.PaymentIntent): Promise<void> {
     if (eventType === "payment_intent.payment_failed") {
       this.logger.warn(`Payment intent ${paymentIntent.id} failed: ${paymentIntent.last_payment_error?.message}`);
-      // TODO: Trigger payment failure notification
+
+      const stripeCustomerId =
+        typeof paymentIntent.customer === "string" ? paymentIntent.customer : paymentIntent.customer?.id;
+
+      if (!stripeCustomerId) {
+        this.logger.warn(`Payment intent ${paymentIntent.id} has no customer ID - skipping notification`);
+        return;
+      }
+
+      // Note: PaymentIntent doesn't directly expose invoice ID in all cases
+      // We'll send a generic payment failure notification
+      try {
+        await this.notificationService.sendPaymentFailedEmail({
+          stripeCustomerId,
+          stripePaymentIntentId: paymentIntent.id,
+          amount: paymentIntent.amount / 100, // Convert cents to dollars
+          currency: paymentIntent.currency,
+          errorMessage: paymentIntent.last_payment_error?.message,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to send payment failure notification for payment intent ${paymentIntent.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+      }
     }
   }
 }

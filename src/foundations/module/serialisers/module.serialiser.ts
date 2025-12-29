@@ -20,7 +20,6 @@ export class ModuleSerialiser extends AbstractJsonApiSerialiser implements JsonA
   create(): JsonApiDataInterface {
     this.attributes = {
       name: "name",
-      isCore: "isCore",
     };
 
     this.meta = {

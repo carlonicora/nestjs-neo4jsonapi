@@ -3,13 +3,60 @@ import Stripe from "stripe";
 import { StripeService } from "./stripe.service";
 import { HandleStripeErrors } from "../errors/stripe.errors";
 
+/**
+ * Stripe Usage Service
+ *
+ * Manages usage-based billing with Stripe's V2 Billing Meters API (Stripe v20+).
+ * Allows reporting meter events for usage-based pricing and retrieving usage summaries.
+ * Requires billing meters to be configured in the Stripe Dashboard.
+ *
+ * @example
+ * ```typescript
+ * // Report API call usage
+ * await stripeUsageService.reportMeterEvent({
+ *   eventName: 'api_call',
+ *   customerId: 'cus_abc123',
+ *   value: 100,
+ * });
+ *
+ * // Get usage summary
+ * const summaries = await stripeUsageService.getMeterEventSummaries({
+ *   meterId: 'mtr_api_calls',
+ *   customerId: 'cus_abc123',
+ *   startTime: startTimestamp,
+ *   endTime: endTimestamp,
+ * });
+ * ```
+ */
 @Injectable()
 export class StripeUsageService {
   constructor(private readonly stripeService: StripeService) {}
 
   /**
    * Report usage using the V2 Billing Meters API (Stripe v20+)
-   * Note: Requires a billing meter to be set up in Stripe Dashboard
+   *
+   * @param params - Meter event parameters
+   * @param params.eventName - Name of the meter event
+   * @param params.customerId - Stripe customer ID
+   * @param params.value - Usage value to report
+   * @param params.timestamp - Unix timestamp for the event (optional, defaults to now)
+   * @param params.identifier - Unique identifier for deduplication (optional)
+   * @returns Promise resolving to the created meter event
+   * @throws {StripeError} If event reporting fails
+   *
+   * @example
+   * ```typescript
+   * const event = await service.reportMeterEvent({
+   *   eventName: 'api_call',
+   *   customerId: 'cus_abc123',
+   *   value: 100,
+   *   identifier: 'request_unique_id',
+   * });
+   * ```
+   *
+   * @remarks
+   * Requires a billing meter to be set up in Stripe Dashboard. The meter must be
+   * associated with a price on the customer's subscription.
    */
   @HandleStripeErrors()
   async reportMeterEvent(params: {
@@ -34,6 +81,24 @@ export class StripeUsageService {
 
   /**
    * List meter event summaries for a customer
+   *
+   * @param params - Summary query parameters
+   * @param params.meterId - The billing meter ID
+   * @param params.customerId - Stripe customer ID
+   * @param params.startTime - Start timestamp (Unix seconds)
+   * @param params.endTime - End timestamp (Unix seconds)
+   * @returns Promise resolving to array of meter event summaries
+   * @throws {StripeError} If retrieval fails
+   *
+   * @example
+   * ```typescript
+   * const summaries = await service.getMeterEventSummaries({
+   *   meterId: 'mtr_api_calls',
+   *   customerId: 'cus_abc123',
+   *   startTime: 1704067200, // Jan 1, 2024
+   *   endTime: 1706745600,   // Feb 1, 2024
+   * });
+   * ```
    */
   @HandleStripeErrors()
   async getMeterEventSummaries(params: {
@@ -54,7 +119,18 @@ export class StripeUsageService {
   }
 
   /**
-   * List all billing meters
+   * List all billing meters configured in Stripe
+   *
+   * @returns Promise resolving to array of billing meters
+   * @throws {StripeError} If listing fails
+   *
+   * @example
+   * ```typescript
+   * const meters = await service.listMeters();
+   * meters.forEach(meter => {
+   *   console.log(`${meter.display_name}: ${meter.event_name}`);
+   * });
+   * ```
    */
   @HandleStripeErrors()
   async listMeters(): Promise<Stripe.Billing.Meter[]> {
@@ -64,7 +140,19 @@ export class StripeUsageService {
   }
 
   /**
-   * Get a subscription item for metered billing
+   * Get a subscription item configured for metered billing
+   *
+   * @param subscriptionId - The subscription ID
+   * @returns Promise resolving to the metered subscription item, or null if none found
+   * @throws {StripeError} If retrieval fails
+   *
+   * @example
+   * ```typescript
+   * const item = await service.getSubscriptionItemForMeteredBilling('sub_abc123');
+   * if (item) {
+   *   console.log('Metered item ID:', item.id);
+   * }
+   * ```
    */
   @HandleStripeErrors()
   async getSubscriptionItemForMeteredBilling(subscriptionId: string): Promise<Stripe.SubscriptionItem | null> {

@@ -10,6 +10,24 @@ import { SubscriptionRepository } from "../repositories/subscription.repository"
 import { SubscriptionModel } from "../entities/subscription.model";
 import { SubscriptionStatus } from "../entities/subscription.entity";
 
+/**
+ * SubscriptionService
+ *
+ * Manages subscription lifecycle for billing customers, coordinating between Stripe and the local database.
+ * Provides comprehensive subscription management including creation, cancellation, pausing, resuming,
+ * plan changes, and proration previews.
+ *
+ * Key Features:
+ * - Create subscriptions with optional trials and custom quantities
+ * - Cancel subscriptions (immediately or at period end)
+ * - Pause and resume subscriptions
+ * - Change subscription plans with automatic proration
+ * - Preview proration amounts before plan changes
+ * - Sync subscription data from Stripe webhooks
+ * - Filter subscriptions by status (active, canceled, past_due, etc.)
+ *
+ * All operations update both Stripe and the local Neo4j database to maintain consistency.
+ */
 @Injectable()
 export class SubscriptionService {
   constructor(
@@ -20,6 +38,25 @@ export class SubscriptionService {
     private readonly jsonApiService: JsonApiService,
   ) {}
 
+  /**
+   * List subscriptions for a company
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.query - JSON:API query parameters for pagination
+   * @param params.status - Optional filter by subscription status
+   * @returns JSON:API formatted list of subscriptions
+   * @throws {HttpException} NOT_FOUND if billing customer not found
+   *
+   * @example
+   * ```typescript
+   * const subscriptions = await subscriptionService.listSubscriptions({
+   *   companyId: 'company_123',
+   *   query: { page: { number: 1, size: 10 } },
+   *   status: 'active'
+   * });
+   * ```
+   */
   async listSubscriptions(params: {
     companyId: string;
     query: any;
@@ -40,6 +77,16 @@ export class SubscriptionService {
     return this.jsonApiService.buildList(SubscriptionModel, subscriptions, paginator);
   }
 
+  /**
+   * Get a single subscription by ID
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @returns JSON:API formatted subscription data
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   */
   async getSubscription(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
@@ -55,6 +102,28 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, subscription);
   }
 
+  /**
+   * Create a new subscription
+   *
+   * @param params - Subscription parameters
+   * @param params.companyId - Company identifier
+   * @param params.priceId - Price ID to subscribe to
+   * @param params.paymentMethodId - Optional payment method ID
+   * @param params.trialPeriodDays - Optional trial period in days
+   * @param params.quantity - Optional quantity (default: 1)
+   * @returns JSON:API formatted subscription data
+   * @throws {HttpException} NOT_FOUND if customer or price not found
+   *
+   * @example
+   * ```typescript
+   * const subscription = await subscriptionService.createSubscription({
+   *   companyId: 'company_123',
+   *   priceId: 'price_456',
+   *   paymentMethodId: 'pm_789',
+   *   trialPeriodDays: 14
+   * });
+   * ```
+   */
   async createSubscription(params: {
     companyId: string;
     priceId: string;
@@ -101,6 +170,27 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, subscription);
   }
 
+  /**
+   * Cancel a subscription
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @param params.cancelImmediately - If true, cancel immediately; if false, cancel at period end
+   * @returns JSON:API formatted updated subscription data
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   *
+   * @example
+   * ```typescript
+   * // Cancel at end of billing period
+   * const subscription = await subscriptionService.cancelSubscription({
+   *   id: 'sub_123',
+   *   companyId: 'company_123',
+   *   cancelImmediately: false
+   * });
+   * ```
+   */
   async cancelSubscription(params: {
     id: string;
     companyId: string;
@@ -132,6 +222,17 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, updatedSubscription);
   }
 
+  /**
+   * Pause a subscription
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @param params.resumeAt - Optional date to automatically resume
+   * @returns JSON:API formatted updated subscription data
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   */
   async pauseSubscription(params: { id: string; companyId: string; resumeAt?: Date }): Promise<JsonApiDataInterface> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
@@ -158,6 +259,16 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, updatedSubscription);
   }
 
+  /**
+   * Resume a paused subscription
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @returns JSON:API formatted updated subscription data
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   */
   async resumeSubscription(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
@@ -183,6 +294,28 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, updatedSubscription);
   }
 
+  /**
+   * Change subscription plan
+   *
+   * Updates the subscription to a new price with automatic proration.
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @param params.newPriceId - New price ID to switch to
+   * @returns JSON:API formatted updated subscription data
+   * @throws {HttpException} NOT_FOUND if subscription or price not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   *
+   * @example
+   * ```typescript
+   * const subscription = await subscriptionService.changePlan({
+   *   id: 'sub_123',
+   *   companyId: 'company_123',
+   *   newPriceId: 'price_premium'
+   * });
+   * ```
+   */
   async changePlan(params: { id: string; companyId: string; newPriceId: string }): Promise<JsonApiDataInterface> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
@@ -222,6 +355,29 @@ export class SubscriptionService {
     return this.jsonApiService.buildSingle(SubscriptionModel, updatedSubscription);
   }
 
+  /**
+   * Preview proration for plan change
+   *
+   * Calculates the proration amount for changing to a new price without actually making the change.
+   *
+   * @param params - Parameters
+   * @param params.id - Subscription ID
+   * @param params.companyId - Company identifier
+   * @param params.newPriceId - New price ID to preview
+   * @returns Proration preview with amounts and line items
+   * @throws {HttpException} NOT_FOUND if subscription or price not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   *
+   * @example
+   * ```typescript
+   * const preview = await subscriptionService.previewProration({
+   *   id: 'sub_123',
+   *   companyId: 'company_123',
+   *   newPriceId: 'price_premium'
+   * });
+   * console.log(`Proration amount: ${preview.amountDue}`);
+   * ```
+   */
   async previewProration(params: { id: string; companyId: string; newPriceId: string }): Promise<any> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
@@ -257,6 +413,24 @@ export class SubscriptionService {
     };
   }
 
+  /**
+   * Sync subscription data from Stripe to local database
+   *
+   * Fetches the latest subscription data from Stripe and updates the local database record.
+   * Used primarily by webhook handlers to keep subscription data in sync.
+   *
+   * @param params - Parameters
+   * @param params.stripeSubscriptionId - Stripe subscription ID to sync
+   * @returns Promise that resolves when sync is complete
+   *
+   * @example
+   * ```typescript
+   * // Called from webhook handler
+   * await subscriptionService.syncSubscriptionFromStripe({
+   *   stripeSubscriptionId: 'sub_1234567890'
+   * });
+   * ```
+   */
   async syncSubscriptionFromStripe(params: { stripeSubscriptionId: string }): Promise<void> {
     const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionService.retrieveSubscription(
       params.stripeSubscriptionId,

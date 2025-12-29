@@ -8,6 +8,23 @@ import { SubscriptionRepository } from "../repositories/subscription.repository"
 import { UsageRecordRepository } from "../repositories/usage-record.repository";
 import { UsageRecordModel } from "../entities/usage-record.model";
 
+/**
+ * UsageService
+ *
+ * Manages usage-based billing for subscriptions using Stripe's V2 Billing Meters API.
+ * Tracks usage events, provides usage summaries, and integrates with metered billing.
+ *
+ * Key Features:
+ * - Report usage events to Stripe meters
+ * - Store usage records locally for tracking
+ * - List usage records with time filtering
+ * - Generate usage summaries for billing periods
+ * - Retrieve meter event summaries from Stripe
+ * - List available billing meters
+ *
+ * Usage-based billing allows charging customers based on actual consumption
+ * (e.g., API calls, storage, compute time) rather than fixed subscription fees.
+ */
 @Injectable()
 export class UsageService {
   constructor(
@@ -18,6 +35,33 @@ export class UsageService {
     private readonly jsonApiService: JsonApiService,
   ) {}
 
+  /**
+   * Report usage for a subscription
+   *
+   * Records a usage event to Stripe's V2 Billing Meters and stores it locally for tracking.
+   *
+   * @param params - Usage parameters
+   * @param params.companyId - Company identifier
+   * @param params.subscriptionId - Subscription ID
+   * @param params.meterId - Meter ID for local tracking
+   * @param params.meterEventName - Stripe meter event name
+   * @param params.quantity - Usage quantity to report
+   * @param params.timestamp - Optional timestamp (defaults to now)
+   * @returns JSON:API formatted usage record
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   *
+   * @example
+   * ```typescript
+   * const usage = await usageService.reportUsage({
+   *   companyId: 'company_123',
+   *   subscriptionId: 'sub_456',
+   *   meterId: 'meter_789',
+   *   meterEventName: 'api_calls',
+   *   quantity: 100
+   * });
+   * ```
+   */
   async reportUsage(params: {
     companyId: string;
     subscriptionId: string;
@@ -59,6 +103,19 @@ export class UsageService {
     return this.jsonApiService.buildSingle(UsageRecordModel, usageRecord);
   }
 
+  /**
+   * List usage records for a subscription
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.subscriptionId - Subscription ID
+   * @param params.query - JSON:API query parameters for pagination
+   * @param params.startTime - Optional filter by start time
+   * @param params.endTime - Optional filter by end time
+   * @returns JSON:API formatted list of usage records
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   */
   async listUsageRecords(params: {
     companyId: string;
     subscriptionId: string;
@@ -87,6 +144,20 @@ export class UsageService {
     return this.jsonApiService.buildList(UsageRecordModel, usageRecords, paginator);
   }
 
+  /**
+   * Get usage summary for a subscription
+   *
+   * Aggregates usage data for a time period from local records.
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.subscriptionId - Subscription ID
+   * @param params.startTime - Summary period start time
+   * @param params.endTime - Summary period end time
+   * @returns Usage summary with totals and breakdowns by meter
+   * @throws {HttpException} NOT_FOUND if subscription not found
+   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
+   */
   async getUsageSummary(params: {
     companyId: string;
     subscriptionId: string;
@@ -119,6 +190,19 @@ export class UsageService {
     };
   }
 
+  /**
+   * Get meter event summaries from Stripe
+   *
+   * Retrieves aggregated meter data from Stripe's V2 Billing Meters API.
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.meterId - Stripe meter ID
+   * @param params.startTime - Summary period start time
+   * @param params.endTime - Summary period end time
+   * @returns Meter event summaries from Stripe
+   * @throws {HttpException} NOT_FOUND if billing customer not found
+   */
   async getMeterEventSummaries(params: {
     companyId: string;
     meterId: string;
@@ -150,6 +234,21 @@ export class UsageService {
     };
   }
 
+  /**
+   * List all available billing meters
+   *
+   * Retrieves all configured meters from Stripe's V2 Billing Meters API.
+   *
+   * @returns List of available meters with their configurations
+   *
+   * @example
+   * ```typescript
+   * const { meters } = await usageService.listMeters();
+   * meters.forEach(meter => {
+   *   console.log(`${meter.displayName}: ${meter.eventName}`);
+   * });
+   * ```
+   */
   async listMeters(): Promise<any> {
     const meters = await this.stripeUsageService.listMeters();
 

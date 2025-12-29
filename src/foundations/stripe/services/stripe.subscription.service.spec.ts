@@ -715,10 +715,7 @@ describe("StripeSubscriptionService", () => {
 
       await service.retrieveSubscription("sub_exact_subscription_123");
 
-      expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith(
-        "sub_exact_subscription_123",
-        expect.any(Object),
-      );
+      expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_exact_subscription_123", expect.any(Object));
     });
   });
 

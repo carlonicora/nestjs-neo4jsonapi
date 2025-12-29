@@ -1,6 +1,28 @@
+// Mock problematic modules before any imports
+jest.mock("../../../foundations/chunker/chunker.module", () => ({
+  ChunkerModule: class {},
+}));
+jest.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
+
+// Mock the barrel export to provide companyMeta
+jest.mock("@carlonicora/nestjs-neo4jsonapi", () => {
+  const actual = jest.requireActual("@carlonicora/nestjs-neo4jsonapi");
+
+  return {
+    ...actual,
+    companyMeta: {
+      type: "companies",
+      endpoint: "companies",
+      nodeName: "company",
+      labelName: "Company",
+    },
+  };
+});
+
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { SystemRoles } from "../../../common/constants/system.roles";
+import { RoleId } from "@carlonicora/nestjs-neo4jsonapi";
 // TODO: App must define its own RoleId extending SystemRoles
 import { FastifyReply } from "fastify";
 import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";

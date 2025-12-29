@@ -31,6 +31,7 @@ import { BillingService } from "./services/billing.service";
 import { InvoiceService } from "./services/invoice.service";
 import { SubscriptionService } from "./services/subscription.service";
 import { UsageService } from "./services/usage.service";
+import { NotificationService } from "./services/notification.service";
 import { StripeService } from "./services/stripe.service";
 import { StripeCustomerService } from "./services/stripe.customer.service";
 import { StripeInvoiceService } from "./services/stripe.invoice.service";
@@ -65,6 +66,7 @@ import { StripeWebhookService } from "./services/stripe.webhook.service";
     SubscriptionService,
     InvoiceService,
     UsageService,
+    NotificationService,
     // Repositories
     BillingCustomerRepository,
     StripeProductRepository,
@@ -101,6 +103,7 @@ import { StripeWebhookService } from "./services/stripe.webhook.service";
     SubscriptionService,
     InvoiceService,
     UsageService,
+    NotificationService,
     // Repositories
     BillingCustomerRepository,
     StripeProductRepository,

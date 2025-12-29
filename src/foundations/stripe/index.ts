@@ -30,6 +30,7 @@ export * from "./services/billing-admin.service";
 export * from "./services/subscription.service";
 export * from "./services/invoice.service";
 export * from "./services/usage.service";
+export * from "./services/notification.service";
 
 // Repositories
 export * from "./repositories/billing-customer.repository";

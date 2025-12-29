@@ -8,10 +8,44 @@ import { Subscription, SubscriptionStatus } from "../entities/subscription.entit
 import { subscriptionMeta } from "../entities/subscription.meta";
 import { SubscriptionModel } from "../entities/subscription.model";
 
+/**
+ * SubscriptionRepository
+ *
+ * Neo4j repository for managing Subscription nodes and their relationships to BillingCustomer and Price nodes.
+ * Handles subscription lifecycle data storage and queries with status filtering.
+ *
+ * Key Features:
+ * - Automatic constraint creation for ID and Stripe subscription ID uniqueness
+ * - Query subscriptions by customer, status, or Stripe ID
+ * - Create and update operations with relationship management
+ * - Support for plan changes by updating price relationships
+ * - Sync operations for webhook data
+ * - Track trial periods, billing cycles, and cancellation status
+ * - Bulk cancel operations for customer deletion
+ *
+ * @example
+ * ```typescript
+ * const subscription = await subscriptionRepository.create({
+ *   billingCustomerId: 'cust_123',
+ *   priceId: 'price_456',
+ *   stripeSubscriptionId: 'sub_stripe789',
+ *   status: 'active',
+ *   currentPeriodStart: new Date(),
+ *   currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+ *   cancelAtPeriodEnd: false,
+ *   quantity: 1
+ * });
+ * ```
+ */
 @Injectable()
 export class SubscriptionRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
+  /**
+   * Initialize repository constraints
+   *
+   * Creates unique constraints and indexes on module initialization.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT ${subscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}) REQUIRE ${subscriptionMeta.nodeName}.id IS UNIQUE`,
@@ -22,6 +56,14 @@ export class SubscriptionRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Find subscriptions by billing customer ID
+   *
+   * @param params - Query parameters
+   * @param params.billingCustomerId - Billing customer identifier
+   * @param params.status - Optional filter by subscription status
+   * @returns Array of subscriptions ordered by creation date descending
+   */
   async findByBillingCustomerId(params: {
     billingCustomerId: string;
     status?: SubscriptionStatus;
@@ -49,6 +91,13 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Find subscription by internal ID
+   *
+   * @param params - Query parameters
+   * @param params.id - Internal subscription ID
+   * @returns Subscription if found, null otherwise
+   */
   async findById(params: { id: string }): Promise<Subscription | null> {
     const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
 
@@ -65,6 +114,13 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Find subscription by Stripe subscription ID
+   *
+   * @param params - Query parameters
+   * @param params.stripeSubscriptionId - Stripe subscription ID
+   * @returns Subscription if found, null otherwise
+   */
   async findByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<Subscription | null> {
     const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
 
@@ -81,6 +137,26 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Create a new subscription
+   *
+   * Creates a Subscription node with BELONGS_TO relationship to BillingCustomer
+   * and USES_PRICE relationship to StripePrice.
+   *
+   * @param params - Creation parameters
+   * @param params.billingCustomerId - Billing customer ID to link to
+   * @param params.priceId - Price ID to link to
+   * @param params.stripeSubscriptionId - Stripe subscription ID
+   * @param params.stripeSubscriptionItemId - Optional Stripe subscription item ID
+   * @param params.status - Subscription status
+   * @param params.currentPeriodStart - Current billing period start date
+   * @param params.currentPeriodEnd - Current billing period end date
+   * @param params.cancelAtPeriodEnd - Whether subscription cancels at period end
+   * @param params.trialStart - Optional trial start date
+   * @param params.trialEnd - Optional trial end date
+   * @param params.quantity - Subscription quantity
+   * @returns Created Subscription
+   */
   async create(params: {
     billingCustomerId: string;
     priceId: string;
@@ -138,6 +214,22 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update subscription by internal ID
+   *
+   * @param params - Update parameters
+   * @param params.id - Internal subscription ID
+   * @param params.status - Optional new status
+   * @param params.currentPeriodStart - Optional new period start
+   * @param params.currentPeriodEnd - Optional new period end
+   * @param params.cancelAtPeriodEnd - Optional cancel at period end flag
+   * @param params.canceledAt - Optional cancellation date (null to clear)
+   * @param params.trialStart - Optional trial start date
+   * @param params.trialEnd - Optional trial end date
+   * @param params.pausedAt - Optional pause date (null to clear)
+   * @param params.quantity - Optional new quantity
+   * @returns Updated Subscription
+   */
   async update(params: {
     id: string;
     status?: SubscriptionStatus;
@@ -214,6 +306,24 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update subscription by Stripe subscription ID
+   *
+   * Used primarily by webhook handlers to sync subscription data from Stripe.
+   *
+   * @param params - Update parameters
+   * @param params.stripeSubscriptionId - Stripe subscription ID
+   * @param params.status - Optional new status
+   * @param params.currentPeriodStart - Optional new period start
+   * @param params.currentPeriodEnd - Optional new period end
+   * @param params.cancelAtPeriodEnd - Optional cancel at period end flag
+   * @param params.canceledAt - Optional cancellation date (null to clear)
+   * @param params.trialStart - Optional trial start date
+   * @param params.trialEnd - Optional trial end date
+   * @param params.pausedAt - Optional pause date (null to clear)
+   * @param params.quantity - Optional new quantity
+   * @returns Updated Subscription if found, null otherwise
+   */
   async updateByStripeSubscriptionId(params: {
     stripeSubscriptionId: string;
     status?: SubscriptionStatus;
@@ -235,6 +345,16 @@ export class SubscriptionRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Update subscription price (change plan)
+   *
+   * Removes old USES_PRICE relationship and creates new one to different price.
+   *
+   * @param params - Update parameters
+   * @param params.id - Internal subscription ID
+   * @param params.newPriceId - New price ID to switch to
+   * @returns Updated Subscription with new price relationship
+   */
   async updatePrice(params: { id: string; newPriceId: string }): Promise<Subscription> {
     const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
 
@@ -257,6 +377,15 @@ export class SubscriptionRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Delete subscription
+   *
+   * Performs a DETACH DELETE to remove the subscription and all relationships.
+   *
+   * @param params - Deletion parameters
+   * @param params.id - Internal subscription ID
+   * @returns Promise that resolves when deletion is complete
+   */
   async delete(params: { id: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 
@@ -270,5 +399,38 @@ export class SubscriptionRepository implements OnModuleInit {
     `;
 
     await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Cancel all active subscriptions for a Stripe customer
+   *
+   * Bulk operation to cancel all active, trialing, or past_due subscriptions
+   * when a customer is deleted. Sets status to canceled and updates timestamps.
+   *
+   * @param params - Cancellation parameters
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @returns Number of subscriptions canceled
+   */
+  async cancelAllByStripeCustomerId(params: { stripeCustomerId: string }): Promise<number> {
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      stripeCustomerId: params.stripeCustomerId,
+      canceledStatus: "canceled" as SubscriptionStatus,
+      canceledAt: new Date().toISOString(),
+    };
+
+    query.query = `
+      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
+      WHERE ${subscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']
+      SET ${subscriptionMeta.nodeName}.status = $canceledStatus,
+          ${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt),
+          ${subscriptionMeta.nodeName}.cancelAtPeriodEnd = false,
+          ${subscriptionMeta.nodeName}.updatedAt = datetime()
+      RETURN count(${subscriptionMeta.nodeName}) as count
+    `;
+
+    const result = await this.neo4j.writeOne(query);
+    return result?.count ?? 0;
   }
 }

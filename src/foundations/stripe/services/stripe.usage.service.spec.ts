@@ -539,10 +539,7 @@ describe("StripeUsageService", () => {
         ...MOCK_SUBSCRIPTION,
         items: {
           object: "list" as const,
-          data: [
-            MOCK_SUBSCRIPTION_ITEM,
-            { ...MOCK_SUBSCRIPTION_ITEM, id: "si_test_metered_second" },
-          ],
+          data: [MOCK_SUBSCRIPTION_ITEM, { ...MOCK_SUBSCRIPTION_ITEM, id: "si_test_metered_second" }],
           has_more: false,
           url: "/v1/subscription_items",
         },

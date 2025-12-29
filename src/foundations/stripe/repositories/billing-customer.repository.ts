@@ -6,10 +6,40 @@ import { billingCustomerMeta } from "../entities/billing-customer.meta";
 import { BillingCustomerModel } from "../entities/billing-customer.model";
 import { companyMeta } from "@carlonicora/nestjs-neo4jsonapi";
 
+/**
+ * BillingCustomerRepository
+ *
+ * Neo4j repository for managing BillingCustomer nodes and their relationships to Company nodes.
+ * Handles CRUD operations and maintains unique constraints for customer identifiers.
+ *
+ * Key Features:
+ * - Automatic constraint creation for ID and Stripe customer ID uniqueness
+ * - Query by company ID, Stripe customer ID, or internal ID
+ * - Create and update operations with relationship management
+ * - Support for syncing from Stripe webhook data
+ * - Tracks customer balance, delinquency status, and default payment method
+ * - Maintains BELONGS_TO relationship with Company nodes
+ *
+ * @example
+ * ```typescript
+ * const customer = await billingCustomerRepository.create({
+ *   companyId: 'comp_123',
+ *   stripeCustomerId: 'cus_stripe123',
+ *   email: 'customer@example.com',
+ *   name: 'Example Corp',
+ *   currency: 'usd'
+ * });
+ * ```
+ */
 @Injectable()
 export class BillingCustomerRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
+  /**
+   * Initialize repository constraints
+   *
+   * Creates unique constraints on module initialization for data integrity.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT ${billingCustomerMeta.nodeName}_id IF NOT EXISTS FOR (${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName}) REQUIRE ${billingCustomerMeta.nodeName}.id IS UNIQUE`,
@@ -20,6 +50,13 @@ export class BillingCustomerRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Find billing customer by company ID
+   *
+   * @param params - Query parameters
+   * @param params.companyId - Company identifier
+   * @returns BillingCustomer if found, null otherwise
+   */
   async findByCompanyId(params: { companyId: string }): Promise<BillingCustomer | null> {
     const query = this.neo4j.initQuery({ serialiser: BillingCustomerModel });
 
@@ -35,6 +72,13 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Find billing customer by Stripe customer ID
+   *
+   * @param params - Query parameters
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @returns BillingCustomer if found, null otherwise
+   */
   async findByStripeCustomerId(params: { stripeCustomerId: string }): Promise<BillingCustomer | null> {
     const query = this.neo4j.initQuery({ serialiser: BillingCustomerModel });
 
@@ -50,6 +94,13 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Find billing customer by internal ID
+   *
+   * @param params - Query parameters
+   * @param params.id - Internal billing customer ID
+   * @returns BillingCustomer if found, null otherwise
+   */
   async findById(params: { id: string }): Promise<BillingCustomer | null> {
     const query = this.neo4j.initQuery({ serialiser: BillingCustomerModel });
 
@@ -65,6 +116,32 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Create a new billing customer
+   *
+   * Creates a BillingCustomer node and establishes BELONGS_TO relationship with Company.
+   * Initializes balance to 0 and delinquent to false.
+   *
+   * @param params - Creation parameters
+   * @param params.companyId - Company identifier to link to
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @param params.email - Customer email address
+   * @param params.name - Customer name
+   * @param params.currency - Default currency code (e.g., 'usd')
+   * @param params.defaultPaymentMethodId - Optional default payment method ID
+   * @returns Created BillingCustomer
+   *
+   * @example
+   * ```typescript
+   * const customer = await billingCustomerRepository.create({
+   *   companyId: 'comp_123',
+   *   stripeCustomerId: 'cus_stripe123',
+   *   email: 'billing@company.com',
+   *   name: 'Acme Corp',
+   *   currency: 'usd'
+   * });
+   * ```
+   */
   async create(params: {
     companyId: string;
     stripeCustomerId: string;
@@ -108,6 +185,18 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update billing customer by internal ID
+   *
+   * @param params - Update parameters
+   * @param params.id - Internal billing customer ID
+   * @param params.email - Optional new email address
+   * @param params.name - Optional new name
+   * @param params.defaultPaymentMethodId - Optional new default payment method ID
+   * @param params.balance - Optional new balance
+   * @param params.delinquent - Optional new delinquency status
+   * @returns Updated BillingCustomer
+   */
   async update(params: {
     id: string;
     email?: string;
@@ -155,6 +244,20 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update billing customer by Stripe customer ID
+   *
+   * Used primarily by webhook handlers to sync customer data from Stripe.
+   *
+   * @param params - Update parameters
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @param params.email - Optional new email address
+   * @param params.name - Optional new name
+   * @param params.defaultPaymentMethodId - Optional new default payment method ID
+   * @param params.balance - Optional new balance
+   * @param params.delinquent - Optional new delinquency status
+   * @returns Updated BillingCustomer
+   */
   async updateByStripeCustomerId(params: {
     stripeCustomerId: string;
     email?: string;
@@ -202,6 +305,15 @@ export class BillingCustomerRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Delete billing customer
+   *
+   * Performs a DETACH DELETE to remove the customer and all relationships.
+   *
+   * @param params - Deletion parameters
+   * @param params.id - Internal billing customer ID
+   * @returns Promise that resolves when deletion is complete
+   */
   async delete(params: { id: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 

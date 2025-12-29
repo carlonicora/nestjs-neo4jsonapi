@@ -17,11 +17,7 @@ import { JwtAuthGuard } from "@carlonicora/nestjs-neo4jsonapi";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 import { CreateCustomerDTO } from "../dtos/create-customer.dto";
 import { CreateSetupIntentDTO } from "../dtos/create-setup-intent.dto";
-import {
-  CancelSubscriptionDTO,
-  CreateSubscriptionDTO,
-  UpdateSubscriptionDTO,
-} from "../dtos/create-subscription.dto";
+import { CancelSubscriptionDTO, CreateSubscriptionDTO, UpdateSubscriptionDTO } from "../dtos/create-subscription.dto";
 import { ReportUsageDTO } from "../dtos/report-usage.dto";
 import { InvoiceStatus } from "../entities/invoice.entity";
 import { SubscriptionStatus } from "../entities/subscription.entity";

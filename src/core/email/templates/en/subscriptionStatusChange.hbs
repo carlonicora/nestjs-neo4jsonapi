@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Subscription Status Update</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  {{> header}}
+
+  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
+    <h1>Subscription Update</h1>
+
+    <p>Hi {{customerName}},</p>
+
+    <p>Your subscription status has been updated.</p>
+
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+      <p style="margin: 5px 0;"><strong>New Status:</strong> <span style="text-transform: uppercase;">{{status}}</span></p>
+      {{#if subscriptionId}}<p style="margin: 5px 0;"><strong>Subscription ID:</strong> {{subscriptionId}}</p>{{/if}}
+    </div>
+
+    {{#if (eq status "canceled")}}
+    <p>Your subscription has been canceled. You will continue to have access until the end of your current billing period.</p>
+    {{else if (eq status "active")}}
+    <p>Your subscription is now active. Thank you for your continued support!</p>
+    {{else if (eq status "past_due")}}
+    <p>Your subscription payment is past due. Please update your payment method to avoid service interruption.</p>
+    {{else}}
+    <p>Your subscription status has changed to {{status}}.</p>
+    {{/if}}
+
+    {{#if dashboardUrl}}
+    <p style="margin: 30px 0;">
+      <a href="{{dashboardUrl}}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+        View Subscription Details
+      </a>
+    </p>
+    {{/if}}
+
+    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
+      If you have any questions, please contact our support team.
+    </p>
+  </div>
+
+  {{> footer}}
+</body>
+</html>

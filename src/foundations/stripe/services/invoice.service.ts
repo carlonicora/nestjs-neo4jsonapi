@@ -10,6 +10,22 @@ import { SubscriptionRepository } from "../repositories/subscription.repository"
 import { InvoiceModel } from "../entities/invoice.model";
 import { InvoiceStatus } from "../entities/invoice.entity";
 
+/**
+ * InvoiceService
+ *
+ * Manages invoice retrieval and synchronization for billing customers.
+ * Provides access to invoice history, upcoming invoices, and maintains sync with Stripe.
+ *
+ * Key Features:
+ * - List customer invoices with filtering by status
+ * - Retrieve individual invoices
+ * - Preview upcoming invoices for subscriptions
+ * - Sync invoice data from Stripe webhooks
+ * - Support for Stripe v20 API invoice structure
+ *
+ * Invoices are automatically created and synced via webhooks when Stripe generates them
+ * for subscriptions or one-time charges.
+ */
 @Injectable()
 export class InvoiceService {
   constructor(
@@ -20,6 +36,25 @@ export class InvoiceService {
     private readonly jsonApiService: JsonApiService,
   ) {}
 
+  /**
+   * List invoices for a company
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.query - JSON:API query parameters for pagination
+   * @param params.status - Optional filter by invoice status
+   * @returns JSON:API formatted list of invoices
+   * @throws {HttpException} NOT_FOUND if billing customer not found
+   *
+   * @example
+   * ```typescript
+   * const invoices = await invoiceService.listInvoices({
+   *   companyId: 'company_123',
+   *   query: { page: { number: 1, size: 10 } },
+   *   status: 'paid'
+   * });
+   * ```
+   */
   async listInvoices(params: { companyId: string; query: any; status?: InvoiceStatus }): Promise<JsonApiDataInterface> {
     const paginator = new JsonApiPaginator(params.query);
 
@@ -36,6 +71,16 @@ export class InvoiceService {
     return this.jsonApiService.buildList(InvoiceModel, invoices, paginator);
   }
 
+  /**
+   * Get a single invoice by ID
+   *
+   * @param params - Parameters
+   * @param params.id - Invoice ID
+   * @param params.companyId - Company identifier
+   * @returns JSON:API formatted invoice data
+   * @throws {HttpException} NOT_FOUND if invoice not found
+   * @throws {HttpException} FORBIDDEN if invoice doesn't belong to company
+   */
   async getInvoice(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
     const invoice = await this.invoiceRepository.findById({ id: params.id });
 
@@ -51,6 +96,27 @@ export class InvoiceService {
     return this.jsonApiService.buildSingle(InvoiceModel, invoice);
   }
 
+  /**
+   * Preview the upcoming invoice for a customer
+   *
+   * Retrieves the next invoice that will be charged for a customer or specific subscription.
+   * This is useful for showing customers what they will be charged before the invoice is finalized.
+   *
+   * @param params - Parameters
+   * @param params.companyId - Company identifier
+   * @param params.subscriptionId - Optional subscription ID to preview
+   * @returns Upcoming invoice preview with amounts and line items
+   * @throws {HttpException} NOT_FOUND if billing customer or subscription not found
+   *
+   * @example
+   * ```typescript
+   * const upcoming = await invoiceService.getUpcomingInvoice({
+   *   companyId: 'company_123',
+   *   subscriptionId: 'sub_456'
+   * });
+   * console.log(`Next charge: ${upcoming.amountDue}`);
+   * ```
+   */
   async getUpcomingInvoice(params: { companyId: string; subscriptionId?: string }): Promise<any> {
     const customer = await this.billingCustomerRepository.findByCompanyId({ companyId: params.companyId });
     if (!customer) {
@@ -91,6 +157,25 @@ export class InvoiceService {
     };
   }
 
+  /**
+   * Sync invoice data from Stripe to local database
+   *
+   * Fetches the latest invoice data from Stripe and updates or creates the local database record.
+   * Handles Stripe v20 API structure including parent subscription details and tax calculations.
+   * Used primarily by webhook handlers to keep invoice data in sync.
+   *
+   * @param params - Parameters
+   * @param params.stripeInvoiceId - Stripe invoice ID to sync
+   * @returns Promise that resolves when sync is complete
+   *
+   * @example
+   * ```typescript
+   * // Called from webhook handler
+   * await invoiceService.syncInvoiceFromStripe({
+   *   stripeInvoiceId: 'in_1234567890'
+   * });
+   * ```
+   */
   async syncInvoiceFromStripe(params: { stripeInvoiceId: string }): Promise<void> {
     const stripeInvoice: Stripe.Invoice = await this.stripeInvoiceService.getInvoice(params.stripeInvoiceId);
 

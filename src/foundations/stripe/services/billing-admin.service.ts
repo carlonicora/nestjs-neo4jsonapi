@@ -8,6 +8,23 @@ import { StripeProductModel } from "../entities/stripe-product.model";
 import { StripePriceRepository } from "../repositories/stripe-price.repository";
 import { StripeProductRepository } from "../repositories/stripe-product.repository";
 
+/**
+ * BillingAdminService
+ *
+ * Administrative service for managing Stripe products and prices in the billing system.
+ * Provides CRUD operations for products and prices, with two-way sync between Stripe and local database.
+ *
+ * Key Features:
+ * - Product management (create, update, archive, list)
+ * - Price management (create, update, list)
+ * - Support for one-time and recurring prices
+ * - Support for usage-based billing with meters
+ * - Sync products and prices from Stripe webhooks
+ * - Filter products and prices by active status
+ *
+ * This service is typically used by admin/backend operations to set up billing offerings
+ * before customers subscribe.
+ */
 @Injectable()
 export class BillingAdminService {
   constructor(
@@ -17,8 +34,22 @@ export class BillingAdminService {
     private readonly jsonApiService: JsonApiService,
   ) {}
 
-  // Products
-
+  /**
+   * List all products
+   *
+   * @param params - Parameters
+   * @param params.query - JSON:API query parameters for pagination
+   * @param params.active - Optional filter by active status
+   * @returns JSON:API formatted list of products
+   *
+   * @example
+   * ```typescript
+   * const products = await billingAdminService.listProducts({
+   *   query: { page: { number: 1, size: 10 } },
+   *   active: true
+   * });
+   * ```
+   */
   async listProducts(params: { query: any; active?: boolean }): Promise<JsonApiDataInterface> {
     const paginator = new JsonApiPaginator(params.query);
 
@@ -29,6 +60,14 @@ export class BillingAdminService {
     return this.jsonApiService.buildList(StripeProductModel, products, paginator);
   }
 
+  /**
+   * Get a single product by ID
+   *
+   * @param params - Parameters
+   * @param params.id - Product ID
+   * @returns JSON:API formatted product data
+   * @throws {HttpException} NOT_FOUND if product not found
+   */
   async getProduct(params: { id: string }): Promise<JsonApiDataInterface> {
     const product = await this.stripeProductRepository.findById({ id: params.id });
 
@@ -39,6 +78,26 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripeProductModel, product);
   }
 
+  /**
+   * Create a new product
+   *
+   * Creates both a Stripe product and a local database record.
+   *
+   * @param params - Product parameters
+   * @param params.name - Product name
+   * @param params.description - Optional product description
+   * @param params.metadata - Optional metadata key-value pairs
+   * @returns JSON:API formatted product data
+   *
+   * @example
+   * ```typescript
+   * const product = await billingAdminService.createProduct({
+   *   name: 'Premium Plan',
+   *   description: 'Full access to all features',
+   *   metadata: { tier: 'premium' }
+   * });
+   * ```
+   */
   async createProduct(params: {
     name: string;
     description?: string;
@@ -61,6 +120,17 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripeProductModel, product);
   }
 
+  /**
+   * Update an existing product
+   *
+   * @param params - Update parameters
+   * @param params.id - Product ID
+   * @param params.name - Optional new name
+   * @param params.description - Optional new description
+   * @param params.metadata - Optional new metadata
+   * @returns JSON:API formatted updated product data
+   * @throws {HttpException} NOT_FOUND if product not found
+   */
   async updateProduct(params: {
     id: string;
     name?: string;
@@ -90,6 +160,17 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripeProductModel, product);
   }
 
+  /**
+   * Archive a product
+   *
+   * Sets the product as inactive in both Stripe and the local database.
+   * Archived products cannot be used for new subscriptions.
+   *
+   * @param params - Parameters
+   * @param params.id - Product ID
+   * @returns Promise that resolves when archival is complete
+   * @throws {HttpException} NOT_FOUND if product not found
+   */
   async archiveProduct(params: { id: string }): Promise<void> {
     const existingProduct = await this.stripeProductRepository.findById({ id: params.id });
 
@@ -105,8 +186,24 @@ export class BillingAdminService {
     });
   }
 
-  // Prices
-
+  /**
+   * List all prices
+   *
+   * @param params - Parameters
+   * @param params.query - JSON:API query parameters for pagination
+   * @param params.productId - Optional filter by product ID
+   * @param params.active - Optional filter by active status
+   * @returns JSON:API formatted list of prices
+   *
+   * @example
+   * ```typescript
+   * const prices = await billingAdminService.listPrices({
+   *   query: { page: { number: 1, size: 10 } },
+   *   productId: 'prod_123',
+   *   active: true
+   * });
+   * ```
+   */
   async listPrices(params: { query: any; productId?: string; active?: boolean }): Promise<JsonApiDataInterface> {
     const paginator = new JsonApiPaginator(params.query);
 
@@ -118,6 +215,14 @@ export class BillingAdminService {
     return this.jsonApiService.buildList(StripePriceModel, prices, paginator);
   }
 
+  /**
+   * Get a single price by ID
+   *
+   * @param params - Parameters
+   * @param params.id - Price ID
+   * @returns JSON:API formatted price data
+   * @throws {HttpException} NOT_FOUND if price not found
+   */
   async getPrice(params: { id: string }): Promise<JsonApiDataInterface> {
     const price = await this.stripePriceRepository.findById({ id: params.id });
 
@@ -128,6 +233,41 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripePriceModel, price);
   }
 
+  /**
+   * Create a new price
+   *
+   * Creates both a Stripe price and a local database record. Supports both one-time
+   * and recurring prices, including usage-based billing with meters.
+   *
+   * @param params - Price parameters
+   * @param params.productId - Product ID to attach price to
+   * @param params.unitAmount - Price amount in smallest currency unit (e.g., cents)
+   * @param params.currency - Currency code (e.g., 'usd', 'eur')
+   * @param params.nickname - Optional display name
+   * @param params.lookupKey - Optional lookup key for referencing price
+   * @param params.recurring - Optional recurring billing configuration
+   * @param params.recurring.interval - Billing interval (day, week, month, year)
+   * @param params.recurring.intervalCount - Number of intervals between billings
+   * @param params.recurring.meter - Optional meter ID for usage-based billing
+   * @param params.metadata - Optional metadata key-value pairs
+   * @returns JSON:API formatted price data
+   * @throws {HttpException} NOT_FOUND if product not found
+   *
+   * @example
+   * ```typescript
+   * // Create a monthly subscription price
+   * const price = await billingAdminService.createPrice({
+   *   productId: 'prod_123',
+   *   unitAmount: 2999, // $29.99
+   *   currency: 'usd',
+   *   nickname: 'Monthly Premium',
+   *   recurring: {
+   *     interval: 'month',
+   *     intervalCount: 1
+   *   }
+   * });
+   * ```
+   */
   async createPrice(params: {
     productId: string;
     unitAmount: number;
@@ -175,6 +315,18 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripePriceModel, price);
   }
 
+  /**
+   * Update an existing price
+   *
+   * Note: Most price fields are immutable in Stripe. Only nickname and metadata can be updated.
+   *
+   * @param params - Update parameters
+   * @param params.id - Price ID
+   * @param params.nickname - Optional new nickname
+   * @param params.metadata - Optional new metadata
+   * @returns JSON:API formatted updated price data
+   * @throws {HttpException} NOT_FOUND if price not found
+   */
   async updatePrice(params: {
     id: string;
     nickname?: string;
@@ -201,6 +353,16 @@ export class BillingAdminService {
     return this.jsonApiService.buildSingle(StripePriceModel, price);
   }
 
+  /**
+   * Sync product data from Stripe to local database
+   *
+   * Fetches the latest product data from Stripe and updates or creates the local database record.
+   * Used primarily by webhook handlers to keep data in sync.
+   *
+   * @param params - Parameters
+   * @param params.stripeProductId - Stripe product ID to sync
+   * @returns Promise that resolves when sync is complete
+   */
   async syncProductFromStripe(params: { stripeProductId: string }): Promise<void> {
     const stripeProduct = await this.stripeProductService.retrieveProduct(params.stripeProductId);
 
@@ -227,6 +389,17 @@ export class BillingAdminService {
     }
   }
 
+  /**
+   * Sync price data from Stripe to local database
+   *
+   * Fetches the latest price data from Stripe and updates or creates the local database record.
+   * Automatically syncs the associated product if not found locally.
+   * Used primarily by webhook handlers to keep data in sync.
+   *
+   * @param params - Parameters
+   * @param params.stripePriceId - Stripe price ID to sync
+   * @returns Promise that resolves when sync is complete
+   */
   async syncPriceFromStripe(params: { stripePriceId: string }): Promise<void> {
     const stripePrice = await this.stripeProductService.retrievePrice(params.stripePriceId);
 

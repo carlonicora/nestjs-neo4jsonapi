@@ -6,10 +6,42 @@ import { UsageRecord } from "../entities/usage-record.entity";
 import { usageRecordMeta } from "../entities/usage-record.meta";
 import { UsageRecordModel } from "../entities/usage-record.model";
 
+/**
+ * UsageRecordRepository
+ *
+ * Neo4j repository for managing UsageRecord nodes and their relationships to Subscription nodes.
+ * Tracks usage events for metered billing with time-based filtering and aggregation.
+ *
+ * Key Features:
+ * - Automatic constraint creation for ID uniqueness and subscription indexing
+ * - Query usage records by subscription with time range filtering
+ * - Create operations for recording usage events
+ * - Aggregation support for usage summaries by meter
+ * - Integration with Stripe V2 Billing Meters
+ * - Stores meter ID and event name for tracking
+ * - Links to Stripe event IDs for idempotency
+ *
+ * @example
+ * ```typescript
+ * const usageRecord = await usageRecordRepository.create({
+ *   subscriptionId: 'sub_123',
+ *   meterId: 'meter_456',
+ *   meterEventName: 'api_calls',
+ *   quantity: 100,
+ *   timestamp: new Date(),
+ *   stripeEventId: 'evt_stripe789'
+ * });
+ * ```
+ */
 @Injectable()
 export class UsageRecordRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
+  /**
+   * Initialize repository constraints and indexes
+   *
+   * Creates unique constraint on ID and index on subscriptionId for efficient queries.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT ${usageRecordMeta.nodeName}_id IF NOT EXISTS FOR (${usageRecordMeta.nodeName}:${usageRecordMeta.labelName}) REQUIRE ${usageRecordMeta.nodeName}.id IS UNIQUE`,
@@ -20,6 +52,16 @@ export class UsageRecordRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Find usage records by subscription ID
+   *
+   * @param params - Query parameters
+   * @param params.subscriptionId - Subscription identifier
+   * @param params.startTime - Optional filter by start time (inclusive)
+   * @param params.endTime - Optional filter by end time (inclusive)
+   * @param params.limit - Optional limit (default: 100)
+   * @returns Array of usage records ordered by timestamp descending
+   */
   async findBySubscriptionId(params: {
     subscriptionId: string;
     startTime?: Date;
@@ -57,6 +99,20 @@ export class UsageRecordRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Create a new usage record
+   *
+   * Creates a UsageRecord node with BELONGS_TO relationship to Subscription.
+   *
+   * @param params - Creation parameters
+   * @param params.subscriptionId - Subscription ID to link to
+   * @param params.meterId - Meter ID for local tracking
+   * @param params.meterEventName - Stripe meter event name
+   * @param params.quantity - Usage quantity reported
+   * @param params.timestamp - Timestamp of usage event
+   * @param params.stripeEventId - Optional Stripe event ID for idempotency
+   * @returns Created UsageRecord
+   */
   async create(params: {
     subscriptionId: string;
     meterId: string;
@@ -99,6 +155,29 @@ export class UsageRecordRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Get usage summary for a subscription
+   *
+   * Aggregates usage data for a time period with totals and breakdowns by meter.
+   *
+   * @param params - Query parameters
+   * @param params.subscriptionId - Subscription identifier
+   * @param params.startTime - Summary period start time (inclusive)
+   * @param params.endTime - Summary period end time (inclusive)
+   * @returns Usage summary with total quantity, record count, and per-meter breakdown
+   *
+   * @example
+   * ```typescript
+   * const summary = await usageRecordRepository.getUsageSummary({
+   *   subscriptionId: 'sub_123',
+   *   startTime: new Date('2024-01-01'),
+   *   endTime: new Date('2024-01-31')
+   * });
+   * // summary.total: 5000
+   * // summary.count: 50
+   * // summary.byMeter: { 'meter_api': 3000, 'meter_storage': 2000 }
+   * ```
+   */
   async getUsageSummary(params: { subscriptionId: string; startTime: Date; endTime: Date }): Promise<{
     total: number;
     count: number;

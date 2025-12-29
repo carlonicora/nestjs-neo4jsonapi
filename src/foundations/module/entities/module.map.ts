@@ -13,7 +13,6 @@ export const mapModule = (params: { data: any; record: any; entityFactory: Entit
   return {
     ...mapEntity({ record: params.data }),
     name: params.data.name,
-    isCore: params.data.isCore,
 
     permissions: permissions,
   };

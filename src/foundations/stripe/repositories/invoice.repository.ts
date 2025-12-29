@@ -7,10 +7,54 @@ import { invoiceMeta } from "../entities/invoice.meta";
 import { InvoiceModel } from "../entities/invoice.model";
 import { subscriptionMeta } from "../entities/subscription.meta";
 
+/**
+ * InvoiceRepository
+ *
+ * Neo4j repository for managing Invoice nodes and their relationships to BillingCustomer and Subscription nodes.
+ * Handles invoice history storage with status tracking and relationships.
+ *
+ * Key Features:
+ * - Automatic constraint creation for ID and Stripe invoice ID uniqueness
+ * - Query invoices by ID, customer, subscription, or status
+ * - Create and update operations with relationship management
+ * - Support for Stripe v20 API invoice structure
+ * - Sync operations for webhook data
+ * - Tracking of payment status and amounts
+ * - Optional subscription linkage for subscription invoices
+ * - Hosted invoice URL and PDF storage
+ *
+ * @example
+ * ```typescript
+ * const invoice = await invoiceRepository.create({
+ *   billingCustomerId: 'cust_123',
+ *   subscriptionId: 'sub_456',
+ *   stripeInvoiceId: 'in_stripe789',
+ *   stripeInvoiceNumber: 'INV-2024-001',
+ *   status: 'paid',
+ *   currency: 'usd',
+ *   amountDue: 2999,
+ *   amountPaid: 2999,
+ *   amountRemaining: 0,
+ *   subtotal: 2999,
+ *   total: 2999,
+ *   tax: null,
+ *   periodStart: new Date(),
+ *   periodEnd: new Date(),
+ *   paidAt: new Date(),
+ *   attemptCount: 1,
+ *   attempted: true
+ * });
+ * ```
+ */
 @Injectable()
 export class InvoiceRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
+  /**
+   * Initialize repository constraints
+   *
+   * Creates unique constraints on module initialization.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_id IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.id IS UNIQUE`,
@@ -21,6 +65,15 @@ export class InvoiceRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Find invoices by billing customer ID
+   *
+   * @param params - Query parameters
+   * @param params.billingCustomerId - Billing customer identifier
+   * @param params.status - Optional filter by invoice status
+   * @param params.limit - Optional limit (default: 100)
+   * @returns Array of invoices ordered by creation date descending
+   */
   async findByBillingCustomerId(params: {
     billingCustomerId: string;
     status?: InvoiceStatus;
@@ -51,6 +104,13 @@ export class InvoiceRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Find invoice by internal ID
+   *
+   * @param params - Query parameters
+   * @param params.id - Internal invoice ID
+   * @returns Invoice if found, null otherwise
+   */
   async findById(params: { id: string }): Promise<Invoice | null> {
     const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
 
@@ -67,6 +127,13 @@ export class InvoiceRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Find invoice by Stripe invoice ID
+   *
+   * @param params - Query parameters
+   * @param params.stripeInvoiceId - Stripe invoice ID
+   * @returns Invoice if found, null otherwise
+   */
   async findByStripeInvoiceId(params: { stripeInvoiceId: string }): Promise<Invoice | null> {
     const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
 
@@ -82,6 +149,35 @@ export class InvoiceRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Create a new invoice
+   *
+   * Creates an Invoice node with BELONGS_TO relationship to BillingCustomer
+   * and optional FOR_SUBSCRIPTION relationship to Subscription.
+   *
+   * @param params - Creation parameters
+   * @param params.billingCustomerId - Billing customer ID to link to
+   * @param params.subscriptionId - Optional subscription ID to link to
+   * @param params.stripeInvoiceId - Stripe invoice ID
+   * @param params.stripeInvoiceNumber - Stripe invoice number (e.g., 'INV-2024-001')
+   * @param params.stripeHostedInvoiceUrl - Stripe hosted invoice URL
+   * @param params.stripePdfUrl - Stripe PDF URL
+   * @param params.status - Invoice status
+   * @param params.currency - Currency code
+   * @param params.amountDue - Amount due in smallest currency unit
+   * @param params.amountPaid - Amount paid in smallest currency unit
+   * @param params.amountRemaining - Amount remaining in smallest currency unit
+   * @param params.subtotal - Subtotal before tax
+   * @param params.total - Total amount including tax
+   * @param params.tax - Tax amount (null if not applicable)
+   * @param params.periodStart - Billing period start date
+   * @param params.periodEnd - Billing period end date
+   * @param params.dueDate - Optional payment due date
+   * @param params.paidAt - Optional payment date
+   * @param params.attemptCount - Number of payment attempts
+   * @param params.attempted - Whether payment was attempted
+   * @returns Created Invoice
+   */
   async create(params: {
     billingCustomerId: string;
     subscriptionId?: string;
@@ -173,6 +269,24 @@ export class InvoiceRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update invoice by Stripe invoice ID
+   *
+   * Used primarily by webhook handlers to sync invoice data from Stripe.
+   *
+   * @param params - Update parameters
+   * @param params.stripeInvoiceId - Stripe invoice ID
+   * @param params.status - Optional new status
+   * @param params.amountDue - Optional new amount due
+   * @param params.amountPaid - Optional new amount paid
+   * @param params.amountRemaining - Optional new amount remaining
+   * @param params.paidAt - Optional payment date (null to clear)
+   * @param params.attemptCount - Optional new attempt count
+   * @param params.attempted - Optional new attempted flag
+   * @param params.stripeHostedInvoiceUrl - Optional new hosted invoice URL
+   * @param params.stripePdfUrl - Optional new PDF URL
+   * @returns Updated Invoice
+   */
   async updateByStripeInvoiceId(params: {
     stripeInvoiceId: string;
     status?: InvoiceStatus;

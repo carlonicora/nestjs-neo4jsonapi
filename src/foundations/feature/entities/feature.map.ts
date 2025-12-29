@@ -6,7 +6,7 @@ export const mapFeature = (params: { data: any; record: any; entityFactory: Enti
   return {
     ...mapEntity({ record: params.data }),
     name: params.data.name,
-    isProduction: params.data.isProduction ?? false,
+    isCore: params.data.isCore ?? false,
     module: [],
   };
 };

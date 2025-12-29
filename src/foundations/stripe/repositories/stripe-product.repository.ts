@@ -5,10 +5,40 @@ import { StripeProduct } from "../entities/stripe-product.entity";
 import { stripeProductMeta } from "../entities/stripe-product.meta";
 import { StripeProductModel } from "../entities/stripe-product.model";
 
+/**
+ * StripeProductRepository
+ *
+ * Neo4j repository for managing StripeProduct nodes representing billing products.
+ * Handles product catalog storage and queries with active status filtering.
+ *
+ * Key Features:
+ * - Automatic constraint creation for ID and Stripe product ID uniqueness
+ * - Query products by ID, Stripe ID, or active status
+ * - Create and update operations for product data
+ * - Support for product archival (setting active=false)
+ * - Sync operations for webhook data
+ * - Metadata storage for custom product attributes
+ *
+ * @example
+ * ```typescript
+ * const product = await stripeProductRepository.create({
+ *   stripeProductId: 'prod_stripe123',
+ *   name: 'Premium Plan',
+ *   description: 'Full access to all features',
+ *   active: true,
+ *   metadata: JSON.stringify({ tier: 'premium' })
+ * });
+ * ```
+ */
 @Injectable()
 export class StripeProductRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
+  /**
+   * Initialize repository constraints
+   *
+   * Creates unique constraints on module initialization.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT ${stripeProductMeta.nodeName}_id IF NOT EXISTS FOR (${stripeProductMeta.nodeName}:${stripeProductMeta.labelName}) REQUIRE ${stripeProductMeta.nodeName}.id IS UNIQUE`,
@@ -19,6 +49,13 @@ export class StripeProductRepository implements OnModuleInit {
     });
   }
 
+  /**
+   * Find all products
+   *
+   * @param params - Optional query parameters
+   * @param params.active - Optional filter by active status
+   * @returns Array of products ordered by name
+   */
   async findAll(params?: { active?: boolean }): Promise<StripeProduct[]> {
     const query = this.neo4j.initQuery({ serialiser: StripeProductModel });
 
@@ -40,6 +77,13 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Find product by internal ID
+   *
+   * @param params - Query parameters
+   * @param params.id - Internal product ID
+   * @returns StripeProduct if found, null otherwise
+   */
   async findById(params: { id: string }): Promise<StripeProduct | null> {
     const query = this.neo4j.initQuery({ serialiser: StripeProductModel });
 
@@ -55,6 +99,13 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Find product by Stripe product ID
+   *
+   * @param params - Query parameters
+   * @param params.stripeProductId - Stripe product ID
+   * @returns StripeProduct if found, null otherwise
+   */
   async findByStripeProductId(params: { stripeProductId: string }): Promise<StripeProduct | null> {
     const query = this.neo4j.initQuery({ serialiser: StripeProductModel });
 
@@ -70,6 +121,17 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Create a new product
+   *
+   * @param params - Creation parameters
+   * @param params.stripeProductId - Stripe product ID
+   * @param params.name - Product name
+   * @param params.description - Optional product description
+   * @param params.active - Whether product is active
+   * @param params.metadata - Optional metadata JSON string
+   * @returns Created StripeProduct
+   */
   async create(params: {
     stripeProductId: string;
     name: string;
@@ -107,6 +169,17 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update product by internal ID
+   *
+   * @param params - Update parameters
+   * @param params.id - Internal product ID
+   * @param params.name - Optional new name
+   * @param params.description - Optional new description
+   * @param params.active - Optional new active status
+   * @param params.metadata - Optional new metadata JSON string
+   * @returns Updated StripeProduct
+   */
   async update(params: {
     id: string;
     name?: string;
@@ -149,6 +222,19 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Update product by Stripe product ID
+   *
+   * Used primarily by webhook handlers to sync product data from Stripe.
+   *
+   * @param params - Update parameters
+   * @param params.stripeProductId - Stripe product ID
+   * @param params.name - Optional new name
+   * @param params.description - Optional new description
+   * @param params.active - Optional new active status
+   * @param params.metadata - Optional new metadata JSON string
+   * @returns Updated StripeProduct
+   */
   async updateByStripeProductId(params: {
     stripeProductId: string;
     name?: string;
@@ -191,6 +277,15 @@ export class StripeProductRepository implements OnModuleInit {
     return this.neo4j.writeOne(query);
   }
 
+  /**
+   * Delete product
+   *
+   * Performs a DETACH DELETE to remove the product and all relationships.
+   *
+   * @param params - Deletion parameters
+   * @param params.id - Internal product ID
+   * @returns Promise that resolves when deletion is complete
+   */
   async delete(params: { id: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 

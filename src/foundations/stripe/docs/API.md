@@ -30,9 +30,10 @@ Get the initialized Stripe client instance.
 **Throws:** `Error` if Stripe is not initialized
 
 **Example:**
+
 ```typescript
 const stripe = this.stripeService.getClient();
-const customer = await stripe.customers.retrieve('cus_123');
+const customer = await stripe.customers.retrieve("cus_123");
 ```
 
 ### isConfigured()
@@ -42,6 +43,7 @@ Check if Stripe SDK is initialized and configured.
 **Returns:** `boolean`
 
 **Example:**
+
 ```typescript
 if (this.stripeService.isConfigured()) {
   // Stripe operations available
@@ -57,6 +59,7 @@ Get the Stripe publishable key for frontend use.
 **Throws:** `Error` if configuration is not available
 
 **Example:**
+
 ```typescript
 const publishableKey = this.stripeService.getPublishableKey();
 // Send to frontend for Stripe.js initialization
@@ -71,6 +74,7 @@ Get the webhook signing secret for webhook verification.
 **Throws:** `Error` if configuration is not available
 
 **Example:**
+
 ```typescript
 const webhookSecret = this.stripeService.getWebhookSecret();
 ```
@@ -84,6 +88,7 @@ Get the customer portal return URL.
 **Throws:** `Error` if configuration is not available
 
 **Example:**
+
 ```typescript
 const returnUrl = this.stripeService.getPortalReturnUrl();
 ```
@@ -95,6 +100,7 @@ Get the customer portal configuration ID (if configured).
 **Returns:** `string | undefined`
 
 **Example:**
+
 ```typescript
 const configId = this.stripeService.getPortalConfigurationId();
 ```
@@ -110,6 +116,7 @@ Customer and payment method management.
 Create a new Stripe customer.
 
 **Parameters:**
+
 ```typescript
 {
   companyId: string;        // Internal company ID (stored in metadata)
@@ -124,12 +131,13 @@ Create a new Stripe customer.
 **Returns:** `Promise<Stripe.Customer>`
 
 **Example:**
+
 ```typescript
 const customer = await this.stripeCustomer.createCustomer({
-  companyId: 'company_123',
-  email: 'user@example.com',
-  name: 'John Doe',
-  metadata: { source: 'web_signup' },
+  companyId: "company_123",
+  email: "user@example.com",
+  name: "John Doe",
+  metadata: { source: "web_signup" },
 });
 ```
 
@@ -138,13 +146,15 @@ const customer = await this.stripeCustomer.createCustomer({
 Retrieve customer details by ID.
 
 **Parameters:**
+
 - `customerId: string` - Stripe customer ID
 
 **Returns:** `Promise<Stripe.Customer>`
 
 **Example:**
+
 ```typescript
-const customer = await this.stripeCustomer.retrieveCustomer('cus_123');
+const customer = await this.stripeCustomer.retrieveCustomer("cus_123");
 ```
 
 ### updateCustomer()
@@ -152,6 +162,7 @@ const customer = await this.stripeCustomer.retrieveCustomer('cus_123');
 Update customer information.
 
 **Parameters:**
+
 ```typescript
 {
   stripeCustomerId: string;  // Customer ID to update
@@ -166,11 +177,12 @@ Update customer information.
 **Returns:** `Promise<Stripe.Customer>`
 
 **Example:**
+
 ```typescript
 const updated = await this.stripeCustomer.updateCustomer({
-  stripeCustomerId: 'cus_123',
-  name: 'Jane Doe',
-  metadata: { plan: 'premium' },
+  stripeCustomerId: "cus_123",
+  name: "Jane Doe",
+  metadata: { plan: "premium" },
 });
 ```
 
@@ -179,13 +191,15 @@ const updated = await this.stripeCustomer.updateCustomer({
 Delete a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID to delete
 
 **Returns:** `Promise<Stripe.DeletedCustomer>`
 
 **Example:**
+
 ```typescript
-await this.stripeCustomer.deleteCustomer('cus_123');
+await this.stripeCustomer.deleteCustomer("cus_123");
 ```
 
 ### listCustomers()
@@ -193,13 +207,15 @@ await this.stripeCustomer.deleteCustomer('cus_123');
 List customers with optional email filter.
 
 **Parameters:**
+
 - `email?: string` - Filter by email (optional)
 
 **Returns:** `Promise<Stripe.Customer[]>`
 
 **Example:**
+
 ```typescript
-const customers = await this.stripeCustomer.listCustomers('user@example.com');
+const customers = await this.stripeCustomer.listCustomers("user@example.com");
 ```
 
 ### attachPaymentMethod()
@@ -207,6 +223,7 @@ const customers = await this.stripeCustomer.listCustomers('user@example.com');
 Attach a payment method to a customer.
 
 **Parameters:**
+
 ```typescript
 {
   stripeCustomerId: string;   // Customer ID
@@ -218,10 +235,11 @@ Attach a payment method to a customer.
 **Returns:** `Promise<Stripe.PaymentMethod>`
 
 **Example:**
+
 ```typescript
 await this.stripeCustomer.attachPaymentMethod({
-  stripeCustomerId: 'cus_123',
-  paymentMethodId: 'pm_123',
+  stripeCustomerId: "cus_123",
+  paymentMethodId: "pm_123",
   setAsDefault: true,
 });
 ```
@@ -231,13 +249,15 @@ await this.stripeCustomer.attachPaymentMethod({
 Remove a payment method from a customer.
 
 **Parameters:**
+
 - `paymentMethodId: string` - Payment method ID to detach
 
 **Returns:** `Promise<Stripe.PaymentMethod>`
 
 **Example:**
+
 ```typescript
-await this.stripeCustomer.detachPaymentMethod('pm_123');
+await this.stripeCustomer.detachPaymentMethod("pm_123");
 ```
 
 ### listPaymentMethods()
@@ -245,13 +265,15 @@ await this.stripeCustomer.detachPaymentMethod('pm_123');
 List all payment methods for a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID
 
 **Returns:** `Promise<Stripe.PaymentMethod[]>`
 
 **Example:**
+
 ```typescript
-const methods = await this.stripeCustomer.listPaymentMethods('cus_123');
+const methods = await this.stripeCustomer.listPaymentMethods("cus_123");
 ```
 
 ### setDefaultPaymentMethod()
@@ -259,20 +281,22 @@ const methods = await this.stripeCustomer.listPaymentMethods('cus_123');
 Set a payment method as the customer's default.
 
 **Parameters:**
+
 ```typescript
 {
-  stripeCustomerId: string;   // Customer ID
-  paymentMethodId: string;    // Payment method ID
+  stripeCustomerId: string; // Customer ID
+  paymentMethodId: string; // Payment method ID
 }
 ```
 
 **Returns:** `Promise<Stripe.Customer>`
 
 **Example:**
+
 ```typescript
 await this.stripeCustomer.setDefaultPaymentMethod({
-  stripeCustomerId: 'cus_123',
-  paymentMethodId: 'pm_456',
+  stripeCustomerId: "cus_123",
+  paymentMethodId: "pm_456",
 });
 ```
 
@@ -287,6 +311,7 @@ Complete subscription lifecycle management.
 Create a new subscription for a customer.
 
 **Parameters:**
+
 ```typescript
 {
   stripeCustomerId: string;   // Customer ID
@@ -300,12 +325,13 @@ Create a new subscription for a customer.
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
 const subscription = await this.stripeSubscription.createSubscription({
-  stripeCustomerId: 'cus_123',
-  priceId: 'price_123',
+  stripeCustomerId: "cus_123",
+  priceId: "price_123",
   trialPeriodDays: 14,
-  metadata: { plan: 'pro' },
+  metadata: { plan: "pro" },
 });
 ```
 
@@ -314,13 +340,15 @@ const subscription = await this.stripeSubscription.createSubscription({
 Get subscription details.
 
 **Parameters:**
+
 - `subscriptionId: string` - Subscription ID
 
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
-const subscription = await this.stripeSubscription.retrieveSubscription('sub_123');
+const subscription = await this.stripeSubscription.retrieveSubscription("sub_123");
 ```
 
 ### updateSubscription()
@@ -328,6 +356,7 @@ const subscription = await this.stripeSubscription.retrieveSubscription('sub_123
 Update a subscription (change plan, metadata, proration).
 
 **Parameters:**
+
 ```typescript
 {
   subscriptionId: string;     // Subscription ID
@@ -340,11 +369,12 @@ Update a subscription (change plan, metadata, proration).
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
 const updated = await this.stripeSubscription.updateSubscription({
-  subscriptionId: 'sub_123',
-  priceId: 'price_456',
-  prorationBehavior: 'create_prorations',
+  subscriptionId: "sub_123",
+  priceId: "price_456",
+  prorationBehavior: "create_prorations",
 });
 ```
 
@@ -353,18 +383,20 @@ const updated = await this.stripeSubscription.updateSubscription({
 Cancel a subscription.
 
 **Parameters:**
+
 - `subscriptionId: string` - Subscription ID
 - `cancelAtPeriodEnd?: boolean` - Cancel at period end (default: true) or immediately
 
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
 // Cancel at end of billing period
-await this.stripeSubscription.cancelSubscription('sub_123', true);
+await this.stripeSubscription.cancelSubscription("sub_123", true);
 
 // Cancel immediately
-await this.stripeSubscription.cancelSubscription('sub_123', false);
+await this.stripeSubscription.cancelSubscription("sub_123", false);
 ```
 
 ### pauseSubscription()
@@ -372,17 +404,19 @@ await this.stripeSubscription.cancelSubscription('sub_123', false);
 Pause a subscription.
 
 **Parameters:**
+
 - `subscriptionId: string` - Subscription ID
 - `resumeAt?: Date` - Optional date to automatically resume
 
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
 const resumeDate = new Date();
 resumeDate.setMonth(resumeDate.getMonth() + 1);
 
-await this.stripeSubscription.pauseSubscription('sub_123', resumeDate);
+await this.stripeSubscription.pauseSubscription("sub_123", resumeDate);
 ```
 
 ### resumeSubscription()
@@ -390,13 +424,15 @@ await this.stripeSubscription.pauseSubscription('sub_123', resumeDate);
 Resume a paused subscription.
 
 **Parameters:**
+
 - `subscriptionId: string` - Subscription ID
 
 **Returns:** `Promise<Stripe.Subscription>`
 
 **Example:**
+
 ```typescript
-await this.stripeSubscription.resumeSubscription('sub_123');
+await this.stripeSubscription.resumeSubscription("sub_123");
 ```
 
 ### previewProration()
@@ -404,15 +440,17 @@ await this.stripeSubscription.resumeSubscription('sub_123');
 Preview proration amount for a subscription change.
 
 **Parameters:**
+
 - `subscriptionId: string` - Subscription ID
 - `newPriceId: string` - New price ID to preview
 
 **Returns:** `Promise<Stripe.UpcomingInvoice>`
 
 **Example:**
+
 ```typescript
-const preview = await this.stripeSubscription.previewProration('sub_123', 'price_456');
-console.log('Proration amount:', preview.amount_due);
+const preview = await this.stripeSubscription.previewProration("sub_123", "price_456");
+console.log("Proration amount:", preview.amount_due);
 ```
 
 ### listSubscriptions()
@@ -420,14 +458,16 @@ console.log('Proration amount:', preview.amount_due);
 List subscriptions for a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID
 - `status?: 'active' | 'canceled' | 'incomplete' | 'past_due' | 'trialing' | 'all'` - Filter by status
 
 **Returns:** `Promise<Stripe.Subscription[]>`
 
 **Example:**
+
 ```typescript
-const activeSubscriptions = await this.stripeSubscription.listSubscriptions('cus_123', 'active');
+const activeSubscriptions = await this.stripeSubscription.listSubscriptions("cus_123", "active");
 ```
 
 ---
@@ -441,6 +481,7 @@ Product and pricing management.
 Create a new product.
 
 **Parameters:**
+
 ```typescript
 {
   name: string;               // Product name
@@ -452,11 +493,12 @@ Create a new product.
 **Returns:** `Promise<Stripe.Product>`
 
 **Example:**
+
 ```typescript
 const product = await this.stripeProduct.createProduct({
-  name: 'Pro Plan',
-  description: 'Professional tier with advanced features',
-  metadata: { tier: 'pro' },
+  name: "Pro Plan",
+  description: "Professional tier with advanced features",
+  metadata: { tier: "pro" },
 });
 ```
 
@@ -465,13 +507,15 @@ const product = await this.stripeProduct.createProduct({
 Get product details.
 
 **Parameters:**
+
 - `productId: string` - Product ID
 
 **Returns:** `Promise<Stripe.Product>`
 
 **Example:**
+
 ```typescript
-const product = await this.stripeProduct.retrieveProduct('prod_123');
+const product = await this.stripeProduct.retrieveProduct("prod_123");
 ```
 
 ### updateProduct()
@@ -479,6 +523,7 @@ const product = await this.stripeProduct.retrieveProduct('prod_123');
 Update product information.
 
 **Parameters:**
+
 ```typescript
 {
   productId: string;          // Product ID
@@ -492,10 +537,11 @@ Update product information.
 **Returns:** `Promise<Stripe.Product>`
 
 **Example:**
+
 ```typescript
 const updated = await this.stripeProduct.updateProduct({
-  productId: 'prod_123',
-  name: 'Premium Plan',
+  productId: "prod_123",
+  name: "Premium Plan",
   active: true,
 });
 ```
@@ -505,13 +551,15 @@ const updated = await this.stripeProduct.updateProduct({
 Archive (deactivate) a product.
 
 **Parameters:**
+
 - `productId: string` - Product ID
 
 **Returns:** `Promise<Stripe.Product>`
 
 **Example:**
+
 ```typescript
-await this.stripeProduct.archiveProduct('prod_123');
+await this.stripeProduct.archiveProduct("prod_123");
 ```
 
 ### listProducts()
@@ -519,11 +567,13 @@ await this.stripeProduct.archiveProduct('prod_123');
 List all products.
 
 **Parameters:**
+
 - `active?: boolean` - Filter by active status
 
 **Returns:** `Promise<Stripe.Product[]>`
 
 **Example:**
+
 ```typescript
 const activeProducts = await this.stripeProduct.listProducts(true);
 ```
@@ -533,6 +583,7 @@ const activeProducts = await this.stripeProduct.listProducts(true);
 Create a price for a product.
 
 **Parameters:**
+
 ```typescript
 {
   productId: string;          // Product ID
@@ -552,34 +603,35 @@ Create a price for a product.
 **Returns:** `Promise<Stripe.Price>`
 
 **Example:**
+
 ```typescript
 // One-time price
 const oneTimePrice = await this.stripeProduct.createPrice({
-  productId: 'prod_123',
-  unitAmount: 9900,  // $99.00
-  currency: 'usd',
-  nickname: 'One-time purchase',
+  productId: "prod_123",
+  unitAmount: 9900, // $99.00
+  currency: "usd",
+  nickname: "One-time purchase",
 });
 
 // Recurring price
 const monthlyPrice = await this.stripeProduct.createPrice({
-  productId: 'prod_123',
-  unitAmount: 999,  // $9.99
-  currency: 'usd',
-  nickname: 'Monthly subscription',
+  productId: "prod_123",
+  unitAmount: 999, // $9.99
+  currency: "usd",
+  nickname: "Monthly subscription",
   recurring: {
-    interval: 'month',
+    interval: "month",
   },
 });
 
 // Usage-based price
 const usagePrice = await this.stripeProduct.createPrice({
-  productId: 'prod_123',
-  unitAmount: 10,  // $0.10 per unit
-  currency: 'usd',
+  productId: "prod_123",
+  unitAmount: 10, // $0.10 per unit
+  currency: "usd",
   recurring: {
-    interval: 'month',
-    meter: 'mtr_123',  // Billing meter ID
+    interval: "month",
+    meter: "mtr_123", // Billing meter ID
   },
 });
 ```
@@ -589,13 +641,15 @@ const usagePrice = await this.stripeProduct.createPrice({
 Get price details.
 
 **Parameters:**
+
 - `priceId: string` - Price ID
 
 **Returns:** `Promise<Stripe.Price>`
 
 **Example:**
+
 ```typescript
-const price = await this.stripeProduct.retrievePrice('price_123');
+const price = await this.stripeProduct.retrievePrice("price_123");
 ```
 
 ### updatePrice()
@@ -603,6 +657,7 @@ const price = await this.stripeProduct.retrievePrice('price_123');
 Update price metadata and active status.
 
 **Parameters:**
+
 ```typescript
 {
   priceId: string;            // Price ID
@@ -615,11 +670,12 @@ Update price metadata and active status.
 **Returns:** `Promise<Stripe.Price>`
 
 **Example:**
+
 ```typescript
 const updated = await this.stripeProduct.updatePrice({
-  priceId: 'price_123',
+  priceId: "price_123",
   active: false,
-  metadata: { deprecated: 'true' },
+  metadata: { deprecated: "true" },
 });
 ```
 
@@ -628,6 +684,7 @@ const updated = await this.stripeProduct.updatePrice({
 List prices with optional filters.
 
 **Parameters:**
+
 ```typescript
 {
   productId?: string;         // Filter by product
@@ -638,8 +695,9 @@ List prices with optional filters.
 **Returns:** `Promise<Stripe.Price[]>`
 
 **Example:**
+
 ```typescript
-const prices = await this.stripeProduct.listPrices({ productId: 'prod_123' });
+const prices = await this.stripeProduct.listPrices({ productId: "prod_123" });
 ```
 
 ---
@@ -653,6 +711,7 @@ Payment and setup intent management.
 Create a payment intent for one-time payments.
 
 **Parameters:**
+
 ```typescript
 {
   amount: number;             // Amount in cents
@@ -666,12 +725,13 @@ Create a payment intent for one-time payments.
 **Returns:** `Promise<Stripe.PaymentIntent>`
 
 **Example:**
+
 ```typescript
 const paymentIntent = await this.stripePayment.createPaymentIntent({
-  amount: 5000,  // $50.00
-  currency: 'usd',
-  customerId: 'cus_123',
-  metadata: { orderId: 'order_456' },
+  amount: 5000, // $50.00
+  currency: "usd",
+  customerId: "cus_123",
+  metadata: { orderId: "order_456" },
 });
 ```
 
@@ -680,13 +740,15 @@ const paymentIntent = await this.stripePayment.createPaymentIntent({
 Get payment intent details.
 
 **Parameters:**
+
 - `paymentIntentId: string` - Payment intent ID
 
 **Returns:** `Promise<Stripe.PaymentIntent>`
 
 **Example:**
+
 ```typescript
-const intent = await this.stripePayment.retrievePaymentIntent('pi_123');
+const intent = await this.stripePayment.retrievePaymentIntent("pi_123");
 ```
 
 ### confirmPaymentIntent()
@@ -694,13 +756,15 @@ const intent = await this.stripePayment.retrievePaymentIntent('pi_123');
 Confirm a payment intent.
 
 **Parameters:**
+
 - `paymentIntentId: string` - Payment intent ID
 
 **Returns:** `Promise<Stripe.PaymentIntent>`
 
 **Example:**
+
 ```typescript
-await this.stripePayment.confirmPaymentIntent('pi_123');
+await this.stripePayment.confirmPaymentIntent("pi_123");
 ```
 
 ### cancelPaymentIntent()
@@ -708,13 +772,15 @@ await this.stripePayment.confirmPaymentIntent('pi_123');
 Cancel a payment intent.
 
 **Parameters:**
+
 - `paymentIntentId: string` - Payment intent ID
 
 **Returns:** `Promise<Stripe.PaymentIntent>`
 
 **Example:**
+
 ```typescript
-await this.stripePayment.cancelPaymentIntent('pi_123');
+await this.stripePayment.cancelPaymentIntent("pi_123");
 ```
 
 ### createSetupIntent()
@@ -722,6 +788,7 @@ await this.stripePayment.cancelPaymentIntent('pi_123');
 Create a setup intent for saving payment methods without charging.
 
 **Parameters:**
+
 ```typescript
 {
   customerId: string;         // Customer ID
@@ -733,10 +800,11 @@ Create a setup intent for saving payment methods without charging.
 **Returns:** `Promise<Stripe.SetupIntent>`
 
 **Example:**
+
 ```typescript
 const setupIntent = await this.stripePayment.createSetupIntent({
-  customerId: 'cus_123',
-  metadata: { purpose: 'save_card' },
+  customerId: "cus_123",
+  metadata: { purpose: "save_card" },
 });
 ```
 
@@ -745,13 +813,15 @@ const setupIntent = await this.stripePayment.createSetupIntent({
 Get setup intent details.
 
 **Parameters:**
+
 - `setupIntentId: string` - Setup intent ID
 
 **Returns:** `Promise<Stripe.SetupIntent>`
 
 **Example:**
+
 ```typescript
-const intent = await this.stripePayment.retrieveSetupIntent('seti_123');
+const intent = await this.stripePayment.retrieveSetupIntent("seti_123");
 ```
 
 ---
@@ -765,13 +835,15 @@ Invoice generation and management.
 Get invoice details.
 
 **Parameters:**
+
 - `invoiceId: string` - Invoice ID
 
 **Returns:** `Promise<Stripe.Invoice>`
 
 **Example:**
+
 ```typescript
-const invoice = await this.stripeInvoice.retrieveInvoice('in_123');
+const invoice = await this.stripeInvoice.retrieveInvoice("in_123");
 ```
 
 ### listInvoices()
@@ -779,13 +851,15 @@ const invoice = await this.stripeInvoice.retrieveInvoice('in_123');
 List invoices for a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID
 
 **Returns:** `Promise<Stripe.Invoice[]>`
 
 **Example:**
+
 ```typescript
-const invoices = await this.stripeInvoice.listInvoices('cus_123');
+const invoices = await this.stripeInvoice.listInvoices("cus_123");
 ```
 
 ### payInvoice()
@@ -793,13 +867,15 @@ const invoices = await this.stripeInvoice.listInvoices('cus_123');
 Pay an invoice.
 
 **Parameters:**
+
 - `invoiceId: string` - Invoice ID
 
 **Returns:** `Promise<Stripe.Invoice>`
 
 **Example:**
+
 ```typescript
-await this.stripeInvoice.payInvoice('in_123');
+await this.stripeInvoice.payInvoice("in_123");
 ```
 
 ### voidInvoice()
@@ -807,13 +883,15 @@ await this.stripeInvoice.payInvoice('in_123');
 Void an invoice.
 
 **Parameters:**
+
 - `invoiceId: string` - Invoice ID
 
 **Returns:** `Promise<Stripe.Invoice>`
 
 **Example:**
+
 ```typescript
-await this.stripeInvoice.voidInvoice('in_123');
+await this.stripeInvoice.voidInvoice("in_123");
 ```
 
 ### retrieveUpcomingInvoice()
@@ -821,14 +899,16 @@ await this.stripeInvoice.voidInvoice('in_123');
 Preview the next upcoming invoice for a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID
 
 **Returns:** `Promise<Stripe.UpcomingInvoice>`
 
 **Example:**
+
 ```typescript
-const upcomingInvoice = await this.stripeInvoice.retrieveUpcomingInvoice('cus_123');
-console.log('Next charge:', upcomingInvoice.amount_due);
+const upcomingInvoice = await this.stripeInvoice.retrieveUpcomingInvoice("cus_123");
+console.log("Next charge:", upcomingInvoice.amount_due);
 ```
 
 ---
@@ -842,6 +922,7 @@ Usage-based billing with Stripe Billing Meters (v20+).
 Report a usage event to a billing meter.
 
 **Parameters:**
+
 ```typescript
 {
   eventName: string;          // Meter event name
@@ -855,11 +936,12 @@ Report a usage event to a billing meter.
 **Returns:** `Promise<Stripe.Billing.MeterEvent>`
 
 **Example:**
+
 ```typescript
 await this.stripeUsage.reportUsage({
-  eventName: 'api_requests',
-  customerId: 'cus_123',
-  value: 100,  // 100 API requests
+  eventName: "api_requests",
+  customerId: "cus_123",
+  value: 100, // 100 API requests
   timestamp: Math.floor(Date.now() / 1000),
 });
 ```
@@ -869,21 +951,23 @@ await this.stripeUsage.reportUsage({
 Get usage summaries for a customer within a time range.
 
 **Parameters:**
+
 ```typescript
 {
-  customerId: string;         // Customer ID
-  startTime: number;          // Start timestamp (Unix)
-  endTime: number;            // End timestamp (Unix)
+  customerId: string; // Customer ID
+  startTime: number; // Start timestamp (Unix)
+  endTime: number; // End timestamp (Unix)
 }
 ```
 
 **Returns:** `Promise<Stripe.Billing.MeterEventSummary[]>`
 
 **Example:**
+
 ```typescript
 const summaries = await this.stripeUsage.listUsageSummaries({
-  customerId: 'cus_123',
-  startTime: Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60,  // 30 days ago
+  customerId: "cus_123",
+  startTime: Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60, // 30 days ago
   endTime: Math.floor(Date.now() / 1000),
 });
 ```
@@ -895,6 +979,7 @@ List all billing meters.
 **Returns:** `Promise<Stripe.Billing.Meter[]>`
 
 **Example:**
+
 ```typescript
 const meters = await this.stripeUsage.listBillingMeters();
 ```
@@ -904,13 +989,15 @@ const meters = await this.stripeUsage.listBillingMeters();
 Get billing meter details.
 
 **Parameters:**
+
 - `meterId: string` - Meter ID
 
 **Returns:** `Promise<Stripe.Billing.Meter>`
 
 **Example:**
+
 ```typescript
-const meter = await this.stripeUsage.retrieveBillingMeter('mtr_123');
+const meter = await this.stripeUsage.retrieveBillingMeter("mtr_123");
 ```
 
 ---
@@ -924,6 +1011,7 @@ Customer self-service portal session management.
 Create a customer portal session.
 
 **Parameters:**
+
 ```typescript
 {
   stripeCustomerId: string;   // Customer ID
@@ -935,10 +1023,11 @@ Create a customer portal session.
 **Returns:** `Promise<Stripe.BillingPortal.Session>`
 
 **Example:**
+
 ```typescript
 const session = await this.stripePortal.createPortalSession({
-  stripeCustomerId: 'cus_123',
-  returnUrl: 'https://example.com/account',
+  stripeCustomerId: "cus_123",
+  returnUrl: "https://example.com/account",
 });
 
 // Redirect user to session.url
@@ -949,14 +1038,16 @@ const session = await this.stripePortal.createPortalSession({
 Get a direct portal URL for a customer.
 
 **Parameters:**
+
 - `customerId: string` - Customer ID
 - `returnUrl?: string` - Optional return URL
 
 **Returns:** `Promise<string>` - Portal URL
 
 **Example:**
+
 ```typescript
-const portalUrl = await this.stripePortal.getPortalUrl('cus_123');
+const portalUrl = await this.stripePortal.getPortalUrl("cus_123");
 // Redirect user to portalUrl
 ```
 
@@ -971,6 +1062,7 @@ Webhook verification and event categorization.
 Verify and parse a Stripe webhook event.
 
 **Parameters:**
+
 - `payload: Buffer | string` - Raw request body
 - `signature: string` - Stripe-Signature header value
 
@@ -979,11 +1071,9 @@ Verify and parse a Stripe webhook event.
 **Throws:** `Error` if signature verification fails
 
 **Example:**
+
 ```typescript
-const event = this.stripeWebhook.constructEvent(
-  req.rawBody,
-  req.headers['stripe-signature'],
-);
+const event = this.stripeWebhook.constructEvent(req.rawBody, req.headers["stripe-signature"]);
 ```
 
 ### isSubscriptionEvent()
@@ -991,11 +1081,13 @@ const event = this.stripeWebhook.constructEvent(
 Check if event type is subscription-related.
 
 **Parameters:**
+
 - `eventType: string` - Event type
 
 **Returns:** `boolean`
 
 **Example:**
+
 ```typescript
 if (this.stripeWebhook.isSubscriptionEvent(event.type)) {
   // Handle subscription event
@@ -1007,11 +1099,13 @@ if (this.stripeWebhook.isSubscriptionEvent(event.type)) {
 Check if event type is invoice-related.
 
 **Parameters:**
+
 - `eventType: string` - Event type
 
 **Returns:** `boolean`
 
 **Example:**
+
 ```typescript
 if (this.stripeWebhook.isInvoiceEvent(event.type)) {
   // Handle invoice event
@@ -1023,11 +1117,13 @@ if (this.stripeWebhook.isInvoiceEvent(event.type)) {
 Check if event type is payment-related.
 
 **Parameters:**
+
 - `eventType: string` - Event type
 
 **Returns:** `boolean`
 
 **Example:**
+
 ```typescript
 if (this.stripeWebhook.isPaymentEvent(event.type)) {
   // Handle payment event
@@ -1039,11 +1135,13 @@ if (this.stripeWebhook.isPaymentEvent(event.type)) {
 Check if event type is customer-related.
 
 **Parameters:**
+
 - `eventType: string` - Event type
 
 **Returns:** `boolean`
 
 **Example:**
+
 ```typescript
 if (this.stripeWebhook.isCustomerEvent(event.type)) {
   // Handle customer event
@@ -1071,38 +1169,38 @@ class StripeError extends Error {
 
 ### Error Types and Status Codes
 
-| Stripe Error Type            | HTTP Status | Description                          |
-|------------------------------|-------------|--------------------------------------|
-| `StripeCardError`            | 402         | Card payment declined or failed      |
-| `StripeRateLimitError`       | 429         | Too many requests to Stripe API      |
-| `StripeInvalidRequestError`  | 400         | Invalid parameters or request        |
-| `StripeAPIError`             | 500         | Stripe API internal error            |
-| `StripeConnectionError`      | 503         | Network connection to Stripe failed  |
-| `StripeAuthenticationError`  | 401         | Invalid API key or authentication    |
-| `StripeIdempotencyError`     | 409         | Duplicate request detected           |
-| Unknown/Other                | 500         | Generic error                        |
+| Stripe Error Type           | HTTP Status | Description                         |
+| --------------------------- | ----------- | ----------------------------------- |
+| `StripeCardError`           | 402         | Card payment declined or failed     |
+| `StripeRateLimitError`      | 429         | Too many requests to Stripe API     |
+| `StripeInvalidRequestError` | 400         | Invalid parameters or request       |
+| `StripeAPIError`            | 500         | Stripe API internal error           |
+| `StripeConnectionError`     | 503         | Network connection to Stripe failed |
+| `StripeAuthenticationError` | 401         | Invalid API key or authentication   |
+| `StripeIdempotencyError`    | 409         | Duplicate request detected          |
+| Unknown/Other               | 500         | Generic error                       |
 
 ### Error Handling Example
 
 ```typescript
-import { StripeError } from './core/stripe/errors/stripe.errors';
+import { StripeError } from "./core/stripe/errors/stripe.errors";
 
 try {
   const customer = await this.stripeCustomer.createCustomer({
-    companyId: 'company_123',
-    email: 'invalid-email',
-    name: 'Test',
+    companyId: "company_123",
+    email: "invalid-email",
+    name: "Test",
   });
 } catch (error) {
   if (error instanceof StripeError) {
     console.error(`Stripe Error [${error.statusCode}]:`, error.message);
 
     if (error.code) {
-      console.error('Error code:', error.code);
+      console.error("Error code:", error.code);
     }
 
     if (error.param) {
-      console.error('Invalid parameter:', error.param);
+      console.error("Invalid parameter:", error.param);
     }
 
     // Handle specific error types
@@ -1122,7 +1220,7 @@ try {
     }
   } else {
     // Non-Stripe error
-    console.error('Unexpected error:', error);
+    console.error("Unexpected error:", error);
   }
 }
 ```

@@ -2,7 +2,6 @@ import { Entity } from "../../../common/abstracts/entity";
 
 export type Module = Entity & {
   name: string;
-  isCore?: boolean;
 
   permissions: {
     create?: boolean | string;

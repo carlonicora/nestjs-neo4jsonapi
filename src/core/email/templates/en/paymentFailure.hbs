@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Payment Failed - Action Required</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  {{> header}}
+
+  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
+    <h1 style="color: #d9534f;">Payment Failed</h1>
+
+    <p>Hi {{customerName}},</p>
+
+    <p>We were unable to process your payment{{#if stripeInvoiceId}} for invoice <strong>{{invoiceNumber}}</strong>{{/if}}.</p>
+
+    {{#if amount}}
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+      <p style="margin: 5px 0;"><strong>Amount Due:</strong> {{amount}} {{currency}}</p>
+      {{#if stripeInvoiceId}}<p style="margin: 5px 0;"><strong>Invoice:</strong> {{invoiceNumber}}</p>{{/if}}
+      {{#if errorMessage}}<p style="margin: 5px 0; color: #d9534f;"><strong>Error:</strong> {{errorMessage}}</p>{{/if}}
+    </div>
+    {{/if}}
+
+    <p><strong>What you need to do:</strong></p>
+    <ul>
+      <li>Verify your payment method is up to date</li>
+      <li>Ensure sufficient funds are available</li>
+      <li>Update your payment information if needed</li>
+    </ul>
+
+    {{#if invoiceUrl}}
+    <p style="margin: 30px 0;">
+      <a href="{{invoiceUrl}}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+        View Invoice
+      </a>
+    </p>
+    {{/if}}
+
+    {{#if updatePaymentUrl}}
+    <p style="margin: 30px 0;">
+      <a href="{{updatePaymentUrl}}" style="background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+        Update Payment Method
+      </a>
+    </p>
+    {{/if}}
+
+    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
+      If you believe this is an error or need assistance, please contact our support team.
+    </p>
+  </div>
+
+  {{> footer}}
+</body>
+</html>
