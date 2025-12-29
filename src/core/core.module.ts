@@ -18,7 +18,6 @@ import { Neo4JModule } from "./neo4j/neo4j.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
 import { SecurityModule } from "./security/security.module";
-import { StripeModule } from "./stripe/stripe.module";
 import { TracingModule } from "./tracing/tracing.module";
 import { VersionModule } from "./version/version.module";
 import { WebsocketModule } from "./websocket/websocket.module";
@@ -69,7 +68,6 @@ function getCoreModules(queueIds: string[] = []) {
     QueueModule.forRootWithQueues(queueIds),
     // 4. Services using external connections
     EmailModule.forRoot(),
-    StripeModule.forRoot(),
     WebsocketModule,
     LLMModule,
     BlockNoteModule,
@@ -93,7 +91,6 @@ function getCoreModuleExports() {
     EmailModule,
     CorsModule,
     VersionModule,
-    StripeModule,
     WebsocketModule,
     LLMModule,
     BlockNoteModule,

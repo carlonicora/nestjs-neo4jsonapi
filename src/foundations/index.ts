@@ -23,5 +23,6 @@ export * from "./push";
 export * from "./relevancy";
 export * from "./role";
 export * from "./s3";
+export * from "./stripe";
 export * from "./tokenusage";
 export * from "./user";

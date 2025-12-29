@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
 import { StripeService } from "./stripe.service";
-import { AppLoggingService } from "../../logging/services/logging.service";
+import { AppLoggingService } from "../../../core/logging/services/logging.service";
 
 export interface WebhookEventData {
   id: string;

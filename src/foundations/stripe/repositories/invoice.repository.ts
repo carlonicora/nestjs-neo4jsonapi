@@ -1,0 +1,241 @@
+import { Injectable, OnModuleInit } from "@nestjs/common";
+import { randomUUID } from "crypto";
+import { Neo4jService } from "@carlonicora/nestjs-neo4jsonapi";
+import { billingCustomerMeta } from "../entities/billing-customer.meta";
+import { Invoice, InvoiceStatus } from "../entities/invoice.entity";
+import { invoiceMeta } from "../entities/invoice.meta";
+import { InvoiceModel } from "../entities/invoice.model";
+import { subscriptionMeta } from "../entities/subscription.meta";
+
+@Injectable()
+export class InvoiceRepository implements OnModuleInit {
+  constructor(private readonly neo4j: Neo4jService) {}
+
+  async onModuleInit() {
+    await this.neo4j.writeOne({
+      query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_id IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.id IS UNIQUE`,
+    });
+
+    await this.neo4j.writeOne({
+      query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
+    });
+  }
+
+  async findByBillingCustomerId(params: {
+    billingCustomerId: string;
+    status?: InvoiceStatus;
+    limit?: number;
+  }): Promise<Invoice[]> {
+    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+
+    const whereParams: string[] = [];
+    if (params.status) {
+      query.queryParams.status = params.status;
+      whereParams.push(`${invoiceMeta.nodeName}.status = $status`);
+    }
+
+    const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
+
+    query.queryParams.billingCustomerId = params.billingCustomerId;
+    query.queryParams.limit = params.limit ?? 100;
+
+    query.query = `
+      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
+      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})
+      WHERE 1=1 ${where}
+      RETURN ${invoiceMeta.nodeName}, ${subscriptionMeta.nodeName}
+      ORDER BY ${invoiceMeta.nodeName}.createdAt DESC
+      LIMIT $limit
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  async findById(params: { id: string }): Promise<Invoice | null> {
+    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+
+    query.queryParams = {
+      id: params.id,
+    };
+
+    query.query = `
+      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})
+      RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${subscriptionMeta.nodeName}
+    `;
+
+    return this.neo4j.readOne(query);
+  }
+
+  async findByStripeInvoiceId(params: { stripeInvoiceId: string }): Promise<Invoice | null> {
+    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+
+    query.queryParams = {
+      stripeInvoiceId: params.stripeInvoiceId,
+    };
+
+    query.query = `
+      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      RETURN ${invoiceMeta.nodeName}
+    `;
+
+    return this.neo4j.readOne(query);
+  }
+
+  async create(params: {
+    billingCustomerId: string;
+    subscriptionId?: string;
+    stripeInvoiceId: string;
+    stripeInvoiceNumber: string | null;
+    stripeHostedInvoiceUrl: string | null;
+    stripePdfUrl: string | null;
+    status: InvoiceStatus;
+    currency: string;
+    amountDue: number;
+    amountPaid: number;
+    amountRemaining: number;
+    subtotal: number;
+    total: number;
+    tax: number | null;
+    periodStart: Date;
+    periodEnd: Date;
+    dueDate: Date | null;
+    paidAt: Date | null;
+    attemptCount: number;
+    attempted: boolean;
+  }): Promise<Invoice> {
+    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+
+    const id = randomUUID();
+
+    query.queryParams = {
+      id,
+      billingCustomerId: params.billingCustomerId,
+      subscriptionId: params.subscriptionId ?? null,
+      stripeInvoiceId: params.stripeInvoiceId,
+      stripeInvoiceNumber: params.stripeInvoiceNumber,
+      stripeHostedInvoiceUrl: params.stripeHostedInvoiceUrl,
+      stripePdfUrl: params.stripePdfUrl,
+      status: params.status,
+      currency: params.currency,
+      amountDue: params.amountDue,
+      amountPaid: params.amountPaid,
+      amountRemaining: params.amountRemaining,
+      subtotal: params.subtotal,
+      total: params.total,
+      tax: params.tax,
+      periodStart: params.periodStart.toISOString(),
+      periodEnd: params.periodEnd.toISOString(),
+      dueDate: params.dueDate?.toISOString() ?? null,
+      paidAt: params.paidAt?.toISOString() ?? null,
+      attemptCount: params.attemptCount,
+      attempted: params.attempted,
+    };
+
+    const subscriptionMatch = params.subscriptionId
+      ? `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`
+      : "";
+    const subscriptionRelation = params.subscriptionId
+      ? `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName})`
+      : "";
+
+    query.query = `
+      MATCH (${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
+      ${subscriptionMatch}
+      CREATE (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {
+        id: $id,
+        stripeInvoiceId: $stripeInvoiceId,
+        stripeInvoiceNumber: $stripeInvoiceNumber,
+        stripeHostedInvoiceUrl: $stripeHostedInvoiceUrl,
+        stripePdfUrl: $stripePdfUrl,
+        status: $status,
+        currency: $currency,
+        amountDue: $amountDue,
+        amountPaid: $amountPaid,
+        amountRemaining: $amountRemaining,
+        subtotal: $subtotal,
+        total: $total,
+        tax: $tax,
+        periodStart: datetime($periodStart),
+        periodEnd: datetime($periodEnd),
+        dueDate: CASE WHEN $dueDate IS NOT NULL THEN datetime($dueDate) ELSE null END,
+        paidAt: CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END,
+        attemptCount: $attemptCount,
+        attempted: $attempted,
+        createdAt: datetime(),
+        updatedAt: datetime()
+      })
+      CREATE (${invoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})
+      ${subscriptionRelation}
+      RETURN ${invoiceMeta.nodeName}
+    `;
+
+    return this.neo4j.writeOne(query);
+  }
+
+  async updateByStripeInvoiceId(params: {
+    stripeInvoiceId: string;
+    status?: InvoiceStatus;
+    amountDue?: number;
+    amountPaid?: number;
+    amountRemaining?: number;
+    paidAt?: Date | null;
+    attemptCount?: number;
+    attempted?: boolean;
+    stripeHostedInvoiceUrl?: string;
+    stripePdfUrl?: string;
+  }): Promise<Invoice> {
+    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+
+    const setParams: string[] = [`${invoiceMeta.nodeName}.updatedAt = datetime()`];
+
+    query.queryParams = { stripeInvoiceId: params.stripeInvoiceId };
+
+    if (params.status !== undefined) {
+      query.queryParams.status = params.status;
+      setParams.push(`${invoiceMeta.nodeName}.status = $status`);
+    }
+    if (params.amountDue !== undefined) {
+      query.queryParams.amountDue = params.amountDue;
+      setParams.push(`${invoiceMeta.nodeName}.amountDue = $amountDue`);
+    }
+    if (params.amountPaid !== undefined) {
+      query.queryParams.amountPaid = params.amountPaid;
+      setParams.push(`${invoiceMeta.nodeName}.amountPaid = $amountPaid`);
+    }
+    if (params.amountRemaining !== undefined) {
+      query.queryParams.amountRemaining = params.amountRemaining;
+      setParams.push(`${invoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
+    }
+    if (params.paidAt !== undefined) {
+      query.queryParams.paidAt = params.paidAt?.toISOString() ?? null;
+      setParams.push(
+        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+      );
+    }
+    if (params.attemptCount !== undefined) {
+      query.queryParams.attemptCount = params.attemptCount;
+      setParams.push(`${invoiceMeta.nodeName}.attemptCount = $attemptCount`);
+    }
+    if (params.attempted !== undefined) {
+      query.queryParams.attempted = params.attempted;
+      setParams.push(`${invoiceMeta.nodeName}.attempted = $attempted`);
+    }
+    if (params.stripeHostedInvoiceUrl !== undefined) {
+      query.queryParams.stripeHostedInvoiceUrl = params.stripeHostedInvoiceUrl;
+      setParams.push(`${invoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
+    }
+    if (params.stripePdfUrl !== undefined) {
+      query.queryParams.stripePdfUrl = params.stripePdfUrl;
+      setParams.push(`${invoiceMeta.nodeName}.stripePdfUrl = $stripePdfUrl`);
+    }
+
+    query.query = `
+      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      SET ${setParams.join(", ")}
+      RETURN ${invoiceMeta.nodeName}
+    `;
+
+    return this.neo4j.writeOne(query);
+  }
+}
