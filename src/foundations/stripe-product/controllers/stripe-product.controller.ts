@@ -15,7 +15,7 @@ import {
 import { FastifyReply } from "fastify";
 import { RoleId } from "../../../common/constants/system.roles";
 import { Roles } from "../../../common/decorators";
-import { AdminJwtAuthGuard } from "../../../common/guards";
+import { AdminJwtAuthGuard, JwtAuthGuard } from "../../../common/guards";
 import { StripeProductPostDTO, StripeProductPutDTO } from "../dtos/stripe-product.dto";
 import { stripeProductMeta } from "../entities/stripe-product.meta";
 import { StripeProductAdminService } from "../services/stripe-product-admin.service";
@@ -51,8 +51,8 @@ export class StripeProductController {
   // Admin: Product endpoints
 
   @Get(stripeProductMeta.endpoint)
-  @UseGuards(AdminJwtAuthGuard)
-  @Roles(RoleId.Administrator)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async listProducts(@Res() reply: FastifyReply, @Query() query: any, @Query("active") active?: string) {
     const response = await this.stripeProductAdminService.listProducts({
       query,
@@ -63,8 +63,8 @@ export class StripeProductController {
   }
 
   @Get(`${stripeProductMeta.endpoint}/:id`)
-  @UseGuards(AdminJwtAuthGuard)
-  @Roles(RoleId.Administrator)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async getProduct(@Res() reply: FastifyReply, @Param("id") id: string) {
     const response = await this.stripeProductAdminService.getProduct({ id });
     reply.send(response);

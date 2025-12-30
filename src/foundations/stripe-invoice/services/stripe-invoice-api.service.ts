@@ -1,26 +1,26 @@
 import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { StripeService } from "./stripe.service";
-import { HandleStripeErrors } from "../errors/stripe.errors";
+import { StripeService } from "../../stripe/services/stripe.service";
+import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
 
 /**
- * Stripe Invoice Service
+ * Stripe Invoice API Service
  *
  * Manages Stripe invoices including retrieval, listing, and payment operations.
  * Provides access to upcoming invoices for subscription previews.
  *
  * @example
  * ```typescript
- * const invoice = await stripeInvoiceService.retrieveInvoice('in_abc123');
+ * const invoice = await stripeInvoiceApiService.retrieveInvoice('in_abc123');
  *
- * const invoices = await stripeInvoiceService.listInvoices({
+ * const invoices = await stripeInvoiceApiService.listInvoices({
  *   stripeCustomerId: 'cus_abc123',
  *   status: 'paid',
  * });
  * ```
  */
 @Injectable()
-export class StripeInvoiceService {
+export class StripeInvoiceApiService {
   constructor(private readonly stripeService: StripeService) {}
 
   /**

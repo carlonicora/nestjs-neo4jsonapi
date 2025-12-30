@@ -6,14 +6,14 @@ jest.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { Neo4jService } from "../../../../core/neo4j";
-import { InvoiceRepository } from "../invoice.repository";
-import { invoiceMeta } from "../../entities/invoice.meta";
-import { billingCustomerMeta } from "../../entities/billing-customer.meta";
+import { StripeInvoiceRepository } from "../stripe-invoice.repository";
+import { stripeInvoiceMeta } from "../../entities/stripe-invoice.meta";
+import { billingCustomerMeta } from "../../../stripe/entities/billing-customer.meta";
 import { stripeSubscriptionMeta } from "../../../stripe-subscription/entities/stripe-subscription.meta";
-import { Invoice, InvoiceStatus } from "../../entities/invoice.entity";
+import { StripeInvoice, StripeInvoiceStatus } from "../../entities/stripe-invoice.entity";
 
-describe("InvoiceRepository", () => {
-  let repository: InvoiceRepository;
+describe("StripeInvoiceRepository", () => {
+  let repository: StripeInvoiceRepository;
   let neo4jService: jest.Mocked<Neo4jService>;
 
   // Test data constants
@@ -33,7 +33,7 @@ describe("InvoiceRepository", () => {
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   };
 
-  const MOCK_INVOICE: Invoice = {
+  const MOCK_INVOICE: StripeInvoice = {
     id: TEST_IDS.invoiceId,
     stripeInvoiceId: TEST_IDS.stripeInvoiceId,
     stripeInvoiceNumber: "ABC-1234",
@@ -73,7 +73,7 @@ describe("InvoiceRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        InvoiceRepository,
+        StripeInvoiceRepository,
         {
           provide: Neo4jService,
           useValue: mockNeo4jService,
@@ -81,7 +81,7 @@ describe("InvoiceRepository", () => {
       ],
     }).compile();
 
-    repository = module.get<InvoiceRepository>(InvoiceRepository);
+    repository = module.get<StripeInvoiceRepository>(StripeInvoiceRepository);
     neo4jService = module.get<Neo4jService>(Neo4jService) as jest.Mocked<Neo4jService>;
 
     // Reset mocks before each test
@@ -99,7 +99,7 @@ describe("InvoiceRepository", () => {
       await repository.onModuleInit();
 
       expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_id IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.id IS UNIQUE`,
+        query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_id IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.id IS UNIQUE`,
       });
     });
 
@@ -109,7 +109,7 @@ describe("InvoiceRepository", () => {
       await repository.onModuleInit();
 
       expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
+        query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
       });
     });
 
@@ -147,15 +147,15 @@ describe("InvoiceRepository", () => {
         limit: 100,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
+        `OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(`WHERE 1=1`);
-      expect(mockQuery.query).not.toContain(`${invoiceMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`RETURN ${invoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
-      expect(mockQuery.query).toContain(`ORDER BY ${invoiceMeta.nodeName}.createdAt DESC`);
+      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC`);
       expect(mockQuery.query).toContain(`LIMIT $limit`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_INVOICE]);
@@ -176,7 +176,7 @@ describe("InvoiceRepository", () => {
         status: "paid",
         limit: 100,
       });
-      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${invoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${stripeInvoiceMeta.nodeName}.status = $status`);
       expect(result).toEqual([MOCK_INVOICE]);
     });
 
@@ -223,7 +223,7 @@ describe("InvoiceRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
 
-      const statuses: InvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
+      const statuses: StripeInvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
 
       for (const status of statuses) {
         jest.clearAllMocks();
@@ -258,7 +258,7 @@ describe("InvoiceRepository", () => {
         billingCustomerId: TEST_IDS.billingCustomerId,
       });
 
-      expect(mockQuery.query).toContain(`ORDER BY ${invoiceMeta.nodeName}.createdAt DESC`);
+      expect(mockQuery.query).toContain(`ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC`);
     });
 
     it("should use OPTIONAL MATCH for subscription relationship", async () => {
@@ -272,7 +272,7 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.query).toContain("OPTIONAL MATCH");
       expect(mockQuery.query).toContain(
-        `(${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
+        `(${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
     });
   });
@@ -292,13 +292,13 @@ describe("InvoiceRepository", () => {
         id: TEST_IDS.invoiceId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
+        `OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`,
+        `RETURN ${stripeInvoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
@@ -332,7 +332,7 @@ describe("InvoiceRepository", () => {
       await repository.findById({ id: TEST_IDS.invoiceId });
 
       expect(mockQuery.query).toContain(
-        `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
     });
 
@@ -364,9 +364,9 @@ describe("InvoiceRepository", () => {
         stripeInvoiceId: TEST_IDS.stripeInvoiceId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})`,
       );
-      expect(mockQuery.query).toContain(`RETURN ${invoiceMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`RETURN ${stripeInvoiceMeta.nodeName}`);
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
     });
@@ -413,7 +413,7 @@ describe("InvoiceRepository", () => {
       stripeInvoiceNumber: "ABC-1234",
       stripeHostedInvoiceUrl: "https://stripe.com/invoice/test123",
       stripePdfUrl: "https://stripe.com/invoice/test123.pdf",
-      status: "open" as InvoiceStatus,
+      status: "open" as StripeInvoiceStatus,
       currency: "usd",
       amountDue: 5000,
       amountPaid: 0,
@@ -468,14 +468,14 @@ describe("InvoiceRepository", () => {
       expect(mockQuery.query).not.toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${invoiceMeta.nodeName}:${invoiceMeta.labelName}`);
+      expect(mockQuery.query).toContain(`CREATE (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}`);
       expect(mockQuery.query).toContain("createdAt: datetime()");
       expect(mockQuery.query).toContain("updatedAt: datetime()");
       expect(mockQuery.query).toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})`,
+        `CREATE (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})`,
       );
       expect(mockQuery.query).not.toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
@@ -498,7 +498,7 @@ describe("InvoiceRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 
@@ -643,12 +643,12 @@ describe("InvoiceRepository", () => {
       expect(mockQuery.queryParams.total).toBe(5000);
     });
 
-    it("should create invoice with all InvoiceStatus values", async () => {
+    it("should create invoice with all StripeInvoiceStatus values", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(MOCK_INVOICE);
 
-      const statuses: InvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
+      const statuses: StripeInvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
 
       for (const status of statuses) {
         jest.clearAllMocks();
@@ -670,7 +670,7 @@ describe("InvoiceRepository", () => {
 
       const paramsWithPaidAt = {
         ...validCreateParams,
-        status: "paid" as InvoiceStatus,
+        status: "paid" as StripeInvoiceStatus,
         paidAt: MOCK_DATES.paidAt,
         amountPaid: 5000,
         amountRemaining: 0,
@@ -707,15 +707,15 @@ describe("InvoiceRepository", () => {
 
       const params = {
         stripeInvoiceId: TEST_IDS.stripeInvoiceId,
-        status: "paid" as InvoiceStatus,
+        status: "paid" as StripeInvoiceStatus,
       };
 
       const result = await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.stripeInvoiceId).toBe(TEST_IDS.stripeInvoiceId);
       expect(mockQuery.queryParams.status).toBe("paid");
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
     });
@@ -733,7 +733,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.amountDue).toBe(6000);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountDue = $amountDue`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountDue = $amountDue`);
     });
 
     it("should update amountPaid field", async () => {
@@ -749,7 +749,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.amountPaid).toBe(5000);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountPaid = $amountPaid`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountPaid = $amountPaid`);
     });
 
     it("should update amountRemaining field", async () => {
@@ -765,7 +765,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.amountRemaining).toBe(0);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
     });
 
     it("should update paidAt field with Date value", async () => {
@@ -782,7 +782,7 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.queryParams.paidAt).toBe(MOCK_DATES.paidAt.toISOString());
       expect(mockQuery.query).toContain(
-        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
       );
     });
 
@@ -800,7 +800,7 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.queryParams.paidAt).toBeNull();
       expect(mockQuery.query).toContain(
-        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
       );
     });
 
@@ -817,7 +817,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.attemptCount).toBe(2);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attemptCount = $attemptCount`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attemptCount = $attemptCount`);
     });
 
     it("should update attempted field", async () => {
@@ -833,7 +833,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.attempted).toBe(true);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attempted = $attempted`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attempted = $attempted`);
     });
 
     it("should update stripeHostedInvoiceUrl field", async () => {
@@ -849,7 +849,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.stripeHostedInvoiceUrl).toBe("https://stripe.com/invoice/updated");
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
     });
 
     it("should update stripePdfUrl field", async () => {
@@ -865,7 +865,7 @@ describe("InvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.stripePdfUrl).toBe("https://stripe.com/invoice/updated.pdf");
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.stripePdfUrl = $stripePdfUrl`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.stripePdfUrl = $stripePdfUrl`);
     });
 
     it("should update multiple fields at once", async () => {
@@ -875,7 +875,7 @@ describe("InvoiceRepository", () => {
 
       const params = {
         stripeInvoiceId: TEST_IDS.stripeInvoiceId,
-        status: "paid" as InvoiceStatus,
+        status: "paid" as StripeInvoiceStatus,
         amountPaid: 5000,
         amountRemaining: 0,
         paidAt: MOCK_DATES.paidAt,
@@ -885,14 +885,14 @@ describe("InvoiceRepository", () => {
 
       await repository.updateByStripeInvoiceId(params);
 
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountPaid = $amountPaid`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountPaid = $amountPaid`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
       expect(mockQuery.query).toContain(
-        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
       );
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attemptCount = $attemptCount`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attempted = $attempted`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attemptCount = $attemptCount`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attempted = $attempted`);
       expect(mockQuery.queryParams).toMatchObject({
         status: "paid",
         amountPaid: 5000,
@@ -914,9 +914,9 @@ describe("InvoiceRepository", () => {
 
       await repository.updateByStripeInvoiceId(params);
 
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).not.toContain(`${invoiceMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).not.toContain(`${invoiceMeta.nodeName}.amountDue = $amountDue`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.amountDue = $amountDue`);
     });
 
     it("should always update updatedAt timestamp", async () => {
@@ -929,7 +929,7 @@ describe("InvoiceRepository", () => {
         status: "paid",
       });
 
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`);
     });
 
     it("should handle update errors", async () => {
@@ -956,10 +956,10 @@ describe("InvoiceRepository", () => {
         attemptCount: 0,
       });
 
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountDue = $amountDue`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountPaid = $amountPaid`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attemptCount = $attemptCount`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountDue = $amountDue`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountPaid = $amountPaid`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attemptCount = $attemptCount`);
       expect(mockQuery.queryParams.amountDue).toBe(0);
       expect(mockQuery.queryParams.amountPaid).toBe(0);
       expect(mockQuery.queryParams.amountRemaining).toBe(0);
@@ -976,16 +976,16 @@ describe("InvoiceRepository", () => {
         attempted: false,
       });
 
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.attempted = $attempted`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.attempted = $attempted`);
       expect(mockQuery.queryParams.attempted).toBe(false);
     });
 
-    it("should update all InvoiceStatus values", async () => {
+    it("should update all StripeInvoiceStatus values", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(MOCK_INVOICE);
 
-      const statuses: InvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
+      const statuses: StripeInvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
 
       for (const status of statuses) {
         jest.clearAllMocks();
@@ -1007,7 +1007,7 @@ describe("InvoiceRepository", () => {
 
       const params = {
         stripeInvoiceId: TEST_IDS.stripeInvoiceId,
-        status: "void" as InvoiceStatus,
+        status: "void" as StripeInvoiceStatus,
         paidAt: null,
       };
 
@@ -1015,7 +1015,7 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.queryParams.paidAt).toBeNull();
       expect(mockQuery.query).toContain(
-        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
       );
     });
   });
@@ -1295,7 +1295,7 @@ describe("InvoiceRepository", () => {
       });
 
       expect(mockQuery.query).not.toContain(`MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
-      expect(mockQuery.query).not.toContain(`CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
+      expect(mockQuery.query).not.toContain(`CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
     });
 
     it("should build query with subscription MATCH when subscriptionId provided", async () => {
@@ -1330,7 +1330,7 @@ describe("InvoiceRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 
@@ -1344,7 +1344,7 @@ describe("InvoiceRepository", () => {
       });
 
       expect(mockQuery.query).toContain("WHERE 1=1");
-      expect(mockQuery.query).not.toContain(`${invoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
     });
 
     it("should build query with status filter when status provided", async () => {
@@ -1358,7 +1358,7 @@ describe("InvoiceRepository", () => {
       });
 
       expect(mockQuery.query).toContain("WHERE 1=1 AND");
-      expect(mockQuery.query).toContain(`${invoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
     });
   });
 });

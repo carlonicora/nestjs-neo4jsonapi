@@ -66,7 +66,8 @@ export class StripeSubscriptionAdminService {
 
     const customer = await this.billingCustomerRepository.findByCompanyId({ companyId: params.companyId });
     if (!customer) {
-      throw new HttpException("Billing customer not found for this company", HttpStatus.NOT_FOUND);
+      // No billing customer yet = no subscriptions. Return empty list.
+      return this.jsonApiService.buildList(StripeSubscriptionModel, [], paginator);
     }
 
     const subscriptions = await this.subscriptionRepository.findByBillingCustomerId({

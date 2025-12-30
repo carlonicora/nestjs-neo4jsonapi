@@ -38,16 +38,16 @@ import { getQueueToken } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import { NotificationService, PaymentFailureNotificationParams } from "../notification.service";
 import { BillingCustomerRepository } from "../../repositories/billing-customer.repository";
-import { InvoiceRepository } from "../../repositories/invoice.repository";
+import { StripeInvoiceRepository } from "../../../stripe-invoice/repositories/stripe-invoice.repository";
 import { AppLoggingService } from "../../../../core/logging";
 import { BillingCustomer } from "../../entities/billing-customer.entity";
-import { Invoice } from "../../entities/invoice.entity";
+import { StripeInvoice } from "../../../stripe-invoice/entities/stripe-invoice.entity";
 
 describe("NotificationService", () => {
   let service: NotificationService;
   let emailQueue: jest.Mocked<Queue>;
   let billingCustomerRepository: jest.Mocked<BillingCustomerRepository>;
-  let invoiceRepository: jest.Mocked<InvoiceRepository>;
+  let stripeInvoiceRepository: jest.Mocked<StripeInvoiceRepository>;
   let logger: jest.Mocked<AppLoggingService>;
 
   // Test data constants
@@ -77,7 +77,7 @@ describe("NotificationService", () => {
     name: null,
   };
 
-  const MOCK_INVOICE: Invoice = {
+  const MOCK_INVOICE: StripeInvoice = {
     id: "invoice_123",
     stripeInvoiceId: TEST_IDS.stripeInvoiceId,
     stripeInvoiceNumber: "INV-2025-001",
@@ -111,7 +111,7 @@ describe("NotificationService", () => {
       findByStripeCustomerId: jest.fn(),
     };
 
-    const mockInvoiceRepository = {
+    const mockStripeInvoiceRepository = {
       findByStripeInvoiceId: jest.fn(),
     };
 
@@ -135,8 +135,8 @@ describe("NotificationService", () => {
           useValue: mockBillingCustomerRepository,
         },
         {
-          provide: InvoiceRepository,
-          useValue: mockInvoiceRepository,
+          provide: StripeInvoiceRepository,
+          useValue: mockStripeInvoiceRepository,
         },
         {
           provide: AppLoggingService,
@@ -148,7 +148,7 @@ describe("NotificationService", () => {
     service = module.get<NotificationService>(NotificationService);
     emailQueue = module.get(getQueueToken("email"));
     billingCustomerRepository = module.get(BillingCustomerRepository);
-    invoiceRepository = module.get(InvoiceRepository);
+    stripeInvoiceRepository = module.get(StripeInvoiceRepository);
     logger = module.get(AppLoggingService);
   });
 
@@ -169,7 +169,7 @@ describe("NotificationService", () => {
     describe("Happy Path", () => {
       it("should queue payment failure email with all parameters", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
@@ -177,7 +177,7 @@ describe("NotificationService", () => {
         expect(billingCustomerRepository.findByStripeCustomerId).toHaveBeenCalledWith({
           stripeCustomerId: TEST_IDS.stripeCustomerId,
         });
-        expect(invoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
           stripeInvoiceId: TEST_IDS.stripeInvoiceId,
         });
         expect(emailQueue.add).toHaveBeenCalledWith(
@@ -228,7 +228,7 @@ describe("NotificationService", () => {
         expect(billingCustomerRepository.findByStripeCustomerId).toHaveBeenCalledWith({
           stripeCustomerId: TEST_IDS.stripeCustomerId,
         });
-        expect(invoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
         expect(emailQueue.add).toHaveBeenCalledWith(
           "billing-notification",
           {
@@ -262,12 +262,12 @@ describe("NotificationService", () => {
 
       it("should fetch invoice details when stripeInvoiceId is provided", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
 
-        expect(invoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
           stripeInvoiceId: TEST_IDS.stripeInvoiceId,
         });
       });
@@ -282,12 +282,12 @@ describe("NotificationService", () => {
 
         await service.sendPaymentFailedEmail(paramsWithoutInvoice);
 
-        expect(invoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
       });
 
       it("should include invoice URL and number from invoice details", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
@@ -376,7 +376,7 @@ describe("NotificationService", () => {
         expect(logger.warn).toHaveBeenCalledWith(
           `Cannot send payment failure notification: Customer ${TEST_IDS.stripeCustomerId} not found in Neo4j`,
         );
-        expect(invoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
         expect(emailQueue.add).not.toHaveBeenCalled();
         expect(logger.log).not.toHaveBeenCalled();
       });
@@ -435,7 +435,7 @@ describe("NotificationService", () => {
     describe("Payload Structure", () => {
       it("should include all required payload fields", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
@@ -522,7 +522,7 @@ describe("NotificationService", () => {
     describe("Logging", () => {
       it("should log success message with invoice ID when invoice provided", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
@@ -551,7 +551,7 @@ describe("NotificationService", () => {
     describe("Edge Cases", () => {
       it("should handle invoice not found gracefully", async () => {
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(baseParams);
@@ -611,7 +611,7 @@ describe("NotificationService", () => {
         };
 
         billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE);
         emailQueue.add.mockResolvedValue({} as any);
 
         await service.sendPaymentFailedEmail(exactParams);

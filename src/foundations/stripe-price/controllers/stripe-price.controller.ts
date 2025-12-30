@@ -15,7 +15,7 @@ import {
 import { FastifyReply } from "fastify";
 import { RoleId } from "../../../common/constants/system.roles";
 import { Roles } from "../../../common/decorators";
-import { AdminJwtAuthGuard } from "../../../common/guards";
+import { AdminJwtAuthGuard, JwtAuthGuard } from "../../../common/guards";
 import { StripePricePostDTO, StripePricePutDTO } from "../dtos/stripe-price.dto";
 import { stripePriceMeta } from "../entities/stripe-price.meta";
 import { StripePriceAdminService } from "../services/stripe-price-admin.service";
@@ -44,8 +44,8 @@ export class StripePriceController {
    * Requires: Admin authentication
    */
   @Get(stripePriceMeta.endpoint)
-  @UseGuards(AdminJwtAuthGuard)
-  @Roles(RoleId.Administrator)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async listPrices(
     @Res() reply: FastifyReply,
     @Query() query: any,
@@ -69,8 +69,8 @@ export class StripePriceController {
    * Requires: Admin authentication
    */
   @Get(`${stripePriceMeta.endpoint}/:id`)
-  @UseGuards(AdminJwtAuthGuard)
-  @Roles(RoleId.Administrator)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async getPrice(@Res() reply: FastifyReply, @Param("id") id: string) {
     const response = await this.stripePriceAdminService.getPrice({ id });
     reply.send(response);

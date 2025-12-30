@@ -6,7 +6,7 @@ import { WebhookEventRepository } from "../repositories/webhook-event.repository
 import { StripeSubscriptionAdminService } from "../../stripe-subscription/services/stripe-subscription-admin.service";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
 import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
-import { InvoiceRepository } from "../repositories/invoice.repository";
+import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
 import { NotificationService } from "../services/notification.service";
 
 export interface WebhookJobData {
@@ -23,7 +23,7 @@ export class WebhookProcessor extends WorkerHost {
     private readonly subscriptionService: StripeSubscriptionAdminService,
     private readonly billingCustomerRepository: BillingCustomerRepository,
     private readonly subscriptionRepository: StripeSubscriptionRepository,
-    private readonly invoiceRepository: InvoiceRepository,
+    private readonly stripeInvoiceRepository: StripeInvoiceRepository,
     private readonly notificationService: NotificationService,
     private readonly logger: AppLoggingService,
   ) {
@@ -124,13 +124,13 @@ export class WebhookProcessor extends WorkerHost {
       this.logger.warn(`Payment failed for invoice ${invoice.id} (customer: ${stripeCustomerId})`);
 
       // Find the invoice in our database
-      const localInvoice = await this.invoiceRepository.findByStripeInvoiceId({
+      const localInvoice = await this.stripeInvoiceRepository.findByStripeInvoiceId({
         stripeInvoiceId: invoice.id,
       });
 
       if (localInvoice) {
         // Update invoice status to failed and increment attempt count
-        await this.invoiceRepository.updateByStripeInvoiceId({
+        await this.stripeInvoiceRepository.updateByStripeInvoiceId({
           stripeInvoiceId: invoice.id,
           status: "uncollectible",
           attemptCount: invoice.attempt_count ?? 0,

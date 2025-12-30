@@ -5,19 +5,19 @@ import { AbstractJsonApiSerialiser } from "../../../core/jsonapi";
 import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
 import { JsonApiDataInterface } from "../../../core/jsonapi";
 import { JsonApiServiceInterface } from "../../../core/jsonapi";
-import { BillingCustomerModel } from "../entities/billing-customer.model";
-import { Invoice } from "../entities/invoice.entity";
-import { InvoiceModel } from "../entities/invoice.model";
+import { BillingCustomerModel } from "../../stripe/entities/billing-customer.model";
+import { StripeInvoice } from "../entities/stripe-invoice.entity";
+import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
 import { StripeSubscriptionModel } from "../../stripe-subscription/entities/stripe-subscription.model";
 
 @Injectable()
-export class InvoiceSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
+export class StripeInvoiceSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
   constructor(serialiserFactory: JsonApiSerialiserFactory, config: ConfigService<ConfigInterface>) {
     super(serialiserFactory, config);
   }
 
   get type(): string {
-    return InvoiceModel.type;
+    return StripeInvoiceModel.type;
   }
 
   create(): JsonApiDataInterface {
@@ -34,10 +34,10 @@ export class InvoiceSerialiser extends AbstractJsonApiSerialiser implements Json
       subtotal: "subtotal",
       total: "total",
       tax: "tax",
-      periodStart: (data: Invoice) => data.periodStart?.toISOString(),
-      periodEnd: (data: Invoice) => data.periodEnd?.toISOString(),
-      dueDate: (data: Invoice) => data.dueDate?.toISOString(),
-      paidAt: (data: Invoice) => data.paidAt?.toISOString(),
+      periodStart: (data: StripeInvoice) => data.periodStart?.toISOString(),
+      periodEnd: (data: StripeInvoice) => data.periodEnd?.toISOString(),
+      dueDate: (data: StripeInvoice) => data.dueDate?.toISOString(),
+      paidAt: (data: StripeInvoice) => data.paidAt?.toISOString(),
       attemptCount: "attemptCount",
       attempted: "attempted",
     };

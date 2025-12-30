@@ -21,16 +21,13 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 import { CreateCustomerDTO } from "../dtos/create-customer.dto";
 import { CreateSetupIntentDTO } from "../dtos/create-setup-intent.dto";
 import { ReportUsageDTO } from "../dtos/report-usage.dto";
-import { InvoiceStatus } from "../entities/invoice.entity";
 import { BillingService } from "../services/billing.service";
-import { InvoiceService } from "../services/invoice.service";
 import { UsageService } from "../services/usage.service";
 
 @Controller("billing")
 export class BillingController {
   constructor(
     private readonly billingService: BillingService,
-    private readonly invoiceService: InvoiceService,
     private readonly usageService: UsageService,
   ) {}
 
@@ -125,52 +122,6 @@ export class BillingController {
     });
 
     reply.send();
-  }
-
-  // Invoice endpoints
-
-  @Get("invoices")
-  async listInvoices(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Query() query: any,
-    @Query("status") status?: InvoiceStatus,
-  ) {
-    const response = await this.invoiceService.listInvoices({
-      companyId: req.user.companyId,
-      query,
-      status,
-    });
-
-    reply.send(response);
-  }
-
-  @Get("invoices/upcoming")
-  async getUpcomingInvoice(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Query("subscriptionId") subscriptionId?: string,
-  ) {
-    const response = await this.invoiceService.getUpcomingInvoice({
-      companyId: req.user.companyId,
-      subscriptionId,
-    });
-
-    reply.send(response);
-  }
-
-  @Get("invoices/:invoiceId")
-  async getInvoice(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("invoiceId") invoiceId: string,
-  ) {
-    const response = await this.invoiceService.getInvoice({
-      id: invoiceId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
   }
 
   // Usage endpoints

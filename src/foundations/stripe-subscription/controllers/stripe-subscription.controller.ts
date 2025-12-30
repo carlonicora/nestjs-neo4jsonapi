@@ -1,10 +1,11 @@
-import { Body, Controller, Get, HttpStatus, Param, Post, Query, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
+import { JwtAuthGuard, RoleId, Roles } from "../../../common";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import {
-  StripeSubscriptionPostDTO,
   StripeSubscriptionCancelDTO,
   StripeSubscriptionChangePlanDTO,
+  StripeSubscriptionPostDTO,
 } from "../dtos/stripe-subscription.dto";
 import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
 import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
@@ -15,6 +16,8 @@ export class StripeSubscriptionController {
   constructor(private readonly subscriptionService: StripeSubscriptionAdminService) {}
 
   @Get(stripeSubscriptionMeta.endpoint)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async listSubscriptions(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -31,6 +34,8 @@ export class StripeSubscriptionController {
   }
 
   @Get(`${stripeSubscriptionMeta.endpoint}/:subscriptionId`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async getSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -45,6 +50,8 @@ export class StripeSubscriptionController {
   }
 
   @Post(`${stripeSubscriptionMeta.endpoint}`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async createSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -62,6 +69,8 @@ export class StripeSubscriptionController {
   }
 
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/cancel`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async cancelSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -78,6 +87,8 @@ export class StripeSubscriptionController {
   }
 
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/pause`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async pauseSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -92,6 +103,8 @@ export class StripeSubscriptionController {
   }
 
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/resume`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async resumeSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -106,6 +119,8 @@ export class StripeSubscriptionController {
   }
 
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/change-plan`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async changePlan(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -127,6 +142,8 @@ export class StripeSubscriptionController {
   }
 
   @Get(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/proration-preview`)
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
   async previewProration(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,

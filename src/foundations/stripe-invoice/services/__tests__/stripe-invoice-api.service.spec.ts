@@ -1,18 +1,18 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { StripeInvoiceService } from "./stripe.invoice.service";
-import { StripeService } from "./stripe.service";
-import { StripeError } from "../errors/stripe.errors";
-import { createMockStripeClient, MockStripeClient } from "../__tests__/mocks/stripe.mock";
+import { StripeInvoiceApiService } from "../stripe-invoice-api.service";
+import { StripeService } from "../../../stripe/services/stripe.service";
+import { StripeError } from "../../../stripe/errors/stripe.errors";
+import { createMockStripeClient, MockStripeClient } from "../../../stripe/__tests__/mocks/stripe.mock";
 import {
   MOCK_INVOICE,
   TEST_IDS,
   STRIPE_INVALID_REQUEST_ERROR,
   STRIPE_API_ERROR,
-} from "../__tests__/fixtures/stripe.fixtures";
+} from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 import Stripe from "stripe";
 
-describe("StripeInvoiceService", () => {
-  let service: StripeInvoiceService;
+describe("StripeInvoiceApiService", () => {
+  let service: StripeInvoiceApiService;
   let stripeService: jest.Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
@@ -26,7 +26,7 @@ describe("StripeInvoiceService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        StripeInvoiceService,
+        StripeInvoiceApiService,
         {
           provide: StripeService,
           useValue: mockStripeService,
@@ -34,7 +34,7 @@ describe("StripeInvoiceService", () => {
       ],
     }).compile();
 
-    service = module.get<StripeInvoiceService>(StripeInvoiceService);
+    service = module.get<StripeInvoiceApiService>(StripeInvoiceApiService);
     stripeService = module.get(StripeService);
   });
 

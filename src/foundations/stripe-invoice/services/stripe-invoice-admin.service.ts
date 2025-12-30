@@ -3,15 +3,15 @@ import Stripe from "stripe";
 import { JsonApiDataInterface } from "../../../core/jsonapi";
 import { JsonApiPaginator } from "../../../core/jsonapi";
 import { JsonApiService } from "../../../core/jsonapi";
-import { StripeInvoiceService } from "./stripe.invoice.service";
-import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
-import { InvoiceRepository } from "../repositories/invoice.repository";
+import { StripeInvoiceApiService } from "./stripe-invoice-api.service";
+import { BillingCustomerRepository } from "../../stripe/repositories/billing-customer.repository";
+import { StripeInvoiceRepository } from "../repositories/stripe-invoice.repository";
 import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
-import { InvoiceModel } from "../entities/invoice.model";
-import { InvoiceStatus } from "../entities/invoice.entity";
+import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
+import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 
 /**
- * InvoiceService
+ * StripeInvoiceAdminService
  *
  * Manages invoice retrieval and synchronization for billing customers.
  * Provides access to invoice history, upcoming invoices, and maintains sync with Stripe.
@@ -27,12 +27,12 @@ import { InvoiceStatus } from "../entities/invoice.entity";
  * for subscriptions or one-time charges.
  */
 @Injectable()
-export class InvoiceService {
+export class StripeInvoiceAdminService {
   constructor(
-    private readonly invoiceRepository: InvoiceRepository,
+    private readonly stripeInvoiceRepository: StripeInvoiceRepository,
     private readonly billingCustomerRepository: BillingCustomerRepository,
     private readonly subscriptionRepository: StripeSubscriptionRepository,
-    private readonly stripeInvoiceService: StripeInvoiceService,
+    private readonly stripeInvoiceApiService: StripeInvoiceApiService,
     private readonly jsonApiService: JsonApiService,
   ) {}
 
@@ -48,14 +48,14 @@ export class InvoiceService {
    *
    * @example
    * ```typescript
-   * const invoices = await invoiceService.listInvoices({
+   * const invoices = await stripeInvoiceAdminService.listInvoices({
    *   companyId: 'company_123',
    *   query: { page: { number: 1, size: 10 } },
    *   status: 'paid'
    * });
    * ```
    */
-  async listInvoices(params: { companyId: string; query: any; status?: InvoiceStatus }): Promise<JsonApiDataInterface> {
+  async listInvoices(params: { companyId: string; query: any; status?: StripeInvoiceStatus }): Promise<JsonApiDataInterface> {
     const paginator = new JsonApiPaginator(params.query);
 
     const customer = await this.billingCustomerRepository.findByCompanyId({ companyId: params.companyId });
@@ -63,12 +63,12 @@ export class InvoiceService {
       throw new HttpException("Billing customer not found for this company", HttpStatus.NOT_FOUND);
     }
 
-    const invoices = await this.invoiceRepository.findByBillingCustomerId({
+    const invoices = await this.stripeInvoiceRepository.findByBillingCustomerId({
       billingCustomerId: customer.id,
       status: params.status,
     });
 
-    return this.jsonApiService.buildList(InvoiceModel, invoices, paginator);
+    return this.jsonApiService.buildList(StripeInvoiceModel, invoices, paginator);
   }
 
   /**
@@ -82,7 +82,7 @@ export class InvoiceService {
    * @throws {HttpException} FORBIDDEN if invoice doesn't belong to company
    */
   async getInvoice(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
-    const invoice = await this.invoiceRepository.findById({ id: params.id });
+    const invoice = await this.stripeInvoiceRepository.findById({ id: params.id });
 
     if (!invoice) {
       throw new HttpException("Invoice not found", HttpStatus.NOT_FOUND);
@@ -93,7 +93,7 @@ export class InvoiceService {
       throw new HttpException("Invoice does not belong to this company", HttpStatus.FORBIDDEN);
     }
 
-    return this.jsonApiService.buildSingle(InvoiceModel, invoice);
+    return this.jsonApiService.buildSingle(StripeInvoiceModel, invoice);
   }
 
   /**
@@ -110,7 +110,7 @@ export class InvoiceService {
    *
    * @example
    * ```typescript
-   * const upcoming = await invoiceService.getUpcomingInvoice({
+   * const upcoming = await stripeInvoiceAdminService.getUpcomingInvoice({
    *   companyId: 'company_123',
    *   subscriptionId: 'sub_456'
    * });
@@ -133,7 +133,7 @@ export class InvoiceService {
       subscriptionStripeId = subscription.stripeSubscriptionId;
     }
 
-    const upcomingInvoice: Stripe.UpcomingInvoice = await this.stripeInvoiceService.getUpcomingInvoice({
+    const upcomingInvoice: Stripe.UpcomingInvoice = await this.stripeInvoiceApiService.getUpcomingInvoice({
       customerId: customer.stripeCustomerId,
       subscriptionId: subscriptionStripeId,
     });
@@ -171,13 +171,13 @@ export class InvoiceService {
    * @example
    * ```typescript
    * // Called from webhook handler
-   * await invoiceService.syncInvoiceFromStripe({
+   * await stripeInvoiceAdminService.syncInvoiceFromStripe({
    *   stripeInvoiceId: 'in_1234567890'
    * });
    * ```
    */
   async syncInvoiceFromStripe(params: { stripeInvoiceId: string }): Promise<void> {
-    const stripeInvoice: Stripe.Invoice = await this.stripeInvoiceService.getInvoice(params.stripeInvoiceId);
+    const stripeInvoice: Stripe.Invoice = await this.stripeInvoiceApiService.getInvoice(params.stripeInvoiceId);
 
     const stripeCustomerId =
       typeof stripeInvoice.customer === "string" ? stripeInvoice.customer : stripeInvoice.customer?.id;
@@ -190,7 +190,7 @@ export class InvoiceService {
       return;
     }
 
-    const existingInvoice = await this.invoiceRepository.findByStripeInvoiceId({
+    const existingInvoice = await this.stripeInvoiceRepository.findByStripeInvoiceId({
       stripeInvoiceId: stripeInvoice.id,
     });
 
@@ -209,9 +209,9 @@ export class InvoiceService {
     }
 
     if (existingInvoice) {
-      await this.invoiceRepository.updateByStripeInvoiceId({
+      await this.stripeInvoiceRepository.updateByStripeInvoiceId({
         stripeInvoiceId: stripeInvoice.id,
-        status: stripeInvoice.status as InvoiceStatus,
+        status: stripeInvoice.status as StripeInvoiceStatus,
         amountDue: stripeInvoice.amount_due,
         amountPaid: stripeInvoice.amount_paid,
         amountRemaining: stripeInvoice.amount_remaining,
@@ -230,14 +230,14 @@ export class InvoiceService {
           ? stripeInvoice.total - (stripeInvoice.total_excluding_tax ?? 0)
           : null;
 
-      await this.invoiceRepository.create({
+      await this.stripeInvoiceRepository.create({
         billingCustomerId: customer.id,
         subscriptionId,
         stripeInvoiceId: stripeInvoice.id,
         stripeInvoiceNumber: stripeInvoice.number,
         stripeHostedInvoiceUrl: stripeInvoice.hosted_invoice_url,
         stripePdfUrl: stripeInvoice.invoice_pdf,
-        status: stripeInvoice.status as InvoiceStatus,
+        status: stripeInvoice.status as StripeInvoiceStatus,
         currency: stripeInvoice.currency,
         amountDue: stripeInvoice.amount_due,
         amountPaid: stripeInvoice.amount_paid,

@@ -35,15 +35,12 @@ import { HttpStatus } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { BillingController } from "../billing.controller";
 import { BillingService } from "../../services/billing.service";
-import { InvoiceService } from "../../services/invoice.service";
 import { UsageService } from "../../services/usage.service";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
-import type { InvoiceStatus } from "../../entities/invoice.entity";
 
 describe("BillingController", () => {
   let controller: BillingController;
   let billingService: jest.Mocked<BillingService>;
-  let invoiceService: jest.Mocked<InvoiceService>;
   let usageService: jest.Mocked<UsageService>;
   let mockReply: jest.Mocked<FastifyReply>;
 
@@ -64,17 +61,6 @@ describe("BillingController", () => {
         stripeCustomerId: TEST_IDS.customerId,
         email: "test@example.com",
         name: "Test Customer",
-      },
-    },
-  };
-
-  const MOCK_INVOICE_RESPONSE = {
-    data: {
-      type: "invoices",
-      id: TEST_IDS.invoiceId,
-      attributes: {
-        stripeInvoiceId: "stripe_inv_123",
-        status: "paid" as InvoiceStatus,
       },
     },
   };
@@ -110,12 +96,6 @@ describe("BillingController", () => {
       removePaymentMethod: jest.fn(),
     };
 
-    const mockInvoiceService = {
-      listInvoices: jest.fn(),
-      getUpcomingInvoice: jest.fn(),
-      getInvoice: jest.fn(),
-    };
-
     const mockUsageService = {
       listMeters: jest.fn(),
       getMeterEventSummaries: jest.fn(),
@@ -132,10 +112,6 @@ describe("BillingController", () => {
           useValue: mockBillingService,
         },
         {
-          provide: InvoiceService,
-          useValue: mockInvoiceService,
-        },
-        {
           provide: UsageService,
           useValue: mockUsageService,
         },
@@ -144,7 +120,6 @@ describe("BillingController", () => {
 
     controller = module.get<BillingController>(BillingController);
     billingService = module.get(BillingService);
-    invoiceService = module.get(InvoiceService);
     usageService = module.get(UsageService);
 
     mockReply = createMockReply();
@@ -435,151 +410,6 @@ describe("BillingController", () => {
         await expect(controller.removePaymentMethod(req, mockReply, TEST_IDS.paymentMethodId)).rejects.toThrow(
           "Cannot remove default payment method",
         );
-      });
-    });
-  });
-
-  // ===================================================================
-  // ===================================================================
-  // INVOICE ENDPOINTS (3 endpoints)
-  // ===================================================================
-
-  describe("Invoice Endpoints", () => {
-    describe("GET /billing/invoices", () => {
-      it("should list all invoices without status filter", async () => {
-        const req = createMockRequest();
-        const mockQuery = { page: { size: 10, number: 1 } };
-        const mockInvoices = { data: [MOCK_INVOICE_RESPONSE.data] };
-        invoiceService.listInvoices.mockResolvedValue(mockInvoices);
-
-        await controller.listInvoices(req, mockReply, mockQuery, undefined);
-
-        expect(invoiceService.listInvoices).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          query: mockQuery,
-          status: undefined,
-        });
-        expect(mockReply.send).toHaveBeenCalledWith(mockInvoices);
-      });
-
-      it("should list invoices with status filter", async () => {
-        const req = createMockRequest();
-        const mockQuery = { page: { size: 10, number: 1 } };
-        const status: InvoiceStatus = "paid";
-        const mockInvoices = { data: [MOCK_INVOICE_RESPONSE.data] };
-        invoiceService.listInvoices.mockResolvedValue(mockInvoices);
-
-        await controller.listInvoices(req, mockReply, mockQuery, status);
-
-        expect(invoiceService.listInvoices).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          query: mockQuery,
-          status,
-        });
-        expect(mockReply.send).toHaveBeenCalledWith(mockInvoices);
-      });
-
-      it("should pass query object from query params", async () => {
-        const req = createMockRequest();
-        const customQuery = { filter: { paid: true }, sort: "-created" };
-        invoiceService.listInvoices.mockResolvedValue({ data: [] });
-
-        await controller.listInvoices(req, mockReply, customQuery, undefined);
-
-        expect(invoiceService.listInvoices).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          query: customQuery,
-          status: undefined,
-        });
-      });
-    });
-
-    describe("GET /billing/invoices/upcoming", () => {
-      it("should get upcoming invoice without subscriptionId", async () => {
-        const req = createMockRequest();
-        const mockUpcomingInvoice = {
-          data: {
-            type: "invoices",
-            attributes: { amount: 5000, period: "upcoming" },
-          },
-        };
-        invoiceService.getUpcomingInvoice.mockResolvedValue(mockUpcomingInvoice);
-
-        await controller.getUpcomingInvoice(req, mockReply, undefined);
-
-        expect(invoiceService.getUpcomingInvoice).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          subscriptionId: undefined,
-        });
-        expect(mockReply.send).toHaveBeenCalledWith(mockUpcomingInvoice);
-      });
-
-      it("should get upcoming invoice with subscriptionId", async () => {
-        const req = createMockRequest();
-        const mockUpcomingInvoice = {
-          data: {
-            type: "invoices",
-            attributes: { amount: 5000, period: "upcoming" },
-          },
-        };
-        invoiceService.getUpcomingInvoice.mockResolvedValue(mockUpcomingInvoice);
-
-        await controller.getUpcomingInvoice(req, mockReply, TEST_IDS.subscriptionId);
-
-        expect(invoiceService.getUpcomingInvoice).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          subscriptionId: TEST_IDS.subscriptionId,
-        });
-        expect(mockReply.send).toHaveBeenCalledWith(mockUpcomingInvoice);
-      });
-
-      it("should extract subscriptionId from query params when provided", async () => {
-        const req = createMockRequest();
-        const customSubscriptionId = "sub_upcoming_invoice_123";
-        invoiceService.getUpcomingInvoice.mockResolvedValue({} as any);
-
-        await controller.getUpcomingInvoice(req, mockReply, customSubscriptionId);
-
-        expect(invoiceService.getUpcomingInvoice).toHaveBeenCalledWith({
-          companyId: TEST_IDS.companyId,
-          subscriptionId: customSubscriptionId,
-        });
-      });
-    });
-
-    describe("GET /billing/invoices/:invoiceId", () => {
-      it("should get invoice by id successfully", async () => {
-        const req = createMockRequest();
-        invoiceService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE);
-
-        await controller.getInvoice(req, mockReply, TEST_IDS.invoiceId);
-
-        expect(invoiceService.getInvoice).toHaveBeenCalledWith({
-          id: TEST_IDS.invoiceId,
-          companyId: TEST_IDS.companyId,
-        });
-        expect(mockReply.send).toHaveBeenCalledWith(MOCK_INVOICE_RESPONSE);
-      });
-
-      it("should extract invoiceId from path params", async () => {
-        const req = createMockRequest();
-        const customInvoiceId = "in_custom_456";
-        invoiceService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE);
-
-        await controller.getInvoice(req, mockReply, customInvoiceId);
-
-        expect(invoiceService.getInvoice).toHaveBeenCalledWith({
-          id: customInvoiceId,
-          companyId: TEST_IDS.companyId,
-        });
-      });
-
-      it("should handle service errors", async () => {
-        const req = createMockRequest();
-        const error = new Error("Invoice not found");
-        invoiceService.getInvoice.mockRejectedValue(error);
-
-        await expect(controller.getInvoice(req, mockReply, TEST_IDS.invoiceId)).rejects.toThrow("Invoice not found");
       });
     });
   });
@@ -1024,9 +854,8 @@ describe("BillingController", () => {
   // ===================================================================
 
   describe("Integration Tests", () => {
-    it("should have all 3 service dependencies injected", () => {
+    it("should have all 2 service dependencies injected", () => {
       expect(controller["billingService"]).toBeDefined();
-      expect(controller["invoiceService"]).toBeDefined();
       expect(controller["usageService"]).toBeDefined();
     });
 
@@ -1036,16 +865,11 @@ describe("BillingController", () => {
 
       // Mock all services
       billingService.getCustomer.mockResolvedValue({} as any);
-      invoiceService.listInvoices.mockResolvedValue({ data: [] });
       usageService.listMeters.mockResolvedValue({ data: [] });
 
       // Test customer endpoint
       await controller.getCustomer(req, createMockReply());
       expect(billingService.getCustomer).toHaveBeenCalledWith(expect.objectContaining({ companyId: customCompanyId }));
-
-      // Test invoice endpoint
-      await controller.listInvoices(req, createMockReply(), {}, undefined);
-      expect(invoiceService.listInvoices).toHaveBeenCalledWith(expect.objectContaining({ companyId: customCompanyId }));
     });
 
     it("should handle multiple validation errors correctly", async () => {

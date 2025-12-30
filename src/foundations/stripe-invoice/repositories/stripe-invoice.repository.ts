@@ -1,14 +1,14 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
-import { billingCustomerMeta } from "../entities/billing-customer.meta";
-import { Invoice, InvoiceStatus } from "../entities/invoice.entity";
-import { invoiceMeta } from "../entities/invoice.meta";
-import { InvoiceModel } from "../entities/invoice.model";
+import { billingCustomerMeta } from "../../stripe/entities/billing-customer.meta";
+import { StripeInvoice, StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
+import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
+import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
 import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 
 /**
- * InvoiceRepository
+ * StripeInvoiceRepository
  *
  * Neo4j repository for managing Invoice nodes and their relationships to BillingCustomer and Subscription nodes.
  * Handles invoice history storage with status tracking and relationships.
@@ -25,7 +25,7 @@ import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/strip
  *
  * @example
  * ```typescript
- * const invoice = await invoiceRepository.create({
+ * const invoice = await stripeInvoiceRepository.create({
  *   billingCustomerId: 'cust_123',
  *   subscriptionId: 'sub_456',
  *   stripeInvoiceId: 'in_stripe789',
@@ -47,7 +47,7 @@ import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/strip
  * ```
  */
 @Injectable()
-export class InvoiceRepository implements OnModuleInit {
+export class StripeInvoiceRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
   /**
@@ -57,11 +57,11 @@ export class InvoiceRepository implements OnModuleInit {
    */
   async onModuleInit() {
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_id IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.id IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_id IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.id IS UNIQUE`,
     });
 
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${invoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${invoiceMeta.nodeName}:${invoiceMeta.labelName}) REQUIRE ${invoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
     });
   }
 
@@ -76,15 +76,15 @@ export class InvoiceRepository implements OnModuleInit {
    */
   async findByBillingCustomerId(params: {
     billingCustomerId: string;
-    status?: InvoiceStatus;
+    status?: StripeInvoiceStatus;
     limit?: number;
-  }): Promise<Invoice[]> {
-    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+  }): Promise<StripeInvoice[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
 
     const whereParams: string[] = [];
     if (params.status) {
       query.queryParams.status = params.status;
-      whereParams.push(`${invoiceMeta.nodeName}.status = $status`);
+      whereParams.push(`${stripeInvoiceMeta.nodeName}.status = $status`);
     }
 
     const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
@@ -93,11 +93,11 @@ export class InvoiceRepository implements OnModuleInit {
     query.queryParams.limit = params.limit ?? 100;
 
     query.query = `
-      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
-      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
+      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
+      OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
       WHERE 1=1 ${where}
-      RETURN ${invoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
-      ORDER BY ${invoiceMeta.nodeName}.createdAt DESC
+      RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
+      ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC
       LIMIT $limit
     `;
 
@@ -111,17 +111,17 @@ export class InvoiceRepository implements OnModuleInit {
    * @param params.id - Internal invoice ID
    * @returns Invoice if found, null otherwise
    */
-  async findById(params: { id: string }): Promise<Invoice | null> {
-    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+  async findById(params: { id: string }): Promise<StripeInvoice | null> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
 
     query.queryParams = {
       id: params.id,
     };
 
     query.query = `
-      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
-      RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
+      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
+      RETURN ${stripeInvoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -134,16 +134,16 @@ export class InvoiceRepository implements OnModuleInit {
    * @param params.stripeInvoiceId - Stripe invoice ID
    * @returns Invoice if found, null otherwise
    */
-  async findByStripeInvoiceId(params: { stripeInvoiceId: string }): Promise<Invoice | null> {
-    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+  async findByStripeInvoiceId(params: { stripeInvoiceId: string }): Promise<StripeInvoice | null> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
 
     query.queryParams = {
       stripeInvoiceId: params.stripeInvoiceId,
     };
 
     query.query = `
-      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
-      RETURN ${invoiceMeta.nodeName}
+      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      RETURN ${stripeInvoiceMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -185,7 +185,7 @@ export class InvoiceRepository implements OnModuleInit {
     stripeInvoiceNumber: string | null;
     stripeHostedInvoiceUrl: string | null;
     stripePdfUrl: string | null;
-    status: InvoiceStatus;
+    status: StripeInvoiceStatus;
     currency: string;
     amountDue: number;
     amountPaid: number;
@@ -199,8 +199,8 @@ export class InvoiceRepository implements OnModuleInit {
     paidAt: Date | null;
     attemptCount: number;
     attempted: boolean;
-  }): Promise<Invoice> {
-    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+  }): Promise<StripeInvoice> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
 
     const id = randomUUID();
 
@@ -232,13 +232,13 @@ export class InvoiceRepository implements OnModuleInit {
       ? `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`
       : "";
     const subscriptionRelation = params.subscriptionId
-      ? `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`
+      ? `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`
       : "";
 
     query.query = `
       MATCH (${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
       ${subscriptionMatch}
-      CREATE (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {
+      CREATE (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {
         id: $id,
         stripeInvoiceId: $stripeInvoiceId,
         stripeInvoiceNumber: $stripeInvoiceNumber,
@@ -261,9 +261,9 @@ export class InvoiceRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${invoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})
+      CREATE (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})
       ${subscriptionRelation}
-      RETURN ${invoiceMeta.nodeName}
+      RETURN ${stripeInvoiceMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -289,7 +289,7 @@ export class InvoiceRepository implements OnModuleInit {
    */
   async updateByStripeInvoiceId(params: {
     stripeInvoiceId: string;
-    status?: InvoiceStatus;
+    status?: StripeInvoiceStatus;
     amountDue?: number;
     amountPaid?: number;
     amountRemaining?: number;
@@ -298,56 +298,56 @@ export class InvoiceRepository implements OnModuleInit {
     attempted?: boolean;
     stripeHostedInvoiceUrl?: string;
     stripePdfUrl?: string;
-  }): Promise<Invoice> {
-    const query = this.neo4j.initQuery({ serialiser: InvoiceModel });
+  }): Promise<StripeInvoice> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
 
-    const setParams: string[] = [`${invoiceMeta.nodeName}.updatedAt = datetime()`];
+    const setParams: string[] = [`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`];
 
     query.queryParams = { stripeInvoiceId: params.stripeInvoiceId };
 
     if (params.status !== undefined) {
       query.queryParams.status = params.status;
-      setParams.push(`${invoiceMeta.nodeName}.status = $status`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.status = $status`);
     }
     if (params.amountDue !== undefined) {
       query.queryParams.amountDue = params.amountDue;
-      setParams.push(`${invoiceMeta.nodeName}.amountDue = $amountDue`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.amountDue = $amountDue`);
     }
     if (params.amountPaid !== undefined) {
       query.queryParams.amountPaid = params.amountPaid;
-      setParams.push(`${invoiceMeta.nodeName}.amountPaid = $amountPaid`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.amountPaid = $amountPaid`);
     }
     if (params.amountRemaining !== undefined) {
       query.queryParams.amountRemaining = params.amountRemaining;
-      setParams.push(`${invoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.amountRemaining = $amountRemaining`);
     }
     if (params.paidAt !== undefined) {
       query.queryParams.paidAt = params.paidAt?.toISOString() ?? null;
       setParams.push(
-        `${invoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
       );
     }
     if (params.attemptCount !== undefined) {
       query.queryParams.attemptCount = params.attemptCount;
-      setParams.push(`${invoiceMeta.nodeName}.attemptCount = $attemptCount`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.attemptCount = $attemptCount`);
     }
     if (params.attempted !== undefined) {
       query.queryParams.attempted = params.attempted;
-      setParams.push(`${invoiceMeta.nodeName}.attempted = $attempted`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.attempted = $attempted`);
     }
     if (params.stripeHostedInvoiceUrl !== undefined) {
       query.queryParams.stripeHostedInvoiceUrl = params.stripeHostedInvoiceUrl;
-      setParams.push(`${invoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
     }
     if (params.stripePdfUrl !== undefined) {
       query.queryParams.stripePdfUrl = params.stripePdfUrl;
-      setParams.push(`${invoiceMeta.nodeName}.stripePdfUrl = $stripePdfUrl`);
+      setParams.push(`${stripeInvoiceMeta.nodeName}.stripePdfUrl = $stripePdfUrl`);
     }
 
     query.query = `
-      MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
       SET ${setParams.join(", ")}
-      RETURN ${invoiceMeta.nodeName}
+      RETURN ${stripeInvoiceMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);

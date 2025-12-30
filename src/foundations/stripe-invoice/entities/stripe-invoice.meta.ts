@@ -1,6 +1,6 @@
 import { DataMeta } from "../../../common/interfaces/datamodel.interface";
 
-export const invoiceMeta: DataMeta = {
+export const stripeInvoiceMeta: DataMeta = {
   type: "invoices",
   endpoint: "invoices",
   nodeName: "invoice",

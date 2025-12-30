@@ -4,7 +4,7 @@ import { Queue } from "bullmq";
 import { AppLoggingService } from "../../../core/logging";
 import { QueueId } from "../../../config/enums/queue.id";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
-import { InvoiceRepository } from "../repositories/invoice.repository";
+import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
 
 export interface PaymentFailureNotificationParams {
   stripeCustomerId: string;
@@ -47,7 +47,7 @@ export class NotificationService {
   constructor(
     @InjectQueue(QueueId.EMAIL) private readonly emailQueue: Queue,
     private readonly billingCustomerRepository: BillingCustomerRepository,
-    private readonly invoiceRepository: InvoiceRepository,
+    private readonly stripeInvoiceRepository: StripeInvoiceRepository,
     private readonly logger: AppLoggingService,
   ) {}
 
@@ -93,7 +93,7 @@ export class NotificationService {
       // Get invoice details if available
       let invoiceDetails = null;
       if (stripeInvoiceId) {
-        invoiceDetails = await this.invoiceRepository.findByStripeInvoiceId({ stripeInvoiceId });
+        invoiceDetails = await this.stripeInvoiceRepository.findByStripeInvoiceId({ stripeInvoiceId });
       }
 
       // Queue email notification (non-blocking)

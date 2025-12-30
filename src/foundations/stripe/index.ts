@@ -15,7 +15,6 @@ export * from "./controllers/webhook.controller";
 // Services - Stripe API Wrappers
 export * from "./services/stripe.service";
 export * from "./services/stripe.customer.service";
-export * from "./services/stripe.invoice.service";
 export * from "./services/stripe.payment.service";
 export * from "./services/stripe.portal.service";
 export * from "./services/stripe.usage.service";
@@ -23,13 +22,11 @@ export * from "./services/stripe.webhook.service";
 
 // Services - Business Logic
 export * from "./services/billing.service";
-export * from "./services/invoice.service";
 export * from "./services/usage.service";
 export * from "./services/notification.service";
 
 // Repositories
 export * from "./repositories/billing-customer.repository";
-export * from "./repositories/invoice.repository";
 export * from "./repositories/usage-record.repository";
 export * from "./repositories/webhook-event.repository";
 
@@ -37,9 +34,6 @@ export * from "./repositories/webhook-event.repository";
 export * from "./entities/billing-customer.entity";
 export * from "./entities/billing-customer.model";
 export * from "./entities/billing-customer.meta";
-export * from "./entities/invoice.entity";
-export * from "./entities/invoice.model";
-export * from "./entities/invoice.meta";
 export * from "./entities/usage-record.entity";
 export * from "./entities/usage-record.model";
 export * from "./entities/usage-record.meta";
@@ -49,7 +43,6 @@ export * from "./entities/webhook-event.meta";
 
 // Serializers
 export * from "./serialisers/billing-customer.serialiser";
-export * from "./serialisers/invoice.serialiser";
 export * from "./serialisers/usage-record.serialiser";
 export * from "./serialisers/webhook-event.serialiser";
 
@@ -69,3 +62,6 @@ export * from "../stripe-price";
 
 // Re-export stripe-subscription module for backward compatibility
 export * from "../stripe-subscription";
+
+// Re-export stripe-invoice module for backward compatibility
+export * from "../stripe-invoice";

@@ -1,16 +1,16 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { BillingCustomer } from "../entities/billing-customer.entity";
+import { BillingCustomer } from "../../stripe/entities/billing-customer.entity";
 import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription.entity";
 
-export type InvoiceStatus = "draft" | "open" | "paid" | "uncollectible" | "void";
+export type StripeInvoiceStatus = "draft" | "open" | "paid" | "uncollectible" | "void";
 
-export type Invoice = Entity & {
+export type StripeInvoice = Entity & {
   stripeInvoiceId: string;
   stripeInvoiceNumber: string | null;
   stripeHostedInvoiceUrl: string | null;
   stripePdfUrl: string | null;
 
-  status: InvoiceStatus;
+  status: StripeInvoiceStatus;
   currency: string;
   amountDue: number;
   amountPaid: number;

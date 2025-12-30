@@ -46,7 +46,7 @@ import { WebhookEventRepository } from "../../repositories/webhook-event.reposit
 import { StripeSubscriptionAdminService } from "../../../stripe-subscription/services/stripe-subscription-admin.service";
 import { BillingCustomerRepository } from "../../repositories/billing-customer.repository";
 import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
-import { InvoiceRepository } from "../../repositories/invoice.repository";
+import { StripeInvoiceRepository } from "../../../stripe-invoice/repositories/stripe-invoice.repository";
 import { NotificationService } from "../../services/notification.service";
 import { AppLoggingService } from "../../../../core/logging";
 
@@ -56,7 +56,7 @@ describe("WebhookProcessor", () => {
   let subscriptionService: jest.Mocked<StripeSubscriptionAdminService>;
   let billingCustomerRepository: jest.Mocked<BillingCustomerRepository>;
   let subscriptionRepository: jest.Mocked<StripeSubscriptionRepository>;
-  let invoiceRepository: jest.Mocked<InvoiceRepository>;
+  let stripeInvoiceRepository: jest.Mocked<StripeInvoiceRepository>;
   let notificationService: jest.Mocked<NotificationService>;
   let logger: jest.Mocked<AppLoggingService>;
 
@@ -99,7 +99,7 @@ describe("WebhookProcessor", () => {
       cancelAllByStripeCustomerId: jest.fn(),
     };
 
-    const mockInvoiceRepository = {
+    const mockStripeInvoiceRepository = {
       findByStripeInvoiceId: jest.fn(),
       updateByStripeInvoiceId: jest.fn(),
     };
@@ -136,8 +136,8 @@ describe("WebhookProcessor", () => {
           useValue: mockStripeSubscriptionRepository,
         },
         {
-          provide: InvoiceRepository,
-          useValue: mockInvoiceRepository,
+          provide: StripeInvoiceRepository,
+          useValue: mockStripeInvoiceRepository,
         },
         {
           provide: NotificationService,
@@ -155,7 +155,7 @@ describe("WebhookProcessor", () => {
     subscriptionService = module.get(StripeSubscriptionAdminService);
     billingCustomerRepository = module.get(BillingCustomerRepository);
     subscriptionRepository = module.get(StripeSubscriptionRepository);
-    invoiceRepository = module.get(InvoiceRepository);
+    stripeInvoiceRepository = module.get(StripeInvoiceRepository);
     notificationService = module.get(NotificationService);
     logger = module.get(AppLoggingService);
   });
@@ -470,16 +470,16 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
 
-        expect(invoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
           stripeInvoiceId: TEST_IDS.invoiceId,
         });
       });
@@ -638,11 +638,11 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
@@ -665,11 +665,11 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
@@ -695,7 +695,7 @@ describe("WebhookProcessor", () => {
         await processor.process(job);
 
         expect(logger.warn).toHaveBeenCalledWith(`Invoice ${TEST_IDS.invoiceId} has no customer ID`);
-        expect(invoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).not.toHaveBeenCalled();
         expect(notificationService.sendPaymentFailedEmail).not.toHaveBeenCalled();
       });
     });
@@ -712,11 +712,11 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
@@ -737,16 +737,16 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
 
-        expect(invoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
+        expect(stripeInvoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
           stripeInvoiceId: TEST_IDS.invoiceId,
         });
       });
@@ -762,16 +762,16 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
 
-        expect(invoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith({
+        expect(stripeInvoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith({
           stripeInvoiceId: TEST_IDS.invoiceId,
           status: "uncollectible",
           attemptCount: 3,
@@ -790,16 +790,16 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
 
-        expect(invoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith(
+        expect(stripeInvoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith(
           expect.objectContaining({
             attemptCount: 0,
           }),
@@ -820,11 +820,11 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
         await processor.process(job);
@@ -850,11 +850,11 @@ describe("WebhookProcessor", () => {
         const notificationError = new Error("Email service unavailable");
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockRejectedValue(notificationError);
 
         await expect(processor.process(job)).resolves.not.toThrow();
@@ -875,11 +875,11 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
           id: "invoice_db_123",
           stripeInvoiceId: TEST_IDS.invoiceId,
         } as any);
-        invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+        stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
         notificationService.sendPaymentFailedEmail.mockRejectedValue("String error");
 
         await expect(processor.process(job)).resolves.not.toThrow();
@@ -900,14 +900,14 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
 
         await processor.process(job);
 
         expect(logger.warn).toHaveBeenCalledWith(
           `Invoice ${TEST_IDS.invoiceId} not found in local database - skipping notification`,
         );
-        expect(invoiceRepository.updateByStripeInvoiceId).not.toHaveBeenCalled();
+        expect(stripeInvoiceRepository.updateByStripeInvoiceId).not.toHaveBeenCalled();
         expect(notificationService.sendPaymentFailedEmail).not.toHaveBeenCalled();
       });
     });
@@ -1007,7 +1007,7 @@ describe("WebhookProcessor", () => {
         const job = createMockJob("invoice.payment_failed", payload);
 
         webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-        invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
+        stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
 
         await processor.process(job);
 
@@ -1342,11 +1342,11 @@ describe("WebhookProcessor", () => {
       const job = createMockJob("invoice.payment_failed", payload);
 
       webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-      invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+      stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
         id: "invoice_db_123",
         stripeInvoiceId: TEST_IDS.invoiceId,
       } as any);
-      invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+      stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
       notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
       await processor.process(job);
@@ -1442,11 +1442,11 @@ describe("WebhookProcessor", () => {
       const job = createMockJob("invoice.payment_failed", payload);
 
       webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-      invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+      stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
         id: "invoice_db_123",
         stripeInvoiceId: TEST_IDS.invoiceId,
       } as any);
-      invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+      stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
       notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
       await processor.process(job);
@@ -1528,11 +1528,11 @@ describe("WebhookProcessor", () => {
       const job = createMockJob("invoice.payment_failed", payload);
 
       webhookEventRepository.updateStatus.mockResolvedValue({} as any);
-      invoiceRepository.findByStripeInvoiceId.mockResolvedValue({
+      stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue({
         id: "invoice_db_123",
         stripeInvoiceId: TEST_IDS.invoiceId,
       } as any);
-      invoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
+      stripeInvoiceRepository.updateByStripeInvoiceId.mockResolvedValue({} as any);
       notificationService.sendPaymentFailedEmail.mockResolvedValue({} as any);
 
       await processor.process(job);
@@ -1544,10 +1544,10 @@ describe("WebhookProcessor", () => {
       expect(logger.warn).toHaveBeenCalledWith(
         `Payment failed for invoice ${TEST_IDS.invoiceId} (customer: ${TEST_IDS.customerId})`,
       );
-      expect(invoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
+      expect(stripeInvoiceRepository.findByStripeInvoiceId).toHaveBeenCalledWith({
         stripeInvoiceId: TEST_IDS.invoiceId,
       });
-      expect(invoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith({
+      expect(stripeInvoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledWith({
         stripeInvoiceId: TEST_IDS.invoiceId,
         status: "uncollectible",
         attemptCount: 2,

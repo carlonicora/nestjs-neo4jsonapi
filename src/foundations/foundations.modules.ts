@@ -16,6 +16,7 @@ import { PushModule } from "./push/push.module";
 import { RelevancyModule } from "./relevancy/relevancy.module";
 import { RoleModule } from "./role/role.module";
 import { S3Module } from "./s3/s3.module";
+import { StripeInvoiceModule } from "./stripe-invoice/stripe-invoice.module";
 import { StripePriceModule } from "./stripe-price";
 import { StripeProductModule } from "./stripe-product";
 import { StripeSubscriptionModule } from "./stripe-subscription";
@@ -57,6 +58,7 @@ const STATIC_FOUNDATION_MODULES = [
   StripeSubscriptionModule,
   StripePriceModule,
   StripeProductModule,
+  StripeInvoiceModule,
 ];
 
 /**
