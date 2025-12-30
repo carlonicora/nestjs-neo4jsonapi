@@ -1,5 +1,5 @@
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
-import { subscriptionMeta } from "../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 import { UsageRecord } from "../entities/usage-record.entity";
 import { mapUsageRecord } from "../entities/usage-record.map";
 import { usageRecordMeta } from "../entities/usage-record.meta";
@@ -10,6 +10,6 @@ export const UsageRecordModel: DataModelInterface<UsageRecord> = {
   entity: undefined as unknown as UsageRecord,
   mapper: mapUsageRecord,
   serialiser: UsageRecordSerialiser,
-  singleChildrenTokens: [subscriptionMeta.nodeName],
+  singleChildrenTokens: [stripeSubscriptionMeta.nodeName],
   childrenTokens: [],
 };

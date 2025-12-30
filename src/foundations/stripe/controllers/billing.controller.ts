@@ -20,20 +20,16 @@ import { RoleId } from "../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CreateCustomerDTO } from "../dtos/create-customer.dto";
 import { CreateSetupIntentDTO } from "../dtos/create-setup-intent.dto";
-import { CancelSubscriptionDTO, CreateSubscriptionDTO, UpdateSubscriptionDTO } from "../dtos/create-subscription.dto";
 import { ReportUsageDTO } from "../dtos/report-usage.dto";
 import { InvoiceStatus } from "../entities/invoice.entity";
-import { SubscriptionStatus } from "../entities/subscription.entity";
 import { BillingService } from "../services/billing.service";
 import { InvoiceService } from "../services/invoice.service";
-import { SubscriptionService } from "../services/subscription.service";
 import { UsageService } from "../services/usage.service";
 
 @Controller("billing")
 export class BillingController {
   constructor(
     private readonly billingService: BillingService,
-    private readonly subscriptionService: SubscriptionService,
     private readonly invoiceService: InvoiceService,
     private readonly usageService: UsageService,
   ) {}
@@ -129,141 +125,6 @@ export class BillingController {
     });
 
     reply.send();
-  }
-
-  // Subscription endpoints
-
-  @Get("subscriptions")
-  async listSubscriptions(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Query() query: any,
-    @Query("status") status?: SubscriptionStatus,
-  ) {
-    const response = await this.subscriptionService.listSubscriptions({
-      companyId: req.user.companyId,
-      query,
-      status,
-    });
-
-    reply.send(response);
-  }
-
-  @Get("subscriptions/:subscriptionId")
-  async getSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-  ) {
-    const response = await this.subscriptionService.getSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
-  }
-
-  @Post("subscriptions")
-  async createSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Body() body: CreateSubscriptionDTO,
-  ) {
-    const response = await this.subscriptionService.createSubscription({
-      companyId: req.user.companyId,
-      priceId: body.priceId,
-      paymentMethodId: body.paymentMethodId,
-      trialPeriodDays: body.trialPeriodDays,
-      quantity: body.quantity,
-    });
-
-    reply.status(HttpStatus.CREATED).send(response);
-  }
-
-  @Post("subscriptions/:subscriptionId/cancel")
-  async cancelSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-    @Body() body: CancelSubscriptionDTO,
-  ) {
-    const response = await this.subscriptionService.cancelSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-      cancelImmediately: body.cancelImmediately,
-    });
-
-    reply.send(response);
-  }
-
-  @Post("subscriptions/:subscriptionId/pause")
-  async pauseSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-  ) {
-    const response = await this.subscriptionService.pauseSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
-  }
-
-  @Post("subscriptions/:subscriptionId/resume")
-  async resumeSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-  ) {
-    const response = await this.subscriptionService.resumeSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
-  }
-
-  @Post("subscriptions/:subscriptionId/change-plan")
-  async changePlan(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-    @Body() body: UpdateSubscriptionDTO,
-  ) {
-    if (!body.priceId) {
-      reply.status(HttpStatus.BAD_REQUEST).send({ error: "priceId is required" });
-      return;
-    }
-
-    const response = await this.subscriptionService.changePlan({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-      newPriceId: body.priceId,
-    });
-
-    reply.send(response);
-  }
-
-  @Get("subscriptions/:subscriptionId/proration-preview")
-  async previewProration(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-    @Query("priceId") priceId: string,
-  ) {
-    if (!priceId) {
-      reply.status(HttpStatus.BAD_REQUEST).send({ error: "priceId query parameter is required" });
-      return;
-    }
-
-    const response = await this.subscriptionService.previewProration({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-      newPriceId: priceId,
-    });
-
-    reply.send(response);
   }
 
   // Invoice endpoints

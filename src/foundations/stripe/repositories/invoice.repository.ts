@@ -5,7 +5,7 @@ import { billingCustomerMeta } from "../entities/billing-customer.meta";
 import { Invoice, InvoiceStatus } from "../entities/invoice.entity";
 import { invoiceMeta } from "../entities/invoice.meta";
 import { InvoiceModel } from "../entities/invoice.model";
-import { subscriptionMeta } from "../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 
 /**
  * InvoiceRepository
@@ -94,9 +94,9 @@ export class InvoiceRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
-      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})
+      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
       WHERE 1=1 ${where}
-      RETURN ${invoiceMeta.nodeName}, ${subscriptionMeta.nodeName}
+      RETURN ${invoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
       ORDER BY ${invoiceMeta.nodeName}.createdAt DESC
       LIMIT $limit
     `;
@@ -120,8 +120,8 @@ export class InvoiceRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})
-      RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${subscriptionMeta.nodeName}
+      OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
+      RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -229,10 +229,10 @@ export class InvoiceRepository implements OnModuleInit {
     };
 
     const subscriptionMatch = params.subscriptionId
-      ? `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`
+      ? `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`
       : "";
     const subscriptionRelation = params.subscriptionId
-      ? `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName})`
+      ? `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`
       : "";
 
     query.query = `

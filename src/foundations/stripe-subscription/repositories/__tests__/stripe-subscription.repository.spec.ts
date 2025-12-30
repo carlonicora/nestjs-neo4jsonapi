@@ -6,15 +6,15 @@ jest.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { Neo4jService } from "../../../../core/neo4j";
-import { SubscriptionRepository } from "../subscription.repository";
-import { subscriptionMeta } from "../../entities/subscription.meta";
-import { billingCustomerMeta } from "../../entities/billing-customer.meta";
+import { StripeSubscriptionRepository } from "../stripe-subscription.repository";
+import { stripeSubscriptionMeta } from "../../entities/stripe-subscription.meta";
+import { billingCustomerMeta } from "../../../stripe/entities/billing-customer.meta";
 import { stripePriceMeta } from "../../../stripe-price/entities/stripe-price.meta";
 import { stripeProductMeta } from "../../../stripe-product/entities/stripe-product.meta";
-import { Subscription, SubscriptionStatus } from "../../entities/subscription.entity";
+import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
 
-describe("SubscriptionRepository", () => {
-  let repository: SubscriptionRepository;
+describe("StripeSubscriptionRepository", () => {
+  let repository: StripeSubscriptionRepository;
   let neo4jService: jest.Mocked<Neo4jService>;
 
   // Test data constants
@@ -38,7 +38,7 @@ describe("SubscriptionRepository", () => {
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   };
 
-  const MOCK_SUBSCRIPTION: Subscription = {
+  const MOCK_SUBSCRIPTION: StripeSubscription = {
     id: TEST_IDS.subscriptionId,
     stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
     stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
@@ -70,7 +70,7 @@ describe("SubscriptionRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        SubscriptionRepository,
+        StripeSubscriptionRepository,
         {
           provide: Neo4jService,
           useValue: mockNeo4jService,
@@ -78,7 +78,7 @@ describe("SubscriptionRepository", () => {
       ],
     }).compile();
 
-    repository = module.get<SubscriptionRepository>(SubscriptionRepository);
+    repository = module.get<StripeSubscriptionRepository>(StripeSubscriptionRepository);
     neo4jService = module.get<Neo4jService>(Neo4jService) as jest.Mocked<Neo4jService>;
 
     // Reset mocks before each test
@@ -96,7 +96,7 @@ describe("SubscriptionRepository", () => {
       await repository.onModuleInit();
 
       expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${subscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}) REQUIRE ${subscriptionMeta.nodeName}.id IS UNIQUE`,
+        query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.id IS UNIQUE`,
       });
     });
 
@@ -106,7 +106,7 @@ describe("SubscriptionRepository", () => {
       await repository.onModuleInit();
 
       expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${subscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}) REQUIRE ${subscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
+        query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
       });
     });
 
@@ -143,17 +143,17 @@ describe("SubscriptionRepository", () => {
         billingCustomerId: TEST_IDS.billingCustomerId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(`WHERE 1=1`);
-      expect(mockQuery.query).not.toContain(`${subscriptionMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
       expect(mockQuery.query).toContain(
-        `RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
       );
-      expect(mockQuery.query).toContain(`ORDER BY ${subscriptionMeta.nodeName}.createdAt DESC`);
+      expect(mockQuery.query).toContain(`ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_SUBSCRIPTION]);
     });
@@ -172,7 +172,7 @@ describe("SubscriptionRepository", () => {
         billingCustomerId: TEST_IDS.billingCustomerId,
         status: "active",
       });
-      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${subscriptionMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${stripeSubscriptionMeta.nodeName}.status = $status`);
       expect(result).toEqual([MOCK_SUBSCRIPTION]);
     });
 
@@ -194,7 +194,7 @@ describe("SubscriptionRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
 
-      const statuses: SubscriptionStatus[] = ["active", "trialing", "past_due", "canceled"];
+      const statuses: StripeSubscriptionStatus[] = ["active", "trialing", "past_due", "canceled"];
 
       for (const status of statuses) {
         jest.clearAllMocks();
@@ -229,7 +229,7 @@ describe("SubscriptionRepository", () => {
         billingCustomerId: TEST_IDS.billingCustomerId,
       });
 
-      expect(mockQuery.query).toContain(`ORDER BY ${subscriptionMeta.nodeName}.createdAt DESC`);
+      expect(mockQuery.query).toContain(`ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC`);
     });
   });
 
@@ -248,13 +248,13 @@ describe("SubscriptionRepository", () => {
         id: TEST_IDS.subscriptionId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -298,13 +298,13 @@ describe("SubscriptionRepository", () => {
         stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -350,7 +350,7 @@ describe("SubscriptionRepository", () => {
       billingCustomerId: TEST_IDS.billingCustomerId,
       priceId: TEST_IDS.priceId,
       stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-      status: "active" as SubscriptionStatus,
+      status: "active" as StripeSubscriptionStatus,
       currentPeriodStart: MOCK_DATES.currentPeriodStart,
       currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
       cancelAtPeriodEnd: false,
@@ -387,14 +387,14 @@ describe("SubscriptionRepository", () => {
       expect(mockQuery.query).toContain(
         `MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}`);
+      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
       expect(mockQuery.query).toContain("createdAt: datetime()");
       expect(mockQuery.query).toContain("updatedAt: datetime()");
       expect(mockQuery.query).toContain(
-        `CREATE (${subscriptionMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})`,
+        `CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName})`,
+        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName})`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -527,15 +527,15 @@ describe("SubscriptionRepository", () => {
 
       const params = {
         id: TEST_IDS.subscriptionId,
-        status: "canceled" as SubscriptionStatus,
+        status: "canceled" as StripeSubscriptionStatus,
       };
 
       const result = await repository.update(params);
 
       expect(mockQuery.queryParams.id).toBe(TEST_IDS.subscriptionId);
       expect(mockQuery.queryParams.status).toBe("canceled");
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
     });
@@ -555,7 +555,7 @@ describe("SubscriptionRepository", () => {
 
       expect(mockQuery.queryParams.currentPeriodStart).toBe(newDate.toISOString());
       expect(mockQuery.query).toContain(
-        `${subscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`,
+        `${stripeSubscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`,
       );
     });
 
@@ -573,7 +573,7 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.currentPeriodEnd).toBe(newDate.toISOString());
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
     });
 
     it("should update cancelAtPeriodEnd field", async () => {
@@ -589,7 +589,7 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.cancelAtPeriodEnd).toBe(true);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
     });
 
     it("should update canceledAt field with Date value", async () => {
@@ -605,8 +605,8 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.canceledAt).toBe(MOCK_DATES.canceledAt.toISOString());
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).not.toContain(`${subscriptionMeta.nodeName}.canceledAt = null`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
+      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = null`);
     });
 
     it("should update canceledAt field with null value", async () => {
@@ -621,7 +621,7 @@ describe("SubscriptionRepository", () => {
 
       await repository.update(params);
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.canceledAt = null`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = null`);
       expect(mockQuery.query).not.toContain(`datetime($canceledAt)`);
     });
 
@@ -638,7 +638,7 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.trialStart).toBe(MOCK_DATES.trialStart.toISOString());
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
     });
 
     it("should update trialEnd field", async () => {
@@ -654,7 +654,7 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.trialEnd).toBe(MOCK_DATES.trialEnd.toISOString());
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
     });
 
     it("should update pausedAt field with Date value", async () => {
@@ -670,8 +670,8 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.pausedAt).toBe(MOCK_DATES.pausedAt.toISOString());
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`);
-      expect(mockQuery.query).not.toContain(`${subscriptionMeta.nodeName}.pausedAt = null`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`);
+      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = null`);
     });
 
     it("should update pausedAt field with null value", async () => {
@@ -686,7 +686,7 @@ describe("SubscriptionRepository", () => {
 
       await repository.update(params);
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.pausedAt = null`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = null`);
       expect(mockQuery.query).not.toContain(`datetime($pausedAt)`);
     });
 
@@ -703,7 +703,7 @@ describe("SubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.quantity).toBe(5);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.quantity = $quantity`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
     });
 
     it("should update multiple fields at once", async () => {
@@ -713,7 +713,7 @@ describe("SubscriptionRepository", () => {
 
       const params = {
         id: TEST_IDS.subscriptionId,
-        status: "canceled" as SubscriptionStatus,
+        status: "canceled" as StripeSubscriptionStatus,
         cancelAtPeriodEnd: true,
         canceledAt: MOCK_DATES.canceledAt,
         quantity: 2,
@@ -721,10 +721,10 @@ describe("SubscriptionRepository", () => {
 
       await repository.update(params);
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.quantity = $quantity`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
       expect(mockQuery.queryParams).toMatchObject({
         status: "canceled",
         cancelAtPeriodEnd: true,
@@ -744,9 +744,9 @@ describe("SubscriptionRepository", () => {
 
       await repository.update(params);
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).not.toContain(`${subscriptionMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).not.toContain(`${subscriptionMeta.nodeName}.quantity = $quantity`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
+      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
     });
 
     it("should always update updatedAt timestamp", async () => {
@@ -756,7 +756,7 @@ describe("SubscriptionRepository", () => {
 
       await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
     });
 
     it("should include relationships in MATCH and RETURN clauses", async () => {
@@ -767,13 +767,13 @@ describe("SubscriptionRepository", () => {
       await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
 
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
       );
     });
 
@@ -795,7 +795,7 @@ describe("SubscriptionRepository", () => {
 
       await repository.update({ id: TEST_IDS.subscriptionId, quantity: 0 });
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.quantity = $quantity`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
       expect(mockQuery.queryParams.quantity).toBe(0);
     });
 
@@ -806,7 +806,7 @@ describe("SubscriptionRepository", () => {
 
       await repository.update({ id: TEST_IDS.subscriptionId, cancelAtPeriodEnd: false });
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
       expect(mockQuery.queryParams.cancelAtPeriodEnd).toBe(false);
     });
   });
@@ -820,7 +820,7 @@ describe("SubscriptionRepository", () => {
 
       const params = {
         stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "canceled" as SubscriptionStatus,
+        status: "canceled" as StripeSubscriptionStatus,
       };
 
       const result = await repository.updateByStripeSubscriptionId(params);
@@ -856,7 +856,7 @@ describe("SubscriptionRepository", () => {
 
       const params = {
         stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "canceled" as SubscriptionStatus,
+        status: "canceled" as StripeSubscriptionStatus,
         cancelAtPeriodEnd: true,
         canceledAt: MOCK_DATES.canceledAt,
         quantity: 3,
@@ -928,20 +928,20 @@ describe("SubscriptionRepository", () => {
         newPriceId: "new-price-id",
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})`,
       );
       expect(mockQuery.query).toContain("DELETE oldRel");
-      expect(mockQuery.query).toContain(`WITH ${subscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`WITH ${stripeSubscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}`);
       expect(mockQuery.query).toContain(
         `MATCH (newPrice:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${subscriptionMeta.nodeName})-[:USES_PRICE]->(newPrice)`);
-      expect(mockQuery.query).toContain(`SET ${subscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(newPrice)`);
+      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
       expect(mockQuery.query).toContain(
-        `RETURN ${subscriptionMeta.nodeName}, newPrice as ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, newPrice as ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -957,7 +957,7 @@ describe("SubscriptionRepository", () => {
         newPriceId: "new-price-id",
       });
 
-      expect(mockQuery.query).toContain(`SET ${subscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
     });
 
     it("should handle errors when new price not found", async () => {
@@ -998,7 +998,7 @@ describe("SubscriptionRepository", () => {
         newPriceId: "new-price-id",
       });
 
-      expect(mockQuery.query).toContain(`WITH ${subscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`WITH ${stripeSubscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}`);
     });
   });
 
@@ -1014,8 +1014,8 @@ describe("SubscriptionRepository", () => {
       expect(mockQuery.queryParams).toEqual({
         id: TEST_IDS.subscriptionId,
       });
-      expect(mockQuery.query).toContain(`MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})`);
-      expect(mockQuery.query).toContain(`DETACH DELETE ${subscriptionMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})`);
+      expect(mockQuery.query).toContain(`DETACH DELETE ${stripeSubscriptionMeta.nodeName}`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });
 
@@ -1064,16 +1064,16 @@ describe("SubscriptionRepository", () => {
       expect(mockQuery.queryParams.canceledStatus).toBe("canceled");
       expect(mockQuery.queryParams.canceledAt).toBeDefined();
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `WHERE ${subscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']`,
+        `WHERE ${stripeSubscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']`,
       );
-      expect(mockQuery.query).toContain(`SET ${subscriptionMeta.nodeName}.status = $canceledStatus`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(`RETURN count(${subscriptionMeta.nodeName}) as count`);
+      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.status = $canceledStatus`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`RETURN count(${stripeSubscriptionMeta.nodeName}) as count`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toBe(3);
     });
@@ -1111,7 +1111,7 @@ describe("SubscriptionRepository", () => {
         stripeCustomerId: TEST_IDS.stripeCustomerId,
       });
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
     });
 
     it("should update canceledAt with current datetime", async () => {
@@ -1140,7 +1140,7 @@ describe("SubscriptionRepository", () => {
         stripeCustomerId: TEST_IDS.stripeCustomerId,
       });
 
-      expect(mockQuery.query).toContain(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
     });
 
     it("should only cancel subscriptions with specific statuses", async () => {
@@ -1191,7 +1191,7 @@ describe("SubscriptionRepository", () => {
         billingCustomerId: TEST_IDS.billingCustomerId,
         priceId: TEST_IDS.priceId,
         stripeSubscriptionId: "",
-        status: "active" as SubscriptionStatus,
+        status: "active" as StripeSubscriptionStatus,
         currentPeriodStart: MOCK_DATES.currentPeriodStart,
         currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
         cancelAtPeriodEnd: false,
@@ -1268,7 +1268,7 @@ describe("SubscriptionRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
 
-      const statuses: SubscriptionStatus[] = [
+      const statuses: StripeSubscriptionStatus[] = [
         "active",
         "past_due",
         "unpaid",

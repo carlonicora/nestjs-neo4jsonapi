@@ -8,7 +8,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { Neo4jService } from "../../../../core/neo4j";
 import { UsageRecordRepository } from "../usage-record.repository";
 import { usageRecordMeta } from "../../entities/usage-record.meta";
-import { subscriptionMeta } from "../../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../../stripe-subscription/entities/stripe-subscription.meta";
 import { UsageRecord } from "../../entities/usage-record.entity";
 
 describe("UsageRecordRepository", () => {
@@ -143,9 +143,9 @@ describe("UsageRecordRepository", () => {
       expect(mockQuery.query).toContain(`MATCH (${usageRecordMeta.nodeName}:${usageRecordMeta.labelName})`);
       expect(mockQuery.query).toContain(`WHERE ${usageRecordMeta.nodeName}.subscriptionId = $subscriptionId`);
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})`,
+        `OPTIONAL MATCH (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`RETURN ${usageRecordMeta.nodeName}, ${subscriptionMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`RETURN ${usageRecordMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
       expect(mockQuery.query).toContain(`ORDER BY ${usageRecordMeta.nodeName}.timestamp DESC`);
       expect(mockQuery.query).toContain(`LIMIT $limit`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
@@ -292,7 +292,7 @@ describe("UsageRecordRepository", () => {
 
       expect(mockQuery.query).toContain("OPTIONAL MATCH");
       expect(mockQuery.query).toContain(
-        `(${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})`,
+        `(${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
     });
 
@@ -369,13 +369,13 @@ describe("UsageRecordRepository", () => {
       });
       expect(mockQuery.queryParams.id).toBeDefined();
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(`CREATE (${usageRecordMeta.nodeName}:${usageRecordMeta.labelName}`);
       expect(mockQuery.query).toContain("createdAt: datetime()");
       expect(mockQuery.query).toContain("updatedAt: datetime()");
       expect(mockQuery.query).toContain(
-        `CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName})`,
+        `CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName})`,
       );
       expect(mockQuery.query).toContain(`RETURN ${usageRecordMeta.nodeName}`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
@@ -449,7 +449,7 @@ describe("UsageRecordRepository", () => {
       await repository.create(validCreateParams);
 
       expect(mockQuery.query).toContain(
-        `CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName})`,
+        `CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 

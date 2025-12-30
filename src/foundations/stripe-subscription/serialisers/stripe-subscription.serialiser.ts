@@ -6,17 +6,17 @@ import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
 import { JsonApiDataInterface } from "../../../core/jsonapi";
 import { JsonApiServiceInterface } from "../../../core/jsonapi";
 import { StripePriceModel } from "../../stripe-price/entities/stripe-price.model";
-import { Subscription } from "../entities/subscription.entity";
-import { SubscriptionModel } from "../entities/subscription.model";
+import { StripeSubscription } from "../entities/stripe-subscription.entity";
+import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
 
 @Injectable()
-export class SubscriptionSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
+export class StripeSubscriptionSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
   constructor(serialiserFactory: JsonApiSerialiserFactory, config: ConfigService<ConfigInterface>) {
     super(serialiserFactory, config);
   }
 
   get type(): string {
-    return SubscriptionModel.type;
+    return StripeSubscriptionModel.type;
   }
 
   create(): JsonApiDataInterface {
@@ -24,14 +24,14 @@ export class SubscriptionSerialiser extends AbstractJsonApiSerialiser implements
       stripeSubscriptionId: "stripeSubscriptionId",
       stripeSubscriptionItemId: "stripeSubscriptionItemId",
       status: "status",
-      currentPeriodStart: (data: Subscription) => data.currentPeriodStart?.toISOString(),
-      currentPeriodEnd: (data: Subscription) => data.currentPeriodEnd?.toISOString(),
+      currentPeriodStart: (data: StripeSubscription) => data.currentPeriodStart?.toISOString(),
+      currentPeriodEnd: (data: StripeSubscription) => data.currentPeriodEnd?.toISOString(),
       cancelAtPeriodEnd: "cancelAtPeriodEnd",
-      canceledAt: (data: Subscription) => data.canceledAt?.toISOString(),
-      trialStart: (data: Subscription) => data.trialStart?.toISOString(),
-      trialEnd: (data: Subscription) => data.trialEnd?.toISOString(),
-      pausedAt: (data: Subscription) => data.pausedAt?.toISOString(),
-      quantity: (data: Subscription) => Number(data.quantity ?? 1),
+      canceledAt: (data: StripeSubscription) => data.canceledAt?.toISOString(),
+      trialStart: (data: StripeSubscription) => data.trialStart?.toISOString(),
+      trialEnd: (data: StripeSubscription) => data.trialEnd?.toISOString(),
+      pausedAt: (data: StripeSubscription) => data.pausedAt?.toISOString(),
+      quantity: (data: StripeSubscription) => Number(data.quantity ?? 1),
     };
 
     this.relationships = {

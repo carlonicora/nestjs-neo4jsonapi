@@ -1,8 +1,8 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { StripeSubscriptionService } from "./stripe.subscription.service";
-import { StripeService } from "./stripe.service";
-import { StripeError } from "../errors/stripe.errors";
-import { createMockStripeClient, MockStripeClient } from "../__tests__/mocks/stripe.mock";
+import { StripeSubscriptionApiService } from "../stripe-subscription-api.service";
+import { StripeService } from "../../../stripe/services/stripe.service";
+import { StripeError } from "../../../stripe/errors/stripe.errors";
+import { createMockStripeClient, MockStripeClient } from "../../../stripe/__tests__/mocks/stripe.mock";
 import {
   MOCK_SUBSCRIPTION,
   MOCK_INVOICE,
@@ -11,11 +11,11 @@ import {
   STRIPE_INVALID_REQUEST_ERROR,
   STRIPE_API_ERROR,
   STRIPE_RATE_LIMIT_ERROR,
-} from "../__tests__/fixtures/stripe.fixtures";
+} from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 import Stripe from "stripe";
 
-describe("StripeSubscriptionService", () => {
-  let service: StripeSubscriptionService;
+describe("StripeSubscriptionApiService", () => {
+  let service: StripeSubscriptionApiService;
   let stripeService: jest.Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
@@ -29,7 +29,7 @@ describe("StripeSubscriptionService", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        StripeSubscriptionService,
+        StripeSubscriptionApiService,
         {
           provide: StripeService,
           useValue: mockStripeService,
@@ -37,7 +37,7 @@ describe("StripeSubscriptionService", () => {
       ],
     }).compile();
 
-    service = module.get<StripeSubscriptionService>(StripeSubscriptionService);
+    service = module.get<StripeSubscriptionApiService>(StripeSubscriptionApiService);
     stripeService = module.get(StripeService);
   });
 

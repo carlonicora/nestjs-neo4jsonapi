@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
-import { subscriptionMeta } from "../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 import { UsageRecord } from "../entities/usage-record.entity";
 import { usageRecordMeta } from "../entities/usage-record.meta";
 import { UsageRecordModel } from "../entities/usage-record.model";
@@ -90,8 +90,8 @@ export class UsageRecordRepository implements OnModuleInit {
     query.query = `
       MATCH (${usageRecordMeta.nodeName}:${usageRecordMeta.labelName})
       WHERE ${whereParams.join(" AND ")}
-      OPTIONAL MATCH (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})
-      RETURN ${usageRecordMeta.nodeName}, ${subscriptionMeta.nodeName}
+      OPTIONAL MATCH (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
+      RETURN ${usageRecordMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
       ORDER BY ${usageRecordMeta.nodeName}.timestamp DESC
       LIMIT $limit
     `;
@@ -136,7 +136,7 @@ export class UsageRecordRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})
       CREATE (${usageRecordMeta.nodeName}:${usageRecordMeta.labelName} {
         id: $id,
         subscriptionId: $subscriptionId,
@@ -148,7 +148,7 @@ export class UsageRecordRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${subscriptionMeta.nodeName})
+      CREATE (${usageRecordMeta.nodeName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName})
       RETURN ${usageRecordMeta.nodeName}
     `;
 

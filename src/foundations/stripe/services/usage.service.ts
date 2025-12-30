@@ -4,7 +4,7 @@ import { JsonApiPaginator } from "../../../core/jsonapi";
 import { JsonApiService } from "../../../core/jsonapi";
 import { StripeUsageService } from "./stripe.usage.service";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
-import { SubscriptionRepository } from "../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
 import { UsageRecordRepository } from "../repositories/usage-record.repository";
 import { UsageRecordModel } from "../entities/usage-record.model";
 
@@ -29,7 +29,7 @@ import { UsageRecordModel } from "../entities/usage-record.model";
 export class UsageService {
   constructor(
     private readonly usageRecordRepository: UsageRecordRepository,
-    private readonly subscriptionRepository: SubscriptionRepository,
+    private readonly subscriptionRepository: StripeSubscriptionRepository,
     private readonly billingCustomerRepository: BillingCustomerRepository,
     private readonly stripeUsageService: StripeUsageService,
     private readonly jsonApiService: JsonApiService,

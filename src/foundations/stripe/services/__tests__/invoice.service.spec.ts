@@ -31,19 +31,19 @@ import Stripe from "stripe";
 import { InvoiceService } from "../invoice.service";
 import { InvoiceRepository } from "../../repositories/invoice.repository";
 import { BillingCustomerRepository } from "../../repositories/billing-customer.repository";
-import { SubscriptionRepository } from "../../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeInvoiceService } from "../stripe.invoice.service";
 import { Invoice, InvoiceStatus } from "../../entities/invoice.entity";
 import { BillingCustomer } from "../../entities/billing-customer.entity";
-import { Subscription } from "../../entities/subscription.entity";
+import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
 import { MOCK_INVOICE, TEST_IDS } from "../../__tests__/fixtures/stripe.fixtures";
 
 describe("InvoiceService", () => {
   let service: InvoiceService;
   let invoiceRepository: jest.Mocked<InvoiceRepository>;
   let billingCustomerRepository: jest.Mocked<BillingCustomerRepository>;
-  let subscriptionRepository: jest.Mocked<SubscriptionRepository>;
+  let subscriptionRepository: jest.Mocked<StripeSubscriptionRepository>;
   let stripeInvoiceService: jest.Mocked<StripeInvoiceService>;
   let jsonApiService: jest.Mocked<JsonApiService>;
 
@@ -62,7 +62,7 @@ describe("InvoiceService", () => {
     company: {} as any,
   };
 
-  const MOCK_DB_SUBSCRIPTION: Subscription = {
+  const MOCK_DB_SUBSCRIPTION: StripeSubscription = {
     id: "subscription_db_123",
     stripeSubscriptionId: TEST_IDS.subscriptionId,
     stripeSubscriptionItemId: "si_test_123",
@@ -139,7 +139,7 @@ describe("InvoiceService", () => {
       findByStripeCustomerId: jest.fn(),
     };
 
-    const mockSubscriptionRepository = {
+    const mockStripeSubscriptionRepository = {
       findById: jest.fn(),
       findByStripeSubscriptionId: jest.fn(),
     };
@@ -166,8 +166,8 @@ describe("InvoiceService", () => {
           useValue: mockBillingCustomerRepository,
         },
         {
-          provide: SubscriptionRepository,
-          useValue: mockSubscriptionRepository,
+          provide: StripeSubscriptionRepository,
+          useValue: mockStripeSubscriptionRepository,
         },
         {
           provide: StripeInvoiceService,
@@ -183,7 +183,7 @@ describe("InvoiceService", () => {
     service = module.get<InvoiceService>(InvoiceService);
     invoiceRepository = module.get(InvoiceRepository);
     billingCustomerRepository = module.get(BillingCustomerRepository);
-    subscriptionRepository = module.get(SubscriptionRepository);
+    subscriptionRepository = module.get(StripeSubscriptionRepository);
     stripeInvoiceService = module.get(StripeInvoiceService);
     jsonApiService = module.get(JsonApiService);
   });
@@ -408,12 +408,12 @@ describe("InvoiceService", () => {
     });
 
     it("should return upcoming invoice with subscriptionId parameter", async () => {
-      const paramsWithSubscription = { ...validParams, subscriptionId: MOCK_DB_SUBSCRIPTION.id };
+      const paramsWithStripeSubscription = { ...validParams, subscriptionId: MOCK_DB_SUBSCRIPTION.id };
       billingCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
       stripeInvoiceService.getUpcomingInvoice.mockResolvedValue(mockUpcomingInvoice);
 
-      const result = await service.getUpcomingInvoice(paramsWithSubscription);
+      const result = await service.getUpcomingInvoice(paramsWithStripeSubscription);
 
       expect(subscriptionRepository.findById).toHaveBeenCalledWith({
         id: MOCK_DB_SUBSCRIPTION.id,
@@ -436,11 +436,11 @@ describe("InvoiceService", () => {
     });
 
     it("should throw NOT_FOUND when subscription not found", async () => {
-      const paramsWithSubscription = { ...validParams, subscriptionId: "non_existent_sub" };
+      const paramsWithStripeSubscription = { ...validParams, subscriptionId: "non_existent_sub" };
       billingCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       subscriptionRepository.findById.mockResolvedValue(null);
 
-      await expect(service.getUpcomingInvoice(paramsWithSubscription)).rejects.toThrow(
+      await expect(service.getUpcomingInvoice(paramsWithStripeSubscription)).rejects.toThrow(
         new HttpException("Subscription not found or does not belong to this company", HttpStatus.NOT_FOUND),
       );
 
@@ -448,12 +448,12 @@ describe("InvoiceService", () => {
     });
 
     it("should throw NOT_FOUND when subscription does not belong to company", async () => {
-      const paramsWithSubscription = { ...validParams, subscriptionId: MOCK_DB_SUBSCRIPTION.id };
+      const paramsWithStripeSubscription = { ...validParams, subscriptionId: MOCK_DB_SUBSCRIPTION.id };
       const differentCustomer = { ...MOCK_BILLING_CUSTOMER, id: "different_customer_id" };
       billingCustomerRepository.findByCompanyId.mockResolvedValue(differentCustomer);
       subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
 
-      await expect(service.getUpcomingInvoice(paramsWithSubscription)).rejects.toThrow(
+      await expect(service.getUpcomingInvoice(paramsWithStripeSubscription)).rejects.toThrow(
         new HttpException("Subscription not found or does not belong to this company", HttpStatus.NOT_FOUND),
       );
 
@@ -814,7 +814,7 @@ describe("InvoiceService", () => {
     });
 
     it("should handle subscription from parent.subscription_details as string", async () => {
-      const invoiceWithSubscription = {
+      const invoiceWithStripeSubscription = {
         ...mockStripeInvoice,
         parent: {
           subscription_details: {
@@ -822,7 +822,7 @@ describe("InvoiceService", () => {
           },
         } as any,
       };
-      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithSubscription);
+      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithStripeSubscription);
       billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
       invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
@@ -841,7 +841,7 @@ describe("InvoiceService", () => {
     });
 
     it("should handle subscription_details.subscription as object", async () => {
-      const invoiceWithSubscription = {
+      const invoiceWithStripeSubscription = {
         ...mockStripeInvoice,
         parent: {
           subscription_details: {
@@ -849,7 +849,7 @@ describe("InvoiceService", () => {
           },
         } as any,
       };
-      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithSubscription);
+      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithStripeSubscription);
       billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
       invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
@@ -868,11 +868,11 @@ describe("InvoiceService", () => {
     });
 
     it("should handle missing subscription (no parent.subscription_details)", async () => {
-      const invoiceWithoutSubscription = {
+      const invoiceWithoutStripeSubscription = {
         ...mockStripeInvoice,
         parent: null,
       };
-      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithoutSubscription);
+      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithoutStripeSubscription);
       billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);
       invoiceRepository.create.mockResolvedValue(undefined);
@@ -888,7 +888,7 @@ describe("InvoiceService", () => {
     });
 
     it("should handle subscription not found in database", async () => {
-      const invoiceWithSubscription = {
+      const invoiceWithStripeSubscription = {
         ...mockStripeInvoice,
         parent: {
           subscription_details: {
@@ -896,7 +896,7 @@ describe("InvoiceService", () => {
           },
         } as any,
       };
-      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithSubscription);
+      stripeInvoiceService.getInvoice.mockResolvedValue(invoiceWithStripeSubscription);
       billingCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(null);
       invoiceRepository.findByStripeInvoiceId.mockResolvedValue(null);

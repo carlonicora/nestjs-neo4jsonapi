@@ -1,15 +1,15 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
-import { billingCustomerMeta } from "../entities/billing-customer.meta";
+import { billingCustomerMeta } from "../../stripe/entities/billing-customer.meta";
 import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
 import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
-import { Subscription, SubscriptionStatus } from "../entities/subscription.entity";
-import { subscriptionMeta } from "../entities/subscription.meta";
-import { SubscriptionModel } from "../entities/subscription.model";
+import { StripeSubscription, StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
+import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
+import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
 
 /**
- * SubscriptionRepository
+ * StripeSubscriptionRepository
  *
  * Neo4j repository for managing Subscription nodes and their relationships to BillingCustomer and Price nodes.
  * Handles subscription lifecycle data storage and queries with status filtering.
@@ -38,7 +38,7 @@ import { SubscriptionModel } from "../entities/subscription.model";
  * ```
  */
 @Injectable()
-export class SubscriptionRepository implements OnModuleInit {
+export class StripeSubscriptionRepository implements OnModuleInit {
   constructor(private readonly neo4j: Neo4jService) {}
 
   /**
@@ -48,11 +48,11 @@ export class SubscriptionRepository implements OnModuleInit {
    */
   async onModuleInit() {
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${subscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}) REQUIRE ${subscriptionMeta.nodeName}.id IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.id IS UNIQUE`,
     });
 
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${subscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}) REQUIRE ${subscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
     });
   }
 
@@ -66,14 +66,14 @@ export class SubscriptionRepository implements OnModuleInit {
    */
   async findByBillingCustomerId(params: {
     billingCustomerId: string;
-    status?: SubscriptionStatus;
-  }): Promise<Subscription[]> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+    status?: StripeSubscriptionStatus;
+  }): Promise<StripeSubscription[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     const whereParams: string[] = [];
     if (params.status) {
       query.queryParams.status = params.status;
-      whereParams.push(`${subscriptionMeta.nodeName}.status = $status`);
+      whereParams.push(`${stripeSubscriptionMeta.nodeName}.status = $status`);
     }
 
     const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
@@ -81,11 +81,11 @@ export class SubscriptionRepository implements OnModuleInit {
     query.queryParams.billingCustomerId = params.billingCustomerId;
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
-      MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       WHERE 1=1 ${where}
-      RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
-      ORDER BY ${subscriptionMeta.nodeName}.createdAt DESC
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC
     `;
 
     return this.neo4j.readMany(query);
@@ -98,17 +98,17 @@ export class SubscriptionRepository implements OnModuleInit {
    * @param params.id - Internal subscription ID
    * @returns Subscription if found, null otherwise
    */
-  async findById(params: { id: string }): Promise<Subscription | null> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+  async findById(params: { id: string }): Promise<StripeSubscription | null> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     query.queryParams = {
       id: params.id,
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -121,17 +121,17 @@ export class SubscriptionRepository implements OnModuleInit {
    * @param params.stripeSubscriptionId - Stripe subscription ID
    * @returns Subscription if found, null otherwise
    */
-  async findByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<Subscription | null> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+  async findByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<StripeSubscription | null> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     query.queryParams = {
       stripeSubscriptionId: params.stripeSubscriptionId,
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -162,15 +162,15 @@ export class SubscriptionRepository implements OnModuleInit {
     priceId: string;
     stripeSubscriptionId: string;
     stripeSubscriptionItemId?: string;
-    status: SubscriptionStatus;
+    status: StripeSubscriptionStatus;
     currentPeriodStart: Date;
     currentPeriodEnd: Date;
     cancelAtPeriodEnd: boolean;
     trialStart?: Date;
     trialEnd?: Date;
     quantity: number;
-  }): Promise<Subscription> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+  }): Promise<StripeSubscription> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     const id = randomUUID();
 
@@ -192,7 +192,7 @@ export class SubscriptionRepository implements OnModuleInit {
     query.query = `
       MATCH (${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      CREATE (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {
+      CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {
         id: $id,
         stripeSubscriptionId: $stripeSubscriptionId,
         stripeSubscriptionItemId: $stripeSubscriptionItemId,
@@ -206,9 +206,9 @@ export class SubscriptionRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${subscriptionMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})
-      CREATE (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName})
-      RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})
+      CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName})
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -232,7 +232,7 @@ export class SubscriptionRepository implements OnModuleInit {
    */
   async update(params: {
     id: string;
-    status?: SubscriptionStatus;
+    status?: StripeSubscriptionStatus;
     currentPeriodStart?: Date;
     currentPeriodEnd?: Date;
     cancelAtPeriodEnd?: boolean;
@@ -241,46 +241,46 @@ export class SubscriptionRepository implements OnModuleInit {
     trialEnd?: Date;
     pausedAt?: Date | null;
     quantity?: number;
-  }): Promise<Subscription> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+  }): Promise<StripeSubscription> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     const setParams: string[] = [];
-    setParams.push(`${subscriptionMeta.nodeName}.updatedAt = datetime()`);
+    setParams.push(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
 
     if (params.status !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.status = $status`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.status = $status`);
     }
     if (params.currentPeriodStart !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`);
     }
     if (params.currentPeriodEnd !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
     }
     if (params.cancelAtPeriodEnd !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
     }
     if (params.canceledAt !== undefined) {
       setParams.push(
         params.canceledAt === null
-          ? `${subscriptionMeta.nodeName}.canceledAt = null`
-          : `${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`,
+          ? `${stripeSubscriptionMeta.nodeName}.canceledAt = null`
+          : `${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`,
       );
     }
     if (params.trialStart !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
     }
     if (params.trialEnd !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
     }
     if (params.pausedAt !== undefined) {
       setParams.push(
         params.pausedAt === null
-          ? `${subscriptionMeta.nodeName}.pausedAt = null`
-          : `${subscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`,
+          ? `${stripeSubscriptionMeta.nodeName}.pausedAt = null`
+          : `${stripeSubscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`,
       );
     }
     if (params.quantity !== undefined) {
-      setParams.push(`${subscriptionMeta.nodeName}.quantity = $quantity`);
+      setParams.push(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
     }
 
     query.queryParams = {
@@ -297,10 +297,10 @@ export class SubscriptionRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      MATCH (${subscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       SET ${setParams.join(", ")}
-      RETURN ${subscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -326,7 +326,7 @@ export class SubscriptionRepository implements OnModuleInit {
    */
   async updateByStripeSubscriptionId(params: {
     stripeSubscriptionId: string;
-    status?: SubscriptionStatus;
+    status?: StripeSubscriptionStatus;
     currentPeriodStart?: Date;
     currentPeriodEnd?: Date;
     cancelAtPeriodEnd?: boolean;
@@ -335,7 +335,7 @@ export class SubscriptionRepository implements OnModuleInit {
     trialEnd?: Date;
     pausedAt?: Date | null;
     quantity?: number;
-  }): Promise<Subscription | null> {
+  }): Promise<StripeSubscription | null> {
     const existing = await this.findByStripeSubscriptionId({ stripeSubscriptionId: params.stripeSubscriptionId });
     if (!existing) return null;
 
@@ -355,8 +355,8 @@ export class SubscriptionRepository implements OnModuleInit {
    * @param params.newPriceId - New price ID to switch to
    * @returns Updated Subscription with new price relationship
    */
-  async updatePrice(params: { id: string; newPriceId: string }): Promise<Subscription> {
-    const query = this.neo4j.initQuery({ serialiser: SubscriptionModel });
+  async updatePrice(params: { id: string; newPriceId: string }): Promise<StripeSubscription> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
     query.queryParams = {
       id: params.id,
@@ -364,14 +364,14 @@ export class SubscriptionRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
-      MATCH (${subscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})
       DELETE oldRel
-      WITH ${subscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}
+      WITH ${stripeSubscriptionMeta.nodeName}, ${billingCustomerMeta.nodeName}
       MATCH (newPrice:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      CREATE (${subscriptionMeta.nodeName})-[:USES_PRICE]->(newPrice)
-      SET ${subscriptionMeta.nodeName}.updatedAt = datetime()
-      RETURN ${subscriptionMeta.nodeName}, newPrice as ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(newPrice)
+      SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()
+      RETURN ${stripeSubscriptionMeta.nodeName}, newPrice as ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -394,8 +394,8 @@ export class SubscriptionRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $id})
-      DETACH DELETE ${subscriptionMeta.nodeName}
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})
+      DETACH DELETE ${stripeSubscriptionMeta.nodeName}
     `;
 
     await this.neo4j.writeOne(query);
@@ -416,18 +416,18 @@ export class SubscriptionRepository implements OnModuleInit {
 
     query.queryParams = {
       stripeCustomerId: params.stripeCustomerId,
-      canceledStatus: "canceled" as SubscriptionStatus,
+      canceledStatus: "canceled" as StripeSubscriptionStatus,
       canceledAt: new Date().toISOString(),
     };
 
     query.query = `
-      MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
-      WHERE ${subscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']
-      SET ${subscriptionMeta.nodeName}.status = $canceledStatus,
-          ${subscriptionMeta.nodeName}.canceledAt = datetime($canceledAt),
-          ${subscriptionMeta.nodeName}.cancelAtPeriodEnd = false,
-          ${subscriptionMeta.nodeName}.updatedAt = datetime()
-      RETURN count(${subscriptionMeta.nodeName}) as count
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
+      WHERE ${stripeSubscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']
+      SET ${stripeSubscriptionMeta.nodeName}.status = $canceledStatus,
+          ${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt),
+          ${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false,
+          ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()
+      RETURN count(${stripeSubscriptionMeta.nodeName}) as count
     `;
 
     const result = await this.neo4j.writeOne(query);

@@ -24,19 +24,19 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { UsageService } from "../usage.service";
 import { UsageRecordRepository } from "../../repositories/usage-record.repository";
-import { SubscriptionRepository } from "../../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
 import { BillingCustomerRepository } from "../../repositories/billing-customer.repository";
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeUsageService } from "../stripe.usage.service";
 import { UsageRecord } from "../../entities/usage-record.entity";
-import { Subscription } from "../../entities/subscription.entity";
+import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
 import { BillingCustomer } from "../../entities/billing-customer.entity";
 import { TEST_IDS } from "../../__tests__/fixtures/stripe.fixtures";
 
 describe("UsageService", () => {
   let service: UsageService;
   let usageRecordRepository: jest.Mocked<UsageRecordRepository>;
-  let subscriptionRepository: jest.Mocked<SubscriptionRepository>;
+  let subscriptionRepository: jest.Mocked<StripeSubscriptionRepository>;
   let billingCustomerRepository: jest.Mocked<BillingCustomerRepository>;
   let stripeUsageService: jest.Mocked<StripeUsageService>;
   let jsonApiService: jest.Mocked<JsonApiService>;
@@ -56,7 +56,7 @@ describe("UsageService", () => {
     company: {} as any,
   };
 
-  const MOCK_SUBSCRIPTION: Subscription = {
+  const MOCK_SUBSCRIPTION: StripeSubscription = {
     id: "subscription_123",
     stripeSubscriptionId: TEST_IDS.subscriptionId,
     stripeSubscriptionItemId: "si_test_123",
@@ -120,7 +120,7 @@ describe("UsageService", () => {
       getUsageSummary: jest.fn(),
     };
 
-    const mockSubscriptionRepository = {
+    const mockStripeSubscriptionRepository = {
       findById: jest.fn(),
     };
 
@@ -147,8 +147,8 @@ describe("UsageService", () => {
           useValue: mockUsageRecordRepository,
         },
         {
-          provide: SubscriptionRepository,
-          useValue: mockSubscriptionRepository,
+          provide: StripeSubscriptionRepository,
+          useValue: mockStripeSubscriptionRepository,
         },
         {
           provide: BillingCustomerRepository,
@@ -167,7 +167,7 @@ describe("UsageService", () => {
 
     service = module.get<UsageService>(UsageService);
     usageRecordRepository = module.get(UsageRecordRepository);
-    subscriptionRepository = module.get(SubscriptionRepository);
+    subscriptionRepository = module.get(StripeSubscriptionRepository);
     billingCustomerRepository = module.get(BillingCustomerRepository);
     stripeUsageService = module.get(StripeUsageService);
     jsonApiService = module.get(JsonApiService);
@@ -989,7 +989,7 @@ describe("UsageService", () => {
     it("should validate ownership before all operations", async () => {
       const callOrder: string[] = [];
       subscriptionRepository.findById.mockImplementation(async () => {
-        callOrder.push("findSubscription");
+        callOrder.push("findStripeSubscription");
         return MOCK_SUBSCRIPTION;
       });
       billingCustomerRepository.findByCompanyId.mockImplementation(async () => {
@@ -1010,20 +1010,20 @@ describe("UsageService", () => {
 
       // Verify ownership checks happen before fetching usage records
       const findUsageIndex = callOrder.indexOf("findUsageRecords");
-      const findSubscriptionIndex = callOrder.indexOf("findSubscription");
+      const findStripeSubscriptionIndex = callOrder.indexOf("findStripeSubscription");
       const findCustomerIndex = callOrder.indexOf("findCustomer");
 
-      expect(findSubscriptionIndex).toBeLessThan(findUsageIndex);
+      expect(findStripeSubscriptionIndex).toBeLessThan(findUsageIndex);
       expect(findCustomerIndex).toBeLessThan(findUsageIndex);
     });
 
     it("should preserve exact IDs across operations", async () => {
-      const exactSubscriptionId = "sub_exact_123456789";
+      const exactStripeSubscriptionId = "sub_exact_123456789";
       const exactMeterId = "meter_exact_987654321";
 
       subscriptionRepository.findById.mockResolvedValue({
         ...MOCK_SUBSCRIPTION,
-        id: exactSubscriptionId,
+        id: exactStripeSubscriptionId,
       });
       billingCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_BILLING_CUSTOMER);
       stripeUsageService.reportMeterEvent.mockResolvedValue(MOCK_STRIPE_METER_EVENT);
@@ -1032,7 +1032,7 @@ describe("UsageService", () => {
 
       await service.reportUsage({
         companyId: TEST_IDS.companyId,
-        subscriptionId: exactSubscriptionId,
+        subscriptionId: exactStripeSubscriptionId,
         meterId: exactMeterId,
         meterEventName: "api_call",
         quantity: 100,
@@ -1040,7 +1040,7 @@ describe("UsageService", () => {
 
       expect(usageRecordRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          subscriptionId: exactSubscriptionId,
+          subscriptionId: exactStripeSubscriptionId,
           meterId: exactMeterId,
         }),
       );

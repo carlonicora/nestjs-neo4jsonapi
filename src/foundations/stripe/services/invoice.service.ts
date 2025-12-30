@@ -6,7 +6,7 @@ import { JsonApiService } from "../../../core/jsonapi";
 import { StripeInvoiceService } from "./stripe.invoice.service";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
 import { InvoiceRepository } from "../repositories/invoice.repository";
-import { SubscriptionRepository } from "../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
 import { InvoiceModel } from "../entities/invoice.model";
 import { InvoiceStatus } from "../entities/invoice.entity";
 
@@ -31,7 +31,7 @@ export class InvoiceService {
   constructor(
     private readonly invoiceRepository: InvoiceRepository,
     private readonly billingCustomerRepository: BillingCustomerRepository,
-    private readonly subscriptionRepository: SubscriptionRepository,
+    private readonly subscriptionRepository: StripeSubscriptionRepository,
     private readonly stripeInvoiceService: StripeInvoiceService,
     private readonly jsonApiService: JsonApiService,
   ) {}

@@ -1,5 +1,5 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { Subscription } from "../entities/subscription.entity";
+import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription.entity";
 
 export type UsageRecord = Entity & {
   subscriptionId: string;
@@ -8,5 +8,5 @@ export type UsageRecord = Entity & {
   quantity: number;
   timestamp: Date;
   stripeEventId?: string;
-  subscription?: Subscription;
+  subscription?: StripeSubscription;
 };

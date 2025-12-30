@@ -16,6 +16,9 @@ import { PushModule } from "./push/push.module";
 import { RelevancyModule } from "./relevancy/relevancy.module";
 import { RoleModule } from "./role/role.module";
 import { S3Module } from "./s3/s3.module";
+import { StripePriceModule } from "./stripe-price";
+import { StripeProductModule } from "./stripe-product";
+import { StripeSubscriptionModule } from "./stripe-subscription";
 import { StripeModule } from "./stripe/stripe.module";
 import { TokenUsageModule } from "./tokenusage/tokenusage.module";
 import { UserModule } from "./user/user.module";
@@ -48,9 +51,12 @@ const STATIC_FOUNDATION_MODULES = [
   RelevancyModule,
   RoleModule,
   S3Module,
-  StripeModule,
   TokenUsageModule,
   UserModule,
+  StripeModule,
+  StripeSubscriptionModule,
+  StripePriceModule,
+  StripeProductModule,
 ];
 
 /**

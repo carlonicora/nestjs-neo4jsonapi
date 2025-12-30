@@ -43,9 +43,9 @@ import { Job } from "bullmq";
 import Stripe from "stripe";
 import { WebhookProcessor, WebhookJobData } from "../webhook.processor";
 import { WebhookEventRepository } from "../../repositories/webhook-event.repository";
-import { SubscriptionService } from "../../services/subscription.service";
+import { StripeSubscriptionAdminService } from "../../../stripe-subscription/services/stripe-subscription-admin.service";
 import { BillingCustomerRepository } from "../../repositories/billing-customer.repository";
-import { SubscriptionRepository } from "../../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
 import { InvoiceRepository } from "../../repositories/invoice.repository";
 import { NotificationService } from "../../services/notification.service";
 import { AppLoggingService } from "../../../../core/logging";
@@ -53,9 +53,9 @@ import { AppLoggingService } from "../../../../core/logging";
 describe("WebhookProcessor", () => {
   let processor: WebhookProcessor;
   let webhookEventRepository: jest.Mocked<WebhookEventRepository>;
-  let subscriptionService: jest.Mocked<SubscriptionService>;
+  let subscriptionService: jest.Mocked<StripeSubscriptionAdminService>;
   let billingCustomerRepository: jest.Mocked<BillingCustomerRepository>;
-  let subscriptionRepository: jest.Mocked<SubscriptionRepository>;
+  let subscriptionRepository: jest.Mocked<StripeSubscriptionRepository>;
   let invoiceRepository: jest.Mocked<InvoiceRepository>;
   let notificationService: jest.Mocked<NotificationService>;
   let logger: jest.Mocked<AppLoggingService>;
@@ -87,7 +87,7 @@ describe("WebhookProcessor", () => {
       updateStatus: jest.fn(),
     };
 
-    const mockSubscriptionService = {
+    const mockStripeSubscriptionAdminService = {
       syncSubscriptionFromStripe: jest.fn(),
     };
 
@@ -95,7 +95,7 @@ describe("WebhookProcessor", () => {
       updateByStripeCustomerId: jest.fn(),
     };
 
-    const mockSubscriptionRepository = {
+    const mockStripeSubscriptionRepository = {
       cancelAllByStripeCustomerId: jest.fn(),
     };
 
@@ -124,16 +124,16 @@ describe("WebhookProcessor", () => {
           useValue: mockWebhookEventRepository,
         },
         {
-          provide: SubscriptionService,
-          useValue: mockSubscriptionService,
+          provide: StripeSubscriptionAdminService,
+          useValue: mockStripeSubscriptionAdminService,
         },
         {
           provide: BillingCustomerRepository,
           useValue: mockBillingCustomerRepository,
         },
         {
-          provide: SubscriptionRepository,
-          useValue: mockSubscriptionRepository,
+          provide: StripeSubscriptionRepository,
+          useValue: mockStripeSubscriptionRepository,
         },
         {
           provide: InvoiceRepository,
@@ -152,9 +152,9 @@ describe("WebhookProcessor", () => {
 
     processor = module.get<WebhookProcessor>(WebhookProcessor);
     webhookEventRepository = module.get(WebhookEventRepository);
-    subscriptionService = module.get(SubscriptionService);
+    subscriptionService = module.get(StripeSubscriptionAdminService);
     billingCustomerRepository = module.get(BillingCustomerRepository);
-    subscriptionRepository = module.get(SubscriptionRepository);
+    subscriptionRepository = module.get(StripeSubscriptionRepository);
     invoiceRepository = module.get(InvoiceRepository);
     notificationService = module.get(NotificationService);
     logger = module.get(AppLoggingService);

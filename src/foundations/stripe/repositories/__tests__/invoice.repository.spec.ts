@@ -9,7 +9,7 @@ import { Neo4jService } from "../../../../core/neo4j";
 import { InvoiceRepository } from "../invoice.repository";
 import { invoiceMeta } from "../../entities/invoice.meta";
 import { billingCustomerMeta } from "../../entities/billing-customer.meta";
-import { subscriptionMeta } from "../../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../../stripe-subscription/entities/stripe-subscription.meta";
 import { Invoice, InvoiceStatus } from "../../entities/invoice.entity";
 
 describe("InvoiceRepository", () => {
@@ -150,11 +150,11 @@ describe("InvoiceRepository", () => {
         `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})`,
+        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(`WHERE 1=1`);
       expect(mockQuery.query).not.toContain(`${invoiceMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`RETURN ${invoiceMeta.nodeName}, ${subscriptionMeta.nodeName}`);
+      expect(mockQuery.query).toContain(`RETURN ${invoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
       expect(mockQuery.query).toContain(`ORDER BY ${invoiceMeta.nodeName}.createdAt DESC`);
       expect(mockQuery.query).toContain(`LIMIT $limit`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
@@ -272,7 +272,7 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.query).toContain("OPTIONAL MATCH");
       expect(mockQuery.query).toContain(
-        `(${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})`,
+        `(${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
     });
   });
@@ -295,10 +295,10 @@ describe("InvoiceRepository", () => {
         `MATCH (${invoiceMeta.nodeName}:${invoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName}:${subscriptionMeta.labelName})`,
+        `OPTIONAL MATCH (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${subscriptionMeta.nodeName}`,
+        `RETURN ${invoiceMeta.nodeName}, ${billingCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
@@ -466,7 +466,7 @@ describe("InvoiceRepository", () => {
         `MATCH (${billingCustomerMeta.nodeName}:${billingCustomerMeta.labelName} {id: $billingCustomerId})`,
       );
       expect(mockQuery.query).not.toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(`CREATE (${invoiceMeta.nodeName}:${invoiceMeta.labelName}`);
       expect(mockQuery.query).toContain("createdAt: datetime()");
@@ -475,7 +475,7 @@ describe("InvoiceRepository", () => {
         `CREATE (${invoiceMeta.nodeName})-[:BELONGS_TO]->(${billingCustomerMeta.nodeName})`,
       );
       expect(mockQuery.query).not.toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName})`,
+        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
@@ -495,10 +495,10 @@ describe("InvoiceRepository", () => {
 
       expect(mockQuery.queryParams.subscriptionId).toBe(TEST_IDS.subscriptionId);
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName})`,
+        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 
@@ -1294,7 +1294,7 @@ describe("InvoiceRepository", () => {
         attempted: false,
       });
 
-      expect(mockQuery.query).not.toContain(`MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName}`);
+      expect(mockQuery.query).not.toContain(`MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
       expect(mockQuery.query).not.toContain(`CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
     });
 
@@ -1327,10 +1327,10 @@ describe("InvoiceRepository", () => {
       });
 
       expect(mockQuery.query).toContain(
-        `MATCH (${subscriptionMeta.nodeName}:${subscriptionMeta.labelName} {id: $subscriptionId})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${subscriptionMeta.nodeName})`,
+        `CREATE (${invoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 

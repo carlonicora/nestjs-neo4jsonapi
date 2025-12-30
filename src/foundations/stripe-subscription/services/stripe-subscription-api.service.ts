@@ -1,17 +1,17 @@
 import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { StripeService } from "./stripe.service";
-import { HandleStripeErrors } from "../errors/stripe.errors";
+import { StripeService } from "../../stripe/services/stripe.service";
+import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
 
 /**
- * Stripe Subscription Service
+ * Stripe Subscription API Service
  *
  * Manages Stripe subscription operations including creation, updates, cancellations, pausing/resuming,
  * and proration previews. Handles subscription lifecycle and billing changes.
  *
  * @example
  * ```typescript
- * const subscription = await stripeSubscriptionService.createSubscription({
+ * const subscription = await stripeSubscriptionApiService.createSubscription({
  *   stripeCustomerId: 'cus_abc123',
  *   priceId: 'price_xyz789',
  *   paymentMethodId: 'pm_def456',
@@ -19,7 +19,7 @@ import { HandleStripeErrors } from "../errors/stripe.errors";
  * ```
  */
 @Injectable()
-export class StripeSubscriptionService {
+export class StripeSubscriptionApiService {
   constructor(private readonly stripeService: StripeService) {}
 
   /**

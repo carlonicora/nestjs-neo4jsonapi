@@ -3,7 +3,7 @@ import { billingCustomerMeta } from "../entities/billing-customer.meta";
 import { Invoice } from "../entities/invoice.entity";
 import { mapInvoice } from "../entities/invoice.map";
 import { invoiceMeta } from "../entities/invoice.meta";
-import { subscriptionMeta } from "../entities/subscription.meta";
+import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 import { InvoiceSerialiser } from "../serialisers/invoice.serialiser";
 
 export const InvoiceModel: DataModelInterface<Invoice> = {
@@ -11,6 +11,6 @@ export const InvoiceModel: DataModelInterface<Invoice> = {
   entity: undefined as unknown as Invoice,
   mapper: mapInvoice,
   serialiser: InvoiceSerialiser,
-  singleChildrenTokens: [billingCustomerMeta.nodeName, subscriptionMeta.nodeName],
+  singleChildrenTokens: [billingCustomerMeta.nodeName, stripeSubscriptionMeta.nodeName],
   childrenTokens: [],
 };

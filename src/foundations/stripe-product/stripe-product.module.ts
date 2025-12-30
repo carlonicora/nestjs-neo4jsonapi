@@ -1,4 +1,4 @@
-import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
+import { Module, OnModuleInit } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
 import { StripeModule } from "../stripe/stripe.module";
 import { StripeProductController } from "./controllers/stripe-product.controller";
@@ -45,7 +45,7 @@ import { StripeProductApiService } from "./services/stripe-product-api.service";
  * ```
  */
 @Module({
-  imports: [forwardRef(() => StripeModule)],
+  imports: [StripeModule],
   controllers: [StripeProductController],
   providers: [
     // Services

@@ -5,7 +5,7 @@ import { AbstractJsonApiSerialiser } from "../../../core/jsonapi";
 import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
 import { JsonApiDataInterface } from "../../../core/jsonapi";
 import { JsonApiServiceInterface } from "../../../core/jsonapi";
-import { SubscriptionModel } from "../entities/subscription.model";
+import { StripeSubscriptionModel } from "../../stripe-subscription/entities/stripe-subscription.model";
 import { UsageRecord } from "../entities/usage-record.entity";
 import { UsageRecordModel } from "../entities/usage-record.model";
 
@@ -31,7 +31,7 @@ export class UsageRecordSerialiser extends AbstractJsonApiSerialiser implements 
 
     this.relationships = {
       subscription: {
-        data: this.serialiserFactory.create(SubscriptionModel),
+        data: this.serialiserFactory.create(StripeSubscriptionModel),
       },
     };
 

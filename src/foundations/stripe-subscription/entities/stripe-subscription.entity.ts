@@ -1,8 +1,8 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { BillingCustomer } from "../entities/billing-customer.entity";
+import { BillingCustomer } from "../../stripe/entities/billing-customer.entity";
 import { StripePrice } from "../../stripe-price/entities/stripe-price.entity";
 
-export type SubscriptionStatus =
+export type StripeSubscriptionStatus =
   | "active"
   | "past_due"
   | "unpaid"
@@ -12,11 +12,11 @@ export type SubscriptionStatus =
   | "trialing"
   | "paused";
 
-export type Subscription = Entity & {
+export type StripeSubscription = Entity & {
   stripeSubscriptionId: string;
   stripeSubscriptionItemId?: string;
 
-  status: SubscriptionStatus;
+  status: StripeSubscriptionStatus;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   cancelAtPeriodEnd: boolean;

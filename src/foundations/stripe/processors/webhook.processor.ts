@@ -3,9 +3,9 @@ import { Job } from "bullmq";
 import Stripe from "stripe";
 import { AppLoggingService } from "../../../core/logging";
 import { WebhookEventRepository } from "../repositories/webhook-event.repository";
-import { SubscriptionService } from "../services/subscription.service";
+import { StripeSubscriptionAdminService } from "../../stripe-subscription/services/stripe-subscription-admin.service";
 import { BillingCustomerRepository } from "../repositories/billing-customer.repository";
-import { SubscriptionRepository } from "../repositories/subscription.repository";
+import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
 import { InvoiceRepository } from "../repositories/invoice.repository";
 import { NotificationService } from "../services/notification.service";
 
@@ -20,9 +20,9 @@ export interface WebhookJobData {
 export class WebhookProcessor extends WorkerHost {
   constructor(
     private readonly webhookEventRepository: WebhookEventRepository,
-    private readonly subscriptionService: SubscriptionService,
+    private readonly subscriptionService: StripeSubscriptionAdminService,
     private readonly billingCustomerRepository: BillingCustomerRepository,
-    private readonly subscriptionRepository: SubscriptionRepository,
+    private readonly subscriptionRepository: StripeSubscriptionRepository,
     private readonly invoiceRepository: InvoiceRepository,
     private readonly notificationService: NotificationService,
     private readonly logger: AppLoggingService,
