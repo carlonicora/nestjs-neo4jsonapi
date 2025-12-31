@@ -1,6 +1,7 @@
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
+import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
 import { StripeSubscriptionModule } from "../stripe-subscription/stripe-subscription.module";
 import { StripeModule } from "../stripe/stripe.module";
 import { StripeInvoiceController } from "./controllers/stripe-invoice.controller";
@@ -28,7 +29,7 @@ import { StripeInvoiceApiService } from "./services/stripe-invoice-api.service";
  * - JsonApiModule (for JSON:API serialization)
  */
 @Module({
-  imports: [JsonApiModule, forwardRef(() => StripeSubscriptionModule), forwardRef(() => StripeModule)],
+  imports: [JsonApiModule, forwardRef(() => StripeCustomerModule), forwardRef(() => StripeSubscriptionModule), forwardRef(() => StripeModule)],
   controllers: [StripeInvoiceController],
   providers: [StripeInvoiceApiService, StripeInvoiceAdminService, StripeInvoiceRepository, StripeInvoiceSerialiser],
   exports: [StripeInvoiceApiService, StripeInvoiceAdminService, StripeInvoiceRepository],

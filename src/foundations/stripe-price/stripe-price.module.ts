@@ -1,5 +1,7 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
+import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
+import { Neo4JModule } from "../../core/neo4j/neo4j.module";
 import { StripeProductModule } from "../stripe-product/stripe-product.module";
 import { StripePriceController } from "./controllers/stripe-price.controller";
 import { StripePriceModel } from "./entities/stripe-price.model";
@@ -17,7 +19,7 @@ import { StripePriceAdminService } from "./services/stripe-price-admin.service";
  * - StripeProductModule - For product-price relationships
  */
 @Module({
-  imports: [StripeProductModule],
+  imports: [Neo4JModule, JsonApiModule, forwardRef(() => StripeProductModule)],
   controllers: [StripePriceController],
   providers: [StripePriceAdminService, StripePriceRepository, StripePriceSerialiser],
   exports: [StripePriceAdminService, StripePriceRepository],

@@ -1,6 +1,5 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
-import { StripeCustomerApiService, StripeCustomerRepository } from "../stripe-customer";
 import { StripeInvoiceModule } from "../stripe-invoice/stripe-invoice.module";
 import { StripeSubscriptionModule } from "../stripe-subscription/stripe-subscription.module";
 import { StripeUsageModule } from "../stripe-usage/stripe-usage.module";
@@ -51,9 +50,6 @@ import { StripeService } from "./services/stripe.service";
     StripePortalService,
     // Business Logic Services
     BillingService,
-    // Re-export from StripeCustomerModule for backward compatibility
-    StripeCustomerApiService,
-    StripeCustomerRepository,
   ],
 })
 export class StripeModule {}

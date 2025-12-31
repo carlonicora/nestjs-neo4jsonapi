@@ -2,6 +2,7 @@ import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
 import { Neo4JModule } from "../../core/neo4j/neo4j.module";
+import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
 import { StripePriceModule } from "../stripe-price/stripe-price.module";
 import { StripeModule } from "../stripe/stripe.module";
 import { StripeSubscriptionController } from "./controllers/stripe-subscription.controller";
@@ -39,7 +40,13 @@ import { StripeSubscriptionApiService } from "./services/stripe-subscription-api
  * - StripeSubscriptionRepository: Database operations
  */
 @Module({
-  imports: [Neo4JModule, JsonApiModule, forwardRef(() => StripePriceModule), forwardRef(() => StripeModule)],
+  imports: [
+    Neo4JModule,
+    JsonApiModule,
+    forwardRef(() => StripeCustomerModule),
+    forwardRef(() => StripePriceModule),
+    forwardRef(() => StripeModule),
+  ],
   controllers: [StripeSubscriptionController],
   providers: [
     StripeSubscriptionApiService,

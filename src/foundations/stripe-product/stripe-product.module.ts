@@ -1,5 +1,7 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
+import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
+import { Neo4JModule } from "../../core/neo4j/neo4j.module";
 import { StripeModule } from "../stripe/stripe.module";
 import { StripeProductController } from "./controllers/stripe-product.controller";
 import { StripeProductModel } from "./entities/stripe-product.model";
@@ -45,7 +47,7 @@ import { StripeProductApiService } from "./services/stripe-product-api.service";
  * ```
  */
 @Module({
-  imports: [StripeModule],
+  imports: [Neo4JModule, JsonApiModule, forwardRef(() => StripeModule)],
   controllers: [StripeProductController],
   providers: [
     // Services
