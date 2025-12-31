@@ -1,15 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpStatus,
-  Param,
-  Post,
-  Query,
-  Req,
-  Res,
-  UseGuards,
-} from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
@@ -113,7 +102,9 @@ export class StripeUsageController {
   ) {
     if (!subscriptionId) {
       reply.status(HttpStatus.BAD_REQUEST).send({
-        errors: [{ status: "400", title: "Missing filter", detail: "filter[subscriptionId] query parameter is required" }],
+        errors: [
+          { status: "400", title: "Missing filter", detail: "filter[subscriptionId] query parameter is required" },
+        ],
       });
       return;
     }
@@ -145,14 +136,18 @@ export class StripeUsageController {
   ) {
     if (!subscriptionId) {
       reply.status(HttpStatus.BAD_REQUEST).send({
-        errors: [{ status: "400", title: "Missing filter", detail: "filter[subscriptionId] query parameter is required" }],
+        errors: [
+          { status: "400", title: "Missing filter", detail: "filter[subscriptionId] query parameter is required" },
+        ],
       });
       return;
     }
 
     if (!startTime || !endTime) {
       reply.status(HttpStatus.BAD_REQUEST).send({
-        errors: [{ status: "400", title: "Missing parameters", detail: "startTime and endTime query parameters are required" }],
+        errors: [
+          { status: "400", title: "Missing parameters", detail: "startTime and endTime query parameters are required" },
+        ],
       });
       return;
     }

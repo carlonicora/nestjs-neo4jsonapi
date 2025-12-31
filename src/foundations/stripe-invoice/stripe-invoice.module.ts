@@ -29,7 +29,12 @@ import { StripeInvoiceApiService } from "./services/stripe-invoice-api.service";
  * - JsonApiModule (for JSON:API serialization)
  */
 @Module({
-  imports: [JsonApiModule, forwardRef(() => StripeCustomerModule), forwardRef(() => StripeSubscriptionModule), forwardRef(() => StripeModule)],
+  imports: [
+    JsonApiModule,
+    forwardRef(() => StripeCustomerModule),
+    forwardRef(() => StripeSubscriptionModule),
+    forwardRef(() => StripeModule),
+  ],
   controllers: [StripeInvoiceController],
   providers: [StripeInvoiceApiService, StripeInvoiceAdminService, StripeInvoiceRepository, StripeInvoiceSerialiser],
   exports: [StripeInvoiceApiService, StripeInvoiceAdminService, StripeInvoiceRepository],

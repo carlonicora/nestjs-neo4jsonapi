@@ -2,7 +2,11 @@ import { mapEntity } from "../../../common/abstracts/entity";
 import { EntityFactory } from "../../../core/neo4j/factories/entity.factory";
 import { StripeUsageRecord } from "./stripe-usage-record.entity";
 
-export const mapStripeUsageRecord = (params: { data: any; record: any; entityFactory: EntityFactory }): StripeUsageRecord => {
+export const mapStripeUsageRecord = (params: {
+  data: any;
+  record: any;
+  entityFactory: EntityFactory;
+}): StripeUsageRecord => {
   return {
     ...mapEntity({ record: params.data }),
     subscriptionId: params.data.subscriptionId,

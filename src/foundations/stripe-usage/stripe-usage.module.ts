@@ -39,17 +39,8 @@ import { StripeUsageApiService } from "./services/stripe-usage-api.service";
     forwardRef(() => StripeCustomerModule),
   ],
   controllers: [StripeUsageController],
-  providers: [
-    StripeUsageApiService,
-    StripeUsageAdminService,
-    StripeUsageRecordRepository,
-    StripeUsageRecordSerialiser,
-  ],
-  exports: [
-    StripeUsageApiService,
-    StripeUsageAdminService,
-    StripeUsageRecordRepository,
-  ],
+  providers: [StripeUsageApiService, StripeUsageAdminService, StripeUsageRecordRepository, StripeUsageRecordSerialiser],
+  exports: [StripeUsageApiService, StripeUsageAdminService, StripeUsageRecordRepository],
 })
 export class StripeUsageModule implements OnModuleInit {
   onModuleInit() {

@@ -2,7 +2,11 @@ import { mapEntity } from "../../../common/abstracts/entity";
 import { EntityFactory } from "../../../core/neo4j/factories/entity.factory";
 import { StripeWebhookEvent } from "./stripe-webhook-event.entity";
 
-export const mapStripeWebhookEvent = (params: { data: any; record: any; entityFactory: EntityFactory }): StripeWebhookEvent => {
+export const mapStripeWebhookEvent = (params: {
+  data: any;
+  record: any;
+  entityFactory: EntityFactory;
+}): StripeWebhookEvent => {
   return {
     ...mapEntity({ record: params.data }),
     stripeEventId: params.data.stripeEventId,

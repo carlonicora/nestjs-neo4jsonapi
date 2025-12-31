@@ -158,7 +158,9 @@ export class StripeWebhookEventRepository implements OnModuleInit {
     }
 
     if (params.incrementRetryCount) {
-      setValues.push(`${stripeWebhookEventMeta.nodeName}.retryCount = ${stripeWebhookEventMeta.nodeName}.retryCount + 1`);
+      setValues.push(
+        `${stripeWebhookEventMeta.nodeName}.retryCount = ${stripeWebhookEventMeta.nodeName}.retryCount + 1`,
+      );
     }
 
     query.query = `
