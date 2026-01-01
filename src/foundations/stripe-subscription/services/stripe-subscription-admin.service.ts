@@ -5,6 +5,7 @@ import { JsonApiPaginator } from "../../../core/jsonapi";
 import { JsonApiService } from "../../../core/jsonapi";
 import { StripeSubscriptionApiService } from "./stripe-subscription-api.service";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
+import { StripeCustomerApiService } from "../../stripe-customer/services/stripe-customer-api.service";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";
 import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
@@ -35,6 +36,7 @@ export class StripeSubscriptionAdminService {
     private readonly stripeCustomerRepository: StripeCustomerRepository,
     private readonly stripePriceRepository: StripePriceRepository,
     private readonly stripeSubscriptionApiService: StripeSubscriptionApiService,
+    private readonly stripeCustomerApiService: StripeCustomerApiService,
     private readonly jsonApiService: JsonApiService,
   ) {}
 
@@ -113,6 +115,7 @@ export class StripeSubscriptionAdminService {
    * @param params.quantity - Optional quantity (default: 1)
    * @returns JSON:API formatted subscription data
    * @throws {HttpException} NOT_FOUND if customer or price not found
+   * @throws {HttpException} PAYMENT_REQUIRED (402) if no payment methods exist
    *
    * @example
    * ```typescript
@@ -141,10 +144,23 @@ export class StripeSubscriptionAdminService {
       throw new HttpException("Price not found", HttpStatus.NOT_FOUND);
     }
 
+    // Validate and auto-select payment method
+    let paymentMethodId = params.paymentMethodId;
+    if (!paymentMethodId) {
+      const paymentMethods = await this.stripeCustomerApiService.listPaymentMethods(customer.stripeCustomerId);
+      if (paymentMethods.length === 0) {
+        throw new HttpException(
+          "No payment method available. Please add a payment method before creating a subscription.",
+          HttpStatus.PAYMENT_REQUIRED,
+        );
+      }
+      paymentMethodId = paymentMethods[0].id;
+    }
+
     const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.createSubscription({
       stripeCustomerId: customer.stripeCustomerId,
       priceId: price.stripePriceId,
-      paymentMethodId: params.paymentMethodId,
+      paymentMethodId,
       trialPeriodDays: params.trialPeriodDays,
       metadata: {
         companyId: params.companyId,
