@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
+import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
 import { StripeProduct } from "../entities/stripe-product.entity";
 import { stripeProductMeta } from "../entities/stripe-product.meta";
 import { StripeProductModel } from "../entities/stripe-product.model";
@@ -70,7 +71,8 @@ export class StripeProductRepository implements OnModuleInit {
     query.query = `
       MATCH (${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       ${where}
-      RETURN ${stripeProductMeta.nodeName}
+      OPTIONAL MATCH (${stripeProductMeta.nodeName})<-[:BELONGS_TO]-(${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})
+      RETURN ${stripeProductMeta.nodeName}, ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}
       ORDER BY ${stripeProductMeta.nodeName}.name
     `;
 
@@ -93,7 +95,8 @@ export class StripeProductRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${stripeProductMeta.nodeName}:${stripeProductMeta.labelName} {id: $id})
-      RETURN ${stripeProductMeta.nodeName}
+      OPTIONAL MATCH (${stripeProductMeta.nodeName})<-[:BELONGS_TO]-(${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})
+      RETURN ${stripeProductMeta.nodeName}, ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -115,7 +118,8 @@ export class StripeProductRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${stripeProductMeta.nodeName}:${stripeProductMeta.labelName} {stripeProductId: $stripeProductId})
-      RETURN ${stripeProductMeta.nodeName}
+      OPTIONAL MATCH (${stripeProductMeta.nodeName})<-[:BELONGS_TO]-(${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})
+      RETURN ${stripeProductMeta.nodeName}, ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);

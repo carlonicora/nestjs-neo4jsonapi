@@ -10,5 +10,6 @@ export const mapStripeProduct = (params: { data: any; record: any; entityFactory
     description: params.data.description,
     active: params.data.active === true,
     metadata: params.data.metadata,
+    stripePrice: [],
   };
 };

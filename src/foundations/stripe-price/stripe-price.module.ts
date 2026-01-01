@@ -22,7 +22,7 @@ import { StripePriceAdminService } from "./services/stripe-price-admin.service";
   imports: [Neo4JModule, JsonApiModule, forwardRef(() => StripeProductModule)],
   controllers: [StripePriceController],
   providers: [StripePriceAdminService, StripePriceRepository, StripePriceSerialiser],
-  exports: [StripePriceAdminService, StripePriceRepository],
+  exports: [StripePriceAdminService, StripePriceRepository, StripePriceSerialiser],
 })
 export class StripePriceModule implements OnModuleInit {
   onModuleInit() {

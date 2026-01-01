@@ -1,8 +1,9 @@
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
+import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
+import { StripeProductSerialiser } from "../serialisers/stripe-product.serialiser";
 import { StripeProduct } from "./stripe-product.entity";
 import { mapStripeProduct } from "./stripe-product.map";
 import { stripeProductMeta } from "./stripe-product.meta";
-import { StripeProductSerialiser } from "../serialisers/stripe-product.serialiser";
 
 export const StripeProductModel: DataModelInterface<StripeProduct> = {
   ...stripeProductMeta,
@@ -10,5 +11,5 @@ export const StripeProductModel: DataModelInterface<StripeProduct> = {
   mapper: mapStripeProduct,
   serialiser: StripeProductSerialiser,
   singleChildrenTokens: [],
-  childrenTokens: [],
+  childrenTokens: [stripePriceMeta.nodeName],
 };
