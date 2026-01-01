@@ -218,7 +218,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || "",
       webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
       apiVersion: process.env.STRIPE_API_VERSION || "2024-12-18.acacia",
-      portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL || "",
+      portalReturnUrl: process.env.STRIPE_PORTAL_RETURN_URL || process.env.APP_URL || "",
       portalConfigurationId: process.env.STRIPE_PORTAL_CONFIGURATION_ID || "",
     },
     discord: {

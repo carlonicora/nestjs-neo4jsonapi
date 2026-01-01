@@ -94,7 +94,7 @@ export class StripeCustomerController {
       return;
     }
 
-    const response = await this.stripeCustomerAdminService.createCustomer(req.user.companyId, body);
+    const response = await this.stripeCustomerAdminService.createCustomer(req.user.companyId, req.user.userId, body);
 
     reply.status(HttpStatus.CREATED).send(response);
   }

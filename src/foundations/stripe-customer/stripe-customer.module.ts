@@ -2,7 +2,9 @@ import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
 import { Neo4JModule } from "../../core/neo4j/neo4j.module";
+import { CompanyModule } from "../company/company.module";
 import { StripeModule } from "../stripe/stripe.module";
+import { UserModule } from "../user/user.module";
 import { StripeCustomerController } from "./controllers/stripe-customer.controller";
 import { StripeCustomerModel } from "./entities/stripe-customer.model";
 import { StripeCustomerRepository } from "./repositories/stripe-customer.repository";
@@ -44,7 +46,7 @@ import { StripeCustomerApiService } from "./services/stripe-customer-api.service
  * ```
  */
 @Module({
-  imports: [Neo4JModule, JsonApiModule, forwardRef(() => StripeModule)],
+  imports: [Neo4JModule, JsonApiModule, CompanyModule, UserModule, forwardRef(() => StripeModule)],
   controllers: [StripeCustomerController],
   providers: [
     // Services

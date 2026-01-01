@@ -1,15 +1,5 @@
 import { Type } from "class-transformer";
-import {
-  Equals,
-  IsDefined,
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-  ValidateNested,
-} from "class-validator";
+import { Equals, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from "class-validator";
 import { stripeCustomerMeta } from "../entities/stripe-customer.meta";
 
 // Base DTO for reference with ID and type validation
@@ -22,40 +12,43 @@ export class StripeCustomerDTO {
 }
 
 // POST DTOs (for creating customers)
+// All fields are optional - backend will auto-fetch from company if not provided
 export class StripeCustomerPostAttributesDTO {
-  @IsDefined()
+  @IsOptional()
   @IsString()
   @MaxLength(255)
-  name: string;
+  name?: string;
 
-  @IsDefined()
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
-  @IsDefined()
+  @IsOptional()
   @IsString()
   @MaxLength(3)
-  currency: string;
+  currency?: string;
 }
 
 export class StripeCustomerPostDataDTO {
+  @IsOptional()
   @Equals(stripeCustomerMeta.endpoint)
-  type: string;
+  type?: string;
 
+  @IsOptional()
   @IsUUID()
-  id: string;
+  id?: string;
 
+  @IsOptional()
   @ValidateNested()
-  @IsNotEmpty()
   @Type(() => StripeCustomerPostAttributesDTO)
-  attributes: StripeCustomerPostAttributesDTO;
+  attributes?: StripeCustomerPostAttributesDTO;
 }
 
 export class StripeCustomerPostDTO {
+  @IsOptional()
   @ValidateNested()
-  @IsNotEmpty()
   @Type(() => StripeCustomerPostDataDTO)
-  data: StripeCustomerPostDataDTO;
+  data?: StripeCustomerPostDataDTO;
 
   @IsOptional()
   included?: any[];

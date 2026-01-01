@@ -1,11 +1,12 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { JsonApiCursorInterface } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j";
 import { stripeCustomerMeta } from "../../stripe-customer/entities/stripe-customer.meta";
+import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 import { StripeInvoice, StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
 import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
-import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
 
 /**
  * StripeInvoiceRepository
@@ -77,9 +78,9 @@ export class StripeInvoiceRepository implements OnModuleInit {
   async findByStripeCustomerId(params: {
     stripeCustomerId: string;
     status?: StripeInvoiceStatus;
-    limit?: number;
+    cursor?: JsonApiCursorInterface;
   }): Promise<StripeInvoice[]> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel, cursor: params.cursor });
 
     const whereParams: string[] = [];
     if (params.status) {
@@ -90,15 +91,16 @@ export class StripeInvoiceRepository implements OnModuleInit {
     const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
 
     query.queryParams.stripeCustomerId = params.stripeCustomerId;
-    query.queryParams.limit = params.limit ?? 100;
 
     query.query = `
       MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
       OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
       WHERE 1=1 ${where}
+
+      {CURSOR}
+
       RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
       ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC
-      LIMIT $limit
     `;
 
     return this.neo4j.readMany(query);

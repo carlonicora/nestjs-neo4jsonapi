@@ -1,14 +1,12 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
-import { JsonApiPaginator } from "../../../core/jsonapi";
-import { JsonApiService } from "../../../core/jsonapi";
-import { StripeInvoiceApiService } from "./stripe-invoice-api.service";
+import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
-import { StripeInvoiceRepository } from "../repositories/stripe-invoice.repository";
 import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
-import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
+import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
+import { StripeInvoiceRepository } from "../repositories/stripe-invoice.repository";
+import { StripeInvoiceApiService } from "./stripe-invoice-api.service";
 
 /**
  * StripeInvoiceAdminService
@@ -70,6 +68,7 @@ export class StripeInvoiceAdminService {
     const invoices = await this.stripeInvoiceRepository.findByStripeCustomerId({
       stripeCustomerId: customer.id,
       status: params.status,
+      cursor: paginator.generateCursor(),
     });
 
     return this.jsonApiService.buildList(StripeInvoiceModel, invoices, paginator);

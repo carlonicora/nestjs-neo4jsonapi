@@ -1,5 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, BadRequestException } from "@nestjs/common";
 import { JsonApiDataInterface, JsonApiService } from "../../../core/jsonapi";
+import { CompanyRepository } from "../../company/repositories/company.repository";
+import { UserRepository } from "../../user/repositories/user.repository";
 import { StripeCustomerRepository } from "../repositories/stripe-customer.repository";
 import { StripeCustomerApiService } from "./stripe-customer-api.service";
 import { StripeCustomerModel } from "../entities/stripe-customer.model";
@@ -21,6 +23,8 @@ export class StripeCustomerAdminService {
   constructor(
     private readonly stripeCustomerApiService: StripeCustomerApiService,
     private readonly stripeCustomerRepository: StripeCustomerRepository,
+    private readonly companyRepository: CompanyRepository,
+    private readonly userRepository: UserRepository,
     private readonly jsonApiService: JsonApiService,
   ) {}
 
@@ -70,13 +74,39 @@ export class StripeCustomerAdminService {
    * Create a new customer
    *
    * Creates customer in both Stripe and Neo4j, establishing company relationship.
+   * If no attributes provided, auto-fetches company name and user email as defaults.
    *
    * @param companyId - The company ID to associate with the customer
-   * @param dto - The JSON:API formatted customer creation data
+   * @param userId - The user ID of the authenticated user (for email fallback)
+   * @param dto - The JSON:API formatted customer creation data (optional)
    * @returns JSON:API formatted created customer
    */
-  async createCustomer(companyId: string, dto: StripeCustomerPostDTO): Promise<JsonApiDataInterface> {
-    const { name, email, currency } = dto.data.attributes;
+  async createCustomer(companyId: string, userId: string, dto?: StripeCustomerPostDTO): Promise<JsonApiDataInterface> {
+    // Extract attributes from DTO if provided
+    let name = dto?.data?.attributes?.name;
+    let email = dto?.data?.attributes?.email;
+    let currency = dto?.data?.attributes?.currency;
+
+    // If name is missing, fetch from company
+    if (!name) {
+      const company = await this.companyRepository.findByCompanyId({ companyId });
+      if (!company) {
+        throw new BadRequestException("Company not found");
+      }
+      name = company.name;
+    }
+
+    // If email is missing, fetch from the authenticated user
+    if (!email) {
+      const user = await this.userRepository.findByUserId({ userId });
+      if (!user) {
+        throw new BadRequestException("User not found");
+      }
+      email = user.email;
+    }
+
+    // Default currency to USD if not provided
+    currency = currency || "usd";
 
     // Create customer in Stripe first
     const stripeCustomer = await this.stripeCustomerApiService.createCustomer({

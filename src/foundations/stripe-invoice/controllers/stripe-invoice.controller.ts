@@ -3,9 +3,10 @@ import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
+import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
 import { StripeInvoiceAdminService } from "../services/stripe-invoice-admin.service";
 
-@Controller("billing")
+@Controller()
 export class StripeInvoiceController {
   constructor(private readonly stripeInvoiceAdminService: StripeInvoiceAdminService) {}
 
@@ -17,7 +18,7 @@ export class StripeInvoiceController {
    * @param query - JSON:API query parameters for pagination
    * @param status - Optional filter by invoice status
    */
-  @Get("invoices")
+  @Get(stripeInvoiceMeta.endpoint)
   @UseGuards(JwtAuthGuard)
   async listInvoices(
     @Req() req: AuthenticatedRequest,
@@ -41,7 +42,7 @@ export class StripeInvoiceController {
    * @param reply - Fastify reply
    * @param subscriptionId - Optional subscription ID to preview
    */
-  @Get("invoices/upcoming")
+  @Get(`${stripeInvoiceMeta.endpoint}/upcoming`)
   @UseGuards(JwtAuthGuard)
   async getUpcomingInvoice(
     @Req() req: AuthenticatedRequest,
@@ -63,7 +64,7 @@ export class StripeInvoiceController {
    * @param reply - Fastify reply
    * @param invoiceId - Invoice ID
    */
-  @Get("invoices/:invoiceId")
+  @Get(`${stripeInvoiceMeta.endpoint}/:invoiceId`)
   @UseGuards(JwtAuthGuard)
   async getInvoice(
     @Req() req: AuthenticatedRequest,

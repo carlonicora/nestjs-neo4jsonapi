@@ -133,6 +133,7 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.error(params.query, params.queryParams);
       this.logger.error(error);
+      throw error;
     }
   }
 

@@ -45,8 +45,13 @@ export class StripePortalService {
 
     const sessionParams: Stripe.BillingPortal.SessionCreateParams = {
       customer: stripeCustomerId,
-      return_url: returnUrl || this.stripeService.getPortalReturnUrl(),
     };
+
+    // Only set return_url if we have a non-empty value
+    const effectiveReturnUrl = returnUrl || this.stripeService.getPortalReturnUrl();
+    if (effectiveReturnUrl) {
+      sessionParams.return_url = effectiveReturnUrl;
+    }
 
     const configurationId = this.stripeService.getPortalConfigurationId();
     if (configurationId) {
