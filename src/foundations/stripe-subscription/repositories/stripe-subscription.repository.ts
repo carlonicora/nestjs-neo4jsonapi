@@ -107,9 +107,9 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
       MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);

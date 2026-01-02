@@ -1,4 +1,4 @@
-import { DataModelInterface } from "@carlonicora/nestjs-neo4jsonapi";
+import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { StripePaymentMethodSerialiser } from "../serialisers/stripe-payment-method.serialiser";
 import { StripePaymentMethod } from "./stripe-payment-method.entity";
 import { stripePaymentMethodMeta } from "./stripe-payment-method.meta";
