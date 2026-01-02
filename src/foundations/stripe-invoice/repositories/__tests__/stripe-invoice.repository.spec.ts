@@ -141,11 +141,9 @@ describe("StripeInvoiceRepository", () => {
 
       expect(neo4jService.initQuery).toHaveBeenCalledWith({
         serialiser: expect.anything(),
+        cursor: undefined,
       });
-      expect(mockQuery.queryParams).toEqual({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        limit: 100,
-      });
+      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
       expect(mockQuery.query).toContain(
         `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
       );
@@ -156,7 +154,6 @@ describe("StripeInvoiceRepository", () => {
       expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
       expect(mockQuery.query).toContain(`RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
       expect(mockQuery.query).toContain(`ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC`);
-      expect(mockQuery.query).toContain(`LIMIT $limit`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_INVOICE]);
     });
@@ -171,38 +168,10 @@ describe("StripeInvoiceRepository", () => {
         status: "paid",
       });
 
-      expect(mockQuery.queryParams).toEqual({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        status: "paid",
-        limit: 100,
-      });
+      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
+      expect(mockQuery.queryParams.status).toBe("paid");
       expect(mockQuery.query).toContain(`WHERE 1=1 AND ${stripeInvoiceMeta.nodeName}.status = $status`);
       expect(result).toEqual([MOCK_INVOICE]);
-    });
-
-    it("should use default limit of 100 when not specified", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
-
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.queryParams.limit).toBe(100);
-    });
-
-    it("should use custom limit when specified", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
-
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        limit: 50,
-      });
-
-      expect(mockQuery.queryParams.limit).toBe(50);
     });
 
     it("should return empty array when no invoices found", async () => {

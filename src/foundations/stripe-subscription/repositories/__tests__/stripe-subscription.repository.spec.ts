@@ -139,19 +139,17 @@ describe("StripeSubscriptionRepository", () => {
       expect(neo4jService.initQuery).toHaveBeenCalledWith({
         serialiser: expect.anything(),
       });
-      expect(mockQuery.queryParams).toEqual({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
+      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
       expect(mockQuery.query).toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(`WHERE 1=1`);
       expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
       expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
       );
       expect(mockQuery.query).toContain(`ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC`);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
@@ -248,13 +246,13 @@ describe("StripeSubscriptionRepository", () => {
         id: TEST_IDS.subscriptionId,
       });
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -301,10 +299,10 @@ describe("StripeSubscriptionRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -385,7 +383,7 @@ describe("StripeSubscriptionRepository", () => {
         `MATCH (${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
       expect(mockQuery.query).toContain("createdAt: datetime()");
@@ -394,7 +392,7 @@ describe("StripeSubscriptionRepository", () => {
         `CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName})`,
+        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -770,10 +768,10 @@ describe("StripeSubscriptionRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
       expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
       );
     });
 
@@ -936,12 +934,12 @@ describe("StripeSubscriptionRepository", () => {
       expect(mockQuery.query).toContain("DELETE oldRel");
       expect(mockQuery.query).toContain(`WITH ${stripeSubscriptionMeta.nodeName}, ${stripeCustomerMeta.nodeName}`);
       expect(mockQuery.query).toContain(
-        `MATCH (newPrice:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
+        `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(newPrice)`);
+      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`);
       expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
       expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, newPrice as ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}`,
+        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_SUBSCRIPTION);

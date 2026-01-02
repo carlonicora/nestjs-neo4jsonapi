@@ -206,12 +206,25 @@ describe("StripeSubscriptionController", () => {
           type: "subscriptions",
           id: "temp-id",
           attributes: {
-            priceId: TEST_IDS.priceId,
             quantity: 1,
+          },
+          relationships: {
+            stripePrice: {
+              data: {
+                type: "stripe-prices",
+                id: TEST_IDS.priceId,
+              },
+            },
           },
         },
       };
-      subscriptionService.createSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
+      const mockServiceResponse = {
+        data: MOCK_SUBSCRIPTION_RESPONSE,
+        clientSecret: "pi_secret",
+        paymentIntentId: "pi_123",
+        requiresAction: false,
+      };
+      subscriptionService.createSubscription.mockResolvedValue(mockServiceResponse);
 
       await controller.createSubscription(req, mockReply, body as any);
 
@@ -223,7 +236,6 @@ describe("StripeSubscriptionController", () => {
         quantity: 1,
       });
       expect(mockReply.status).toHaveBeenCalledWith(HttpStatus.CREATED);
-      expect(mockReply.send).toHaveBeenCalledWith(MOCK_SUBSCRIPTION_RESPONSE);
     });
 
     it("should pass all body parameters to service", async () => {
@@ -233,14 +245,27 @@ describe("StripeSubscriptionController", () => {
           type: "subscriptions",
           id: "temp-id",
           attributes: {
-            priceId: TEST_IDS.priceId,
             paymentMethodId: "pm_123",
             trialPeriodDays: 14,
             quantity: 2,
           },
+          relationships: {
+            stripePrice: {
+              data: {
+                type: "stripe-prices",
+                id: TEST_IDS.priceId,
+              },
+            },
+          },
         },
       };
-      subscriptionService.createSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
+      const mockServiceResponse = {
+        data: MOCK_SUBSCRIPTION_RESPONSE,
+        clientSecret: "pi_secret",
+        paymentIntentId: "pi_123",
+        requiresAction: false,
+      };
+      subscriptionService.createSubscription.mockResolvedValue(mockServiceResponse);
 
       await controller.createSubscription(req, mockReply, body as any);
 

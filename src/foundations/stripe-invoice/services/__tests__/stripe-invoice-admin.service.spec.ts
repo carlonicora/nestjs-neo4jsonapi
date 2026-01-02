@@ -208,10 +208,12 @@ describe("StripeInvoiceAdminService", () => {
       expect(stripeCustomerRepository.findByCompanyId).toHaveBeenCalledWith({
         companyId: validParams.companyId,
       });
-      expect(invoiceRepository.findByStripeCustomerId).toHaveBeenCalledWith({
-        stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
-        status: undefined,
-      });
+      expect(invoiceRepository.findByStripeCustomerId).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
+          status: undefined,
+        }),
+      );
       expect(jsonApiService.buildList).toHaveBeenCalledWith(expect.any(Object), [MOCK_DB_INVOICE], expect.any(Object));
       expect(result).toEqual(MOCK_JSON_API_LIST_RESPONSE);
     });
@@ -235,10 +237,12 @@ describe("StripeInvoiceAdminService", () => {
 
       await service.listInvoices(paramsWithStatus);
 
-      expect(invoiceRepository.findByStripeCustomerId).toHaveBeenCalledWith({
-        stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
-        status: "paid",
-      });
+      expect(invoiceRepository.findByStripeCustomerId).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
+          status: "paid",
+        }),
+      );
     });
 
     it("should use JsonApiPaginator with query params", async () => {

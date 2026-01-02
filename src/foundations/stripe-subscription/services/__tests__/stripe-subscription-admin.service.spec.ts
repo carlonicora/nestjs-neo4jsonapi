@@ -39,6 +39,7 @@ import { StripeCustomerRepository } from "../../../stripe-customer/repositories/
 import { StripePriceRepository } from "../../../stripe-price/repositories/stripe-price.repository";
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeSubscriptionApiService } from "../stripe-subscription-api.service";
+import { StripeCustomerApiService } from "../../../stripe-customer/services/stripe-customer-api.service";
 import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
@@ -46,6 +47,7 @@ import {
   MOCK_SUBSCRIPTION,
   MOCK_PRICE_RECURRING,
   MOCK_INVOICE,
+  MOCK_PAYMENT_METHOD,
   TEST_IDS,
 } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 
@@ -55,6 +57,7 @@ describe("StripeSubscriptionAdminService", () => {
   let stripeCustomerRepository: jest.Mocked<StripeCustomerRepository>;
   let stripePriceRepository: jest.Mocked<StripePriceRepository>;
   let stripeSubscriptionApiService: jest.Mocked<StripeSubscriptionApiService>;
+  let stripeCustomerApiService: jest.Mocked<StripeCustomerApiService>;
   let jsonApiService: jest.Mocked<JsonApiService>;
 
   // Test data constants
@@ -155,6 +158,15 @@ describe("StripeSubscriptionAdminService", () => {
       previewProration: jest.fn(),
     };
 
+    const mockStripeCustomerApiService = {
+      createCustomer: jest.fn(),
+      retrieveCustomer: jest.fn(),
+      updateCustomer: jest.fn(),
+      deleteCustomer: jest.fn(),
+      listPaymentMethods: jest.fn(),
+      setDefaultPaymentMethod: jest.fn(),
+    };
+
     const mockJsonApiService = {
       buildSingle: jest.fn(),
       buildList: jest.fn(),
@@ -180,6 +192,10 @@ describe("StripeSubscriptionAdminService", () => {
           useValue: mockStripeSubscriptionApiService,
         },
         {
+          provide: StripeCustomerApiService,
+          useValue: mockStripeCustomerApiService,
+        },
+        {
           provide: JsonApiService,
           useValue: mockJsonApiService,
         },
@@ -191,7 +207,11 @@ describe("StripeSubscriptionAdminService", () => {
     stripeCustomerRepository = module.get(StripeCustomerRepository);
     stripePriceRepository = module.get(StripePriceRepository);
     stripeSubscriptionApiService = module.get(StripeSubscriptionApiService);
+    stripeCustomerApiService = module.get(StripeCustomerApiService);
     jsonApiService = module.get(JsonApiService);
+
+    // Default mock for listPaymentMethods - return payment method, tests that need empty array can override
+    stripeCustomerApiService.listPaymentMethods.mockResolvedValue([MOCK_PAYMENT_METHOD]);
   });
 
   afterEach(() => {
@@ -385,14 +405,19 @@ describe("StripeSubscriptionAdminService", () => {
       expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledWith({
         stripeCustomerId: MOCK_STRIPE_CUSTOMER.stripeCustomerId,
         priceId: MOCK_STRIPE_PRICE.stripePriceId,
-        paymentMethodId: undefined,
+        paymentMethodId: MOCK_PAYMENT_METHOD.id,
         trialPeriodDays: undefined,
         metadata: {
           companyId: validParams.companyId,
           priceId: validParams.priceId,
         },
       });
-      expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+      expect(result).toEqual({
+        data: MOCK_JSON_API_RESPONSE,
+        clientSecret: null,
+        paymentIntentId: null,
+        requiresAction: false,
+      });
     });
 
     it("should throw NOT_FOUND when customer does not exist", async () => {
@@ -560,7 +585,7 @@ describe("StripeSubscriptionAdminService", () => {
       );
     });
 
-    it("should return JSON:API formatted response", async () => {
+    it("should return JSON:API formatted response with SCA metadata", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
       stripeSubscriptionApiService.createSubscription.mockResolvedValue(mockStripeSubscriptionWithItem);
@@ -569,7 +594,12 @@ describe("StripeSubscriptionAdminService", () => {
 
       const result = await service.createSubscription(validParams);
 
-      expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+      expect(result).toEqual({
+        data: MOCK_JSON_API_RESPONSE,
+        clientSecret: null,
+        paymentIntentId: null,
+        requiresAction: false,
+      });
       expect(jsonApiService.buildSingle).toHaveBeenCalledWith(expect.any(Object), MOCK_DB_SUBSCRIPTION);
     });
   });

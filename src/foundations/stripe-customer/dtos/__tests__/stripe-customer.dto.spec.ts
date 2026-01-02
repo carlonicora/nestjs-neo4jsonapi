@@ -58,16 +58,18 @@ describe("StripeCustomerPostDTO", () => {
     });
   });
 
-  describe("invalid payloads", () => {
-    it("should fail validation when data is missing", async () => {
+  describe("optional fields", () => {
+    it("should pass validation when data is missing (auto-fetch from company)", async () => {
       const payload = {};
 
       const dto = plainToInstance(StripeCustomerPostDTO, payload);
       const errors = await validate(dto);
 
-      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.length).toBe(0);
     });
+  });
 
+  describe("invalid payloads", () => {
     it("should fail validation when type is wrong", async () => {
       const payload = {
         data: {
@@ -106,42 +108,6 @@ describe("StripeCustomerPostDTO", () => {
       expect(errors.length).toBeGreaterThan(0);
     });
 
-    it("should fail validation when name is missing", async () => {
-      const payload = {
-        data: {
-          type: stripeCustomerMeta.endpoint,
-          id: validId,
-          attributes: {
-            email: "test@example.com",
-            currency: "usd",
-          },
-        },
-      };
-
-      const dto = plainToInstance(StripeCustomerPostDTO, payload);
-      const errors = await validate(dto);
-
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it("should fail validation when email is missing", async () => {
-      const payload = {
-        data: {
-          type: stripeCustomerMeta.endpoint,
-          id: validId,
-          attributes: {
-            name: "Test",
-            currency: "usd",
-          },
-        },
-      };
-
-      const dto = plainToInstance(StripeCustomerPostDTO, payload);
-      const errors = await validate(dto);
-
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
     it("should fail validation when email is invalid", async () => {
       const payload = {
         data: {
@@ -151,24 +117,6 @@ describe("StripeCustomerPostDTO", () => {
             name: "Test",
             email: "not-an-email",
             currency: "usd",
-          },
-        },
-      };
-
-      const dto = plainToInstance(StripeCustomerPostDTO, payload);
-      const errors = await validate(dto);
-
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it("should fail validation when currency is missing", async () => {
-      const payload = {
-        data: {
-          type: stripeCustomerMeta.endpoint,
-          id: validId,
-          attributes: {
-            name: "Test",
-            email: "test@example.com",
           },
         },
       };

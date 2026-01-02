@@ -35,6 +35,7 @@ import { StripeCustomerRepository } from "../../../stripe-customer/repositories/
 import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
 import { StripeInvoiceRepository } from "../../../stripe-invoice/repositories/stripe-invoice.repository";
 import { AppLoggingService } from "../../../../core/logging";
+import { StripeService } from "../../../stripe/services/stripe.service";
 import {
   MOCK_SUBSCRIPTION,
   MOCK_INVOICE,
@@ -110,6 +111,14 @@ describe("StripeWebhookProcessor", () => {
       verbose: jest.fn(),
     };
 
+    const mockStripeService = {
+      getClient: jest.fn().mockReturnValue({
+        invoices: {
+          retrieve: jest.fn(),
+        },
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StripeWebhookProcessor,
@@ -136,6 +145,10 @@ describe("StripeWebhookProcessor", () => {
         {
           provide: StripeWebhookNotificationService,
           useValue: mockNotificationService,
+        },
+        {
+          provide: StripeService,
+          useValue: mockStripeService,
         },
         {
           provide: AppLoggingService,
