@@ -29,5 +29,5 @@ export type StripeSubscription = Entity & {
   quantity: number;
 
   stripeCustomer: StripeCustomer;
-  price: StripePrice;
+  stripePrice: StripePrice;
 };

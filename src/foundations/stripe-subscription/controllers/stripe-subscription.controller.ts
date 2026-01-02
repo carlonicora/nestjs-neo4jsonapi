@@ -175,7 +175,6 @@ export class StripeSubscriptionController {
 
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/sync`)
   @UseGuards(JwtAuthGuard)
-  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
   async syncSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,

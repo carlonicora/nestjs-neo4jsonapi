@@ -21,6 +21,6 @@ export const mapStripeSubscription = (params: {
     pausedAt: params.data.pausedAt ? new Date(params.data.pausedAt) : undefined,
     quantity: Number(params.data.quantity ?? 1),
     stripeCustomer: undefined,
-    price: undefined,
+    stripePrice: undefined,
   };
 };

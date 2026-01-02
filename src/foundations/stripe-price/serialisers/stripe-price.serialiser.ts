@@ -1,13 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { BaseConfigInterface as ConfigInterface } from "../../../config/interfaces/base.config.interface";
-import { AbstractJsonApiSerialiser } from "../../../core/jsonapi";
-import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
-import { JsonApiServiceInterface } from "../../../core/jsonapi";
+import {
+  AbstractJsonApiSerialiser,
+  JsonApiDataInterface,
+  JsonApiSerialiserFactory,
+  JsonApiServiceInterface,
+} from "../../../core/jsonapi";
+import { StripeProductModel } from "../../stripe-product/entities/stripe-product.model";
 import { StripePrice } from "../entities/stripe-price.entity";
 import { StripePriceModel } from "../entities/stripe-price.model";
-import { StripeProductModel } from "../../stripe-product/entities/stripe-product.model";
 
 @Injectable()
 export class StripePriceSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
@@ -22,7 +24,7 @@ export class StripePriceSerialiser extends AbstractJsonApiSerialiser implements 
   create(): JsonApiDataInterface {
     this.attributes = {
       stripePriceId: "stripePriceId",
-      productId: (data: StripePrice) => data.product?.id,
+      productId: (data: StripePrice) => data.stripeProduct?.id,
       active: "active",
       currency: "currency",
       unitAmount: (data: StripePrice) => (data.unitAmount ? Number(data.unitAmount) : undefined),
@@ -46,7 +48,8 @@ export class StripePriceSerialiser extends AbstractJsonApiSerialiser implements 
     };
 
     this.relationships = {
-      product: {
+      stripeProduct: {
+        name: "product",
         data: this.serialiserFactory.create(StripeProductModel),
       },
     };

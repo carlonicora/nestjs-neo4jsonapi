@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { BaseConfigInterface as ConfigInterface } from "../../../config/interfaces/base.config.interface";
-import { AbstractJsonApiSerialiser } from "../../../core/jsonapi";
-import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
-import { JsonApiServiceInterface } from "../../../core/jsonapi";
+import {
+  AbstractJsonApiSerialiser,
+  JsonApiDataInterface,
+  JsonApiSerialiserFactory,
+  JsonApiServiceInterface,
+} from "../../../core/jsonapi";
 import { StripePriceModel } from "../../stripe-price/entities/stripe-price.model";
 import { StripeSubscription } from "../entities/stripe-subscription.entity";
 import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
@@ -35,7 +37,8 @@ export class StripeSubscriptionSerialiser extends AbstractJsonApiSerialiser impl
     };
 
     this.relationships = {
-      price: {
+      stripePrice: {
+        name: "price",
         data: this.serialiserFactory.create(StripePriceModel),
       },
     };

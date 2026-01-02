@@ -1,13 +1,11 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
-import { JsonApiPaginator } from "../../../core/jsonapi";
-import { JsonApiService } from "../../../core/jsonapi";
+import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { StripeProductRepository } from "../../stripe-product/repositories/stripe-product.repository";
+import { StripeProductAdminService } from "../../stripe-product/services/stripe-product-admin.service";
+import { StripeProductApiService } from "../../stripe-product/services/stripe-product-api.service";
 import { StripePricePostDataDTO, StripePricePutDataDTO } from "../dtos/stripe-price.dto";
 import { StripePriceModel } from "../entities/stripe-price.model";
 import { StripePriceRepository } from "../repositories/stripe-price.repository";
-import { StripeProductAdminService } from "../../stripe-product/services/stripe-product-admin.service";
-import { StripeProductApiService } from "../../stripe-product/services/stripe-product-api.service";
-import { StripeProductRepository } from "../../stripe-product/repositories/stripe-product.repository";
 
 /**
  * StripePriceAdminService
@@ -263,6 +261,9 @@ export class StripePriceAdminService {
   async syncPriceFromStripe(params: { stripePriceId: string }): Promise<void> {
     const stripePrice = await this.stripeProductApiService.retrievePrice(params.stripePriceId);
 
+    // Get nickname from Stripe price, or fallback to metadata.nickname if not set
+    const nickname = stripePrice.nickname ?? (stripePrice.metadata?.nickname as string | undefined) ?? undefined;
+
     const existingPrice = await this.stripePriceRepository.findByStripePriceId({
       stripePriceId: params.stripePriceId,
     });
@@ -271,7 +272,7 @@ export class StripePriceAdminService {
       await this.stripePriceRepository.updateByStripePriceId({
         stripePriceId: params.stripePriceId,
         active: stripePrice.active,
-        nickname: stripePrice.nickname ?? undefined,
+        nickname,
         metadata: stripePrice.metadata ? JSON.stringify(stripePrice.metadata) : undefined,
       });
     } else {
@@ -299,7 +300,7 @@ export class StripePriceAdminService {
           recurringInterval: stripePrice.recurring?.interval,
           recurringIntervalCount: stripePrice.recurring?.interval_count,
           recurringUsageType: stripePrice.recurring?.meter ? "metered" : "licensed",
-          nickname: stripePrice.nickname ?? undefined,
+          nickname,
           lookupKey: stripePrice.lookup_key ?? undefined,
           metadata: stripePrice.metadata ? JSON.stringify(stripePrice.metadata) : undefined,
         });

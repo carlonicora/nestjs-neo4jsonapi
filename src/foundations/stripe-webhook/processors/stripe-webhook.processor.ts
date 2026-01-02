@@ -53,8 +53,6 @@ export class StripeWebhookProcessor extends WorkerHost {
   async process(job: Job<StripeWebhookJobData>): Promise<void> {
     const { webhookEventId, eventType, payload } = job.data;
 
-    console.log("Processing webhook event:", eventType, "with payload:", payload, "webhookEventId:", webhookEventId);
-
     try {
       await this.stripeWebhookEventRepository.updateStatus({
         id: webhookEventId,

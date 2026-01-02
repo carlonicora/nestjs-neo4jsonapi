@@ -22,5 +22,5 @@ export type StripePrice = Entity & {
   description?: string;
   features?: string; // JSON array stored as string
 
-  product: StripeProduct;
+  stripeProduct: StripeProduct;
 };

@@ -18,6 +18,6 @@ export const mapStripePrice = (params: { data: any; record: any; entityFactory: 
     metadata: params.data.metadata,
     description: params.data.description,
     features: params.data.features,
-    product: undefined,
+    stripeProduct: undefined,
   };
 };
