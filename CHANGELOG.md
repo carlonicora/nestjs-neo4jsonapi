@@ -1,3 +1,9 @@
+## [1.18.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.17.0...v1.18.0) (2026-01-02)
+
+### 🚀 Features
+
+* add allowRegistration ([df71b74](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/df71b74e736429dcb601e3be0b70d0085a963f22))
+
 ## [1.17.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.16.0...v1.17.0) (2026-01-02)
 
 ### 🚀 Features
