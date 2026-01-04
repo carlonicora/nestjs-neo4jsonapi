@@ -1,3 +1,13 @@
+## [1.20.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.19.0...v1.20.0) (2026-01-04)
+
+### 🚀 Features
+
+* allow submodules generation ([596307f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/596307f5d6c8c7b1e6c714769699fc808ca3e8d8))
+
+### ♻️ Chores
+
+* remove unused import from stripe fixtures ([8fcb4cb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8fcb4cb12358a3f489a3a4056e8a5439c190de67))
+
 ## [1.19.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.18.0...v1.19.0) (2026-01-02)
 
 ### 🚀 Features
