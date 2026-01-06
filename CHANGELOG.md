@@ -1,3 +1,9 @@
+## [1.23.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.22.0...v1.23.0) (2026-01-06)
+
+### 🚀 Features
+
+* add api documentation ([fdb9be5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fdb9be50e443c9a28a6dab14d901d9c812cb0b8b))
+
 ## [1.22.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.21.0...v1.22.0) (2026-01-06)
 
 ### 🚀 Features
