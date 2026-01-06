@@ -1,3 +1,9 @@
+## [1.21.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.20.0...v1.21.0) (2026-01-06)
+
+### 🚀 Features
+
+* add health check ([c3417a0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c3417a0c1bb40dbedfa467344ca76658b0b0140d))
+
 ## [1.20.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.19.0...v1.20.0) (2026-01-04)
 
 ### 🚀 Features
