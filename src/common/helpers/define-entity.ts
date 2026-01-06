@@ -232,7 +232,7 @@ export function defineEntity<T>() {
           const recordKey = `${nodeName}_${relName}_relationship_${field.name}`;
           autoComputed[field.name] = {
             compute: (params) => {
-              if (params.record?.get) {
+              if (params.record?.get && params.record.has(recordKey)) {
                 return convertFieldValue(params.record.get(recordKey), field.type);
               }
               return null;
