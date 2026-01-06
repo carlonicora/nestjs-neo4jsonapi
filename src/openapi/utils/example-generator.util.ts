@@ -1,4 +1,4 @@
-import { CypherType, FieldDef } from "../../common/interfaces/entity.schema.interface";
+import { FieldDef } from "../../common/interfaces/entity.schema.interface";
 
 /**
  * Generates example values for OpenAPI documentation based on field name and type.
