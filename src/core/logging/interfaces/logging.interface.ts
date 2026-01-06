@@ -3,6 +3,7 @@ export interface LogContext {
   traceId?: string;
   spanId?: string;
   userId?: string;
+  companyId?: string;
   ip?: string;
   userAgent?: string;
   method?: string;

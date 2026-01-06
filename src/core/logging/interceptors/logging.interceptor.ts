@@ -3,8 +3,14 @@ import { FastifyRequest } from "fastify";
 import { ClsService } from "nestjs-cls";
 import { catchError, Observable, tap, throwError } from "rxjs";
 import { baseConfig } from "../../../config/base.config";
+import { AuthenticatedUser } from "../../../common/interfaces/authenticated.request.interface";
 import { LogContext } from "../interfaces/logging.interface";
 import { AppLoggingService } from "../services/logging.service";
+
+// Extended request type that may have user attached by auth guard
+interface RequestWithUser extends FastifyRequest {
+  user?: AuthenticatedUser;
+}
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -17,7 +23,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler<any>): Observable<any> {
     const startTime = Date.now();
-    const request = context.switchToHttp().getRequest<FastifyRequest>();
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
 
     // Store start time and context on the raw request for the onSend hook
     (request as any).raw["requestStartTime"] = startTime;
@@ -29,6 +35,10 @@ export class LoggingInterceptor implements NestInterceptor {
     const userIp = request.ip;
     const userAgent = request.headers["user-agent"];
 
+    // Extract user context if authenticated (user may be attached by JWT guard)
+    const userId = request.user?.userId;
+    const companyId = request.user?.companyId;
+
     // Set up request context for logging with trace correlation
     const logContext: LogContext = {
       requestId,
@@ -36,6 +46,8 @@ export class LoggingInterceptor implements NestInterceptor {
       userAgent,
       method: requestMethod,
       url: requestPath,
+      ...(userId && { userId }),
+      ...(companyId && { companyId }),
     };
 
     // Set context in ClsService for the entire request lifecycle
