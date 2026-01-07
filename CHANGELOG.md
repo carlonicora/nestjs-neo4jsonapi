@@ -1,3 +1,10 @@
+## [1.23.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.23.1...v1.23.2) (2026-01-07)
+
+### ♻️ Chores
+
+* update packages ([0a1ebff](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0a1ebff28373ee44e0f83dd708ba090f36572e6e))
+* update peer dependencies for NestJS packages to latest versions ([c5bee4c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c5bee4c172648b5ae7763be2089bbb887a7cb2e7))
+
 ## [1.23.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.23.0...v1.23.1) (2026-01-07)
 
 ### 🐛 Bug Fixes
