@@ -5,11 +5,13 @@ import { S3HealthIndicator } from "../indicators/s3.health";
 
 // Mock AWS SDK
 vi.mock("@aws-sdk/client-s3", () => ({
-  S3Client: vi.fn().mockImplementation(() => ({
-    send: vi.fn().mockResolvedValue({}),
-    destroy: vi.fn(),
-  })),
-  HeadBucketCommand: vi.fn(),
+  S3Client: class MockS3Client {
+    send = vi.fn().mockResolvedValue({});
+    destroy = vi.fn();
+  },
+  HeadBucketCommand: class MockHeadBucketCommand {
+    constructor(public params: any) {}
+  },
 }));
 
 describe("S3HealthIndicator", () => {

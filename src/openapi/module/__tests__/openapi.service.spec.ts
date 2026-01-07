@@ -10,12 +10,12 @@ vi.mock('@nestjs/common', async () => {
   const actual = await vi.importActual('@nestjs/common');
   return {
     ...actual,
-    Logger: vi.fn().mockImplementation(() => ({
-      log: vi.fn(),
-      debug: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    })),
+    Logger: class MockLogger {
+      log = vi.fn();
+      debug = vi.fn();
+      warn = vi.fn();
+      error = vi.fn();
+    },
   };
 });
 
@@ -29,8 +29,9 @@ const mockPhotographDescriptor: EntityDescriptor<
     endpoint: 'photographs',
     nodeName: 'photograph',
     labelName: 'Photograph',
+    entity: {} as any,
+    mapper: () => ({}) as any,
     childrenTokens: [],
-    mapper: {} as any,
   },
   isCompanyScoped: true,
   relationships: {
@@ -40,8 +41,6 @@ const mockPhotographDescriptor: EntityDescriptor<
         endpoint: 'users',
         nodeName: 'user',
         labelName: 'User',
-        childrenTokens: [],
-        mapper: {} as any,
       },
       direction: 'out',
       relationship: 'CREATED_BY',
@@ -63,6 +62,8 @@ const mockPhotographDescriptor: EntityDescriptor<
   injectServices: [],
   constraints: [],
   indexes: [],
+  fulltextIndexName: 'photographs_fulltext',
+  defaultOrderBy: 'createdAt',
 };
 
 const mockRollDescriptor: EntityDescriptor<
@@ -74,8 +75,9 @@ const mockRollDescriptor: EntityDescriptor<
     endpoint: 'rolls',
     nodeName: 'roll',
     labelName: 'Roll',
+    entity: {} as any,
+    mapper: () => ({}) as any,
     childrenTokens: [],
-    mapper: {} as any,
   },
   isCompanyScoped: true,
   relationships: {},
@@ -92,6 +94,8 @@ const mockRollDescriptor: EntityDescriptor<
   injectServices: [],
   constraints: [],
   indexes: [],
+  fulltextIndexName: 'rolls_fulltext',
+  defaultOrderBy: 'createdAt',
 };
 
 describe('OpenApiService', () => {
