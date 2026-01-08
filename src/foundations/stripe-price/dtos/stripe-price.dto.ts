@@ -11,6 +11,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   ValidateNested,
 } from "class-validator";
 import { stripePriceMeta } from "../entities/stripe-price.meta";
@@ -80,6 +81,11 @@ export class StripePricePostAttributesDTO {
   @IsOptional()
   @IsString()
   features?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  token?: number;
 }
 
 export class StripePricePostDataDTO {
@@ -123,6 +129,11 @@ export class StripePricePutAttributesDTO {
   @IsOptional()
   @IsString()
   features?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  token?: number;
 }
 
 export class StripePricePutDataDTO {

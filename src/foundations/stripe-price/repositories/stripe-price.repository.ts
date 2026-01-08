@@ -181,6 +181,7 @@ export class StripePriceRepository implements OnModuleInit {
     metadata?: string;
     description?: string;
     features?: string;
+    token?: number;
   }): Promise<StripePrice> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
 
@@ -202,6 +203,7 @@ export class StripePriceRepository implements OnModuleInit {
       metadata: params.metadata ?? null,
       description: params.description ?? null,
       features: params.features ?? null,
+      token: params.token ?? null,
     };
 
     query.query = `
@@ -221,6 +223,7 @@ export class StripePriceRepository implements OnModuleInit {
         metadata: $metadata,
         description: $description,
         features: $features,
+        token: $token,
         createdAt: datetime(),
         updatedAt: datetime()
       })
@@ -252,6 +255,7 @@ export class StripePriceRepository implements OnModuleInit {
     metadata?: string;
     description?: string;
     features?: string;
+    token?: number;
   }): Promise<StripePrice> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
 
@@ -273,6 +277,9 @@ export class StripePriceRepository implements OnModuleInit {
     if (params.features !== undefined) {
       setParams.push(`${stripePriceMeta.nodeName}.features = $features`);
     }
+    if (params.token !== undefined) {
+      setParams.push(`${stripePriceMeta.nodeName}.token = $token`);
+    }
 
     query.queryParams = {
       id: params.id,
@@ -281,6 +288,7 @@ export class StripePriceRepository implements OnModuleInit {
       metadata: params.metadata,
       description: params.description,
       features: params.features,
+      token: params.token,
     };
 
     query.query = `
@@ -313,6 +321,7 @@ export class StripePriceRepository implements OnModuleInit {
     metadata?: string;
     description?: string;
     features?: string;
+    token?: number;
   }): Promise<StripePrice> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
 
@@ -334,6 +343,9 @@ export class StripePriceRepository implements OnModuleInit {
     if (params.features !== undefined) {
       setParams.push(`${stripePriceMeta.nodeName}.features = $features`);
     }
+    if (params.token !== undefined) {
+      setParams.push(`${stripePriceMeta.nodeName}.token = $token`);
+    }
 
     query.queryParams = {
       stripePriceId: params.stripePriceId,
@@ -342,6 +354,7 @@ export class StripePriceRepository implements OnModuleInit {
       metadata: params.metadata,
       description: params.description,
       features: params.features,
+      token: params.token,
     };
 
     query.query = `

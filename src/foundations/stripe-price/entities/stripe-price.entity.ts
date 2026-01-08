@@ -21,6 +21,7 @@ export type StripePrice = Entity & {
   metadata?: string;
   description?: string;
   features?: string; // JSON array stored as string
+  token?: number; // Neo4j only, not synced to Stripe
 
   stripeProduct: StripeProduct;
 };

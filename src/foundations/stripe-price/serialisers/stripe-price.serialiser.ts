@@ -45,6 +45,7 @@ export class StripePriceSerialiser extends AbstractJsonApiSerialiser implements 
       },
       description: "description",
       features: "features",
+      token: (data: StripePrice) => (data.token !== undefined ? Number(data.token) : undefined),
     };
 
     this.relationships = {
