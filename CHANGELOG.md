@@ -1,3 +1,10 @@
+## [1.26.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.25.0...v1.26.0) (2026-01-08)
+
+### 🚀 Features
+
+* add stripe token allocation ([3971dea](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3971dea2a105e6b366e3403ddd0eadef10b027b3))
+* add tokens to price ([f67dd6a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f67dd6a19df4d377c14e198889f9160e68d1a6d7))
+
 ## [1.25.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.24.0...v1.25.0) (2026-01-08)
 
 ### 🚀 Features
