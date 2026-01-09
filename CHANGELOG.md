@@ -1,3 +1,9 @@
+## [1.28.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.28.0...v1.28.1) (2026-01-09)
+
+### 🚨 Tests
+
+* add mock for StripeInvoiceAdminService in StripeWebhookProcessor tests ([b6b6843](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b6b6843c1e66f08f52595d24f68e70da322b74bb))
+
 ## [1.28.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.27.0...v1.28.0) (2026-01-09)
 
 ### 🚀 Features
