@@ -144,6 +144,10 @@ export class CompanyService {
     );
   }
 
+  async findRaw(params: { companyId: string }): Promise<Company> {
+    return this.companyRepository.findByCompanyId({ companyId: params.companyId });
+  }
+
   async delete(params: { companyId: string }): Promise<void> {
     const queueElement: any = {
       companyId: params.companyId,

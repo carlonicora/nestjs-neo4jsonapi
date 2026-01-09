@@ -13,7 +13,7 @@ export const mapCompany = (params: { data: any; record: any; entityFactory: Enti
     availableMonthlyTokens: params.data.availableMonthlyTokens ?? 0,
     availableExtraTokens: params.data.availableExtraTokens ?? 0,
     ownerEmail: params.data.ownerEmail,
-    isActiveSubscription: params.data.isActive,
+    isActiveSubscription: params.data.isActiveSubscription,
 
     feature: [],
     module: [],

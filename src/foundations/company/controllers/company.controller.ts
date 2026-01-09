@@ -128,4 +128,29 @@ export class CompanyController {
 
     await this.cacheService.invalidateByElement(companyMeta.endpoint, companyId);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
+  @Delete(`${companyMeta.endpoint}/:companyId/self-delete`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async selfDelete(
+    @Req() request: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("companyId") companyId: string,
+    @Body() body: { confirmation: string },
+  ) {
+    // Verify user belongs to this company
+    if (request.user.companyId !== companyId) throw new HttpException("Unauthorised", 401);
+
+    // Fetch company to verify confirmation
+    const company = await this.companyService.findRaw({ companyId });
+    if (body.confirmation !== company.name)
+      throw new HttpException("Confirmation does not match company name", HttpStatus.BAD_REQUEST);
+
+    // Delete company
+    await this.companyService.delete({ companyId });
+    reply.send();
+
+    await this.cacheService.invalidateByElement(companyMeta.endpoint, companyId);
+  }
 }
