@@ -1,3 +1,14 @@
+## [1.28.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.27.0...v1.28.0) (2026-01-09)
+
+### 🚀 Features
+
+* add extra token allocation for one-time purchases on payment success ([6204888](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/62048880e94ab6332956efff4448f80ed4f564de))
+* implement one-time purchase flow and update payment intent handling ([66832e2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/66832e28d895c1ab5f82bd83cf8dbd73e56e7dfa))
+
+### 🐛 Bug Fixes
+
+* handle all invoice webhook events for dashboard visibility ([099835e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/099835e04f508fd9680ab0f06188dc9d5b966004))
+
 ## [1.27.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.26.0...v1.27.0) (2026-01-09)
 
 ### 🚀 Features
