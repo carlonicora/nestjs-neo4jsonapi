@@ -41,6 +41,7 @@ import { StripePriceRepository } from "../../../stripe-price/repositories/stripe
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeSubscriptionApiService } from "../stripe-subscription-api.service";
 import { StripeCustomerApiService } from "../../../stripe-customer/services/stripe-customer-api.service";
+import { StripePaymentService } from "../../../stripe/services/stripe.payment.service";
 import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
@@ -59,6 +60,7 @@ describe("StripeSubscriptionAdminService", () => {
   let stripePriceRepository: vi.Mocked<StripePriceRepository>;
   let stripeSubscriptionApiService: vi.Mocked<StripeSubscriptionApiService>;
   let stripeCustomerApiService: vi.Mocked<StripeCustomerApiService>;
+  let stripePaymentService: vi.Mocked<StripePaymentService>;
   let jsonApiService: vi.Mocked<JsonApiService>;
 
   // Test data constants
@@ -168,6 +170,16 @@ describe("StripeSubscriptionAdminService", () => {
       setDefaultPaymentMethod: vi.fn(),
     };
 
+    const mockStripePaymentService = {
+      createPaymentIntent: vi.fn(),
+      confirmPaymentIntent: vi.fn(),
+      retrievePaymentIntent: vi.fn(),
+      cancelPaymentIntent: vi.fn(),
+      createSetupIntent: vi.fn(),
+      retrieveSetupIntent: vi.fn(),
+      retrievePaymentMethod: vi.fn(),
+    };
+
     const mockJsonApiService = {
       buildSingle: vi.fn(),
       buildList: vi.fn(),
@@ -197,6 +209,10 @@ describe("StripeSubscriptionAdminService", () => {
           useValue: mockStripeCustomerApiService,
         },
         {
+          provide: StripePaymentService,
+          useValue: mockStripePaymentService,
+        },
+        {
           provide: JsonApiService,
           useValue: mockJsonApiService,
         },
@@ -209,6 +225,7 @@ describe("StripeSubscriptionAdminService", () => {
     stripePriceRepository = module.get(StripePriceRepository);
     stripeSubscriptionApiService = module.get(StripeSubscriptionApiService);
     stripeCustomerApiService = module.get(StripeCustomerApiService);
+    stripePaymentService = module.get(StripePaymentService);
     jsonApiService = module.get(JsonApiService);
 
     // Default mock for listPaymentMethods - return payment method, tests that need empty array can override

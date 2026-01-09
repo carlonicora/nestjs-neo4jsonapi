@@ -64,7 +64,7 @@ export class StripePaymentService {
       amount: params.amount,
       currency: params.currency,
       customer: params.stripeCustomerId,
-      automatic_payment_methods: { enabled: true },
+      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
       metadata: params.metadata,
       description: params.description,
       receipt_email: params.receiptEmail,

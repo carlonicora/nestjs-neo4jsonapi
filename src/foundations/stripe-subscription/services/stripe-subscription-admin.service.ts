@@ -1,9 +1,12 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
 import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.entity";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeCustomerApiService } from "../../stripe-customer/services/stripe-customer-api.service";
+import { StripePrice } from "../../stripe-price/entities/stripe-price.entity";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
+import { StripePaymentService } from "../../stripe/services/stripe.payment.service";
 import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
 import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";
@@ -42,6 +45,7 @@ export class StripeSubscriptionAdminService {
     private readonly stripePriceRepository: StripePriceRepository,
     private readonly stripeSubscriptionApiService: StripeSubscriptionApiService,
     private readonly stripeCustomerApiService: StripeCustomerApiService,
+    private readonly stripePaymentService: StripePaymentService,
     private readonly jsonApiService: JsonApiService,
   ) {}
 
@@ -180,6 +184,19 @@ export class StripeSubscriptionAdminService {
       paymentMethodId = paymentMethods[0].id;
     }
 
+    // Branch based on price type: one-time vs recurring
+    if (price.priceType === "one_time") {
+      return this.createOneTimePurchase({
+        customer,
+        price,
+        paymentMethodId,
+        companyId: params.companyId,
+        priceId: params.priceId,
+        quantity: params.quantity ?? 1,
+      });
+    }
+
+    // Recurring subscription flow
     const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.createSubscription({
       stripeCustomerId: customer.stripeCustomerId,
       priceId: price.stripePriceId,
@@ -514,5 +531,85 @@ export class StripeSubscriptionAdminService {
         trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : undefined,
       });
     }
+  }
+
+  /**
+   * Create a one-time purchase using PaymentIntent flow
+   *
+   * Unlike recurring subscriptions, one-time purchases:
+   * - Use PaymentIntent API instead of Subscription API
+   * - Don't block or get blocked by existing subscriptions
+   * - Store as StripeSubscription record with PaymentIntent ID
+   *
+   * @param params - Purchase parameters
+   * @returns CreateSubscriptionResult with purchase data
+   */
+  private async createOneTimePurchase(params: {
+    customer: StripeCustomer;
+    price: StripePrice;
+    paymentMethodId: string;
+    companyId: string;
+    priceId: string;
+    quantity: number;
+  }): Promise<CreateSubscriptionResult> {
+    const { customer, price, paymentMethodId, companyId, priceId, quantity } = params;
+
+    // Create PaymentIntent for the one-time amount
+    const paymentIntent = await this.stripePaymentService.createPaymentIntent({
+      amount: (price.unitAmount ?? 0) * quantity,
+      currency: price.currency,
+      stripeCustomerId: customer.stripeCustomerId,
+      metadata: {
+        companyId,
+        priceId,
+        type: "one_time_purchase",
+      },
+      description: price.description ?? `One-time purchase: ${price.nickname ?? priceId}`,
+    });
+
+    // Confirm the PaymentIntent with the payment method
+    const confirmedPaymentIntent = await this.stripePaymentService.confirmPaymentIntent(
+      paymentIntent.id,
+      paymentMethodId,
+    );
+
+    // Determine status and if SCA is required
+    let clientSecret: string | null = null;
+    let status: StripeSubscriptionStatus;
+
+    if (confirmedPaymentIntent.status === "succeeded") {
+      status = "active";
+    } else if (confirmedPaymentIntent.status === "requires_action") {
+      status = "incomplete";
+      clientSecret = confirmedPaymentIntent.client_secret;
+    } else {
+      status = "incomplete";
+    }
+
+    const requiresAction = status === "incomplete" && clientSecret !== null;
+
+    // Create a "subscription" record to track the purchase
+    // Note: stripeSubscriptionId stores the PaymentIntent ID for one-time purchases
+    const now = new Date();
+    const subscription = await this.subscriptionRepository.create({
+      stripeCustomerId: customer.id,
+      priceId: priceId,
+      stripeSubscriptionId: confirmedPaymentIntent.id, // Store PaymentIntent ID
+      stripeSubscriptionItemId: undefined, // No subscription item for one-time
+      status: status,
+      currentPeriodStart: now,
+      currentPeriodEnd: now, // One-time purchases don't have a period
+      cancelAtPeriodEnd: false,
+      quantity: quantity,
+    });
+
+    const data = await this.jsonApiService.buildSingle(StripeSubscriptionModel, subscription);
+
+    return {
+      data,
+      clientSecret,
+      paymentIntentId: confirmedPaymentIntent.id,
+      requiresAction,
+    };
   }
 }

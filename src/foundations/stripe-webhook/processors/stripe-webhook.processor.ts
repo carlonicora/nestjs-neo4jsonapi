@@ -334,6 +334,26 @@ export class StripeWebhookProcessor extends WorkerHost {
 
   private async handlePaymentIntentEvent(eventType: string, paymentIntent: Stripe.PaymentIntent): Promise<void> {
     if (eventType === "payment_intent.succeeded") {
+      // Check if this is a one-time purchase by checking metadata
+      const metadata = paymentIntent.metadata || {};
+
+      if (metadata.type === "one_time_purchase") {
+        // Update the local subscription record from "incomplete" to "active"
+        const existingSubscription = await this.subscriptionRepository.findByStripeSubscriptionId({
+          stripeSubscriptionId: paymentIntent.id,
+        });
+
+        if (existingSubscription && existingSubscription.status === "incomplete") {
+          await this.subscriptionRepository.updateByStripeSubscriptionId({
+            stripeSubscriptionId: paymentIntent.id,
+            status: "active",
+          });
+          this.logger.debug(`One-time purchase ${paymentIntent.id} marked as active`);
+        }
+        return;
+      }
+
+      // Regular subscription payment flow
       // When payment succeeds, sync any related subscription to update its status
       // PaymentIntent metadata or invoice relationship can tell us which subscription
       const paymentIntentData = paymentIntent as unknown as Record<string, unknown>;
