@@ -1,3 +1,9 @@
+## [1.29.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.28.1...v1.29.0) (2026-01-14)
+
+### 🚀 Features
+
+* **auth:** add GDPR consent collection for user registration ([7dc33af](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7dc33afcdb8004befa30d51a15308a451d3372d5))
+
 ## [1.28.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.28.0...v1.28.1) (2026-01-09)
 
 ### 🚨 Tests
