@@ -1,3 +1,10 @@
+## [1.30.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.29.0...v1.30.0) (2026-01-14)
+
+### 🚀 Features
+
+* add google oauth ([b66284b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b66284b6a05d1e76189c776d51382395ca88a674))
+* add vertex llm support ([26d653e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/26d653e04bc66fd8d29ec1ae22a3349ae320b216))
+
 ## [1.29.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.28.1...v1.29.0) (2026-01-14)
 
 ### 🚀 Features
