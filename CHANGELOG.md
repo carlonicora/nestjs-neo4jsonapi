@@ -1,3 +1,9 @@
+## [1.31.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.31.0...v1.31.1) (2026-01-15)
+
+### 🐛 Bug Fixes
+
+* correct requesty for gemini calls ([446d7d3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/446d7d3fc5f5772e3a91a1ca3b91e2c79ff9aa7f))
+
 ## [1.31.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.30.0...v1.31.0) (2026-01-15)
 
 ### 🚀 Features
