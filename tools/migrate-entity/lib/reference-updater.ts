@@ -5,8 +5,8 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import { glob } from "glob";
+import * as path from "path";
 import { AliasModelInfo, Reference, ReferenceUsage } from "./types";
 
 /**
@@ -17,7 +17,7 @@ export async function findExternalReferences(
   labelName: string,
   srcDir: string = "src",
   excludePaths: string[] = [],
-  aliasModels: AliasModelInfo[] = []
+  aliasModels: AliasModelInfo[] = [],
 ): Promise<Reference[]> {
   const references: Reference[] = [];
 
@@ -27,12 +27,10 @@ export async function findExternalReferences(
   const entityTypeName = labelName; // e.g., "Article"
 
   // Build list of all model names (base + aliases) for pattern matching
-  const allModelNames = [modelName, ...aliasModels.map(a => a.modelName)];
+  const allModelNames = [modelName, ...aliasModels.map((a) => a.modelName)];
 
   // Normalize exclude paths for comparison
-  const normalizedExcludePaths = new Set(
-    excludePaths.map((p) => path.normalize(path.resolve(process.cwd(), p)))
-  );
+  const normalizedExcludePaths = new Set(excludePaths.map((p) => path.normalize(path.resolve(process.cwd(), p))));
 
   // Find all TypeScript files (including test files - they may import entities)
   const tsFiles = await glob(`${srcDir}/**/*.ts`, {
@@ -53,7 +51,7 @@ export async function findExternalReferences(
     // Check if file imports or uses the old exports (model/entity files that will be deleted)
     // Note: We DON'T include ${entityName}.meta because meta files are preserved
     const hasOldPatterns =
-      allModelNames.some(name => content.includes(name)) ||
+      allModelNames.some((name) => content.includes(name)) ||
       content.includes(`${entityName}.entity`) ||
       content.includes(`${entityName}.model`);
 
@@ -72,8 +70,8 @@ export async function findExternalReferences(
 
     if (usages.length === 0 && oldImports.length === 0) continue;
 
-    // Calculate new import
-    const newImport = calculateNewImport(oldImports, entityName, labelName, aliasModels);
+    // Calculate new import (pass content to detect entity type usage in return types etc.)
+    const newImport = calculateNewImport(oldImports, entityName, labelName, aliasModels, content);
 
     references.push({
       filePath: absolutePath,
@@ -96,7 +94,7 @@ function findUsagesInFile(
   modelName: string,
   labelName: string,
   skipMetaReplacements: boolean = false,
-  aliasModels: AliasModelInfo[] = []
+  aliasModels: AliasModelInfo[] = [],
 ): ReferenceUsage[] {
   const usages: ReferenceUsage[] = [];
   const lines = content.split("\n");
@@ -242,13 +240,13 @@ function extractAllOldImports(
   metaName: string,
   modelName: string,
   entityTypeName: string,
-  aliasModels: AliasModelInfo[] = []
+  aliasModels: AliasModelInfo[] = [],
 ): string[] {
   const imports: string[] = [];
   const lines = content.split("\n");
 
   // Build list of all model names (base + aliases) for pattern matching
-  const allModelNames = [modelName, ...aliasModels.map(a => a.modelName)];
+  const allModelNames = [modelName, ...aliasModels.map((a) => a.modelName)];
 
   for (const line of lines) {
     if (!line.trim().startsWith("import ")) continue;
@@ -258,7 +256,7 @@ function extractAllOldImports(
 
     // Check for various import patterns (entity/model files that will be deleted)
     const isEntityImport =
-      allModelNames.some(name => line.includes(name)) ||
+      allModelNames.some((name) => line.includes(name)) ||
       (line.includes(`${entityName}.entity`) && line.includes(entityTypeName)) ||
       line.includes(`${entityName}.model`);
 
@@ -277,7 +275,8 @@ function calculateNewImport(
   oldImports: string[],
   entityName: string,
   labelName: string,
-  aliasModels: AliasModelInfo[] = []
+  aliasModels: AliasModelInfo[] = [],
+  fileContent: string = "",
 ): string {
   const descriptorName = `${labelName}Descriptor`;
   const imports: string[] = [];
@@ -314,6 +313,19 @@ function calculateNewImport(
       // Remove suffixes to get base path
       extractedPath = extractedPath.replace(/\.(meta|model|entity)$/, "");
       importPath = extractedPath;
+    }
+  }
+
+  // Also check if the entity type is used in the file content (e.g., in return types like Promise<User[]>)
+  // This catches cases where the type is used but wasn't in the old imports
+  if (!needsEntityType && fileContent) {
+    // Look for entity type usage outside of import lines
+    const lines = fileContent.split("\n").filter((line) => !line.trim().startsWith("import "));
+    const contentWithoutImports = lines.join("\n");
+    // Match the entity type followed by common type patterns: [], >, ), :, |, &, etc.
+    const typeUsagePattern = new RegExp(`\\b${labelName}\\s*[\\[\\]>\\):\\|&,]`, "g");
+    if (typeUsagePattern.test(contentWithoutImports)) {
+      needsEntityType = true;
     }
   }
 
