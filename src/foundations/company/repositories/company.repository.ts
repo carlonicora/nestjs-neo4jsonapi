@@ -4,8 +4,7 @@ import { ClsService } from "nestjs-cls";
 import { updateRelationshipQuery } from "../../../core";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
-import { Company } from "../../company/entities/company.entity";
-import { CompanyModel } from "../../company/entities/company.model";
+import { CompanyDescriptor, Company } from "../../company/entities/company";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { moduleMeta } from "../../module";
 import { companyMeta } from "../entities/company.meta";
@@ -24,7 +23,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async fetchAll(): Promise<Company[]> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     query.query = `
       MATCH (company:Company)
@@ -35,7 +34,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async findByCompanyId(params: { companyId: string }): Promise<Company> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     query.queryParams = {
       companyId: params.companyId,
@@ -52,7 +51,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async findCurrent(companyId?: string): Promise<Company> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     if (companyId) query.queryParams.companyId = companyId;
 
@@ -65,7 +64,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async findSingle(): Promise<Company> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     query.queryParams = {};
 
@@ -119,7 +118,7 @@ export class CompanyRepository implements OnModuleInit {
     featureIds?: string[];
     moduleIds?: string[];
   }): Promise<Company> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     await this.neo4j.validateExistingNodes({
       nodes: [
@@ -292,7 +291,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async createByName(params: { name: string }): Promise<Company> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     query.queryParams = {
       companyId: randomUUID(),
@@ -318,7 +317,7 @@ export class CompanyRepository implements OnModuleInit {
   async useTokens(params: { input: number; output: number; companyId?: string }): Promise<void> {
     const tokens = params.input + params.output;
 
-    const companyQuery = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const companyQuery = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
     companyQuery.queryParams = {
       companyId: params.companyId ?? this.clsService.get("companyId"),
     };
@@ -424,7 +423,7 @@ export class CompanyRepository implements OnModuleInit {
   }
 
   async find(params: { term: string; cursor: JsonApiCursorInterface }): Promise<Company[]> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -475,7 +474,7 @@ export class CompanyRepository implements OnModuleInit {
    * @returns Company if found, null otherwise
    */
   async findByStripeCustomerId(params: { stripeCustomerId: string }): Promise<Company | null> {
-    const query = this.neo4j.initQuery({ serialiser: CompanyModel });
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
     query.queryParams = {
       stripeCustomerId: params.stripeCustomerId,

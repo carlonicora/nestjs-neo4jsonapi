@@ -1,5 +1,5 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { Company } from "../../company/entities/company.entity";
+import { Company } from "../../company/entities/company";
 import { Module } from "../../module/entities/module.entity";
 import { Role } from "../../role/entities/role.entity";
 

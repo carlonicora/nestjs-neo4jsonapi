@@ -7,7 +7,7 @@ import { AbstractJsonApiSerialiser } from "../../../core/jsonapi/abstracts/abstr
 import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonapi.serialiser.factory";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
-import { CompanyModel } from "../../company/entities/company.model";
+import { CompanyDescriptor } from "../../company/entities/company";
 import { ModuleModel } from "../../module/entities/module.model";
 import { RoleModel } from "../../role/entities/role.model";
 import { S3Service } from "../../s3/services/s3.service";
@@ -59,7 +59,7 @@ export class UserSerialiser extends AbstractJsonApiSerialiser implements JsonApi
         data: this.serialiserFactory.create(RoleModel),
       },
       company: {
-        data: this.serialiserFactory.create(CompanyModel),
+        data: this.serialiserFactory.create(CompanyDescriptor.model),
       },
       module: {
         name: `modules`,

@@ -1,5 +1,5 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { Company } from "../../company/entities/company.entity";
+import { Company } from "../../company/entities/company";
 import { User } from "../../user/entities/user.entity";
 
 /**

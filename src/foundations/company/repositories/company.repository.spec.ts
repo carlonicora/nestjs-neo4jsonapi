@@ -10,7 +10,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { CompanyRepository } from "./company.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
-import { Company } from "../entities/company.entity";
+import { Company } from "../entities/company";
 
 describe("CompanyRepository", () => {
   let repository: CompanyRepository;

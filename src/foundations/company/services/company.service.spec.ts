@@ -19,7 +19,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { VersionService } from "../../../core/version/services/version.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { QueueId } from "../../../config/enums/queue.id";
-import { Company } from "../entities/company.entity";
+import { Company } from "../entities/company";
 
 describe("CompanyService", () => {
   let service: CompanyService;

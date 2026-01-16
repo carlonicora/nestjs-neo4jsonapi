@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { AppLoggingService } from "../../../core/logging";
-import { Company } from "../../company/entities/company.entity";
+import { Company } from "../../company/entities/company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";

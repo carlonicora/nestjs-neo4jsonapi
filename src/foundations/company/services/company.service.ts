@@ -11,8 +11,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { VersionService } from "../../../core/version/services/version.service";
 import { CompanyPostDataDTO } from "../../company/dtos/company.post.dto";
 import { CompanyPutDataDTO } from "../../company/dtos/company.put.dto";
-import { Company } from "../../company/entities/company.entity";
-import { CompanyModel } from "../../company/entities/company.model";
+import { CompanyDescriptor, Company } from "../../company/entities/company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.put.dto";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
@@ -91,7 +90,7 @@ export class CompanyService {
     });
 
     return this.builder.buildSingle(
-      CompanyModel,
+      CompanyDescriptor.model,
       await this.companyRepository.findByCompanyId({ companyId: params.data.id }),
     );
   }
@@ -110,7 +109,7 @@ export class CompanyService {
     });
 
     return this.builder.buildSingle(
-      CompanyModel,
+      CompanyDescriptor.model,
       await this.companyRepository.findByCompanyId({ companyId: params.data.id }),
     );
   }
@@ -122,7 +121,7 @@ export class CompanyService {
     });
 
     return this.builder.buildSingle(
-      CompanyModel,
+      CompanyDescriptor.model,
       await this.companyRepository.findByCompanyId({ companyId: params.data.id }),
     );
   }
@@ -131,7 +130,7 @@ export class CompanyService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      CompanyModel,
+      CompanyDescriptor.model,
       await this.companyRepository.find({ term: params.term, cursor: paginator.generateCursor() }),
       paginator,
     );
@@ -139,7 +138,7 @@ export class CompanyService {
 
   async findOne(params: { companyId: string }): Promise<JsonApiDataInterface> {
     return this.builder.buildSingle(
-      CompanyModel,
+      CompanyDescriptor.model,
       await this.companyRepository.findByCompanyId({ companyId: params.companyId }),
     );
   }
