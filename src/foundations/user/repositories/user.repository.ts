@@ -67,9 +67,6 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findFullUser(params: { userId: string }): Promise<User> {
-    console.log("[findFullUser] userId:", params.userId);
-
-    // Query 1: Get user with roles, company, features
     let query = this.neo4j.initQuery({ serialiser: UserModel });
 
     query.queryParams = {
@@ -89,17 +86,8 @@ export class UserRepository implements OnModuleInit {
 
     const user = await this.neo4j.readOne(query);
 
-    console.log("[findFullUser] user.company:", user.company?.id ?? "none");
-    console.log(
-      "[findFullUser] user.roles:",
-      user.role?.map((r: any) => r.id),
-    );
-
-    // Check if user is Administrator BY ROLE (not by company absence)
     const isAdministrator = user.role?.some((r: any) => r.id === RoleId.Administrator);
-    console.log("[findFullUser] isAdministrator:", isAdministrator);
 
-    // Query 2: Get modules
     query = this.neo4j.initQuery({ serialiser: ModuleModel });
     query.queryParams = {
       companyId: user.company?.id ?? null,
@@ -110,25 +98,18 @@ export class UserRepository implements OnModuleInit {
     let modules: any[] = [];
 
     if (isAdministrator) {
-      // Administrator: modules via Role → HAS_PERMISSIONS → Module
-      console.log("[findFullUser] Using adminModuleQuery");
       query.query = adminModuleQuery;
       try {
         modules = await this.neo4j.readMany(query);
-        console.log("[findFullUser] Administrator modules:", modules?.length ?? 0);
-      } catch (e: any) {
-        console.log("[findFullUser] Administrator modules query failed:", e.message);
+      } catch {
         modules = [];
       }
     } else {
-      // Regular user: modules via Company → Features → Modules
-      console.log("[findFullUser] Using featureModuleQuery");
       query.query += `
         ${this.userCypherService.default({ searchField: "id" })}
         ${featureModuleQuery}
       `;
       modules = await this.neo4j.readMany(query);
-      console.log("[findFullUser] Regular user modules:", modules?.length ?? 0);
     }
 
     user.module = modules;
