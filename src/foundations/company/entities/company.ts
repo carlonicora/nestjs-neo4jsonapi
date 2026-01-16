@@ -1,7 +1,4 @@
-import {
-  Entity,
-  defineEntity,
-} from "../../../common";
+import { Entity, defineEntity } from "../../../common";
 import type { Feature } from "../../feature/entities/feature.entity";
 import type { Module } from "../../module/entities/module.entity";
 import { featureMeta } from "../../feature/entities/feature.meta";
@@ -26,7 +23,6 @@ export type Company = Entity & {
   feature: Feature[];
   module: Module[];
 };
-
 
 /**
  * Company Entity Descriptor

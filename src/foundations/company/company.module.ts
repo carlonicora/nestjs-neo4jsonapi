@@ -14,7 +14,12 @@ import { CompanyService } from "./services/company.service";
 
 @Module({
   controllers: [CompanyController],
-  providers: [CompanyRepository, CompanyService, CompanyDescriptor.model.serialiser, createWorkerProvider(CompanyProcessor)],
+  providers: [
+    CompanyRepository,
+    CompanyService,
+    CompanyDescriptor.model.serialiser,
+    createWorkerProvider(CompanyProcessor),
+  ],
   exports: [CompanyService, CompanyDescriptor.model.serialiser, CompanyRepository],
   imports: [BullModule.registerQueue({ name: QueueId.COMPANY }), FeatureModule, S3Module],
 })
