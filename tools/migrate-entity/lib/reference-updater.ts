@@ -30,11 +30,10 @@ export async function findExternalReferences(
     excludePaths.map((p) => path.normalize(path.resolve(process.cwd(), p)))
   );
 
-  // Find all TypeScript files (excluding test files)
+  // Find all TypeScript files (including test files - they may import entities)
   const tsFiles = await glob(`${srcDir}/**/*.ts`, {
     nodir: true,
     cwd: process.cwd(),
-    ignore: [`${srcDir}/**/*.spec.ts`, `${srcDir}/**/*.test.ts`, `${srcDir}/**/__tests__/**`],
   });
 
   for (const filePath of tsFiles) {

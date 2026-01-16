@@ -322,10 +322,12 @@ export class EntityMigrator {
    * - Changes ./entities/entity.entity -> ./entities/entity
    * - Replaces EntityModel export with EntityDescriptor
    * - Keeps Entity type export
+   * - Reorders exports so entity/descriptor comes BEFORE module (avoids circular dependency)
    */
   private updateIndexExports(content: string, entityName: string, labelName: string): string {
     const modelName = `${labelName}Model`;
     const descriptorName = `${labelName}Descriptor`;
+    const moduleName = `${labelName}Module`;
     let updated = content;
 
     // Pattern 1: export { Entity } from "./entities/entity.entity"
@@ -358,6 +360,25 @@ export class EntityMigrator {
         simpleEntityExport,
         `export { ${labelName}, ${descriptorName} } from "./entities/${entityName}"`
       );
+    }
+
+    // Reorder exports: entity/descriptor must come BEFORE module to avoid circular dependency
+    // Find the module export line and entity export line
+    const lines = updated.split("\n");
+    const moduleExportIndex = lines.findIndex(line =>
+      line.includes(moduleName) && line.includes("./") && line.includes("module")
+    );
+    const entityExportIndex = lines.findIndex(line =>
+      line.includes(descriptorName) || (line.includes(labelName) && line.includes("./entities/"))
+    );
+
+    // If module export comes before entity export, swap them
+    if (moduleExportIndex !== -1 && entityExportIndex !== -1 && moduleExportIndex < entityExportIndex) {
+      const moduleExportLine = lines[moduleExportIndex];
+      const entityExportLine = lines[entityExportIndex];
+      lines[moduleExportIndex] = entityExportLine;
+      lines[entityExportIndex] = moduleExportLine;
+      updated = lines.join("\n");
     }
 
     return updated;
