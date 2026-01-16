@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { glob } from "glob";
+import { AliasModelInfo } from "./types";
 
 export interface ModuleUpdateResult {
   modulePath: string;
@@ -29,7 +30,8 @@ export async function findModuleFile(modulePath: string): Promise<string | null>
 export function updateModule(
   modulePath: string,
   entityName: string,
-  labelName: string
+  labelName: string,
+  aliasModels: AliasModelInfo[] = []
 ): ModuleUpdateResult | null {
   const content = fs.readFileSync(modulePath, "utf-8");
   const changes: string[] = [];
@@ -38,21 +40,22 @@ export function updateModule(
   const modelName = `${labelName}Model`;
   const serialiserName = `${labelName}Serialiser`;
 
+  // Build list of all descriptors (base + aliases)
+  const allDescriptors = [descriptorName, ...aliasModels.map(a => a.descriptorName)];
+
   let updatedContent = content;
 
-  // 1. Update import: EntityModel -> EntityDescriptor
+  // 1. Update import: EntityModel, AliasModel... -> EntityDescriptor, AliasDescriptor...
+  // Handle imports that may include multiple models on one line
   const modelImportPattern = new RegExp(
-    `import\\s*\\{\\s*${modelName}\\s*\\}\\s*from\\s*["'][^"']+\\.model["'];?`,
+    `import\\s*\\{[^}]*${modelName}[^}]*\\}\\s*from\\s*["'][^"']+\\.model["'];?`,
     "g"
   );
   if (modelImportPattern.test(updatedContent)) {
-    // Replace the import path
-    const oldImport = updatedContent.match(modelImportPattern)?.[0] || "";
-    const newImportPath = oldImport
-      .replace(`{ ${modelName} }`, `{ ${descriptorName} }`)
-      .replace(".model", "");
+    // Replace the entire import with the new descriptors
+    const newImportPath = `import { ${allDescriptors.join(", ")} } from "./entities/${entityName}";`;
     updatedContent = updatedContent.replace(modelImportPattern, newImportPath);
-    changes.push(`Updated import: ${modelName} -> ${descriptorName}`);
+    changes.push(`Updated import: models -> ${allDescriptors.join(", ")}`);
   }
 
   // 2. Remove serialiser import (it's now auto-generated)
@@ -79,11 +82,32 @@ export function updateModule(
     changes.push(`Updated registry: modelRegistry.register(${modelName}) -> modelRegistry.register(${descriptorName}.model)`);
   }
 
+  // 4b. Update alias model registry registrations
+  for (const alias of aliasModels) {
+    const aliasRegistryPattern = new RegExp(`modelRegistry\\.register\\(${alias.modelName}\\)`, "g");
+    if (aliasRegistryPattern.test(updatedContent)) {
+      updatedContent = updatedContent.replace(
+        aliasRegistryPattern,
+        `modelRegistry.register(${alias.descriptorName}.model)`
+      );
+      changes.push(`Updated registry: modelRegistry.register(${alias.modelName}) -> modelRegistry.register(${alias.descriptorName}.model)`);
+    }
+  }
+
   // 5. Update any other standalone EntityModel usages
   const standaloneModelPattern = new RegExp(`\\b${modelName}\\b(?!\\.)`, "g");
   if (standaloneModelPattern.test(updatedContent)) {
     updatedContent = updatedContent.replace(standaloneModelPattern, `${descriptorName}.model`);
     changes.push(`Updated standalone ${modelName} usages`);
+  }
+
+  // 5b. Update any other standalone alias model usages
+  for (const alias of aliasModels) {
+    const standaloneAliasPattern = new RegExp(`\\b${alias.modelName}\\b(?!\\.)`, "g");
+    if (standaloneAliasPattern.test(updatedContent)) {
+      updatedContent = updatedContent.replace(standaloneAliasPattern, `${alias.descriptorName}.model`);
+      changes.push(`Updated standalone ${alias.modelName} usages`);
+    }
   }
 
   if (changes.length === 0) {

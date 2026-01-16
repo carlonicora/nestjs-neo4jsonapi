@@ -330,3 +330,43 @@ export function defineEntity<T>() {
     return descriptor;
   };
 }
+
+/**
+ * Create an alias descriptor from a base descriptor with different meta.
+ *
+ * Alias descriptors share the same entity type, fields, computed, and relationships
+ * as the base descriptor, but have different type/endpoint/nodeName/labelName.
+ *
+ * This is useful for entities like User that have aliases (Owner, Author, Assignee)
+ * which represent the same entity but appear as different relationship endpoints.
+ *
+ * @param baseDescriptor - The base EntityDescriptor to alias
+ * @param aliasMeta - The DataMeta for the alias (type, endpoint, nodeName, labelName)
+ * @returns A new EntityDescriptor with the alias meta
+ *
+ * @example
+ * ```typescript
+ * // In user.ts:
+ * export const UserDescriptor = defineEntity<User>()({ ... });
+ *
+ * export const OwnerDescriptor = defineEntityAlias(UserDescriptor, ownerMeta);
+ * export const AuthorDescriptor = defineEntityAlias(UserDescriptor, authorMeta);
+ * export const AssigneeDescriptor = defineEntityAlias(UserDescriptor, assigneeMeta);
+ * ```
+ */
+export function defineEntityAlias<T, R extends Record<string, RelationshipDef>>(
+  baseDescriptor: EntityDescriptor<T, R>,
+  aliasMeta: { type: string; endpoint: string; nodeName: string; labelName: string },
+): EntityDescriptor<T, R> {
+  // Create a new model with the alias meta
+  const aliasModel: DataModelInterface<T> = {
+    ...baseDescriptor.model,
+    ...aliasMeta,
+  };
+
+  // Create a new descriptor that shares everything except the model
+  return {
+    ...baseDescriptor,
+    model: aliasModel,
+  };
+}

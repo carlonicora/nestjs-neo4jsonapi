@@ -37,4 +37,4 @@ export type {
   RelationshipDef,
 } from "./entity.schema.interface";
 
-export { defineEntity } from "../helpers/define-entity";
+export { defineEntity, defineEntityAlias } from "../helpers/define-entity";

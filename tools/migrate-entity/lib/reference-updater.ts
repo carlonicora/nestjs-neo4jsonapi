@@ -7,7 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { glob } from "glob";
-import { Reference, ReferenceUsage } from "./types";
+import { AliasModelInfo, Reference, ReferenceUsage } from "./types";
 
 /**
  * Finds all external files that reference the old entity exports.
@@ -16,7 +16,8 @@ export async function findExternalReferences(
   entityName: string,
   labelName: string,
   srcDir: string = "src",
-  excludePaths: string[] = []
+  excludePaths: string[] = [],
+  aliasModels: AliasModelInfo[] = []
 ): Promise<Reference[]> {
   const references: Reference[] = [];
 
@@ -24,6 +25,9 @@ export async function findExternalReferences(
   const metaName = `${entityName}Meta`;
   const modelName = `${labelName}Model`;
   const entityTypeName = labelName; // e.g., "Article"
+
+  // Build list of all model names (base + aliases) for pattern matching
+  const allModelNames = [modelName, ...aliasModels.map(a => a.modelName)];
 
   // Normalize exclude paths for comparison
   const normalizedExcludePaths = new Set(
@@ -49,7 +53,7 @@ export async function findExternalReferences(
     // Check if file imports or uses the old exports (model/entity files that will be deleted)
     // Note: We DON'T include ${entityName}.meta because meta files are preserved
     const hasOldPatterns =
-      content.includes(modelName) ||
+      allModelNames.some(name => content.includes(name)) ||
       content.includes(`${entityName}.entity`) ||
       content.includes(`${entityName}.model`);
 
@@ -61,15 +65,15 @@ export async function findExternalReferences(
     // since companyMeta is still available from company.meta.ts
     const importsFromMetaFile = content.includes(`${entityName}.meta"`);
 
-    const usages = findUsagesInFile(content, metaName, modelName, labelName, importsFromMetaFile);
+    const usages = findUsagesInFile(content, metaName, modelName, labelName, importsFromMetaFile, aliasModels);
 
     // Find all old imports that need updating (excluding meta file imports)
-    const oldImports = extractAllOldImports(content, entityName, metaName, modelName, entityTypeName);
+    const oldImports = extractAllOldImports(content, entityName, metaName, modelName, entityTypeName, aliasModels);
 
     if (usages.length === 0 && oldImports.length === 0) continue;
 
     // Calculate new import
-    const newImport = calculateNewImport(oldImports, entityName, labelName);
+    const newImport = calculateNewImport(oldImports, entityName, labelName, aliasModels);
 
     references.push({
       filePath: absolutePath,
@@ -91,7 +95,8 @@ function findUsagesInFile(
   metaName: string,
   modelName: string,
   labelName: string,
-  skipMetaReplacements: boolean = false
+  skipMetaReplacements: boolean = false,
+  aliasModels: AliasModelInfo[] = []
 ): ReferenceUsage[] {
   const usages: ReferenceUsage[] = [];
   const lines = content.split("\n");
@@ -175,6 +180,52 @@ function findUsagesInFile(
         }
       }
     }
+
+    // Check for alias model usage patterns (OwnerModel, AuthorModel, etc.)
+    for (const alias of aliasModels) {
+      if (line.includes(alias.modelName)) {
+        // Pattern: serialiserFactory.create(AliasModel) -> serialiserFactory.create(AliasDescriptor.model)
+        if (line.includes(`serialiserFactory.create(${alias.modelName})`)) {
+          usages.push({
+            line: lineNumber,
+            oldText: `serialiserFactory.create(${alias.modelName})`,
+            newText: `serialiserFactory.create(${alias.descriptorName}.model)`,
+          });
+        }
+
+        // Pattern: modelRegistry.register(AliasModel) -> modelRegistry.register(AliasDescriptor.model)
+        if (line.includes(`modelRegistry.register(${alias.modelName})`)) {
+          usages.push({
+            line: lineNumber,
+            oldText: `modelRegistry.register(${alias.modelName})`,
+            newText: `modelRegistry.register(${alias.descriptorName}.model)`,
+          });
+        }
+
+        // Pattern: AliasModel.property -> AliasDescriptor.model.property
+        const aliasPropertyPattern = new RegExp(`${alias.modelName}\\.(\\w+)`, "g");
+        let match;
+        while ((match = aliasPropertyPattern.exec(line)) !== null) {
+          usages.push({
+            line: lineNumber,
+            oldText: `${alias.modelName}.${match[1]}`,
+            newText: `${alias.descriptorName}.model.${match[1]}`,
+          });
+        }
+
+        // Pattern: standalone AliasModel usage (not followed by .)
+        if (!line.includes(`${alias.modelName}.`)) {
+          const standaloneAliasPattern = new RegExp(`\\b${alias.modelName}\\b`, "g");
+          if (standaloneAliasPattern.test(line)) {
+            usages.push({
+              line: lineNumber,
+              oldText: alias.modelName,
+              newText: `${alias.descriptorName}.model`,
+            });
+          }
+        }
+      }
+    }
   }
 
   // Deduplicate usages for the same line and text
@@ -190,10 +241,14 @@ function extractAllOldImports(
   entityName: string,
   metaName: string,
   modelName: string,
-  entityTypeName: string
+  entityTypeName: string,
+  aliasModels: AliasModelInfo[] = []
 ): string[] {
   const imports: string[] = [];
   const lines = content.split("\n");
+
+  // Build list of all model names (base + aliases) for pattern matching
+  const allModelNames = [modelName, ...aliasModels.map(a => a.modelName)];
 
   for (const line of lines) {
     if (!line.trim().startsWith("import ")) continue;
@@ -203,7 +258,7 @@ function extractAllOldImports(
 
     // Check for various import patterns (entity/model files that will be deleted)
     const isEntityImport =
-      line.includes(modelName) ||
+      allModelNames.some(name => line.includes(name)) ||
       (line.includes(`${entityName}.entity`) && line.includes(entityTypeName)) ||
       line.includes(`${entityName}.model`);
 
@@ -218,7 +273,12 @@ function extractAllOldImports(
 /**
  * Calculates the new import statement, consolidating all old imports.
  */
-function calculateNewImport(oldImports: string[], entityName: string, labelName: string): string {
+function calculateNewImport(
+  oldImports: string[],
+  entityName: string,
+  labelName: string,
+  aliasModels: AliasModelInfo[] = []
+): string {
   const descriptorName = `${labelName}Descriptor`;
   const imports: string[] = [];
   let importPath: string | null = null;
@@ -226,11 +286,19 @@ function calculateNewImport(oldImports: string[], entityName: string, labelName:
   // Determine what to import
   let needsDescriptor = false;
   let needsEntityType = false;
+  const neededAliasDescriptors = new Set<string>();
 
   for (const oldImport of oldImports) {
     // Check what's being imported
-    if (oldImport.includes("Meta") || oldImport.includes("Model")) {
+    if (oldImport.includes("Meta") || oldImport.includes(`${labelName}Model`)) {
       needsDescriptor = true;
+    }
+
+    // Check for alias models
+    for (const alias of aliasModels) {
+      if (oldImport.includes(alias.modelName)) {
+        neededAliasDescriptors.add(alias.descriptorName);
+      }
     }
 
     // Check if the entity type itself is imported
@@ -260,6 +328,10 @@ function calculateNewImport(oldImports: string[], entityName: string, labelName:
   }
   if (needsEntityType) {
     imports.push(labelName);
+  }
+  // Add alias descriptors
+  for (const aliasDescriptor of neededAliasDescriptors) {
+    imports.push(aliasDescriptor);
   }
 
   if (imports.length === 0) {

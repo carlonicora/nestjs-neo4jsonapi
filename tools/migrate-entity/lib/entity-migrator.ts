@@ -11,7 +11,7 @@ import { generateEntityFile, generateMetaFile } from "./descriptor-generator";
 import { discoverAllModulePaths, discoverOldFiles, isAlreadyMigrated } from "./file-discovery";
 import { findModuleFile, formatModuleContent, updateModule } from "./module-updater";
 import { findExternalReferences, summarizeReferences, updateFileReferences } from "./reference-updater";
-import { EntityMigrationResult, FileChange, MigrationResult, MigratorOptions, OldEntityFiles } from "./types";
+import { AliasModelInfo, EntityMigrationResult, FileChange, MigrationResult, MigratorOptions, OldEntityFiles } from "./types";
 
 export class EntityMigrator {
   private changes: FileChange[] = [];
@@ -140,15 +140,27 @@ export class EntityMigrator {
       }
     }
 
-    // 6. Write meta file first
+    // 6. Write meta file first (preserve additional exports if they exist)
+    let finalMetaContent = metaContent;
+    if (fs.existsSync(metaTargetPath)) {
+      const existingMeta = fs.readFileSync(metaTargetPath, "utf-8");
+      // Check if existing file has additional exports beyond the primary meta
+      const primaryMetaName = `${parsed.meta.nodeName}Meta`;
+      const additionalExports = this.extractAdditionalMetaExports(existingMeta, primaryMetaName);
+      if (additionalExports) {
+        // Append additional exports to the new meta content
+        finalMetaContent = metaContent.trimEnd() + "\n" + additionalExports;
+      }
+    }
+
     changes.push({
       type: fs.existsSync(metaTargetPath) ? "update" : "create",
       path: metaTargetPath,
-      content: metaContent,
+      content: finalMetaContent,
     });
 
     if (!this.options.dryRun) {
-      fs.writeFileSync(metaTargetPath, metaContent);
+      fs.writeFileSync(metaTargetPath, finalMetaContent);
       this.log(`    Created: ${path.relative(process.cwd(), metaTargetPath)}`);
     } else {
       this.log(`    Would create: ${path.relative(process.cwd(), metaTargetPath)}`);
@@ -174,7 +186,8 @@ export class EntityMigrator {
       oldFiles.entityName,
       parsed.meta.labelName,
       "src",
-      [targetPath, metaTargetPath] // Exclude the entity files being migrated
+      [targetPath, metaTargetPath], // Exclude the entity files being migrated
+      parsed.aliasModels
     );
 
     if (this.options.verbose) {
@@ -200,7 +213,7 @@ export class EntityMigrator {
     // 9. Update module file
     const moduleFile = await findModuleFile(modulePath);
     if (moduleFile) {
-      const moduleUpdate = updateModule(moduleFile, oldFiles.entityName, parsed.meta.labelName);
+      const moduleUpdate = updateModule(moduleFile, oldFiles.entityName, parsed.meta.labelName, parsed.aliasModels);
       if (moduleUpdate) {
         const formattedContent = formatModuleContent(moduleUpdate.updatedContent);
         changes.push({
@@ -228,7 +241,8 @@ export class EntityMigrator {
       const updatedIndexContent = this.updateIndexExports(
         indexContent,
         oldFiles.entityName,
-        parsed.meta.labelName
+        parsed.meta.labelName,
+        parsed.aliasModels
       );
 
       if (updatedIndexContent !== indexContent) {
@@ -320,34 +334,59 @@ export class EntityMigrator {
   /**
    * Updates the module's index.ts to export the new descriptor instead of old model.
    * - Changes ./entities/entity.entity -> ./entities/entity
-   * - Replaces EntityModel export with EntityDescriptor
+   * - Replaces EntityModel export with EntityDescriptor (and alias descriptors)
    * - Keeps Entity type export
    * - Reorders exports so entity/descriptor comes BEFORE module (avoids circular dependency)
    */
-  private updateIndexExports(content: string, entityName: string, labelName: string): string {
+  private updateIndexExports(
+    content: string,
+    entityName: string,
+    labelName: string,
+    aliasModels: AliasModelInfo[] = []
+  ): string {
     const modelName = `${labelName}Model`;
     const descriptorName = `${labelName}Descriptor`;
     const moduleName = `${labelName}Module`;
+
+    // Build the list of all descriptors to export (base + aliases)
+    const allDescriptors = [descriptorName, ...aliasModels.map(a => a.descriptorName)];
+    const descriptorsExport = allDescriptors.join(", ");
+
     let updated = content;
 
     // Pattern 1: export { Entity } from "./entities/entity.entity"
-    // -> export { Entity, EntityDescriptor } from "./entities/entity"
+    // -> export { Entity, EntityDescriptor, AliasDescriptors... } from "./entities/entity"
     const entityExportPattern = new RegExp(
       `export\\s*\\{\\s*(${labelName})\\s*\\}\\s*from\\s*["']\\./entities/${entityName}\\.entity["']`,
       "g"
     );
     updated = updated.replace(
       entityExportPattern,
-      `export { ${labelName}, ${descriptorName} } from "./entities/${entityName}"`
+      `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`
     );
 
     // Pattern 2: export { EntityModel } from "./entities/entity.model"
     // -> remove this line (descriptor is exported from entity file now)
+    // Also handles lines with multiple models like: export { AssigneeModel, AuthorModel, UserModel } from ...
     const modelExportPattern = new RegExp(
-      `export\\s*\\{\\s*${modelName}\\s*\\}\\s*from\\s*["']\\./entities/${entityName}\\.model["'];?\\n?`,
+      `export\\s*\\{[^}]*${modelName}[^}]*\\}\\s*from\\s*["']\\./entities/${entityName}\\.model["'];?\\n?`,
       "g"
     );
     updated = updated.replace(modelExportPattern, "");
+
+    // Pattern 2b: export * from "./entities/entity.map" -> remove (file deleted)
+    const mapStarExportPattern = new RegExp(
+      `export\\s*\\*\\s*from\\s*["']\\./entities/${entityName}\\.map["'];?\\n?`,
+      "g"
+    );
+    updated = updated.replace(mapStarExportPattern, "");
+
+    // Pattern 2c: export { EntitySerialiser } from "./serialisers/entity.serialiser" -> remove (file deleted)
+    const serialiserExportPattern = new RegExp(
+      `export\\s*\\{[^}]*\\}\\s*from\\s*["']\\./serialisers/${entityName}\\.serialiser["'];?\\n?`,
+      "g"
+    );
+    updated = updated.replace(serialiserExportPattern, "");
 
     // Pattern 3: If Entity is exported separately and we haven't handled it yet
     // Handle case where entity and model are on separate lines
@@ -358,7 +397,7 @@ export class EntityMigrator {
     if (simpleEntityExport.test(updated) && !updated.includes(descriptorName)) {
       updated = updated.replace(
         simpleEntityExport,
-        `export { ${labelName}, ${descriptorName} } from "./entities/${entityName}"`
+        `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`
       );
     }
 
@@ -382,6 +421,31 @@ export class EntityMigrator {
     }
 
     return updated;
+  }
+
+  /**
+   * Extracts additional meta exports from an existing meta file.
+   * Returns the additional exports (everything after the primary meta) or null if none exist.
+   */
+  private extractAdditionalMetaExports(existingContent: string, primaryMetaName: string): string | null {
+    // Find where the primary meta export ends
+    const primaryMetaPattern = new RegExp(
+      `export\\s+const\\s+${primaryMetaName}\\s*:\\s*DataMeta\\s*=\\s*\\{[^}]+\\};`,
+      "s"
+    );
+    const match = existingContent.match(primaryMetaPattern);
+    if (!match) return null;
+
+    // Get everything after the primary meta
+    const afterPrimary = existingContent.slice(match.index! + match[0].length).trim();
+    if (!afterPrimary) return null;
+
+    // Check if there are additional exports
+    if (afterPrimary.includes("export const")) {
+      return "\n" + afterPrimary;
+    }
+
+    return null;
   }
 
   /**

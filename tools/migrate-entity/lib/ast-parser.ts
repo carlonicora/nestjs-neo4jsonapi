@@ -7,6 +7,7 @@
 
 import * as fs from "fs";
 import {
+  AliasModelInfo,
   CypherRelationship,
   CypherServiceWarning,
   OldEntityFiles,
@@ -30,8 +31,9 @@ export function parseOldFiles(files: OldEntityFiles): ParsedEntity {
   const entityType = files.entity ? parseEntityFile(files.entity) : createEmptyEntityType(meta.labelName);
   const mapper = files.map ? parseMapFile(files.map) : null;
   const serialiser = files.serialiser ? parseSerialiserFile(files.serialiser) : null;
+  const aliasModels = files.model ? parseAliasModels(files.model, meta.labelName) : [];
 
-  return { meta, entityType, mapper, serialiser };
+  return { meta, entityType, mapper, serialiser, aliasModels };
 }
 
 /**
@@ -268,7 +270,8 @@ function extractSerialiserRelationships(content: string): ParsedSerialiserRelati
     const dtoKey = dtoKeyMatch ? dtoKeyMatch[1] : undefined;
 
     // Extract model from this.serialiserFactory.create(UserModel)
-    const modelMatch = block.match(/this\.serialiserFactory\.create\((\w+)\)/);
+    // Also handles already-migrated entities: this.serialiserFactory.create(CompanyDescriptor.model)
+    const modelMatch = block.match(/this\.serialiserFactory\.create\((\w+)(?:\.model)?\)/);
     const modelImport = modelMatch ? modelMatch[1] : "";
 
     relationships.push({ name, dtoKey, modelImport });
@@ -419,6 +422,67 @@ function createEmptyEntityType(labelName: string): ParsedEntityType {
     relationshipFields: [],
     imports: [],
   };
+}
+
+/**
+ * Parses alias models from the model file.
+ *
+ * Alias models are additional model exports that spread from the base model
+ * but use a different meta. Example:
+ *
+ * ```typescript
+ * export const UserModel: DataModelInterface<User> = {
+ *   ...userMeta,
+ *   // ...
+ * };
+ *
+ * export const OwnerModel: DataModelInterface<User> = {
+ *   ...UserModel,
+ *   ...ownerMeta,
+ * };
+ * ```
+ *
+ * @param filePath Path to the model file
+ * @param baseLabelName The label name of the base model (e.g., "User")
+ * @returns Array of alias model info
+ */
+export function parseAliasModels(filePath: string, baseLabelName: string): AliasModelInfo[] {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+
+  const content = fs.readFileSync(filePath, "utf-8");
+  const aliasModels: AliasModelInfo[] = [];
+
+  // Pattern to match alias model definitions:
+  // export const XxxModel: DataModelInterface<Entity> = {
+  //   ...BaseModel,
+  //   ...xxxMeta,
+  // };
+  // Note: Alias models spread from the base model AND override with their own meta
+  const aliasPattern = /export\s+const\s+(\w+Model)\s*:\s*DataModelInterface<\w+>\s*=\s*\{[^}]*\.\.\.(\w+Model)[^}]*\.\.\.(\w+Meta)[^}]*\}/gs;
+
+  let match;
+  while ((match = aliasPattern.exec(content)) !== null) {
+    const modelName = match[1];
+    const baseModel = match[2];
+    const metaName = match[3];
+
+    // Skip the base model itself (it doesn't spread from another model)
+    // Only include models that spread from the base model
+    if (baseModel === `${baseLabelName}Model`) {
+      // Derive descriptor name from model name: OwnerModel -> OwnerDescriptor
+      const descriptorName = modelName.replace(/Model$/, "Descriptor");
+
+      aliasModels.push({
+        modelName,
+        metaName,
+        descriptorName,
+      });
+    }
+  }
+
+  return aliasModels;
 }
 
 /**

@@ -30,6 +30,19 @@ export interface ParsedMeta {
   labelName: string;
 }
 
+/**
+ * Information about an alias model (e.g., OwnerModel, AuthorModel)
+ * that shares the same entity type but has different meta.
+ */
+export interface AliasModelInfo {
+  /** The exported model name (e.g., "OwnerModel") */
+  modelName: string;
+  /** The meta variable it spreads (e.g., "ownerMeta") */
+  metaName: string;
+  /** The derived descriptor name (e.g., "OwnerDescriptor") */
+  descriptorName: string;
+}
+
 export interface ParsedField {
   name: string;
   type: string;
@@ -94,6 +107,8 @@ export interface ParsedEntity {
   entityType: ParsedEntityType;
   mapper: ParsedMapper | null;
   serialiser: ParsedSerialiser | null;
+  /** Alias models parsed from model file (e.g., OwnerModel, AuthorModel) */
+  aliasModels: AliasModelInfo[];
 }
 
 export interface FieldConfig {

@@ -327,14 +327,20 @@ function getDefaultValue(fieldName: string, mapper: ParsedEntity["mapper"]): str
 }
 
 /**
- * Converts Model import name to meta variable name.
+ * Converts Model/Descriptor import name to model reference.
+ * Returns either a meta variable name or a Descriptor.model reference.
  */
 function modelToMetaName(relName: string, modelImport: string): string {
-  // Special cases
+  // Special cases for framework-provided relationships
   if (relName === "author") return "authorMeta";
   if (relName === "user" || relName === "editors") return "userMeta";
 
-  // General case: UserModel -> userMeta
+  // Already migrated entity: CompanyDescriptor -> CompanyDescriptor.model
+  if (modelImport.endsWith("Descriptor")) {
+    return `${modelImport}.model`;
+  }
+
+  // Old pattern: UserModel -> userMeta
   const baseName = modelImport.replace("Model", "").toLowerCase();
   return `${baseName}Meta`;
 }
@@ -396,12 +402,24 @@ function generateImports(
   const featureImports: string[] = [];
 
   for (const rel of relationships) {
-    const metaName = rel.model;
-    const baseName = metaName.replace("Meta", "");
+    const modelRef = rel.model;
+
+    // Already-migrated entity: CompanyDescriptor.model -> need to import CompanyDescriptor
+    if (modelRef.endsWith(".model")) {
+      const descriptorName = modelRef.replace(".model", "");
+      const descriptorImport = findDescriptorImport(parsed, descriptorName);
+      if (descriptorImport) {
+        featureImports.push(descriptorImport);
+      }
+      continue;
+    }
+
+    // Meta-based reference: xxxMeta
+    const baseName = modelRef.replace("Meta", "");
 
     // Framework-provided metas (user, author, owner, company)
     if (["user", "author", "owner", "company"].includes(baseName)) {
-      frameworkImports.add(metaName);
+      frameworkImports.add(modelRef);
       // Also add the type if it's a relationship field type
       const typeName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
       if (parsed.entityType.relationshipFields.some((f) => f.type.includes(typeName))) {
@@ -409,7 +427,7 @@ function generateImports(
       }
     } else {
       // Feature-specific metas need separate imports
-      const metaImport = findMetaImport(parsed, metaName);
+      const metaImport = findMetaImport(parsed, modelRef);
       if (metaImport) {
         featureImports.push(metaImport);
       }
@@ -420,19 +438,30 @@ function generateImports(
   // Collect non-framework types that need imports from original entity
   const relationshipTypeImports: string[] = [];
 
+  // Framework types that should be added to frameworkImports instead of separate imports
+  const frameworkTypes = new Set(["Company", "User", "Author", "Owner", "Assignee"]);
+
   for (const field of parsed.entityType.relationshipFields) {
     const typeName = field.type.replace("[]", "");
-    // Add framework types (Company, User)
-    if (["Company", "User"].includes(typeName)) {
+
+    // For framework types, add to frameworkImports (internal import) instead
+    if (frameworkTypes.has(typeName)) {
       frameworkImports.add(typeName);
-    } else {
-      // For non-framework types, find the original import from entity
-      for (const imp of parsed.entityType.imports) {
-        // Match imports like "import { Feature } from ..." or "import { Module } from ..."
-        if (imp.includes(`{ ${typeName} }`) || imp.includes(`{ ${typeName},`) || imp.includes(`, ${typeName} }`)) {
-          relationshipTypeImports.push(imp);
-          break;
-        }
+      continue;
+    }
+
+    // For all other relationship types, find the original import from entity
+    // Use type-only imports to avoid circular dependencies
+    for (const imp of parsed.entityType.imports) {
+      // Skip imports from the package barrel - these should use internal paths
+      if (imp.includes("@carlonicora/nestjs-neo4jsonapi")) {
+        continue;
+      }
+
+      // Match imports like "import { Feature } from ..." or "import { Module } from ..."
+      if (imp.includes(`{ ${typeName} }`) || imp.includes(`{ ${typeName},`) || imp.includes(`, ${typeName} }`)) {
+        relationshipTypeImports.push(imp);
+        break;
       }
     }
   }
@@ -542,8 +571,41 @@ function findMetaImport(parsed: ParsedEntity, metaName: string): string | null {
   if (baseName === "module") {
     return `import { ${metaName} } from "../../module/entities/module.meta";`;
   }
+  if (baseName === "role") {
+    return `import { ${metaName} } from "../../role/entities/role.meta";`;
+  }
+  if (baseName === "configuration") {
+    return `import { ${metaName} } from "../../configuration/entities/configuration.meta";`;
+  }
+  if (baseName === "referencerole") {
+    return `import { ${metaName} } from "../../reference-role/entities/reference.role.meta";`;
+  }
 
-  return null;
+  // Generic fallback: assume foundation-style path
+  return `import { ${metaName} } from "../../${baseName}/entities/${baseName}.meta";`;
+}
+
+/**
+ * Finds the descriptor import statement for an already-migrated entity.
+ * Looks for existing imports like: import { CompanyDescriptor } from "../../company/entities/company";
+ */
+function findDescriptorImport(parsed: ParsedEntity, descriptorName: string): string | null {
+  // Check if serialiser already imports this descriptor
+  if (parsed.serialiser) {
+    for (const imp of parsed.serialiser.imports) {
+      if (imp.includes(descriptorName)) {
+        // Extract the path and return just this descriptor import
+        const pathMatch = imp.match(/from\s+["']([^"']+)["']/);
+        if (pathMatch) {
+          return `import { ${descriptorName} } from "${pathMatch[1]}";`;
+        }
+      }
+    }
+  }
+
+  // Derive path from descriptor name (e.g., CompanyDescriptor -> ../../company/entities/company)
+  const baseName = descriptorName.replace("Descriptor", "").toLowerCase();
+  return `import { ${descriptorName} } from "../../${baseName}/entities/${baseName}";`;
 }
 
 /**
@@ -692,8 +754,34 @@ export const ${metaName}: DataMeta = {
 export function generateEntityFile(parsed: ParsedEntity, entityDir: string, options: GeneratorOptions = {}): string {
   const descriptor = generateDescriptor(parsed, entityDir, options);
 
-  // Start with imports
-  let content = descriptor.imports.join("\n") + "\n\n";
+  // Start with imports - extend with alias-related imports
+  const imports = [...descriptor.imports];
+  if (parsed.aliasModels.length > 0) {
+    // Add defineEntityAlias to the framework imports (already in first import line)
+    const firstImport = imports[0];
+    if (firstImport && firstImport.includes("defineEntity")) {
+      imports[0] = firstImport.replace("defineEntity,", "defineEntity,\n  defineEntityAlias,");
+    }
+
+    // Add alias meta imports to the self-meta import line
+    // The self-meta import is the one that imports from "./{entityName}.meta" (the last import added by generateImports)
+    const selfMetaPattern = new RegExp(`from\\s+["']\\.\\/[^"']+\\.meta["']`);
+    const metaImportIndex = imports.findIndex((imp) => selfMetaPattern.test(imp));
+    if (metaImportIndex !== -1) {
+      const existingMetaImport = imports[metaImportIndex];
+      const aliasMetaNames = parsed.aliasModels.map((a) => a.metaName);
+      const baseMeta = `${parsed.meta.nodeName}Meta`;
+
+      // Reconstruct meta import with all metas
+      const allMetas = [baseMeta, ...aliasMetaNames];
+      const pathMatch = existingMetaImport.match(/from\s+["']([^"']+)["']/);
+      if (pathMatch) {
+        imports[metaImportIndex] = `import { ${allMetas.join(", ")} } from "${pathMatch[1]}";`;
+      }
+    }
+  }
+
+  let content = imports.join("\n") + "\n\n";
 
   // Add the entity type definition (keep from original)
   content += generateEntityTypeDefinition(parsed);
@@ -702,7 +790,32 @@ export function generateEntityFile(parsed: ParsedEntity, entityDir: string, opti
   // Add the descriptor
   content += descriptor.code;
 
+  // Add alias descriptors if any
+  if (parsed.aliasModels.length > 0) {
+    content += generateAliasDescriptors(parsed);
+  }
+
   return content;
+}
+
+/**
+ * Generates alias descriptor exports for entities with alias models.
+ *
+ * Example output:
+ * ```typescript
+ * export const OwnerDescriptor = defineEntityAlias(UserDescriptor, ownerMeta);
+ * export const AuthorDescriptor = defineEntityAlias(UserDescriptor, authorMeta);
+ * ```
+ */
+function generateAliasDescriptors(parsed: ParsedEntity): string {
+  const baseDescriptorName = `${parsed.meta.labelName}Descriptor`;
+  let code = "\n// Alias descriptors for relationship endpoints\n";
+
+  for (const alias of parsed.aliasModels) {
+    code += `export const ${alias.descriptorName} = defineEntityAlias(${baseDescriptorName}, ${alias.metaName});\n`;
+  }
+
+  return code;
 }
 
 /**
