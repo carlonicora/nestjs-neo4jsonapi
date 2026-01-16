@@ -1,14 +1,10 @@
-export const featureModuleQuery = `
-    OPTIONAL MATCH (user)-[:MEMBER_OF]->(role:Role)
-    OPTIONAL MATCH (feature:Feature)
-      WHERE exists((company)-[:HAS_FEATURE]->(feature))
-         OR feature.isCore = true
-    MATCH (m:Module)-[:IN_FEATURE]->(feature)
-    OPTIONAL MATCH (role)-[perm:HAS_PERMISSIONS]->(m)
-    WITH m, 
-        coalesce(apoc.convert.fromJsonList(m.permissions), []) AS defaultPermissions, 
+// Permission resolution logic - reusable for both regular users and administrators
+// Expects: m (module), perm (HAS_PERMISSIONS relationship, can be null)
+export const modulePermissionResolutionQuery = `
+    WITH m,
+        coalesce(apoc.convert.fromJsonList(m.permissions), []) AS defaultPermissions,
         collect(perm) AS perms
-    WITH m, defaultPermissions, 
+    WITH m, defaultPermissions,
         apoc.coll.flatten([p IN perms | coalesce(apoc.convert.fromJsonList(p.permissions), [])]) AS rolePerms
     WITH m,
         head([x IN defaultPermissions WHERE x.type = 'create' | x.value]) AS defaultCreate,
@@ -22,25 +18,25 @@ export const featureModuleQuery = `
         [defaultUpdate] + [x IN rolePerms WHERE x.type = 'update' | x.value] AS updateValues,
         [defaultDelete] + [x IN rolePerms WHERE x.type = 'delete' | x.value] AS deleteValues
     WITH m,
-        CASE 
+        CASE
         WHEN any(x IN createValues WHERE x = true) THEN true
         WHEN any(x IN createValues WHERE x IS NOT NULL AND x <> false AND x <> true)
             THEN head([x IN createValues WHERE x IS NOT NULL AND x <> false AND x <> true])
         ELSE coalesce(head(createValues), false)
         END AS effectiveCreate,
-        CASE 
+        CASE
         WHEN any(x IN readValues WHERE x = true) THEN true
         WHEN any(x IN readValues WHERE x IS NOT NULL AND x <> false AND x <> true)
             THEN head([x IN readValues WHERE x IS NOT NULL AND x <> false AND x <> true])
         ELSE coalesce(head(readValues), false)
         END AS effectiveRead,
-        CASE 
+        CASE
         WHEN any(x IN updateValues WHERE x = true) THEN true
         WHEN any(x IN updateValues WHERE x IS NOT NULL AND x <> false AND x <> true)
             THEN head([x IN updateValues WHERE x IS NOT NULL AND x <> false AND x <> true])
         ELSE coalesce(head(updateValues), false)
         END AS effectiveUpdate,
-        CASE 
+        CASE
         WHEN any(x IN deleteValues WHERE x = true) THEN true
         WHEN any(x IN deleteValues WHERE x IS NOT NULL AND x <> false AND x <> true)
             THEN head([x IN deleteValues WHERE x IS NOT NULL AND x <> false AND x <> true])
@@ -58,4 +54,22 @@ export const featureModuleQuery = `
     ) YIELD node AS module
 
     RETURN module
+`;
+
+// For regular users: modules via Company → Features → Modules
+export const featureModuleQuery = `
+    OPTIONAL MATCH (user)-[:MEMBER_OF]->(role:Role)
+    OPTIONAL MATCH (feature:Feature)
+      WHERE exists((company)-[:HAS_FEATURE]->(feature))
+         OR feature.isCore = true
+    MATCH (m:Module)-[:IN_FEATURE]->(feature)
+    OPTIONAL MATCH (role)-[perm:HAS_PERMISSIONS]->(m)
+    ${modulePermissionResolutionQuery}
+`;
+
+// For Administrator users: modules via Role → HAS_PERMISSIONS → Module
+export const adminModuleQuery = `
+    MATCH (user:User {id: $searchValue})-[:MEMBER_OF]->(role:Role)
+    MATCH (role)-[perm:HAS_PERMISSIONS]->(m:Module)
+    ${modulePermissionResolutionQuery}
 `;
