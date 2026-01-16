@@ -88,9 +88,7 @@ export function generateDescriptor(
     });
 
     if (unmigratableMethods.length > 0) {
-      console.warn(
-        `    ⚠️  Serialiser has custom methods that may need manual migration:`,
-      );
+      console.warn(`    ⚠️  Serialiser has custom methods that may need manual migration:`);
       for (const method of unmigratableMethods) {
         console.warn(`      - ${method}() → Consider adding field transform`);
       }
@@ -417,14 +415,18 @@ function generateImports(
     // Meta-based reference: xxxMeta
     const baseName = modelRef.replace("Meta", "");
 
-    // Framework-provided metas (user, author, owner, company)
-    if (["user", "author", "owner", "company"].includes(baseName)) {
-      frameworkImports.add(modelRef);
-      // Also add the type if it's a relationship field type
-      const typeName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
-      if (parsed.entityType.relationshipFields.some((f) => f.type.includes(typeName))) {
-        frameworkImports.add(typeName);
-      }
+    // Known foundation metas and their import paths
+    const foundationMetaPaths: Record<string, string> = {
+      user: "../../user/entities/user.meta",
+      author: "../../user/entities/user.meta",
+      owner: "../../user/entities/user.meta",
+      assignee: "../../user/entities/user.meta",
+      company: "../../company/entities/company.meta",
+    };
+
+    if (foundationMetaPaths[baseName]) {
+      // Foundation-provided metas: import from their meta files
+      featureImports.push(`import { ${modelRef} } from "${foundationMetaPaths[baseName]}";`);
     } else {
       // Feature-specific metas need separate imports
       const metaImport = findMetaImport(parsed, modelRef);
@@ -435,18 +437,26 @@ function generateImports(
   }
 
   // Add relationship type imports from entity type definition
-  // Collect non-framework types that need imports from original entity
+  // Collect types that need imports from original entity or foundation paths
   const relationshipTypeImports: string[] = [];
 
-  // Framework types that should be added to frameworkImports instead of separate imports
-  const frameworkTypes = new Set(["Company", "User", "Author", "Owner", "Assignee"]);
+  // Known foundation entity types and their import paths
+  const foundationEntityPaths: Record<string, string> = {
+    Company: "../../company/entities/company",
+    User: "../../user/entities/user",
+    // Alias types map to User
+    Author: "../../user/entities/user",
+    Owner: "../../user/entities/user",
+    Assignee: "../../user/entities/user",
+  };
 
   for (const field of parsed.entityType.relationshipFields) {
     const typeName = field.type.replace("[]", "");
 
-    // For framework types, add to frameworkImports (internal import) instead
-    if (frameworkTypes.has(typeName)) {
-      frameworkImports.add(typeName);
+    // For known foundation types, generate type-only imports
+    if (foundationEntityPaths[typeName]) {
+      const importPath = foundationEntityPaths[typeName];
+      relationshipTypeImports.push(`import type { ${typeName} } from "${importPath}";`);
       continue;
     }
 
@@ -460,7 +470,9 @@ function generateImports(
 
       // Match imports like "import { Feature } from ..." or "import { Module } from ..."
       if (imp.includes(`{ ${typeName} }`) || imp.includes(`{ ${typeName},`) || imp.includes(`, ${typeName} }`)) {
-        relationshipTypeImports.push(imp);
+        // Convert to type-only import
+        const typeImport = imp.replace(/^import\s+\{/, "import type {");
+        relationshipTypeImports.push(typeImport);
         break;
       }
     }
