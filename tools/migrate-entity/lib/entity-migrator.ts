@@ -168,12 +168,13 @@ export class EntityMigrator {
       this.log(`    Would create: ${path.relative(process.cwd(), targetPath)}`);
     }
 
-    // 8. Find and update external references
+    // 8. Find and update external references (exclude the entity files we just created)
     this.log(`    Finding external references...`);
     const references = await findExternalReferences(
       oldFiles.entityName,
       parsed.meta.labelName,
-      "src"
+      "src",
+      [targetPath, metaTargetPath] // Exclude the entity files being migrated
     );
 
     if (this.options.verbose) {

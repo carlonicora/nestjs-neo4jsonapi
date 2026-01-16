@@ -15,7 +15,8 @@ import { Reference, ReferenceUsage } from "./types";
 export async function findExternalReferences(
   entityName: string,
   labelName: string,
-  srcDir: string = "src"
+  srcDir: string = "src",
+  excludePaths: string[] = []
 ): Promise<Reference[]> {
   const references: Reference[] = [];
 
@@ -23,6 +24,11 @@ export async function findExternalReferences(
   const metaName = `${entityName}Meta`;
   const modelName = `${labelName}Model`;
   const entityTypeName = labelName; // e.g., "Article"
+
+  // Normalize exclude paths for comparison
+  const normalizedExcludePaths = new Set(
+    excludePaths.map((p) => path.normalize(path.resolve(process.cwd(), p)))
+  );
 
   // Find all TypeScript files (excluding test files)
   const tsFiles = await glob(`${srcDir}/**/*.ts`, {
@@ -32,7 +38,13 @@ export async function findExternalReferences(
   });
 
   for (const filePath of tsFiles) {
-    const absolutePath = path.resolve(process.cwd(), filePath);
+    const absolutePath = path.normalize(path.resolve(process.cwd(), filePath));
+
+    // Skip excluded paths (the entity files being migrated)
+    if (normalizedExcludePaths.has(absolutePath)) {
+      continue;
+    }
+
     const content = fs.readFileSync(absolutePath, "utf-8");
 
     // Check if file imports or uses the old exports
