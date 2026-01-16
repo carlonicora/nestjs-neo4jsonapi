@@ -88,6 +88,9 @@ function findUsagesInFile(
     // Skip import lines (handled separately)
     if (line.trim().startsWith("import ")) continue;
 
+    // Skip export lines (these are definitions, not usages)
+    if (line.trim().startsWith("export ")) continue;
+
     // Check for meta usage patterns
     if (line.includes(metaName)) {
       // Pattern: entityMeta.property -> EntityDescriptor.model.property
