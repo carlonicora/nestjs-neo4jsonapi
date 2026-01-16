@@ -221,7 +221,33 @@ export class EntityMigrator {
       }
     }
 
-    // 10. Delete old files (model, map, serialiser - not meta since we're using the same path)
+    // 10. Update module's index.ts to export new descriptor instead of old model
+    const indexPath = path.join(modulePath, "index.ts");
+    if (fs.existsSync(indexPath)) {
+      const indexContent = fs.readFileSync(indexPath, "utf-8");
+      const updatedIndexContent = this.updateIndexExports(
+        indexContent,
+        oldFiles.entityName,
+        parsed.meta.labelName
+      );
+
+      if (updatedIndexContent !== indexContent) {
+        changes.push({
+          type: "update",
+          path: indexPath,
+          content: updatedIndexContent,
+        });
+
+        if (!this.options.dryRun) {
+          fs.writeFileSync(indexPath, updatedIndexContent);
+          this.log(`    Updated index: ${path.relative(process.cwd(), indexPath)}`);
+        } else {
+          this.log(`    Would update index: ${path.relative(process.cwd(), indexPath)}`);
+        }
+      }
+    }
+
+    // 12. Delete old files (model, map, serialiser - not meta since we're using the same path)
     const filesToDelete = [oldFiles.model, oldFiles.map, oldFiles.serialiser].filter(
       (f): f is string => f !== null
     );
@@ -253,10 +279,10 @@ export class EntityMigrator {
       }
     }
 
-    // 11. Clean up empty directories
+    // 13. Clean up empty directories
     await this.cleanupEmptyDirectories(modulePath);
 
-    // 12. Detect and warn about custom cypher.service.ts logic
+    // 14. Detect and warn about custom cypher.service.ts logic
     const cypherWarnings = detectCypherServiceWarnings(modulePath);
     if (cypherWarnings.length > 0) {
       this.log(`\n    ⚠️  PHASE 2 WARNING: Custom cypher.service.ts logic detected:`);
@@ -289,6 +315,52 @@ export class EntityMigrator {
   private getMetaFilePath(oldFiles: OldEntityFiles): string {
     const baseName = oldFiles.entityName;
     return path.join(oldFiles.entityDir, `${baseName}.meta.ts`);
+  }
+
+  /**
+   * Updates the module's index.ts to export the new descriptor instead of old model.
+   * - Changes ./entities/entity.entity -> ./entities/entity
+   * - Replaces EntityModel export with EntityDescriptor
+   * - Keeps Entity type export
+   */
+  private updateIndexExports(content: string, entityName: string, labelName: string): string {
+    const modelName = `${labelName}Model`;
+    const descriptorName = `${labelName}Descriptor`;
+    let updated = content;
+
+    // Pattern 1: export { Entity } from "./entities/entity.entity"
+    // -> export { Entity, EntityDescriptor } from "./entities/entity"
+    const entityExportPattern = new RegExp(
+      `export\\s*\\{\\s*(${labelName})\\s*\\}\\s*from\\s*["']\\./entities/${entityName}\\.entity["']`,
+      "g"
+    );
+    updated = updated.replace(
+      entityExportPattern,
+      `export { ${labelName}, ${descriptorName} } from "./entities/${entityName}"`
+    );
+
+    // Pattern 2: export { EntityModel } from "./entities/entity.model"
+    // -> remove this line (descriptor is exported from entity file now)
+    const modelExportPattern = new RegExp(
+      `export\\s*\\{\\s*${modelName}\\s*\\}\\s*from\\s*["']\\./entities/${entityName}\\.model["'];?\\n?`,
+      "g"
+    );
+    updated = updated.replace(modelExportPattern, "");
+
+    // Pattern 3: If Entity is exported separately and we haven't handled it yet
+    // Handle case where entity and model are on separate lines
+    const simpleEntityExport = new RegExp(
+      `(export\\s*\\{\\s*${labelName}\\s*\\}\\s*from\\s*["']\\./entities/${entityName}["'])`,
+      "g"
+    );
+    if (simpleEntityExport.test(updated) && !updated.includes(descriptorName)) {
+      updated = updated.replace(
+        simpleEntityExport,
+        `export { ${labelName}, ${descriptorName} } from "./entities/${entityName}"`
+      );
+    }
+
+    return updated;
   }
 
   /**
