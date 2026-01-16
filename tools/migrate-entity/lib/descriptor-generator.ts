@@ -417,11 +417,23 @@ function generateImports(
   }
 
   // Add relationship type imports from entity type definition
+  // Collect non-framework types that need imports from original entity
+  const relationshipTypeImports: string[] = [];
+
   for (const field of parsed.entityType.relationshipFields) {
     const typeName = field.type.replace("[]", "");
     // Add framework types (Company, User)
     if (["Company", "User"].includes(typeName)) {
       frameworkImports.add(typeName);
+    } else {
+      // For non-framework types, find the original import from entity
+      for (const imp of parsed.entityType.imports) {
+        // Match imports like "import { Feature } from ..." or "import { Module } from ..."
+        if (imp.includes(`{ ${typeName} }`) || imp.includes(`{ ${typeName},`) || imp.includes(`, ${typeName} }`)) {
+          relationshipTypeImports.push(imp);
+          break;
+        }
+      }
     }
   }
 
@@ -442,7 +454,12 @@ function generateImports(
     imports.push(...[...new Set(externalImports)]);
   }
 
-  // Group 3: Entity-specific imports (src/features/...)
+  // Group 3: Relationship type imports (Feature, Module, etc.) from original entity
+  if (relationshipTypeImports.length > 0) {
+    imports.push(...[...new Set(relationshipTypeImports)]);
+  }
+
+  // Group 4: Entity-specific imports (src/features/...)
   for (const imp of parsed.entityType.imports) {
     if (imp.includes("src/features/") && !imp.includes(".meta")) {
       featureImports.push(imp);
@@ -462,9 +479,10 @@ function generateImports(
 
 /**
  * Finds the meta import statement for a given meta name.
+ * Derives the path from serialiser model imports by converting .model to .meta
  */
 function findMetaImport(parsed: ParsedEntity, metaName: string): string | null {
-  // Check serialiser imports
+  // Check if serialiser already imports this meta directly
   if (parsed.serialiser) {
     for (const imp of parsed.serialiser.imports) {
       if (imp.includes(`.meta"`) || imp.includes(`.meta'`)) {
@@ -481,19 +499,42 @@ function findMetaImport(parsed: ParsedEntity, metaName: string): string | null {
     }
   }
 
-  // Fallback: construct import from meta name
   const baseName = metaName.replace("Meta", "");
-  if (baseName === "author" || baseName === "user") {
+
+  // Framework-provided metas
+  if (["author", "user", "company"].includes(baseName)) {
     return `import { ${metaName} } from "@carlonicora/nestjs-neo4jsonapi";`;
   }
+
+  // Try to derive meta import from serialiser model imports
+  // e.g., FeatureModel from ".../feature.model" -> featureMeta from ".../feature.meta"
+  if (parsed.serialiser) {
+    const modelName = baseName.charAt(0).toUpperCase() + baseName.slice(1) + "Model";
+    for (const imp of parsed.serialiser.imports) {
+      if (imp.includes(modelName)) {
+        // Extract path and convert to meta path
+        const pathMatch = imp.match(/from\s+["']([^"']+)["']/);
+        if (pathMatch) {
+          const modelPath = pathMatch[1];
+          const metaPath = modelPath.replace(/\.model$/, ".meta");
+          return `import { ${metaName} } from "${metaPath}";`;
+        }
+      }
+    }
+  }
+
+  // Last resort: construct path heuristically from known foundations structure
   if (baseName === "topic") {
     return `import { ${metaName} } from "src/features/topic/entities/topic.meta";`;
   }
   if (baseName === "expertise") {
     return `import { ${metaName} } from "src/features/expertise/entities/expertise.meta";`;
   }
-  if (baseName === "company") {
-    return `import { ${metaName} } from "@carlonicora/nestjs-neo4jsonapi";`;
+  if (baseName === "feature") {
+    return `import { ${metaName} } from "../../feature/entities/feature.meta";`;
+  }
+  if (baseName === "module") {
+    return `import { ${metaName} } from "../../module/entities/module.meta";`;
   }
 
   return null;
