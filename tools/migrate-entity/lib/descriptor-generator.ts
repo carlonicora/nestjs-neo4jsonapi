@@ -441,8 +441,10 @@ function generateImports(
   const imports: string[] = [];
 
   // Group 1: Single barrel import from framework
+  // Use internal imports (../../../common) to avoid circular dependency when the package
+  // barrel re-exports from ./foundations which tries to load this entity again
   const frameworkImportList = Array.from(frameworkImports).sort();
-  imports.push(`import {\n  ${frameworkImportList.join(",\n  ")},\n} from "@carlonicora/nestjs-neo4jsonapi";`);
+  imports.push(`import {\n  ${frameworkImportList.join(",\n  ")},\n} from "../../../common";`);
 
   // Group 2: External type imports (from original entity imports that aren't framework)
   for (const imp of parsed.entityType.imports) {
@@ -455,8 +457,12 @@ function generateImports(
   }
 
   // Group 3: Relationship type imports (Feature, Module, etc.) from original entity
+  // Use "import type" to avoid runtime circular dependencies - these are only needed for TypeScript types
   if (relationshipTypeImports.length > 0) {
-    imports.push(...[...new Set(relationshipTypeImports)]);
+    const typeOnlyImports = [...new Set(relationshipTypeImports)].map((imp) =>
+      imp.startsWith("import type ") ? imp : imp.replace(/^import\s+/, "import type "),
+    );
+    imports.push(...typeOnlyImports);
   }
 
   // Group 4: Entity-specific imports (src/features/...)
