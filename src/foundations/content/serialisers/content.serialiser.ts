@@ -7,7 +7,7 @@ import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonap
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
 import { ContentModel } from "../../content/entities/content.model";
-import { AuthorModel, OwnerModel } from "../../user/entities/user.model";
+import { OwnerDescriptor, AuthorDescriptor } from "../../user/entities/user";
 import { ContentExtensionConfig, CONTENT_EXTENSION_CONFIG } from "../interfaces/content.extension.interface";
 
 @Injectable()
@@ -41,10 +41,10 @@ export class ContentSerialiser extends AbstractJsonApiSerialiser implements Json
 
     this.relationships = {
       owner: {
-        data: this.serialiserFactory.create(OwnerModel),
+        data: this.serialiserFactory.create(OwnerDescriptor.model),
       },
       author: {
-        data: this.serialiserFactory.create(AuthorModel),
+        data: this.serialiserFactory.create(AuthorDescriptor.model),
       },
     };
 

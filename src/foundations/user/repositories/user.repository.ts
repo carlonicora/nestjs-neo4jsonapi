@@ -8,9 +8,8 @@ import { companyMeta } from "../../company/entities/company.meta";
 import { ModuleModel } from "../../module/entities/module.model";
 import { adminModuleQuery, featureModuleQuery } from "../../module/queries/feature.module.query";
 import { roleMeta } from "../../role/entities/role.meta";
-import { User } from "../../user/entities/user.entity";
+import { UserDescriptor, User } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
-import { UserModel } from "../../user/entities/user.model";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 
 @Injectable()
@@ -49,7 +48,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findOneForAdmin(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       userId: params.userId,
@@ -67,7 +66,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findFullUser(params: { userId: string }): Promise<User> {
-    let query = this.neo4j.initQuery({ serialiser: UserModel });
+    let query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -118,7 +117,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByUserId(params: { userId: string; companyId?: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -139,7 +138,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByEmail(params: { email: string; includeDeleted?: boolean }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       email: params.email.toLowerCase(),
@@ -159,7 +158,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByCode(params: { code: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       code: params.code,
@@ -181,7 +180,7 @@ export class UserRepository implements OnModuleInit {
     includeDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -206,7 +205,7 @@ export class UserRepository implements OnModuleInit {
     term?: string;
     includeDeleted?: boolean;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, fetchAll: true });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
 
     query.queryParams = {
       ...query.queryParams,
@@ -235,7 +234,7 @@ export class UserRepository implements OnModuleInit {
     isDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       companyId: params.companyId,
@@ -255,7 +254,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -281,7 +280,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findNotInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,

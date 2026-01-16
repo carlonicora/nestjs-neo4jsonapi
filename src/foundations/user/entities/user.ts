@@ -3,6 +3,7 @@ import {
   defineEntity,
   defineEntityAlias,
 } from "../../../common";
+import { S3Service } from "../../s3";
 import type { Role } from "../../role/entities/role.entity";
 import type { Company } from "../../company/entities/company";
 import type { Module } from "../../module/entities/module.entity";
@@ -47,6 +48,8 @@ export type User = Entity & {
 export const UserDescriptor = defineEntity<User>()({
   ...userMeta,
 
+  injectServices: [S3Service],
+
   // Field definitions
   fields: {
     email: { type: "string", required: true },
@@ -54,7 +57,14 @@ export const UserDescriptor = defineEntity<User>()({
     title: { type: "string" },
     bio: { type: "string" },
     password: { type: "string" },
-    avatar: { type: "string" },
+    avatar: {
+      type: "string",
+      transform: async (data, services) => {
+        if (!data.avatar) return undefined;
+        if (data.avatar.startsWith("~")) return data.avatar.substring(1);
+        return await services.S3Service.generateSignedUrl({ key: data.avatar, isPublic: true });
+      },
+    },
     phone: { type: "string" },
     rate: { type: "number" },
     isActive: { type: "boolean", meta: true },
@@ -65,6 +75,13 @@ export const UserDescriptor = defineEntity<User>()({
     termsAcceptedAt: { type: "datetime" },
     marketingConsent: { type: "boolean" },
     marketingConsentAt: { type: "datetime" },
+  },
+
+  // Virtual fields (output-only, not in entity type)
+  virtualFields: {
+    avatarUrl: {
+      compute: (params) => params.data.avatar,
+    },
   },
 
   // Relationship definitions

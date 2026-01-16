@@ -5,7 +5,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { RelevanceRepositoryInterface } from "../../relevancy/interfaces/relevance.repository.interface";
 import { authorQuery, contentQuery, contentToAuthorQuery } from "../../relevancy/queries/relevance";
-import { User, UserModel } from "../../user";
+import { UserDescriptor, User } from "../../user";
 
 @Injectable()
 export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
@@ -100,7 +100,7 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
   }
 
   async findUsersById(params: { cypherService: any; id: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,

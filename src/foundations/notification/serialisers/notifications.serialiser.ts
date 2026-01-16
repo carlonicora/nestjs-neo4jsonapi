@@ -6,7 +6,7 @@ import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonap
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
 import { notificationMeta } from "../../notification/entities/notification.meta";
-import { UserModel } from "../../user/entities/user.model";
+import { UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
 export class NotificationSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
@@ -29,7 +29,7 @@ export class NotificationSerialiser extends AbstractJsonApiSerialiser implements
     this.relationships = {
       user: {
         name: `actor`,
-        data: this.serialiserFactory.create(UserModel),
+        data: this.serialiserFactory.create(UserDescriptor.model),
       },
     };
 

@@ -9,8 +9,7 @@ import { Auth } from "../../auth/entities/auth.entity";
 import { AuthModel } from "../../auth/entities/auth.model";
 import { ModuleModel } from "../../module/entities/module.model";
 import { featureModuleQuery } from "../../module/queries/feature.module.query";
-import { User } from "../../user/entities/user.entity";
-import { UserModel } from "../../user/entities/user.model";
+import { UserDescriptor, User } from "../../user/entities/user";
 
 @Injectable()
 export class AuthRepository implements OnModuleInit {
@@ -202,7 +201,7 @@ export class AuthRepository implements OnModuleInit {
   }
 
   async findUserById(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       userId: params.userId,
@@ -394,7 +393,7 @@ WITH auth, auth_user, auth_user_role, module,
   }
 
   async startResetPassword(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserModel });
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
       userId: params.userId,

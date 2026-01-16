@@ -11,8 +11,7 @@ import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.d
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
-import { User } from "../../user/entities/user.entity";
-import { UserModel } from "../../user/entities/user.model";
+import { UserDescriptor, User } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
 
 @Injectable()
@@ -44,7 +43,7 @@ export class UserService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findMany({
         term: params.term,
         cursor: paginator.generateCursor(),
@@ -63,7 +62,7 @@ export class UserService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findManyByContentIds({
         contentIds: params.contentIds,
         includeDeleted: params.includeDeleted ?? false,
@@ -84,7 +83,7 @@ export class UserService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findManyByCompany({
         companyId: params.companyId,
         term: params.term,
@@ -105,7 +104,7 @@ export class UserService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findInRole({
         roleId: params.roleId,
         term: params.term,
@@ -124,7 +123,7 @@ export class UserService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findNotInRole({
         roleId: params.roleId,
         term: params.term,
@@ -135,16 +134,16 @@ export class UserService {
   }
 
   async findByUserId(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserModel, await this.db.findByUserId({ userId: params.userId }));
+    return this.builder.buildSingle(UserDescriptor.model, await this.db.findByUserId({ userId: params.userId }));
   }
 
   async findOneForAdmin(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserModel, await this.db.findOneForAdmin({ userId: params.userId }));
+    return this.builder.buildSingle(UserDescriptor.model, await this.db.findOneForAdmin({ userId: params.userId }));
   }
 
   async findByUserIdCompanyId(params: { userId: string; companyId: string }): Promise<JsonApiDataInterface> {
     return this.builder.buildSingle(
-      UserModel,
+      UserDescriptor.model,
       await this.db.findByUserId({ userId: params.userId, companyId: params.companyId }),
     );
   }
@@ -175,7 +174,7 @@ export class UserService {
     }
 
     if (params.isCurrentUser)
-      return this.builder.buildSingle(UserModel, await this.db.findFullUser({ userId: params.data.id }));
+      return this.builder.buildSingle(UserDescriptor.model, await this.db.findFullUser({ userId: params.data.id }));
 
     return this.findByUserId({
       userId: params.data.id,
@@ -183,7 +182,7 @@ export class UserService {
   }
 
   async findFullUser(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserModel, await this.db.findFullUser({ userId: params.userId }));
+    return this.builder.buildSingle(UserDescriptor.model, await this.db.findFullUser({ userId: params.userId }));
   }
 
   async reactivate(params: { userId: string }): Promise<JsonApiDataInterface> {
@@ -226,7 +225,7 @@ export class UserService {
   }
 
   async findByEmail(params: { email: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserModel, await this.db.findByEmail({ email: params.email }));
+    return this.builder.buildSingle(UserDescriptor.model, await this.db.findByEmail({ email: params.email }));
   }
 
   async create(params: {

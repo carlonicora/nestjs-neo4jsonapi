@@ -7,7 +7,7 @@ import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonap
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
 import { auditMeta } from "../../audit/entities/audit.meta";
-import { UserModel } from "../../user/entities/user.model";
+import { UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
 export class AuditSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
@@ -32,7 +32,7 @@ export class AuditSerialiser extends AbstractJsonApiSerialiser implements JsonAp
 
     this.relationships = {
       user: {
-        data: this.serialiserFactory.create(UserModel),
+        data: this.serialiserFactory.create(UserDescriptor.model),
       },
       audited: {
         data: dynamicRel,

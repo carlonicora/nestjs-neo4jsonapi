@@ -6,7 +6,7 @@ import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonap
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
 import { authMeta } from "../../auth/entities/auth.meta";
-import { UserModel } from "../../user/entities/user.model";
+import { UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
 export class AuthSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
@@ -31,7 +31,7 @@ export class AuthSerialiser extends AbstractJsonApiSerialiser implements JsonApi
 
     this.relationships = {
       user: {
-        data: this.serialiserFactory.create(UserModel),
+        data: this.serialiserFactory.create(UserDescriptor.model),
       },
     };
 

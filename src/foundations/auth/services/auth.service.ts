@@ -19,7 +19,7 @@ import { AuthModel } from "../../auth/entities/auth.model";
 import { AuthRepository } from "../../auth/repositories/auth.repository";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { Role } from "../../role/entities/role.entity";
-import { User } from "../../user/entities/user.entity";
+import { User } from "../../user/entities/user";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { UserService } from "../../user/services/user.service";
 import { PendingRegistrationService } from "./pending-registration.service";

@@ -35,7 +35,7 @@ import { UserPatchRateDTO } from "../../user/dtos/user.patch.rate.dto";
 import { UserPostDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDTO } from "../../user/dtos/user.put.dto";
 import { userMeta } from "../../user/entities/user.meta";
-import { User } from "../entities/user.entity";
+import { User } from "../entities/user";
 import { UserCypherService } from "../services/user.cypher.service";
 import { UserService } from "../services/user.service";
 
