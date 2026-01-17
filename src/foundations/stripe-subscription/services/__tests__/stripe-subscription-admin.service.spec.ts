@@ -1178,17 +1178,27 @@ describe("StripeSubscriptionAdminService", () => {
         subtotal: 500,
         total: 550,
         amountDue: 550,
+        immediateCharge: 550, // 999 + (-449) = 550
         currency: "usd",
+        prorationDate: expect.any(Date),
         lines: [
           {
             description: "Remaining time on 1 × Monthly Plan (at $9.99 / month)",
             amount: 999,
             proration: true,
+            period: {
+              start: new Date(1704067200 * 1000),
+              end: new Date(1706745600 * 1000),
+            },
           },
           {
             description: "Unused time on 1 × Monthly Plan (at $9.99 / month)",
             amount: -449,
             proration: true,
+            period: {
+              start: new Date(1704067200 * 1000),
+              end: new Date(1706745600 * 1000),
+            },
           },
         ],
       });
