@@ -20,5 +20,6 @@ export const mapStripePrice = (params: { data: any; record: any; entityFactory: 
     features: params.data.features,
     token: params.data.token ? Number(params.data.token) : undefined,
     stripeProduct: undefined,
+    feature: [], // Initialize relationship array (naming follows Company pattern)
   };
 };

@@ -1,5 +1,6 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { StripeProduct } from "../../stripe-product/entities/stripe-product.entity";
+import { Feature } from "../../feature/entities/feature.entity";
 
 export type StripePriceType = "one_time" | "recurring";
 export type StripePriceRecurringInterval = "day" | "week" | "month" | "year";
@@ -24,4 +25,5 @@ export type StripePrice = Entity & {
   token?: number; // Neo4j only, not synced to Stripe
 
   stripeProduct: StripeProduct;
+  feature?: Feature[]; // HAS_FEATURE relationship (naming follows Company pattern)
 };

@@ -1,6 +1,7 @@
 import { Type } from "class-transformer";
 import {
   Equals,
+  IsArray,
   IsDefined,
   IsEnum,
   IsInt,
@@ -88,6 +89,24 @@ export class StripePricePostAttributesDTO {
   token?: number;
 }
 
+// Feature relationship item DTO (for JSON:API relationships)
+export class StripePriceFeaturesItemDTO {
+  @Equals("features")
+  type: string;
+
+  @IsUUID()
+  id: string;
+}
+
+// Relationships DTO for POST requests
+export class StripePricePostRelationshipsDTO {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StripePriceFeaturesItemDTO)
+  features?: StripePriceFeaturesItemDTO[];
+}
+
 export class StripePricePostDataDTO {
   @Equals(stripePriceMeta.endpoint)
   type: string;
@@ -99,6 +118,11 @@ export class StripePricePostDataDTO {
   @IsNotEmpty()
   @Type(() => StripePricePostAttributesDTO)
   attributes: StripePricePostAttributesDTO;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StripePricePostRelationshipsDTO)
+  relationships?: StripePricePostRelationshipsDTO;
 }
 
 export class StripePricePostDTO {
@@ -136,6 +160,15 @@ export class StripePricePutAttributesDTO {
   token?: number;
 }
 
+// Relationships DTO for PUT requests
+export class StripePricePutRelationshipsDTO {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StripePriceFeaturesItemDTO)
+  features?: StripePriceFeaturesItemDTO[];
+}
+
 export class StripePricePutDataDTO {
   @Equals(stripePriceMeta.endpoint)
   type: string;
@@ -147,6 +180,11 @@ export class StripePricePutDataDTO {
   @IsOptional()
   @Type(() => StripePricePutAttributesDTO)
   attributes?: StripePricePutAttributesDTO;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => StripePricePutRelationshipsDTO)
+  relationships?: StripePricePutRelationshipsDTO;
 }
 
 export class StripePricePutDTO {

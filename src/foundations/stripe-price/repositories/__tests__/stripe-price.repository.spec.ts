@@ -749,6 +749,10 @@ describe("StripePriceRepository", () => {
         active: true,
         nickname: undefined,
         metadata: undefined,
+        description: undefined,
+        features: undefined,
+        token: undefined,
+        featureIds: [],
       });
       expect(mockQuery.query).toContain(
         `MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,

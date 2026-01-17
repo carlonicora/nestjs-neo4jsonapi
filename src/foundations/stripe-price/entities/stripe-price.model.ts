@@ -4,6 +4,7 @@ import { mapStripePrice } from "../entities/stripe-price.map";
 import { stripePriceMeta } from "../entities/stripe-price.meta";
 import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
 import { StripePriceSerialiser } from "../serialisers/stripe-price.serialiser";
+import { featureMeta } from "../../feature/entities/feature.meta";
 
 export const StripePriceModel: DataModelInterface<StripePrice> = {
   ...stripePriceMeta,
@@ -11,5 +12,5 @@ export const StripePriceModel: DataModelInterface<StripePrice> = {
   mapper: mapStripePrice,
   serialiser: StripePriceSerialiser,
   singleChildrenTokens: [stripeProductMeta.nodeName],
-  childrenTokens: [],
+  childrenTokens: [featureMeta.nodeName],
 };

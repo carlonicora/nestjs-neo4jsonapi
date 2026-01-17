@@ -127,6 +127,10 @@ export class StripePriceAdminService {
       throw new HttpException("Product not found", HttpStatus.NOT_FOUND);
     }
 
+    // Extract featureIds from relationships only for recurring prices (Neo4j only, NOT sent to Stripe)
+    const isRecurring = !!params.data.attributes.recurring;
+    const featureIds = isRecurring ? params.data.relationships?.features?.map((f) => f.id) : undefined;
+
     const stripePrice = await this.stripeProductApiService.createPrice({
       productId: product.stripeProductId,
       unitAmount: params.data.attributes.unitAmount,
@@ -135,6 +139,7 @@ export class StripePriceAdminService {
       lookupKey: params.data.attributes.lookupKey,
       recurring: params.data.attributes.recurring,
       metadata: params.data.attributes.metadata,
+      // NOTE: featureIds NOT sent to Stripe - they are Neo4j-only
     });
 
     const price = await this.stripePriceRepository.create({
@@ -153,6 +158,7 @@ export class StripePriceAdminService {
       description: params.data.attributes.description,
       features: params.data.attributes.features,
       token: params.data.attributes.token,
+      featureIds, // Pass featureIds to repository for Neo4j relationship creation
     });
 
     return this.jsonApiService.buildSingle(StripePriceModel, price);
@@ -179,10 +185,15 @@ export class StripePriceAdminService {
       throw new HttpException("Price not found", HttpStatus.NOT_FOUND);
     }
 
+    // Extract featureIds from relationships only for recurring prices (Neo4j only, NOT sent to Stripe)
+    const featureIds =
+      existingPrice.priceType === "recurring" ? params.data.relationships?.features?.map((f) => f.id) : undefined;
+
     await this.stripeProductApiService.updatePrice({
       priceId: existingPrice.stripePriceId,
       nickname: params.data.attributes?.nickname,
       metadata: params.data.attributes?.metadata,
+      // NOTE: featureIds NOT sent to Stripe - they are Neo4j-only
     });
 
     const price = await this.stripePriceRepository.update({
@@ -192,6 +203,8 @@ export class StripePriceAdminService {
       description: params.data.attributes?.description,
       features: params.data.attributes?.features,
       token: params.data.attributes?.token,
+      featureIds, // Pass featureIds to repository for Neo4j relationship update (already filtered for recurring)
+      priceType: existingPrice.priceType, // Pass priceType for repository validation
     });
 
     return this.jsonApiService.buildSingle(StripePriceModel, price);

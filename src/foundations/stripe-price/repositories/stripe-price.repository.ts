@@ -1,7 +1,9 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
+import { updateRelationshipQuery } from "../../../core";
 import { stripeProductMeta } from "../../stripe-product";
+import { featureMeta } from "../../feature/entities/feature.meta";
 import {
   StripePrice,
   StripePriceRecurringInterval,
@@ -85,14 +87,16 @@ export class StripePriceRepository implements OnModuleInit {
       query.query = `
         MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName} {id: $productId})
         ${where}
-        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+        OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
         ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
       `;
     } else {
       query.query = `
         MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
         ${where}
-        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+        OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
         ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
       `;
     }
@@ -116,7 +120,8 @@ export class StripePriceRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -138,7 +143,8 @@ export class StripePriceRepository implements OnModuleInit {
 
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {stripePriceId: $stripePriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -182,8 +188,19 @@ export class StripePriceRepository implements OnModuleInit {
     description?: string;
     features?: string;
     token?: number;
+    featureIds?: string[];
   }): Promise<StripePrice> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
+
+    // Feature relationships only allowed for recurring prices
+    const isRecurring = params.priceType === "recurring";
+
+    // Validate feature nodes exist only for recurring prices (following Company pattern)
+    if (isRecurring && params.featureIds && params.featureIds.length > 0) {
+      await this.neo4j.validateExistingNodes({
+        nodes: params.featureIds.map((id) => ({ id, label: featureMeta.labelName })),
+      });
+    }
 
     const id = randomUUID();
 
@@ -204,6 +221,7 @@ export class StripePriceRepository implements OnModuleInit {
       description: params.description ?? null,
       features: params.features ?? null,
       token: params.token ?? null,
+      featureIds: params.featureIds ?? [],
     };
 
     query.query = `
@@ -228,6 +246,27 @@ export class StripePriceRepository implements OnModuleInit {
         updatedAt: datetime()
       })
       CREATE (${stripePriceMeta.nodeName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName})
+    `;
+
+    // Use updateRelationshipQuery for HAS_FEATURE only for recurring prices
+    if (isRecurring) {
+      query.query += updateRelationshipQuery({
+        node: stripePriceMeta.nodeName,
+        relationshipName: "HAS_FEATURE",
+        relationshipToNode: true,
+        label: featureMeta.labelName,
+        param: "featureIds",
+        values: params.featureIds ?? [],
+      });
+
+      // Re-match stripeProduct after updateRelationshipQuery (WITH clauses lose the variable)
+      query.query += `
+      WITH ${stripePriceMeta.nodeName}
+      MATCH (${stripePriceMeta.nodeName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      `;
+    }
+
+    query.query += `
       RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 
@@ -256,8 +295,20 @@ export class StripePriceRepository implements OnModuleInit {
     description?: string;
     features?: string;
     token?: number;
+    featureIds?: string[];
+    priceType?: StripePriceType;
   }): Promise<StripePrice> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
+
+    // Feature relationships only allowed for recurring prices
+    const isRecurring = params.priceType === "recurring";
+
+    // Validate feature nodes exist only for recurring prices
+    if (isRecurring && params.featureIds && params.featureIds.length > 0) {
+      await this.neo4j.validateExistingNodes({
+        nodes: params.featureIds.map((id) => ({ id, label: featureMeta.labelName })),
+      });
+    }
 
     const setParams: string[] = [];
     setParams.push(`${stripePriceMeta.nodeName}.updatedAt = datetime()`);
@@ -289,11 +340,33 @@ export class StripePriceRepository implements OnModuleInit {
       description: params.description,
       features: params.features,
       token: params.token,
+      featureIds: params.featureIds ?? [],
     };
 
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       SET ${setParams.join(", ")}
+    `;
+
+    // Only update relationships if featureIds was provided AND price is recurring
+    if (params.featureIds !== undefined && isRecurring) {
+      query.query += updateRelationshipQuery({
+        node: stripePriceMeta.nodeName,
+        relationshipName: "HAS_FEATURE",
+        relationshipToNode: true,
+        label: featureMeta.labelName,
+        param: "featureIds",
+        values: params.featureIds,
+      });
+
+      // Re-match stripeProduct after updateRelationshipQuery (WITH clauses lose the variable)
+      query.query += `
+      WITH ${stripePriceMeta.nodeName}
+      MATCH (${stripePriceMeta.nodeName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      `;
+    }
+
+    query.query += `
       RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
     `;
 

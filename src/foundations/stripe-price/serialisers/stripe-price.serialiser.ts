@@ -8,6 +8,7 @@ import {
   JsonApiServiceInterface,
 } from "../../../core/jsonapi";
 import { StripeProductModel } from "../../stripe-product/entities/stripe-product.model";
+import { FeatureModel } from "../../feature/entities/feature.model";
 import { StripePrice } from "../entities/stripe-price.entity";
 import { StripePriceModel } from "../entities/stripe-price.model";
 
@@ -52,6 +53,10 @@ export class StripePriceSerialiser extends AbstractJsonApiSerialiser implements 
       stripeProduct: {
         name: "product",
         data: this.serialiserFactory.create(StripeProductModel),
+      },
+      feature: {
+        name: "features", // JSON:API key (matches frontend expectations)
+        data: this.serialiserFactory.create(FeatureModel),
       },
     };
 
