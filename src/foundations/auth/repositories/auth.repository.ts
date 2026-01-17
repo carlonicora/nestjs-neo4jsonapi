@@ -7,9 +7,12 @@ import { AuthCode } from "../../auth/entities/auth.code.entity";
 import { AuthCodeModel } from "../../auth/entities/auth.code.model";
 import { Auth } from "../../auth/entities/auth.entity";
 import { AuthModel } from "../../auth/entities/auth.model";
+import { companyMeta } from "../../company";
+import { featureMeta } from "../../feature/entities/feature.meta";
 import { ModuleModel } from "../../module/entities/module.model";
 import { featureModuleQuery } from "../../module/queries/feature.module.query";
-import { UserDescriptor, User } from "../../user/entities/user";
+import { userMeta } from "../../user";
+import { User, UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
 export class AuthRepository implements OnModuleInit {
@@ -211,7 +214,11 @@ export class AuthRepository implements OnModuleInit {
       MATCH (user:User {id: $userId}) 
       OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
-      RETURN user, user_role, user_company
+      MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+      WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
+      OR EXISTS {((${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
+
+      RETURN user, user_role, user_company, ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -234,14 +241,21 @@ export class AuthRepository implements OnModuleInit {
         CREATE (auth:Auth {id: $authId, token: $token, expiration: $expiration, createdAt: datetime(), updatedAt: datetime()}) 
         CREATE (auth_user)-[:HAS_AUTH]->(auth)
 
-        WITH auth, auth_user
+        OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
+        MATCH (auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+        WHERE auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
+        OR EXISTS {((auth_${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
+
+
+
+        WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}
         OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
         OPTIONAL MATCH (auth_user_role)-[perm:HAS_PERMISSIONS]->(module:Module)
-        WITH auth, auth_user, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms, collect(perm) AS rolePerms
+        WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms, collect(perm) AS rolePerms
 
-WITH auth, auth_user, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms
 
-WITH auth, auth_user, auth_user_role, module, 
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module, 
 CASE 
     WHEN head([p IN modPerms WHERE p.type = "create"]) IS NULL THEN false 
     ELSE head([p IN modPerms WHERE p.type = "create"]).value 
@@ -260,18 +274,18 @@ CASE
   END AS defaultDelete
 
 OPTIONAL MATCH (auth_user_role)-[perm:HAS_PERMISSIONS]->(module)
-WITH auth, auth_user, auth_user_role, module, defaultCreate, defaultRead, defaultUpdate, defaultDelete, collect(perm) AS rolePerms
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module, defaultCreate, defaultRead, defaultUpdate, defaultDelete, collect(perm) AS rolePerms
 
-WITH auth, auth_user, auth_user_role, module, defaultCreate, defaultRead, defaultUpdate, defaultDelete, apoc.coll.flatten([p IN rolePerms | apoc.convert.fromJsonList(p.permissions)]) AS rolePermsParsed
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module, defaultCreate, defaultRead, defaultUpdate, defaultDelete, apoc.coll.flatten([p IN rolePerms | apoc.convert.fromJsonList(p.permissions)]) AS rolePermsParsed
 
-WITH auth, auth_user, auth_user_role, module,
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}, auth_user_role, module,
      defaultCreate, defaultRead, defaultUpdate, defaultDelete, rolePermsParsed,
      [defaultCreate] + [r IN rolePermsParsed WHERE r.type="create" | r.value] AS createValues,
      [defaultRead]   + [r IN rolePermsParsed WHERE r.type="read"   | r.value] AS readValues,
      [defaultUpdate] + [r IN rolePermsParsed WHERE r.type="update" | r.value] AS updateValues,
      [defaultDelete] + [r IN rolePermsParsed WHERE r.type="delete" | r.value] AS deleteValues
 
-WITH auth, auth_user, auth_user_role, module,
+WITH auth, auth_user, auth_user_company, auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName},  auth_user_role, module,
      CASE 
        WHEN any(x IN createValues WHERE x = true) THEN true
        WHEN any(x IN createValues WHERE x <> true AND x <> false) THEN head([x IN createValues WHERE x <> true AND x <> false])
@@ -317,7 +331,11 @@ WITH auth, auth_user, auth_user_role, module,
       WITH auth, auth_user
       OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
-      OPTIONAL MATCH (auth_user_company)-[:HAS_FEATURE]->(auth_user_company_feature:Feature)
+      
+      MATCH (auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
+      WHERE auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
+      OR EXISTS {((auth_${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
+      
       OPTIONAL MATCH (auth_user_company)-[:HAS_CONFIGURATION]->(auth_user_company_configuration:Configuration)
       RETURN auth, auth_user, auth_user_role, auth_user_company, auth_user_company_feature, auth_user_company_configuration
     `;
