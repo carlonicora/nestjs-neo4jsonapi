@@ -49,6 +49,14 @@ export class CompanyService {
       throw new HttpException("NO_TOKENS", HttpStatus.PAYMENT_REQUIRED);
   }
 
+  async hasAvailableTokens(params: { companyId: string }): Promise<boolean> {
+    const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
+    return (
+      (company.availableMonthlyTokens && company.availableMonthlyTokens > 0) ||
+      (company.availableExtraTokens && company.availableExtraTokens > 0)
+    );
+  }
+
   async useTokens(params: { inputTokens: number; outputTokens: number }) {
     await this.companyRepository.useTokens({
       input: params.inputTokens,
