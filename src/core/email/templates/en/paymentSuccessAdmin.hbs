@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Payment Received - Internal Notification</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  {{> header}}
+
+  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
+    <h1 style="color: #17a2b8;">Payment Notification</h1>
+
+    <p>Hi {{adminName}},</p>
+
+    <p>A payment has been received:</p>
+
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+      <p style="margin: 5px 0;"><strong>Company:</strong> {{companyName}}</p>
+      <p style="margin: 5px 0;"><strong>Amount:</strong> {{amount}} {{currency}}</p>
+      {{#if isOneTimePurchase}}<p style="margin: 5px 0;"><strong>Type:</strong> One-time purchase</p>{{else}}<p style="margin: 5px 0;"><strong>Type:</strong> Subscription payment</p>{{/if}}
+    </div>
+
+    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
+      This is an automated internal notification. For detailed transaction information, please check the Stripe dashboard.
+    </p>
+  </div>
+
+  {{> footer}}
+</body>
+</html>

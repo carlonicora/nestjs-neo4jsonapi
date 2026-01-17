@@ -313,6 +313,29 @@ export class StripeWebhookProcessor extends WorkerHost {
         );
         // Don't throw - token allocation failure should not fail webhook processing
       }
+
+      // Send payment success notifications (non-blocking)
+      try {
+        await this.notificationService.sendPaymentSuccessToCompanyAdmins({
+          stripeCustomerId,
+          stripeInvoiceId: invoice.id,
+          amount: invoice.amount_paid / 100, // Convert cents to dollars
+          currency: invoice.currency,
+          isOneTimePurchase: false,
+        });
+        await this.notificationService.sendPaymentSuccessToPlatformAdmins({
+          stripeCustomerId,
+          stripeInvoiceId: invoice.id,
+          amount: invoice.amount_paid / 100,
+          currency: invoice.currency,
+          isOneTimePurchase: false,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to send payment success notifications for invoice ${invoice.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+        // Don't throw - notification failure should not fail webhook processing
+      }
     }
   }
 
@@ -381,6 +404,34 @@ export class StripeWebhookProcessor extends WorkerHost {
             `Extra token allocation failed for one-time purchase ${paymentIntent.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
           );
           // Don't throw - token allocation failure should not fail webhook processing
+        }
+
+        // Send payment success notifications (non-blocking)
+        const stripeCustomerId =
+          typeof paymentIntent.customer === "string" ? paymentIntent.customer : paymentIntent.customer?.id;
+
+        if (stripeCustomerId) {
+          try {
+            await this.notificationService.sendPaymentSuccessToCompanyAdmins({
+              stripeCustomerId,
+              stripePaymentIntentId: paymentIntent.id,
+              amount: paymentIntent.amount / 100, // Convert cents to dollars
+              currency: paymentIntent.currency,
+              isOneTimePurchase: true,
+            });
+            await this.notificationService.sendPaymentSuccessToPlatformAdmins({
+              stripeCustomerId,
+              stripePaymentIntentId: paymentIntent.id,
+              amount: paymentIntent.amount / 100,
+              currency: paymentIntent.currency,
+              isOneTimePurchase: true,
+            });
+          } catch (error) {
+            this.logger.error(
+              `Failed to send payment success notifications for payment intent ${paymentIntent.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+            );
+            // Don't throw - notification failure should not fail webhook processing
+          }
         }
 
         return;

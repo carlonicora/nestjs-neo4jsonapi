@@ -1,10 +1,13 @@
 import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable } from "@nestjs/common";
 import { Queue } from "bullmq";
-import { AppLoggingService } from "../../../core/logging";
+import { ClsService } from "nestjs-cls";
 import { QueueId } from "../../../config/enums/queue.id";
+import { AppLoggingService } from "../../../core/logging";
+import { CompanyRepository } from "../../company/repositories/company.repository";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
+import { UserRepository } from "../../user/repositories/user.repository";
 
 export interface StripeWebhookPaymentFailureNotificationParams {
   stripeCustomerId: string;
@@ -13,6 +16,16 @@ export interface StripeWebhookPaymentFailureNotificationParams {
   errorMessage?: string;
   amount?: number;
   currency?: string;
+}
+
+export interface StripeWebhookPaymentSuccessNotificationParams {
+  stripeCustomerId: string;
+  stripeInvoiceId?: string;
+  stripePaymentIntentId?: string;
+  amount: number;
+  currency: string;
+  companyName?: string;
+  isOneTimePurchase?: boolean;
 }
 
 /**
@@ -34,6 +47,9 @@ export class StripeWebhookNotificationService {
     @InjectQueue(QueueId.EMAIL) private readonly emailQueue: Queue,
     private readonly stripeCustomerRepository: StripeCustomerRepository,
     private readonly stripeInvoiceRepository: StripeInvoiceRepository,
+    private readonly userRepository: UserRepository,
+    private readonly companyRepository: CompanyRepository,
+    private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
   ) {}
 
@@ -138,6 +154,138 @@ export class StripeWebhookNotificationService {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       this.logger.error(`Failed to queue subscription notification for ${stripeCustomerId}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Send payment success notification to company admins
+   * Includes invoice link and thank you message
+   */
+  async sendPaymentSuccessToCompanyAdmins(params: StripeWebhookPaymentSuccessNotificationParams): Promise<void> {
+    const { stripeCustomerId, stripeInvoiceId, stripePaymentIntentId, amount, currency, isOneTimePurchase } = params;
+
+    try {
+      // Run in CLS context since this may be called from a worker without HTTP context
+      await this.cls.run(async () => {
+        // Find all company admins for this Stripe customer
+        const companyAdmins = await this.userRepository.findCompanyAdminsByStripeCustomerId({ stripeCustomerId });
+
+        if (companyAdmins.length === 0) {
+          this.logger.warn(`No company admins found for Stripe customer ${stripeCustomerId} - skipping notification`);
+          return;
+        }
+
+        // Get invoice details if available
+        let invoiceDetails = null;
+        if (stripeInvoiceId) {
+          invoiceDetails = await this.stripeInvoiceRepository.findByStripeInvoiceId({ stripeInvoiceId });
+        }
+
+        // Queue email for each company admin
+        for (const admin of companyAdmins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "payment-success-customer" as const,
+              payload: {
+                to: admin.email,
+                customerName: admin.name || "Customer",
+                stripeCustomerId,
+                stripeInvoiceId,
+                stripePaymentIntentId,
+                amount,
+                currency: currency || "usd",
+                invoiceUrl: invoiceDetails?.stripeHostedInvoiceUrl,
+                invoiceNumber: invoiceDetails?.stripeInvoiceNumber || undefined,
+                isOneTimePurchase: isOneTimePurchase || false,
+                locale: "en",
+              },
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: "exponential",
+                delay: 5000,
+              },
+            },
+          );
+        }
+
+        this.logger.log(
+          `Queued payment success notification for ${companyAdmins.length} company admin(s) (customer: ${stripeCustomerId})`,
+        );
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue payment success notification for company admins: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block webhook processing
+    }
+  }
+
+  /**
+   * Send payment success notification to platform administrators
+   * Minimal details: company name and amount only
+   */
+  async sendPaymentSuccessToPlatformAdmins(params: StripeWebhookPaymentSuccessNotificationParams): Promise<void> {
+    const { stripeCustomerId, amount, currency, companyName, isOneTimePurchase } = params;
+
+    try {
+      // Run in CLS context since this may be called from a worker without HTTP context
+      await this.cls.run(async () => {
+        // Find all platform administrators
+        const platformAdmins = await this.userRepository.findPlatformAdministrators();
+
+        if (platformAdmins.length === 0) {
+          this.logger.warn("No platform administrators found - skipping admin notification");
+          return;
+        }
+
+        // Resolve company name if not provided
+        let resolvedCompanyName = companyName;
+        if (!resolvedCompanyName) {
+          const stripeCustomer = await this.stripeCustomerRepository.findByStripeCustomerId({ stripeCustomerId });
+          if (stripeCustomer) {
+            const company = await this.companyRepository.findByStripeCustomerId({
+              stripeCustomerId: stripeCustomer.id,
+            });
+            resolvedCompanyName = company?.name || "Unknown Company";
+          } else {
+            resolvedCompanyName = "Unknown Company";
+          }
+        }
+
+        // Queue email for each platform admin
+        for (const admin of platformAdmins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "payment-success-admin" as const,
+              payload: {
+                to: admin.email,
+                adminName: admin.name || "Administrator",
+                companyName: resolvedCompanyName,
+                amount,
+                currency: currency || "usd",
+                isOneTimePurchase: isOneTimePurchase || false,
+                locale: "en",
+              },
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: "exponential",
+                delay: 5000,
+              },
+            },
+          );
+        }
+
+        this.logger.log(`Queued payment success admin notification for ${platformAdmins.length} platform admin(s)`);
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue payment success admin notification: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block webhook processing
     }
   }
 }

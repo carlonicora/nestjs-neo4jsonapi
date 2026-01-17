@@ -8,7 +8,7 @@ import { companyMeta } from "../../company/entities/company.meta";
 import { ModuleModel } from "../../module/entities/module.model";
 import { adminModuleQuery, featureModuleQuery } from "../../module/queries/feature.module.query";
 import { roleMeta } from "../../role/entities/role.meta";
-import { UserDescriptor, User } from "../../user/entities/user";
+import { User, UserDescriptor } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 
@@ -575,5 +575,48 @@ export class UserRepository implements OnModuleInit {
     `;
 
     await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Find all platform administrators (Only35 owners)
+   * These users have the Administrator role and receive internal payment notifications.
+   */
+  async findPlatformAdministrators(): Promise<User[]> {
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+
+    query.queryParams = {
+      administratorRoleId: RoleId.Administrator,
+    };
+
+    query.query = `
+      MATCH (user:User {isDeleted: false})-[:MEMBER_OF]->(role:Role {id: $administratorRoleId})
+      RETURN user
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * Find company admins for a Stripe customer
+   * Query path: StripeCustomer -> Company <- User with CompanyAdministrator role
+   */
+  async findCompanyAdminsByStripeCustomerId(params: { stripeCustomerId: string }): Promise<User[]> {
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+
+    query.queryParams = {
+      stripeCustomerId: params.stripeCustomerId,
+      companyAdminRoleId: RoleId.CompanyAdministrator,
+    };
+
+    query.query = `
+      MATCH (stripeCustomer:StripeCustomer {stripeCustomerId: $stripeCustomerId})
+      MATCH (company:Company)<-[:BELONGS_TO]-(stripeCustomer)
+      MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
+      MATCH (user)-[:MEMBER_OF]->(role:Role {id: $companyAdminRoleId})
+      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      RETURN user, user_role
+    `;
+
+    return this.neo4j.readMany(query);
   }
 }

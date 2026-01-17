@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Payment Confirmation - Thank You!</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  {{> header}}
+
+  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
+    <h1 style="color: #28a745;">Payment Successful</h1>
+
+    <p>Hi {{customerName}},</p>
+
+    <p>Thank you for your {{#if isOneTimePurchase}}purchase{{else}}payment{{/if}}! We've successfully processed your transaction.</p>
+
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+      <p style="margin: 5px 0;"><strong>Amount Paid:</strong> {{amount}} {{currency}}</p>
+      {{#if invoiceNumber}}<p style="margin: 5px 0;"><strong>Invoice:</strong> {{invoiceNumber}}</p>{{/if}}
+      {{#if isOneTimePurchase}}<p style="margin: 5px 0;"><strong>Type:</strong> One-time purchase</p>{{/if}}
+    </div>
+
+    {{#if invoiceUrl}}
+    <p style="margin: 30px 0;">
+      <a href="{{invoiceUrl}}" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+        View Invoice
+      </a>
+    </p>
+    {{/if}}
+
+    {{#if billingDashboardUrl}}
+    <p style="margin: 20px 0;">
+      <a href="{{billingDashboardUrl}}" style="color: #007bff; text-decoration: none;">
+        Go to Billing Dashboard
+      </a>
+    </p>
+    {{/if}}
+
+    <p style="margin-top: 30px;">
+      Thank you for being a valued customer!
+    </p>
+
+    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
+      If you have any questions about this payment, please contact our support team.
+    </p>
+  </div>
+
+  {{> footer}}
+</body>
+</html>

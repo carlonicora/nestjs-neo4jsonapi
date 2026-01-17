@@ -14,6 +14,9 @@ import {
 } from "../stripe-webhook-notification.service";
 import { StripeCustomerRepository } from "../../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeInvoiceRepository } from "../../../stripe-invoice/repositories/stripe-invoice.repository";
+import { UserRepository } from "../../../user/repositories/user.repository";
+import { CompanyRepository } from "../../../company/repositories/company.repository";
+import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../../../../core/logging";
 import { QueueId } from "../../../../config/enums/queue.id";
 import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
@@ -62,6 +65,19 @@ describe("StripeWebhookNotificationService", () => {
       findByStripeInvoiceId: vi.fn(),
     };
 
+    const mockUserRepository = {
+      findPlatformAdministrators: vi.fn(),
+      findCompanyAdminsByStripeCustomerId: vi.fn(),
+    };
+
+    const mockCompanyRepository = {
+      findByStripeCustomerId: vi.fn(),
+    };
+
+    const mockClsService = {
+      run: vi.fn((callback) => callback()),
+    };
+
     const mockLogger = {
       log: vi.fn(),
       error: vi.fn(),
@@ -84,6 +100,18 @@ describe("StripeWebhookNotificationService", () => {
         {
           provide: StripeInvoiceRepository,
           useValue: mockStripeInvoiceRepository,
+        },
+        {
+          provide: UserRepository,
+          useValue: mockUserRepository,
+        },
+        {
+          provide: CompanyRepository,
+          useValue: mockCompanyRepository,
+        },
+        {
+          provide: ClsService,
+          useValue: mockClsService,
         },
         {
           provide: AppLoggingService,
