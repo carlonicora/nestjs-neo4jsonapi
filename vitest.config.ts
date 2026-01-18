@@ -1,6 +1,6 @@
-import { defineConfig } from "vitest/config";
-import swc from "unplugin-swc";
 import path from "path";
+import swc from "unplugin-swc";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [
@@ -21,16 +21,14 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/**/*.spec.ts", "tools/**/*.spec.ts"],
+    silent: true,
+    reporters: ["default"],
+    onConsoleLog: () => false,
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
       include: ["src/**/*.ts"],
-      exclude: [
-        "src/**/*.spec.ts",
-        "src/**/*.interface.ts",
-        "src/**/*.dto.ts",
-        "src/**/index.ts",
-      ],
+      exclude: ["src/**/*.spec.ts", "src/**/*.interface.ts", "src/**/*.dto.ts", "src/**/index.ts"],
     },
     testTimeout: 10000,
   },
