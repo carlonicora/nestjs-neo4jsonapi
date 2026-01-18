@@ -1,3 +1,16 @@
+## [1.33.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.32.1...v1.33.0) (2026-01-18)
+
+### 🚀 Features
+
+* add email on trial end ([5b5a376](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5b5a376a4a135dba50c74c0e7a2c7fe8fd6a0069))
+* add stripe trial subscription ([b52200b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b52200b238c12b912dff251a268ebe375a460d17))
+* add stripe trial subscription ([b84ae35](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b84ae359653cf834b42f6960789c2b9a7604bbd1))
+* add vision llm configuration ([7dc9b66](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7dc9b66956e0c00e7098d31d41eca377285ca736))
+
+### 🐛 Bug Fixes
+
+* correct vitest output ([4077b3b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4077b3bd2fef6b839e080de2497512b1afe2f93a))
+
 ## [1.32.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.32.0...v1.32.1) (2026-01-17)
 
 ### 🐛 Bug Fixes
