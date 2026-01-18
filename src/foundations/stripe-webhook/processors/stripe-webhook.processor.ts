@@ -4,6 +4,7 @@ import { ClsService } from "nestjs-cls";
 import Stripe from "stripe";
 import { QueueId } from "../../../config/enums/queue.id";
 import { AppLoggingService } from "../../../core/logging";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
@@ -41,6 +42,7 @@ export class StripeWebhookProcessor extends WorkerHost {
     private readonly stripeInvoiceAdminService: StripeInvoiceAdminService,
     private readonly logger: AppLoggingService,
     private readonly cls: ClsService,
+    private readonly webSocketService: WebSocketService,
   ) {
     super();
   }
@@ -231,6 +233,19 @@ export class StripeWebhookProcessor extends WorkerHost {
                   // Don't throw - notification failure shouldn't block webhook processing
                 }
               }
+
+              // Send WebSocket to refresh frontend after subscription deactivation
+              try {
+                await this.webSocketService.sendMessageToCompany(company.id, "company:subscription_updated", {
+                  type: "company:subscription_updated",
+                  companyId: company.id,
+                });
+              } catch (error) {
+                this.logger.error(
+                  `WebSocket notification failed for company ${company.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                );
+                // Don't throw - WebSocket failure should not fail webhook
+              }
             }
           } else {
             this.logger.warn(`Company not found for stripe customer ${stripeCustomerId}`);
@@ -414,10 +429,12 @@ export class StripeWebhookProcessor extends WorkerHost {
       }
 
       // Sync features (non-blocking)
+      let featureSyncCompanyId: string | undefined;
       try {
         const featureResult = await this.featureSyncService.syncFeaturesOnPayment({
           stripeSubscriptionId: subscriptionId,
         });
+        featureSyncCompanyId = featureResult.companyId;
         if (featureResult.success && featureResult.featuresAdded?.length) {
           this.logger.debug(
             `Feature sync: ${featureResult.featuresAdded.length} features added for subscription ${subscriptionId}`,
@@ -428,6 +445,21 @@ export class StripeWebhookProcessor extends WorkerHost {
           `Feature sync failed for ${subscriptionId}: ${error instanceof Error ? error.message : "Unknown error"}`,
         );
         // Don't throw - feature sync failure should not fail webhook
+      }
+
+      // Send WebSocket to refresh frontend after feature sync
+      if (featureSyncCompanyId) {
+        try {
+          await this.webSocketService.sendMessageToCompany(featureSyncCompanyId, "company:subscription_updated", {
+            type: "company:subscription_updated",
+            companyId: featureSyncCompanyId,
+          });
+        } catch (error) {
+          this.logger.error(
+            `WebSocket notification failed for company ${featureSyncCompanyId}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          );
+          // Don't throw - WebSocket failure should not fail webhook
+        }
       }
 
       // Send payment success notifications (non-blocking)

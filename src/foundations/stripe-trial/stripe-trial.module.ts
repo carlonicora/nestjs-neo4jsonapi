@@ -1,7 +1,6 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module, forwardRef } from "@nestjs/common";
 import { QueueId } from "../../config/enums/queue.id";
-import { WebsocketModule } from "../../core/websocket/websocket.module";
 import { CompanyModule } from "../company/company.module";
 import { TrialProcessor } from "./processors/trial.processor";
 import { TrialService } from "./services/trial.service";
@@ -15,7 +14,7 @@ import { TrialService } from "./services/trial.service";
  * Queue-based architecture:
  * - AuthModule queues trial creation jobs (no direct dependency)
  * - TrialProcessor handles jobs asynchronously
- * - WebSocket notification sent on completion
+ * - WebSocket notification sent from Stripe webhook after feature sync
  *
  * Dependencies (via ModuleRef):
  * - StripeCustomerAdminService: Create Stripe customer
@@ -24,10 +23,9 @@ import { TrialService } from "./services/trial.service";
  *
  * Direct dependencies:
  * - CompanyModule: Update company tokens and subscription status
- * - WebsocketModule: Send subscription update notifications
  */
 @Module({
-  imports: [forwardRef(() => CompanyModule), BullModule.registerQueue({ name: QueueId.TRIAL }), WebsocketModule],
+  imports: [forwardRef(() => CompanyModule), BullModule.registerQueue({ name: QueueId.TRIAL })],
   providers: [TrialService, TrialProcessor],
   exports: [TrialService],
 })

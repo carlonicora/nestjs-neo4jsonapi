@@ -2,8 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CompanyRepository } from "../../company/repositories/company.repository";
-import { StripeCustomerAdminService } from "../../stripe-customer/services/stripe-customer-admin.service";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
+import { StripeCustomerAdminService } from "../../stripe-customer/services/stripe-customer-admin.service";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
 import { StripeSubscriptionAdminService } from "../../stripe-subscription/services/stripe-subscription-admin.service";
 
@@ -106,8 +106,8 @@ export class TrialService {
     await this.stripeSubscriptionAdminService.createSubscription({
       companyId: params.companyId,
       priceId: trialPrice.id,
-      // trialPeriodDays: 14,
-      trialEnd: Math.floor(Date.now() / 1000) + 3 * 60,
+      trialPeriodDays: 14,
+      // trialEnd: Math.floor(Date.now() / 1000) + 3 * 60,
     });
 
     // 4. Allocate trial tokens from price configuration

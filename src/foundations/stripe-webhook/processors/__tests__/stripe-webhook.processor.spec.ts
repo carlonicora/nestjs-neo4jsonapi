@@ -43,6 +43,7 @@ import { CompanyRepository } from "../../../company/repositories/company.reposit
 import { AppLoggingService } from "../../../../core/logging";
 import { StripeService } from "../../../stripe/services/stripe.service";
 import { StripeInvoiceAdminService } from "../../../stripe-invoice/services/stripe-invoice-admin.service";
+import { WebSocketService } from "../../../../core/websocket/services/websocket.service";
 import {
   MOCK_SUBSCRIPTION,
   MOCK_INVOICE,
@@ -159,6 +160,12 @@ describe("StripeWebhookProcessor", () => {
       has: vi.fn().mockReturnValue(false),
     };
 
+    const mockWebSocketService = {
+      sendMessageToCompany: vi.fn().mockResolvedValue(undefined),
+      sendMessageToUser: vi.fn().mockResolvedValue(undefined),
+      broadcast: vi.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StripeWebhookProcessor,
@@ -217,6 +224,10 @@ describe("StripeWebhookProcessor", () => {
         {
           provide: ClsService,
           useValue: mockClsService,
+        },
+        {
+          provide: WebSocketService,
+          useValue: mockWebSocketService,
         },
       ],
     }).compile();

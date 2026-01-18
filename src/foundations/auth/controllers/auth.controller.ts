@@ -19,14 +19,10 @@ import { AuthPostRegisterDTO } from "../../auth/dtos/auth.post.register.dto";
 import { AuthPostResetPasswordDTO } from "../../auth/dtos/auth.post.resetpassword.dto";
 import { authMeta } from "../../auth/entities/auth.meta";
 import { AuthService } from "../../auth/services/auth.service";
-import { TrialQueueService } from "../../auth/services/trial-queue.service";
 
 @Controller(authMeta.endpoint)
 export class AuthController {
-  constructor(
-    private readonly service: AuthService,
-    private readonly trialQueueService: TrialQueueService,
-  ) {}
+  constructor(private readonly service: AuthService) {}
 
   @Post()
   async findAuth(@Query("code") code: string) {
@@ -100,18 +96,5 @@ export class AuthController {
     },
   ): Promise<{ code: string }> {
     return this.service.completeOAuthRegistration(body);
-  }
-
-  // TODO: REMOVE - Temporary test endpoint for trial queue
-  @UseGuards(JwtAuthGuard)
-  @Post("test-trial")
-  @HttpCode(HttpStatus.OK)
-  async testTrial(@Req() req: any) {
-    const { companyId, userId } = req.user;
-    await this.trialQueueService.queueTrialCreation({
-      companyId,
-      userId,
-    });
-    return { message: "Trial queued", companyId, userId };
   }
 }

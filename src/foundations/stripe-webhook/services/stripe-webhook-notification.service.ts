@@ -365,7 +365,9 @@ export class StripeWebhookNotificationService {
         const companyAdmins = await this.userRepository.findCompanyAdminsByStripeCustomerId({ stripeCustomerId });
 
         if (companyAdmins.length === 0) {
-          this.logger.warn(`No company admins found for Stripe customer ${stripeCustomerId} - skipping trial ended notification`);
+          this.logger.warn(
+            `No company admins found for Stripe customer ${stripeCustomerId} - skipping trial ended notification`,
+          );
           return;
         }
 

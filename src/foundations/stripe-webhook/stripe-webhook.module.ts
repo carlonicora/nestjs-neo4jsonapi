@@ -3,6 +3,7 @@ import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { createWorkerProvider } from "../../common/decorators/conditional-service.decorator";
 import { modelRegistry } from "../../common/registries/registry";
 import { QueueId } from "../../config/enums/queue.id";
+import { WebsocketModule } from "../../core/websocket/websocket.module";
 import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
 import { StripeInvoiceModule } from "../stripe-invoice/stripe-invoice.module";
 import { StripePriceModule } from "../stripe-price/stripe-price.module";
@@ -56,6 +57,7 @@ import { StripeWebhookService } from "./services/stripe-webhook.service";
     forwardRef(() => StripeSubscriptionModule),
     forwardRef(() => CompanyModule),
     forwardRef(() => UserModule),
+    WebsocketModule,
     BullModule.registerQueue({ name: QueueId.BILLING_WEBHOOK }),
     BullModule.registerQueue({ name: QueueId.EMAIL }),
   ],
