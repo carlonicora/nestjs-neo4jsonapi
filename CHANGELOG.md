@@ -1,3 +1,9 @@
+## [1.34.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.34.2...v1.34.3) (2026-01-19)
+
+### 🚨 Tests
+
+* add tests and fix linting ([6d11731](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6d117319684e5e41b173d5e7dbe5a625687f53ed))
+
 ## [1.34.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.34.1...v1.34.2) (2026-01-19)
 
 ### 🐛 Bug Fixes
