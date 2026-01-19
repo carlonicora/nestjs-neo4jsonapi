@@ -2,84 +2,19 @@
 
 This document lists all testable files that do not yet have associated test files.
 
-**Total Files Needing Tests:** ~250+ files
-**Current Test Coverage:** ~9%
-
 ---
 
-## Controllers (26 files)
-
-- [x] `src/core/health/controllers/health.controller.ts`
-- [x] `src/core/version/controllers/version.controller.ts`
-- [x] `src/foundations/audit/controllers/audit.controller.ts`
-- [x] `src/foundations/auth/controllers/auth.controller.ts`
-- [x] `src/foundations/auth/controllers/auth.discord.controller.ts`
-- [x] `src/foundations/auth/controllers/auth.google.controller.ts`
-- [x] `src/foundations/chunk/controllers/chunk.controller.ts`
-- [x] `src/foundations/content/controllers/content.controller.ts`
-- [x] `src/foundations/feature/controllers/feature.controller.ts`
-- [x] `src/foundations/notification/controllers/notification.controller.ts`
-- [x] `src/foundations/oauth/controllers/oauth.authorize.controller.ts`
-- [x] `src/foundations/oauth/controllers/oauth.management.controller.ts`
-- [x] `src/foundations/oauth/controllers/oauth.token.controller.ts`
-- [x] `src/foundations/push/controllers/push.controller.ts`
-- [x] `src/foundations/role/controllers/role.controller.ts`
-- [x] `src/foundations/role/controllers/role.user.controller.ts`
-- [x] `src/foundations/s3/controllers/s3.controller.ts`
-- [x] `src/foundations/stripe-customer/controllers/stripe-customer.controller.ts`
-- [x] `src/foundations/stripe-invoice/controllers/stripe-invoice.controller.ts`
-- [x] `src/foundations/stripe-usage/controllers/stripe-usage.controller.ts`
-- [x] `src/foundations/user/controllers/user.controller.ts`
-
----
-
-## Services (92 files)
-
-### Core Services
-
-- [x] `src/core/cache/services/cache.service.ts`
-- [ ] `src/core/cors/services/cors.options.service.ts`
-- [ ] `src/core/debug/services/debug.module.service.ts`
-- [ ] `src/core/email/services/email.service.ts`
-- [ ] `src/core/jsonapi/services/jsonapi.deserialiser.service.ts`
-- [ ] `src/core/jsonapi/services/jsonapi.query.service.ts`
-- [ ] `src/core/jsonapi/services/jsonapi.registry.service.ts`
-- [ ] `src/core/jsonapi/services/jsonapi.relationship.service.ts`
-- [ ] `src/core/jsonapi/services/jsonapi.service.ts`
-- [ ] `src/core/llm/services/llm.service.ts`
-- [ ] `src/core/llm/services/streaming.service.ts`
-- [ ] `src/core/logging/services/logging.service.ts`
-- [ ] `src/core/migrator/services/migrator.service.ts`
-- [ ] `src/core/neo4j/services/neo4j.service.ts`
-- [ ] `src/core/redis/services/redis.service.ts`
-- [ ] `src/core/security/services/security.service.ts`
-- [ ] `src/core/tracing/services/tracing.service.ts`
-- [ ] `src/core/version/services/version.service.ts`
-- [ ] `src/core/websocket/services/ws.context.service.ts`
-- [ ] `src/core/websocket/services/ws.gateway.base.ts`
-- [ ] `src/core/websocket/services/ws.registry.service.ts`
+## Services
 
 ### Agent Services
 
-- [ ] `src/agents/community.detector/services/community.detector.agent.service.ts`
-- [ ] `src/agents/community.summariser/services/community.summariser.agent.service.ts`
-- [ ] `src/agents/community.summariser/services/community.summariser.service.ts`
-- [ ] `src/agents/contextualiser/services/contextualiser.agent.service.ts`
-- [ ] `src/agents/contextualiser/services/contextualiser.output.service.ts`
-- [ ] `src/agents/contextualiser/services/contextualiser.service.ts`
-- [ ] `src/agents/contextualiser.nodes/services/contextualiser.nodes.agent.service.ts`
-- [ ] `src/agents/contextualiser.nodes/services/contextualiser.nodes.service.ts`
-- [ ] `src/agents/drift/services/drift.agent.service.ts`
-- [ ] `src/agents/drift/services/drift.service.ts`
-- [ ] `src/agents/drift.nodes/services/drift.nodes.agent.service.ts`
-- [ ] `src/agents/drift.nodes/services/drift.nodes.service.ts`
-- [ ] `src/agents/graph.creator/services/graph.creator.agent.service.ts`
+- [x] `src/agents/community.detector/services/community.detector.service.ts`
+- [x] `src/agents/community.summariser/services/community.summariser.service.ts`
+- [x] `src/agents/contextualiser/services/contextualiser.service.ts`
+- [ ] `src/agents/drift/services/drift.migration.service.ts`
+- [ ] `src/agents/drift/services/drift.search.service.ts`
 - [ ] `src/agents/graph.creator/services/graph.creator.service.ts`
-- [ ] `src/agents/responder/services/responder.agent.service.ts`
-- [ ] `src/agents/responder/services/responder.output.service.ts`
 - [ ] `src/agents/responder/services/responder.service.ts`
-- [ ] `src/agents/summariser/services/summariser.agent.service.ts`
-- [ ] `src/agents/summariser/services/summariser.output.service.ts`
 - [ ] `src/agents/summariser/services/summariser.service.ts`
 
 ### Auth Services
@@ -92,13 +27,7 @@ This document lists all testable files that do not yet have associated test file
 
 ### Chunker Services
 
-- [ ] `src/foundations/chunker/services/chunker.docx.service.ts`
-- [ ] `src/foundations/chunker/services/chunker.imageextractor.service.ts`
-- [ ] `src/foundations/chunker/services/chunker.pdf.service.ts`
-- [ ] `src/foundations/chunker/services/chunker.pptx.service.ts`
-- [ ] `src/foundations/chunker/services/chunker.semanticsplitter.service.ts`
 - [ ] `src/foundations/chunker/services/chunker.service.ts`
-- [ ] `src/foundations/chunker/services/chunker.xlsx.service.ts`
 
 ### Foundation Services
 
@@ -106,14 +35,13 @@ This document lists all testable files that do not yet have associated test file
 - [ ] `src/foundations/audit/services/audit.service.ts`
 - [ ] `src/foundations/chunk/services/chunk.service.ts`
 - [ ] `src/foundations/community/services/community.service.ts`
-- [ ] `src/foundations/content/services/content.processing.service.ts`
 - [ ] `src/foundations/content/services/content.service.ts`
+- [ ] `src/foundations/content/services/content.cypher.service.ts`
 - [ ] `src/foundations/discord-user/services/discord-user.service.ts`
 - [ ] `src/foundations/discord/services/discord.service.ts`
 - [ ] `src/foundations/feature/services/feature.service.ts`
 - [ ] `src/foundations/google-user/services/google-user.service.ts`
 - [ ] `src/foundations/keyconcept/services/keyconcept.service.ts`
-- [ ] `src/foundations/module/services/module.service.ts`
 - [ ] `src/foundations/notification/services/notification.service.ts`
 - [ ] `src/foundations/push/services/push.service.ts`
 - [ ] `src/foundations/relevancy/services/relevancy.service.ts`
@@ -121,22 +49,16 @@ This document lists all testable files that do not yet have associated test file
 - [ ] `src/foundations/s3/services/s3.service.ts`
 - [ ] `src/foundations/tokenusage/services/tokenusage.service.ts`
 - [ ] `src/foundations/user/services/user.service.ts`
+- [ ] `src/foundations/user/services/user.cypher.service.ts`
 
 ### Stripe Services
 
 - [ ] `src/foundations/stripe-customer/services/stripe-customer-admin.service.ts`
-- [ ] `src/foundations/stripe-invoice/services/stripe-invoice-sync.service.ts`
-- [ ] `src/foundations/stripe-price/services/stripe-price-api.service.ts`
-- [ ] `src/foundations/stripe-price/services/stripe-price-sync.service.ts`
-- [ ] `src/foundations/stripe-product/services/stripe-product-sync.service.ts`
-- [ ] `src/foundations/stripe-subscription/services/stripe-subscription-sync.service.ts`
-- [ ] `src/foundations/stripe-trial/services/stripe-trial.service.ts`
-- [ ] `src/foundations/stripe-usage/services/stripe-usage-sync.service.ts`
-- [ ] `src/foundations/stripe/services/stripe.service.ts`
+- [ ] `src/foundations/stripe-trial/services/trial.service.ts`
 
 ---
 
-## Repositories (26 files)
+## Repositories
 
 - [ ] `src/core/neo4j/abstracts/abstract.repository.ts`
 - [ ] `src/foundations/atomicfact/repositories/atomicfact.repository.ts`
@@ -155,10 +77,11 @@ This document lists all testable files that do not yet have associated test file
 - [ ] `src/foundations/push/repositories/push.repository.ts`
 - [ ] `src/foundations/relevancy/repositories/relevancy.repository.ts`
 - [ ] `src/foundations/role/repositories/role.repository.ts`
+- [ ] `src/foundations/tokenusage/repositories/tokenusage.repository.ts`
 
 ---
 
-## Guards (6 files)
+## Guards
 
 - [ ] `src/common/guards/jwt.auth.admin.guard.ts`
 - [ ] `src/common/guards/jwt.auth.guard.ts`
@@ -169,7 +92,7 @@ This document lists all testable files that do not yet have associated test file
 
 ---
 
-## Interceptors (3 files)
+## Interceptors
 
 - [ ] `src/core/cache/interceptors/cache.interceptor.ts`
 - [ ] `src/core/logging/interceptors/logging.interceptor.ts`
@@ -177,23 +100,16 @@ This document lists all testable files that do not yet have associated test file
 
 ---
 
-## Filters (1 file)
-
-- [ ] `src/common/filters/http-exception.filter.ts`
-
----
-
-## Processors (5 files)
+## Processors
 
 - [ ] `src/agents/community.summariser/processors/community.summariser.processor.ts`
 - [ ] `src/foundations/chunk/processors/chunk.processor.ts`
 - [ ] `src/foundations/company/processors/company.processor.ts`
 - [ ] `src/foundations/stripe-trial/processors/trial.processor.ts`
-- [ ] `src/foundations/stripe-webhook/processors/stripe-webhook.processor.ts`
 
 ---
 
-## Serialisers (21 files)
+## Serialisers
 
 - [ ] `src/core/jsonapi/abstracts/abstract.jsonapi.serialiser.ts`
 - [ ] `src/core/jsonapi/serialisers/descriptor.based.serialiser.ts`
@@ -219,7 +135,7 @@ This document lists all testable files that do not yet have associated test file
 
 ---
 
-## Decorators (6 files)
+## Decorators
 
 - [ ] `src/common/decorators/conditional-service.decorator.ts`
 - [ ] `src/common/decorators/module.decorator.ts`
@@ -230,11 +146,10 @@ This document lists all testable files that do not yet have associated test file
 
 ---
 
-## Factories (7 files)
+## Factories
 
 - [ ] `src/agents/contextualiser/factories/contextualiser.context.factory.ts`
 - [ ] `src/agents/responder/factories/responder.context.factory.ts`
-- [ ] `src/bootstrap/app.module.factory.ts`
 - [ ] `src/core/jsonapi/factories/dynamic.relationship.factory.ts`
 - [ ] `src/core/jsonapi/factories/jsonapi.serialiser.factory.ts`
 - [ ] `src/core/neo4j/factories/entity.factory.ts`
@@ -242,109 +157,136 @@ This document lists all testable files that do not yet have associated test file
 
 ---
 
-## Strategies (5 files)
+## Strategies
 
 - [ ] `src/common/strategies/jwt.strategy.ts`
-- [ ] `src/foundations/auth/strategies/discord.strategy.ts`
-- [ ] `src/foundations/auth/strategies/google.strategy.ts`
-- [ ] `src/foundations/oauth/strategies/oauth.strategy.ts`
-- [ ] `src/foundations/oauth/strategies/oauth.token.strategy.ts`
 
 ---
 
-## Utilities (15+ files)
+## Utilities
 
-- [ ] `src/common/utils/env.utils.ts`
-- [ ] `src/common/utils/ip.utils.ts`
-- [ ] `src/common/utils/pagination.utils.ts`
-- [ ] `src/common/utils/query.utils.ts`
-- [ ] `src/common/utils/string.utils.ts`
-- [ ] `src/common/utils/validation.utils.ts`
-- [ ] `src/core/jsonapi/utils/sparse-fields.utils.ts`
-- [ ] `src/core/neo4j/utils/cypher.utils.ts`
-- [ ] `src/core/neo4j/utils/relationship.utils.ts`
-- [ ] `src/core/websocket/utils/ws.utils.ts`
-- [ ] `src/foundations/auth/utils/auth.utils.ts`
-- [ ] `src/foundations/oauth/utils/oauth.crypto.utils.ts`
-- [ ] `src/foundations/oauth/utils/oauth.scope.utils.ts`
-- [ ] `src/foundations/stripe/utils/stripe.utils.ts`
+- [ ] `src/core/llm/utils/tools.utils.ts`
+- [ ] `src/core/llm/utils/schema.utils.ts`
 
 ---
 
-## DTOs (30+ files)
+## Abstracts
+
+- [ ] `src/core/neo4j/abstracts/abstract.service.ts`
+- [ ] `src/core/llm/abstracts/abstract.tools.ts`
+
+---
+
+## DTOs
 
 ### Auth DTOs
-- [ ] `src/foundations/auth/dtos/auth.dto.ts`
-- [ ] `src/foundations/auth/dtos/pending-registration.dto.ts`
 
-### Chunk DTOs
-- [ ] `src/foundations/chunk/dtos/chunk.dto.ts`
+- [ ] `src/foundations/auth/dtos/auth.post.forgot.dto.ts`
+- [ ] `src/foundations/auth/dtos/auth.post.login.dto.ts`
+- [ ] `src/foundations/auth/dtos/auth.post.register.dto.ts`
+- [ ] `src/foundations/auth/dtos/auth.post.resetpassword.dto.ts`
 
 ### Content DTOs
+
 - [ ] `src/foundations/content/dtos/content.dto.ts`
 
 ### Feature DTOs
+
 - [ ] `src/foundations/feature/dtos/feature.dto.ts`
 
+### Module DTOs
+
+- [ ] `src/foundations/module/dtos/module.dto.ts`
+
 ### Notification DTOs
-- [ ] `src/foundations/notification/dtos/notification.dto.ts`
+
+- [ ] `src/foundations/notification/dtos/notification.patch.dto.ts`
 
 ### OAuth DTOs
+
 - [ ] `src/foundations/oauth/dtos/oauth.authorize.dto.ts`
 - [ ] `src/foundations/oauth/dtos/oauth.client.dto.ts`
+- [ ] `src/foundations/oauth/dtos/oauth.introspect.dto.ts`
+- [ ] `src/foundations/oauth/dtos/oauth.revoke.dto.ts`
 - [ ] `src/foundations/oauth/dtos/oauth.token.dto.ts`
 
 ### Push DTOs
-- [ ] `src/foundations/push/dtos/push.dto.ts`
+
+- [ ] `src/foundations/push/dtos/subscription.push.dto.ts`
 
 ### Role DTOs
-- [ ] `src/foundations/role/dtos/role.dto.ts`
 
-### S3 DTOs
-- [ ] `src/foundations/s3/dtos/s3.dto.ts`
+- [ ] `src/foundations/role/dtos/role.dto.ts`
+- [ ] `src/foundations/role/dtos/role.post.dto.ts`
 
 ### User DTOs
+
 - [ ] `src/foundations/user/dtos/user.dto.ts`
+- [ ] `src/foundations/user/dtos/user.patch.rate.dto.ts`
+- [ ] `src/foundations/user/dtos/user.post.dto.ts`
+- [ ] `src/foundations/user/dtos/user.put.dto.ts`
+
+### Stripe DTOs
+
+- [ ] `src/foundations/stripe/dtos/create-setup-intent.dto.ts`
+- [ ] `src/foundations/stripe-usage/dtos/stripe-usage.dto.ts`
+- [ ] `src/foundations/stripe-subscription/dtos/stripe-subscription.dto.ts`
+- [ ] `src/foundations/stripe-product/dtos/stripe-product.dto.ts`
+
+### Company DTOs
+
+- [ ] `src/foundations/company/dtos/company.configurations.put.dto.ts`
+- [ ] `src/foundations/company/dtos/company.dto.ts`
+- [ ] `src/foundations/company/dtos/company.post.dto.ts`
+- [ ] `src/foundations/company/dtos/company.put.dto.ts`
 
 ---
 
-## Entities/Models (25+ files)
+## Entities/Models
 
-- [ ] `src/foundations/atomicfact/entities/atomicfact.entity.ts`
+- [ ] `src/foundations/atomicfact/entities/atomic.fact.entity.ts`
 - [ ] `src/foundations/audit/entities/audit.entity.ts`
-- [ ] `src/foundations/auth/entities/pending-registration.entity.ts`
+- [ ] `src/foundations/auth/entities/auth.code.entity.ts`
+- [ ] `src/foundations/auth/entities/auth.entity.ts`
 - [ ] `src/foundations/chunk/entities/chunk.entity.ts`
 - [ ] `src/foundations/community/entities/community.entity.ts`
 - [ ] `src/foundations/content/entities/content.entity.ts`
-- [ ] `src/foundations/discord-user/entities/discord-user.entity.ts`
 - [ ] `src/foundations/feature/entities/feature.entity.ts`
-- [ ] `src/foundations/google-user/entities/google-user.entity.ts`
-- [ ] `src/foundations/keyconcept/entities/keyconcept.entity.ts`
+- [ ] `src/foundations/keyconcept/entities/key.concept.entity.ts`
 - [ ] `src/foundations/module/entities/module.entity.ts`
 - [ ] `src/foundations/notification/entities/notification.entity.ts`
+- [ ] `src/foundations/oauth/entities/oauth.access.token.entity.ts`
+- [ ] `src/foundations/oauth/entities/oauth.authorization.code.entity.ts`
 - [ ] `src/foundations/oauth/entities/oauth.client.entity.ts`
-- [ ] `src/foundations/oauth/entities/oauth.token.entity.ts`
+- [ ] `src/foundations/oauth/entities/oauth.refresh.token.entity.ts`
 - [ ] `src/foundations/push/entities/push.entity.ts`
-- [ ] `src/foundations/relevancy/entities/relevancy.entity.ts`
-- [ ] `src/foundations/role/entities/role.entity.ts`
+- [ ] `src/foundations/s3/entities/s3.entity.ts`
 - [ ] `src/foundations/tokenusage/entities/tokenusage.entity.ts`
-- [ ] `src/foundations/user/entities/user.entity.ts`
+- [ ] `src/foundations/stripe-customer/entities/stripe-customer.entity.ts`
+- [ ] `src/foundations/stripe-customer/entities/stripe-payment-method.entity.ts`
+- [ ] `src/foundations/stripe-invoice/entities/stripe-invoice.entity.ts`
+- [ ] `src/foundations/stripe-price/entities/stripe-price.entity.ts`
+- [ ] `src/foundations/stripe-product/entities/stripe-product.entity.ts`
+- [ ] `src/foundations/stripe-subscription/entities/stripe-subscription.entity.ts`
+- [ ] `src/foundations/stripe-usage/entities/stripe-usage-record.entity.ts`
+- [ ] `src/foundations/stripe-webhook/entities/stripe-webhook-event.entity.ts`
 
 ---
 
-## Modules (20+ files)
+## Modules
 
 - [ ] `src/agents/community.detector/community.detector.module.ts`
 - [ ] `src/agents/community.summariser/community.summariser.module.ts`
 - [ ] `src/agents/contextualiser/contextualiser.module.ts`
-- [ ] `src/agents/contextualiser.nodes/contextualiser.nodes.module.ts`
 - [ ] `src/agents/drift/drift.module.ts`
-- [ ] `src/agents/drift.nodes/drift.nodes.module.ts`
 - [ ] `src/agents/graph.creator/graph.creator.module.ts`
 - [ ] `src/agents/responder/responder.module.ts`
 - [ ] `src/agents/summariser/summariser.module.ts`
+- [ ] `src/core/appmode/app.mode.module.ts`
+- [ ] `src/core/blocknote/blocknote.module.ts`
 - [ ] `src/core/cache/cache.module.ts`
 - [ ] `src/core/cors/cors.module.ts`
+- [ ] `src/core/debug/debug.module.ts`
 - [ ] `src/core/email/email.module.ts`
 - [ ] `src/core/jsonapi/jsonapi.module.ts`
 - [ ] `src/core/llm/llm.module.ts`
@@ -354,45 +296,38 @@ This document lists all testable files that do not yet have associated test file
 - [ ] `src/core/redis/redis.module.ts`
 - [ ] `src/core/security/security.module.ts`
 - [ ] `src/core/tracing/tracing.module.ts`
+- [ ] `src/core/version/version.module.ts`
 - [ ] `src/core/websocket/websocket.module.ts`
-
----
-
-## Health Indicators (4 files)
-
-- [ ] `src/core/health/indicators/disk.health.ts`
-- [ ] `src/core/health/indicators/neo4j.health.ts`
-- [ ] `src/core/health/indicators/redis.health.ts`
-- [ ] `src/core/health/indicators/s3.health.ts`
-
----
-
-## Summary
-
-| Category | Untested Files | Priority |
-|----------|---------------|----------|
-| Services | 92 | High |
-| Repositories | 26 | High |
-| Controllers | 26 | High |
-| Serialisers | 21 | Medium |
-| DTOs | 30+ | Medium |
-| Entities | 25+ | Medium |
-| Modules | 20+ | Low |
-| Utilities | 15+ | Medium |
-| Guards | 6 | High |
-| Decorators | 6 | Medium |
-| Factories | 7 | Medium |
-| Strategies | 5 | Medium |
-| Processors | 5 | High |
-| Interceptors | 3 | Medium |
-| Health Indicators | 4 | Low |
-| Filters | 1 | Medium |
-
-**Recommended Priority Order:**
-1. Guards, Interceptors, Filters (security-critical)
-2. Core Services (cache, neo4j, redis, security, jsonapi)
-3. Processors (async job handling)
-4. Controllers (API endpoints)
-5. Repositories (data access layer)
-6. Auth & OAuth services
-7. Remaining services and utilities
+- [ ] `src/core/health/health.module.ts`
+- [ ] `src/core/queue/queue.module.ts`
+- [ ] `src/foundations/atomicfact/atomicfact.module.ts`
+- [ ] `src/foundations/audit/audit.module.ts`
+- [ ] `src/foundations/auth/auth.module.ts`
+- [ ] `src/foundations/chunk/chunk.module.ts`
+- [ ] `src/foundations/chunker/chunker.module.ts`
+- [ ] `src/foundations/community/community.module.ts`
+- [ ] `src/foundations/content/content.module.ts`
+- [ ] `src/foundations/discord-user/discord-user.module.ts`
+- [ ] `src/foundations/discord/discord.module.ts`
+- [ ] `src/foundations/feature/feature.module.ts`
+- [ ] `src/foundations/google-user/google-user.module.ts`
+- [ ] `src/foundations/keyconcept/keyconcept.module.ts`
+- [ ] `src/foundations/module/module.module.ts`
+- [ ] `src/foundations/notification/notification.module.ts`
+- [ ] `src/foundations/oauth/oauth.module.ts`
+- [ ] `src/foundations/push/push.module.ts`
+- [ ] `src/foundations/relevancy/relevancy.module.ts`
+- [ ] `src/foundations/role/role.module.ts`
+- [ ] `src/foundations/s3/s3.module.ts`
+- [ ] `src/foundations/tokenusage/tokenusage.module.ts`
+- [ ] `src/foundations/company/company.module.ts`
+- [ ] `src/foundations/user/user.module.ts`
+- [ ] `src/foundations/stripe/stripe.module.ts`
+- [ ] `src/foundations/stripe-customer/stripe-customer.module.ts`
+- [ ] `src/foundations/stripe-invoice/stripe-invoice.module.ts`
+- [ ] `src/foundations/stripe-price/stripe-price.module.ts`
+- [ ] `src/foundations/stripe-product/stripe-product.module.ts`
+- [ ] `src/foundations/stripe-subscription/stripe-subscription.module.ts`
+- [ ] `src/foundations/stripe-trial/stripe-trial.module.ts`
+- [ ] `src/foundations/stripe-usage/stripe-usage.module.ts`
+- [ ] `src/foundations/stripe-webhook/stripe-webhook.module.ts`
