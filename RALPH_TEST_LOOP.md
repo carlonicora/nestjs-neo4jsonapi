@@ -19,9 +19,11 @@ You are implementing unit tests for all files in `@packages/nestjs-neo4jsonapi/T
 Read `@packages/nestjs-neo4jsonapi/TEST-COVERAGE-GAPS.md` and find the **FIRST** line with `- [ ]` (unchecked item).
 
 **If NO unchecked items remain:**
+
 ```
 <promise>ALL_TESTS_COMPLETE</promise>
 ```
+
 Stop immediately. Do not continue.
 
 **If an unchecked item exists:** Continue to Step 2.
@@ -59,10 +61,10 @@ grep -r "createMock" packages/nestjs-neo4jsonapi/src --include="*.ts"
 
 **ALWAYS check these locations first:**
 
-| Mock | Location | Usage |
-|------|----------|-------|
-| Stripe Client | `src/foundations/stripe/__tests__/mocks/stripe.mock.ts` | `createMockStripeClient()` |
-| Common Test Helpers | `src/__tests__/helpers/` | Shared test utilities |
+| Mock                | Location                                                | Usage                      |
+| ------------------- | ------------------------------------------------------- | -------------------------- |
+| Stripe Client       | `src/foundations/stripe/__tests__/mocks/stripe.mock.ts` | `createMockStripeClient()` |
+| Common Test Helpers | `src/__tests__/helpers/`                                | Shared test utilities      |
 
 ### Step 3c: Mock Reuse Rules
 
@@ -249,6 +251,7 @@ pnpm --filter @carlonicora/nestjs-neo4jsonapi test src/path/to/file.spec.ts
 ## Step 8: Fix Failures
 
 If tests fail:
+
 1. Read the error message carefully
 2. Fix the test or implementation issue
 3. Re-run the tests
@@ -257,16 +260,31 @@ If tests fail:
 **IMPORTANT:** Track failure count per file.
 
 If tests fail **3 times with the same error**:
+
 ```
 <promise>BLOCKED: [filename] - [error description]</promise>
 ```
+
 Stop immediately. Do not continue to the next file.
 
 ---
 
-## Step 9: Mark Complete
+## Step 9: Lint the project
+
+run
+
+```
+pnpm lint
+```
+
+to ensure no errors have been left behind
+
+---
+
+## Step 10: Mark Complete
 
 When all tests pass, update `@packages/nestjs-neo4jsonapi/TEST-COVERAGE-GAPS.md`:
+
 - Change `- [ ]` to `- [x]` for the completed file
 
 ---
@@ -308,9 +326,7 @@ describe("MyController", () => {
 
     const module = await Test.createTestingModule({
       controllers: [MyController],
-      providers: [
-        { provide: MyService, useValue: createMockMyService() },
-      ],
+      providers: [{ provide: MyService, useValue: createMockMyService() }],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
@@ -365,10 +381,7 @@ describe("MyRepository", () => {
     neo4jService = createMockNeo4jService();
 
     const module = await Test.createTestingModule({
-      providers: [
-        MyRepository,
-        { provide: Neo4jService, useValue: neo4jService },
-      ],
+      providers: [MyRepository, { provide: Neo4jService, useValue: neo4jService }],
     }).compile();
 
     repository = module.get<MyRepository>(MyRepository);
@@ -381,7 +394,7 @@ describe("MyRepository", () => {
 
     expect(neo4jService.run).toHaveBeenCalledWith(
       expect.stringContaining("MATCH"),
-      expect.objectContaining({ id: "123" })
+      expect.objectContaining({ id: "123" }),
     );
   });
 });
@@ -409,7 +422,9 @@ describe("JwtAuthGuard", () => {
     const context = createMockExecutionContext({
       headers: { authorization: "Bearer invalid-token" },
     });
-    jwtService.verify.mockImplementation(() => { throw new Error("Invalid token"); });
+    jwtService.verify.mockImplementation(() => {
+      throw new Error("Invalid token");
+    });
 
     await expect(guard.canActivate(context)).rejects.toThrow();
   });

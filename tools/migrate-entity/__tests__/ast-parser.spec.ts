@@ -6,13 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import * as path from "path";
-import {
-  parseMetaFile,
-  parseEntityFile,
-  parseMapFile,
-  parseSerialiserFile,
-  parseOldFiles,
-} from "../lib/ast-parser";
+import { parseMetaFile, parseEntityFile, parseMapFile, parseSerialiserFile, parseOldFiles } from "../lib/ast-parser";
 import { OldEntityFiles } from "../lib/types";
 
 const FIXTURES_DIR = path.resolve(__dirname, "../__fixtures__");

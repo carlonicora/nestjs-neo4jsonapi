@@ -285,7 +285,18 @@ export class CacheService {
       return "empty";
     }
 
-    const str = JSON.stringify(obj, Object.keys(obj).sort());
+    const sortObjectKeys = (o: unknown): unknown => {
+      if (o === null || typeof o !== "object") return o;
+      if (Array.isArray(o)) return o.map(sortObjectKeys);
+      return Object.keys(o as Record<string, unknown>)
+        .sort()
+        .reduce((result: Record<string, unknown>, key) => {
+          result[key] = sortObjectKeys((o as Record<string, unknown>)[key]);
+          return result;
+        }, {});
+    };
+
+    const str = JSON.stringify(sortObjectKeys(obj));
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);

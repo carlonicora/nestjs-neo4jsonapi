@@ -17,13 +17,7 @@ const FIXTURES_DIR = path.resolve(__dirname, "../__fixtures__");
  * Helper to check if TypeScript code is syntactically valid
  */
 function isValidTypeScript(code: string): { valid: boolean; errors: string[] } {
-  const sourceFile = ts.createSourceFile(
-    "test.ts",
-    code,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
+  const sourceFile = ts.createSourceFile("test.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
   const errors: string[] = [];
 

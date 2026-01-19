@@ -9,27 +9,27 @@ This document lists all testable files that do not yet have associated test file
 
 ## Controllers (26 files)
 
-- [ ] `src/core/health/controllers/health.controller.ts`
-- [ ] `src/core/version/controllers/version.controller.ts`
-- [ ] `src/foundations/audit/controllers/audit.controller.ts`
-- [ ] `src/foundations/auth/controllers/auth.controller.ts`
-- [ ] `src/foundations/auth/controllers/auth.discord.controller.ts`
-- [ ] `src/foundations/auth/controllers/auth.google.controller.ts`
-- [ ] `src/foundations/chunk/controllers/chunk.controller.ts`
-- [ ] `src/foundations/content/controllers/content.controller.ts`
-- [ ] `src/foundations/feature/controllers/feature.controller.ts`
-- [ ] `src/foundations/notification/controllers/notification.controller.ts`
-- [ ] `src/foundations/oauth/controllers/oauth.authorize.controller.ts`
-- [ ] `src/foundations/oauth/controllers/oauth.management.controller.ts`
-- [ ] `src/foundations/oauth/controllers/oauth.token.controller.ts`
-- [ ] `src/foundations/push/controllers/push.controller.ts`
-- [ ] `src/foundations/role/controllers/role.controller.ts`
-- [ ] `src/foundations/role/controllers/role.user.controller.ts`
-- [ ] `src/foundations/s3/controllers/s3.controller.ts`
-- [ ] `src/foundations/stripe-customer/controllers/stripe-customer.controller.ts`
-- [ ] `src/foundations/stripe-invoice/controllers/stripe-invoice.controller.ts`
-- [ ] `src/foundations/stripe-usage/controllers/stripe-usage.controller.ts`
-- [ ] `src/foundations/user/controllers/user.controller.ts`
+- [x] `src/core/health/controllers/health.controller.ts`
+- [x] `src/core/version/controllers/version.controller.ts`
+- [x] `src/foundations/audit/controllers/audit.controller.ts`
+- [x] `src/foundations/auth/controllers/auth.controller.ts`
+- [x] `src/foundations/auth/controllers/auth.discord.controller.ts`
+- [x] `src/foundations/auth/controllers/auth.google.controller.ts`
+- [x] `src/foundations/chunk/controllers/chunk.controller.ts`
+- [x] `src/foundations/content/controllers/content.controller.ts`
+- [x] `src/foundations/feature/controllers/feature.controller.ts`
+- [x] `src/foundations/notification/controllers/notification.controller.ts`
+- [x] `src/foundations/oauth/controllers/oauth.authorize.controller.ts`
+- [x] `src/foundations/oauth/controllers/oauth.management.controller.ts`
+- [x] `src/foundations/oauth/controllers/oauth.token.controller.ts`
+- [x] `src/foundations/push/controllers/push.controller.ts`
+- [x] `src/foundations/role/controllers/role.controller.ts`
+- [x] `src/foundations/role/controllers/role.user.controller.ts`
+- [x] `src/foundations/s3/controllers/s3.controller.ts`
+- [x] `src/foundations/stripe-customer/controllers/stripe-customer.controller.ts`
+- [x] `src/foundations/stripe-invoice/controllers/stripe-invoice.controller.ts`
+- [x] `src/foundations/stripe-usage/controllers/stripe-usage.controller.ts`
+- [x] `src/foundations/user/controllers/user.controller.ts`
 
 ---
 
@@ -37,7 +37,7 @@ This document lists all testable files that do not yet have associated test file
 
 ### Core Services
 
-- [ ] `src/core/cache/services/cache.service.ts`
+- [x] `src/core/cache/services/cache.service.ts`
 - [ ] `src/core/cors/services/cors.options.service.ts`
 - [ ] `src/core/debug/services/debug.module.service.ts`
 - [ ] `src/core/email/services/email.service.ts`

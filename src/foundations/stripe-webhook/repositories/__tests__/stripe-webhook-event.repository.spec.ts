@@ -144,9 +144,9 @@ describe("StripeWebhookEventRepository", () => {
       const error = new Error("Database error");
       neo4jService.readOne.mockRejectedValue(error);
 
-      await expect(
-        repository.findByStripeEventId({ stripeEventId: TEST_IDS.stripeEventId }),
-      ).rejects.toThrow("Database error");
+      await expect(repository.findByStripeEventId({ stripeEventId: TEST_IDS.stripeEventId })).rejects.toThrow(
+        "Database error",
+      );
     });
   });
 
@@ -235,7 +235,9 @@ describe("StripeWebhookEventRepository", () => {
         retryCount: 0,
       });
       expect(mockQuery.queryParams.id).toBeDefined();
-      expect(mockQuery.query).toContain(`CREATE (${stripeWebhookEventMeta.nodeName}:${stripeWebhookEventMeta.labelName}`);
+      expect(mockQuery.query).toContain(
+        `CREATE (${stripeWebhookEventMeta.nodeName}:${stripeWebhookEventMeta.labelName}`,
+      );
       expect(mockQuery.query).toContain("createdAt: datetime($createdAt)");
       expect(mockQuery.query).toContain("updatedAt: datetime($updatedAt)");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
@@ -366,9 +368,7 @@ describe("StripeWebhookEventRepository", () => {
       await repository.updateStatus(params);
 
       expect(mockQuery.queryParams.processedAt).toBe(processedAt.toISOString());
-      expect(mockQuery.query).toContain(
-        `${stripeWebhookEventMeta.nodeName}.processedAt = datetime($processedAt)`,
-      );
+      expect(mockQuery.query).toContain(`${stripeWebhookEventMeta.nodeName}.processedAt = datetime($processedAt)`);
     });
 
     it("should update status with error message", async () => {

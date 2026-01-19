@@ -228,7 +228,7 @@ describe("StripeWebhookNotificationService", () => {
       const paramsWithPaymentIntent: StripeWebhookPaymentFailureNotificationParams = {
         stripeCustomerId: TEST_IDS.customerId,
         stripePaymentIntentId: TEST_IDS.paymentIntentId,
-        amount: 10.00,
+        amount: 10.0,
         currency: "usd",
         errorMessage: "Insufficient funds",
       };
@@ -333,9 +333,7 @@ describe("StripeWebhookNotificationService", () => {
 
       await service.sendPaymentFailedEmail(baseParams);
 
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("Unknown error"),
-      );
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Unknown error"));
     });
 
     it("should handle invoice not found in local database", async () => {
@@ -392,11 +390,7 @@ describe("StripeWebhookNotificationService", () => {
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
       emailQueue.add.mockResolvedValue({} as any);
 
-      await service.sendSubscriptionStatusChangeEmail(
-        TEST_IDS.customerId,
-        "canceled",
-        TEST_IDS.subscriptionId,
-      );
+      await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, "canceled", TEST_IDS.subscriptionId);
 
       expect(stripeCustomerRepository.findByStripeCustomerId).toHaveBeenCalledWith({
         stripeCustomerId: TEST_IDS.customerId,
@@ -430,11 +424,7 @@ describe("StripeWebhookNotificationService", () => {
     it("should skip notification when customer not found", async () => {
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(null);
 
-      await service.sendSubscriptionStatusChangeEmail(
-        TEST_IDS.customerId,
-        "canceled",
-        TEST_IDS.subscriptionId,
-      );
+      await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, "canceled", TEST_IDS.subscriptionId);
 
       expect(logger.warn).toHaveBeenCalledWith(
         `Cannot send subscription notification: Customer ${TEST_IDS.customerId} not found in Neo4j`,
@@ -450,11 +440,7 @@ describe("StripeWebhookNotificationService", () => {
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(customerWithoutName as any);
       emailQueue.add.mockResolvedValue({} as any);
 
-      await service.sendSubscriptionStatusChangeEmail(
-        TEST_IDS.customerId,
-        "active",
-        TEST_IDS.subscriptionId,
-      );
+      await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, "active", TEST_IDS.subscriptionId);
 
       expect(emailQueue.add).toHaveBeenCalledWith(
         "billing-notification",
@@ -471,11 +457,7 @@ describe("StripeWebhookNotificationService", () => {
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
       emailQueue.add.mockRejectedValue(new Error("Queue connection failed"));
 
-      await service.sendSubscriptionStatusChangeEmail(
-        TEST_IDS.customerId,
-        "canceled",
-        TEST_IDS.subscriptionId,
-      );
+      await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, "canceled", TEST_IDS.subscriptionId);
 
       expect(logger.error).toHaveBeenCalledWith(
         expect.stringContaining(`Failed to queue subscription notification for ${TEST_IDS.customerId}`),
@@ -487,15 +469,9 @@ describe("StripeWebhookNotificationService", () => {
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
       emailQueue.add.mockRejectedValue("string error");
 
-      await service.sendSubscriptionStatusChangeEmail(
-        TEST_IDS.customerId,
-        "canceled",
-        TEST_IDS.subscriptionId,
-      );
+      await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, "canceled", TEST_IDS.subscriptionId);
 
-      expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining("Unknown error"),
-      );
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Unknown error"));
     });
 
     it("should handle different subscription statuses", async () => {
@@ -508,11 +484,7 @@ describe("StripeWebhookNotificationService", () => {
         vi.clearAllMocks();
         stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
 
-        await service.sendSubscriptionStatusChangeEmail(
-          TEST_IDS.customerId,
-          status,
-          TEST_IDS.subscriptionId,
-        );
+        await service.sendSubscriptionStatusChangeEmail(TEST_IDS.customerId, status, TEST_IDS.subscriptionId);
 
         expect(emailQueue.add).toHaveBeenCalledWith(
           "billing-notification",
@@ -658,17 +630,13 @@ describe("StripeWebhookNotificationService", () => {
         currency: "usd",
       });
 
-      expect(emailQueue.add).toHaveBeenCalledWith(
-        "billing-notification",
-        expect.any(Object),
-        {
-          attempts: 3,
-          backoff: {
-            type: "exponential",
-            delay: 5000,
-          },
+      expect(emailQueue.add).toHaveBeenCalledWith("billing-notification", expect.any(Object), {
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 5000,
         },
-      );
+      });
     });
   });
 
@@ -720,9 +688,7 @@ describe("StripeWebhookNotificationService", () => {
         reason: "trial_expired",
       });
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("no admins found"),
-      );
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no admins found"));
       expect(emailQueue.add).not.toHaveBeenCalled();
     });
 
@@ -862,9 +828,7 @@ describe("StripeWebhookNotificationService", () => {
         dataRemovalDate: new Date("2025-02-25"),
       });
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("no owner email"),
-      );
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no owner email"));
       expect(emailQueue.add).not.toHaveBeenCalled();
     });
 
@@ -918,9 +882,7 @@ describe("StripeWebhookNotificationService", () => {
         dataRemovalDate: new Date(),
       });
 
-      expect(logger.log).toHaveBeenCalledWith(
-        `Queued subscription cancelled email for company ${MOCK_COMPANY.id}`,
-      );
+      expect(logger.log).toHaveBeenCalledWith(`Queued subscription cancelled email for company ${MOCK_COMPANY.id}`);
     });
 
     it("should use default company name when name is missing", async () => {

@@ -46,7 +46,7 @@ describe("StripeSubscriptionController", () => {
 
   // Test data constants
   const TEST_IDS = {
-    companyId: "company_123",
+    companyId: "660e8400-e29b-41d4-a716-446655440001",
     subscriptionId: "sub_test123",
     priceId: "price_test123",
   };
@@ -67,7 +67,7 @@ describe("StripeSubscriptionController", () => {
     return {
       user: {
         companyId,
-        userId: "user_123",
+        userId: "550e8400-e29b-41d4-a716-446655440001",
       },
     } as AuthenticatedRequest;
   };

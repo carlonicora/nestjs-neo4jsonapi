@@ -44,7 +44,7 @@ describe("StripeUsageAdminService", () => {
 
   // Test data constants
   const MOCK_STRIPE_CUSTOMER: StripeCustomer = {
-    id: "billing_customer_123",
+    id: "990e8400-e29b-41d4-a716-446655440001",
     stripeCustomerId: TEST_IDS.customerId,
     email: "test@example.com",
     name: "Test Customer",
@@ -58,7 +58,7 @@ describe("StripeUsageAdminService", () => {
   };
 
   const MOCK_SUBSCRIPTION: StripeSubscription = {
-    id: "subscription_123",
+    id: "aa0e8400-e29b-41d4-a716-446655440001",
     stripeSubscriptionId: TEST_IDS.subscriptionId,
     stripeSubscriptionItemId: "si_test_123",
     status: "active",
@@ -73,7 +73,7 @@ describe("StripeUsageAdminService", () => {
   };
 
   const MOCK_USAGE_RECORD: StripeUsageRecord = {
-    id: "usage_record_123",
+    id: "cc0e8400-e29b-41d4-a716-446655440001",
     subscriptionId: MOCK_SUBSCRIPTION.id,
     meterId: TEST_IDS.meterId,
     meterEventName: "api_call",

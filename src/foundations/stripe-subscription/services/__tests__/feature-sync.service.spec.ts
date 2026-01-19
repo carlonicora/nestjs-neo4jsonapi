@@ -21,11 +21,11 @@ describe("FeatureSyncService", () => {
   let logger: vi.Mocked<AppLoggingService>;
 
   // Test data constants
-  const MOCK_COMPANY_ID = "company_123";
+  const MOCK_COMPANY_ID = "660e8400-e29b-41d4-a716-446655440001";
   const MOCK_SUBSCRIPTION_ID = "sub_stripe_123";
-  const MOCK_CUSTOMER_INTERNAL_ID = "customer_internal_123";
+  const MOCK_CUSTOMER_INTERNAL_ID = "990e8400-e29b-41d4-a716-446655440001";
   const MOCK_STRIPE_CUSTOMER_ID = "cus_stripe_123";
-  const MOCK_PRICE_ID = "price_123";
+  const MOCK_PRICE_ID = "ee0e8400-e29b-41d4-a716-446655440001";
 
   const MOCK_FEATURE_1 = { id: "feat-1", name: "Feature 1" };
   const MOCK_FEATURE_2 = { id: "feat-2", name: "Feature 2" };

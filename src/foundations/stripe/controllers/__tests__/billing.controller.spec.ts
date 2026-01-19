@@ -44,19 +44,18 @@ describe("BillingController", () => {
 
   // Test data constants
   const TEST_IDS = {
-    companyId: "company_123",
+    companyId: "660e8400-e29b-41d4-a716-446655440001",
     customerId: "cus_test123",
     invoiceId: "in_test123",
     paymentMethodId: "pm_test123",
   };
-
 
   // Create a mock authenticated request
   const createMockRequest = (companyId: string = TEST_IDS.companyId): AuthenticatedRequest => {
     return {
       user: {
         companyId,
-        userId: "user_123",
+        userId: "550e8400-e29b-41d4-a716-446655440001",
       },
     } as AuthenticatedRequest;
   };
@@ -313,7 +312,9 @@ describe("BillingController", () => {
 
       // Test portal session endpoint
       await controller.createPortalSession(req, createMockReply());
-      expect(billingService.createPortalSession).toHaveBeenCalledWith(expect.objectContaining({ companyId: customCompanyId }));
+      expect(billingService.createPortalSession).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: customCompanyId }),
+      );
     });
   });
 });

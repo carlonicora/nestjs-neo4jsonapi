@@ -16,7 +16,7 @@ const compat = new FlatCompat({
 
 export default [
   {
-    ignores: ["**/eslint.config.mjs", "dist/**/*", "**/*.spec.ts", "**/*.test.ts"],
+    ignores: ["**/eslint.config.mjs", "dist/**/*", "tools/**/__fixtures__/**"],
   },
   ...compat.extends("plugin:@typescript-eslint/recommended", "plugin:prettier/recommended"),
   {
@@ -52,6 +52,26 @@ export default [
         "argsIgnorePattern": "^_",
         "varsIgnorePattern": "^_"
       }],
+    },
+  },
+  // Test files configuration with relaxed rules
+  {
+    files: ["**/*.test.ts", "**/*.spec.ts", "**/__tests__/**/*.ts"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+      },
+      parser: tsParser,
+      parserOptions: {
+        project: path.resolve(__dirname, "tsconfig.spec.json"),
+        tsconfigRootDir: path.resolve(__dirname),
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
     },
   },
 ];

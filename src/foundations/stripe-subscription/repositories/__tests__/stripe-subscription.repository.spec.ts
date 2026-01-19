@@ -214,9 +214,9 @@ describe("StripeSubscriptionRepository", () => {
       const error = new Error("Database error");
       neo4jService.readMany.mockRejectedValue(error);
 
-      await expect(
-        repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId }),
-      ).rejects.toThrow("Database error");
+      await expect(repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId })).rejects.toThrow(
+        "Database error",
+      );
     });
 
     it("should order results by createdAt DESC", async () => {
@@ -386,7 +386,9 @@ describe("StripeSubscriptionRepository", () => {
       expect(mockQuery.query).toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
+      expect(mockQuery.query).toContain(
+        `CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`,
+      );
       expect(mockQuery.query).toContain("createdAt: datetime()");
       expect(mockQuery.query).toContain("updatedAt: datetime()");
       expect(mockQuery.query).toContain(
@@ -572,7 +574,9 @@ describe("StripeSubscriptionRepository", () => {
       await repository.update(params);
 
       expect(mockQuery.queryParams.currentPeriodEnd).toBe(newDate.toISOString());
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
+      expect(mockQuery.query).toContain(
+        `${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`,
+      );
     });
 
     it("should update cancelAtPeriodEnd field", async () => {
@@ -937,7 +941,9 @@ describe("StripeSubscriptionRepository", () => {
       expect(mockQuery.query).toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`);
+      expect(mockQuery.query).toContain(
+        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`,
+      );
       expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
       expect(mockQuery.query).toContain(
         `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
@@ -1013,7 +1019,9 @@ describe("StripeSubscriptionRepository", () => {
       expect(mockQuery.queryParams).toEqual({
         id: TEST_IDS.subscriptionId,
       });
-      expect(mockQuery.query).toContain(`MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})`);
+      expect(mockQuery.query).toContain(
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})`,
+      );
       expect(mockQuery.query).toContain(`DETACH DELETE ${stripeSubscriptionMeta.nodeName}`);
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });

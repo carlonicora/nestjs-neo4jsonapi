@@ -6,11 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import * as path from "path";
-import {
-  generateDescriptor,
-  generateMetaFile,
-  generateEntityFile,
-} from "../lib/descriptor-generator";
+import { generateDescriptor, generateMetaFile, generateEntityFile } from "../lib/descriptor-generator";
 import { parseOldFiles } from "../lib/ast-parser";
 import { OldEntityFiles, ParsedEntity, ParsedMeta } from "../lib/types";
 
@@ -383,7 +379,9 @@ describe("descriptor-generator", () => {
       expect(result.indexOf("import")).toBeLessThan(result.indexOf("export type TestEntity"));
 
       // Should have type definition before descriptor
-      expect(result.indexOf("export type TestEntity")).toBeLessThan(result.indexOf("export const TestEntityDescriptor"));
+      expect(result.indexOf("export type TestEntity")).toBeLessThan(
+        result.indexOf("export const TestEntityDescriptor"),
+      );
 
       // Should have descriptor type export at end
       expect(result).toContain("export type TestEntityDescriptorType");

@@ -143,10 +143,7 @@ describe("StripeWebhookController", () => {
 
       await controller.handleStripeWebhook(req, mockReply, TEST_DATA.signature);
 
-      expect(stripeWebhookService.constructEvent).toHaveBeenCalledWith(
-        (req as any).rawBody,
-        TEST_DATA.signature,
-      );
+      expect(stripeWebhookService.constructEvent).toHaveBeenCalledWith((req as any).rawBody, TEST_DATA.signature);
       expect(stripeWebhookEventRepository.findByStripeEventId).toHaveBeenCalledWith({
         stripeEventId: MOCK_WEBHOOK_EVENT.id,
       });
@@ -424,13 +421,7 @@ describe("StripeWebhookController", () => {
 
       await controller.handleStripeWebhook(req, mockReply, TEST_DATA.signature);
 
-      expect(callOrder).toEqual([
-        "constructEvent",
-        "parseEvent",
-        "findByStripeEventId",
-        "create",
-        "queueAdd",
-      ]);
+      expect(callOrder).toEqual(["constructEvent", "parseEvent", "findByStripeEventId", "create", "queueAdd"]);
     });
   });
 });

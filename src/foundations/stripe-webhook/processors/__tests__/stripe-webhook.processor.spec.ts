@@ -69,10 +69,7 @@ describe("StripeWebhookProcessor", () => {
     stripeEventId: "evt_test_12345678",
   };
 
-  const createMockJob = (
-    eventType: string,
-    payload: Record<string, any>,
-  ): Job<StripeWebhookJobData> => {
+  const createMockJob = (eventType: string, payload: Record<string, any>): Job<StripeWebhookJobData> => {
     return {
       id: "job_123",
       data: {
@@ -361,7 +358,10 @@ describe("StripeWebhookProcessor", () => {
         ...MOCK_SUBSCRIPTION,
         status: "canceled",
       };
-      const job = createMockJob("customer.subscription.deleted", canceledSubscription as unknown as Record<string, any>);
+      const job = createMockJob(
+        "customer.subscription.deleted",
+        canceledSubscription as unknown as Record<string, any>,
+      );
 
       const mockStripeCustomer = { id: "internal-customer-id", stripeCustomerId: TEST_IDS.customerId };
       const mockCompany = { id: "company-id" };
@@ -384,7 +384,10 @@ describe("StripeWebhookProcessor", () => {
         ...MOCK_SUBSCRIPTION,
         status: "canceled",
       };
-      const job = createMockJob("customer.subscription.updated", canceledSubscription as unknown as Record<string, any>);
+      const job = createMockJob(
+        "customer.subscription.updated",
+        canceledSubscription as unknown as Record<string, any>,
+      );
 
       const mockStripeCustomer = { id: "internal-customer-id", stripeCustomerId: TEST_IDS.customerId };
       const mockCompany = { id: "company-id" };
@@ -402,7 +405,9 @@ describe("StripeWebhookProcessor", () => {
         status: "completed",
         processedAt: expect.any(Date),
       });
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Failed to update company subscription status"));
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to update company subscription status"),
+      );
     });
 
     it("should not update subscription status when stripe customer not found (canceled)", async () => {
@@ -411,7 +416,10 @@ describe("StripeWebhookProcessor", () => {
         ...MOCK_SUBSCRIPTION,
         status: "canceled",
       };
-      const job = createMockJob("customer.subscription.updated", canceledSubscription as unknown as Record<string, any>);
+      const job = createMockJob(
+        "customer.subscription.updated",
+        canceledSubscription as unknown as Record<string, any>,
+      );
 
       stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(null);
       subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
@@ -428,7 +436,10 @@ describe("StripeWebhookProcessor", () => {
         ...MOCK_SUBSCRIPTION,
         status: "canceled",
       };
-      const job = createMockJob("customer.subscription.updated", canceledSubscription as unknown as Record<string, any>);
+      const job = createMockJob(
+        "customer.subscription.updated",
+        canceledSubscription as unknown as Record<string, any>,
+      );
 
       const mockStripeCustomer = { id: "internal-customer-id", stripeCustomerId: TEST_IDS.customerId };
 
@@ -631,7 +642,10 @@ describe("StripeWebhookProcessor", () => {
         ...MOCK_PAYMENT_INTENT,
         customer: null,
       };
-      const job = createMockJob("payment_intent.payment_failed", paymentIntentWithoutCustomer as unknown as Record<string, any>);
+      const job = createMockJob(
+        "payment_intent.payment_failed",
+        paymentIntentWithoutCustomer as unknown as Record<string, any>,
+      );
 
       await processor.process(job);
 
@@ -652,7 +666,9 @@ describe("StripeWebhookProcessor", () => {
       await processor.process(job);
 
       expect(logger.error).toHaveBeenCalledWith(
-        expect.stringContaining(`Failed to send payment failure notification for payment intent ${MOCK_PAYMENT_INTENT.id}`),
+        expect.stringContaining(
+          `Failed to send payment failure notification for payment intent ${MOCK_PAYMENT_INTENT.id}`,
+        ),
       );
       // Should still complete successfully
       expect(stripeWebhookEventRepository.updateStatus).toHaveBeenCalledWith({

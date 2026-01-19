@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
-import { Test, TestingModule } from '@nestjs/testing';
-import { OpenApiModule } from '../openapi.module';
-import { OpenApiService } from '../openapi.service';
+import { describe, it, expect } from "vitest";
+import { Test, TestingModule } from "@nestjs/testing";
+import { OpenApiModule } from "../openapi.module";
+import { OpenApiService } from "../openapi.service";
 
-describe('OpenApiModule', () => {
+describe("OpenApiModule", () => {
   let module: TestingModule;
 
-  it('should compile the module', async () => {
+  it("should compile the module", async () => {
     module = await Test.createTestingModule({
       imports: [OpenApiModule],
     }).compile();
@@ -14,7 +14,7 @@ describe('OpenApiModule', () => {
     expect(module).toBeDefined();
   });
 
-  it('should provide OpenApiService', async () => {
+  it("should provide OpenApiService", async () => {
     module = await Test.createTestingModule({
       imports: [OpenApiModule],
     }).compile();
@@ -24,7 +24,7 @@ describe('OpenApiModule', () => {
     expect(service).toBeInstanceOf(OpenApiService);
   });
 
-  it('should export OpenApiService', async () => {
+  it("should export OpenApiService", async () => {
     module = await Test.createTestingModule({
       imports: [OpenApiModule],
     }).compile();
@@ -34,7 +34,7 @@ describe('OpenApiModule', () => {
     expect(service).toBeDefined();
   });
 
-  it('should be a global module (same instance across modules)', async () => {
+  it("should be a global module (same instance across modules)", async () => {
     module = await Test.createTestingModule({
       imports: [OpenApiModule],
     }).compile();

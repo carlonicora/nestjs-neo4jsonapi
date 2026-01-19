@@ -89,7 +89,6 @@ describe("StripeProductController", () => {
       expect(service.archiveProduct).toHaveBeenCalledWith({ id: productId });
     });
 
-
     it("should handle errors from admin service", async () => {
       const productId = uuid();
       const error = new Error("Product not found");
@@ -132,7 +131,6 @@ describe("StripeProductController", () => {
       expect(service.reactivateProduct).toHaveBeenCalledWith({ id: productId });
     });
 
-
     it("should use DELETE method on /:id/archive route", async () => {
       const productId = uuid();
       mockStripeProductAdminService.reactivateProduct.mockResolvedValue(undefined);
@@ -153,5 +151,4 @@ describe("StripeProductController", () => {
       expect(service.reactivateProduct).toHaveBeenCalledWith({ id: productId });
     });
   });
-
 });

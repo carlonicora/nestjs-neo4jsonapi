@@ -214,9 +214,9 @@ describe("StripeInvoiceRepository", () => {
       const error = new Error("Database error");
       neo4jService.readMany.mockRejectedValue(error);
 
-      await expect(
-        repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId }),
-      ).rejects.toThrow("Database error");
+      await expect(repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId })).rejects.toThrow(
+        "Database error",
+      );
     });
 
     it("should order results by createdAt DESC", async () => {
@@ -819,7 +819,9 @@ describe("StripeInvoiceRepository", () => {
       await repository.updateByStripeInvoiceId(params);
 
       expect(mockQuery.queryParams.stripeHostedInvoiceUrl).toBe("https://stripe.com/invoice/updated");
-      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`);
+      expect(mockQuery.query).toContain(
+        `${stripeInvoiceMeta.nodeName}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl`,
+      );
     });
 
     it("should update stripePdfUrl field", async () => {
@@ -1264,7 +1266,9 @@ describe("StripeInvoiceRepository", () => {
         attempted: false,
       });
 
-      expect(mockQuery.query).not.toContain(`MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`);
+      expect(mockQuery.query).not.toContain(
+        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`,
+      );
       expect(mockQuery.query).not.toContain(`CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
     });
 

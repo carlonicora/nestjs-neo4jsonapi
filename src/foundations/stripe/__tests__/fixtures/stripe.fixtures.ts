@@ -8,21 +8,22 @@
 import Stripe from "stripe";
 
 // Test IDs
+// Internal IDs use UUID v4 format, Stripe external IDs use Stripe's test prefixes
 export const TEST_IDS = {
-  customerId: "cus_test_12345678",
-  companyId: "company_test_123",
-  subscriptionId: "sub_test_12345678",
-  productId: "prod_test_12345678",
-  priceId: "price_test_12345678",
-  paymentIntentId: "pi_test_12345678",
-  paymentMethodId: "pm_test_12345678",
-  setupIntentId: "seti_test_12345678",
-  invoiceId: "in_test_12345678",
-  couponId: "coupon_test_12345678",
-  refundId: "re_test_12345678",
-  taxRateId: "txr_test_12345678",
-  disputeId: "dp_test_12345678",
-  meterId: "meter_test_12345678",
+  customerId: "cus_test_12345678", // Stripe external ID
+  companyId: "660e8400-e29b-41d4-a716-446655440001", // Internal UUID
+  subscriptionId: "sub_test_12345678", // Stripe external ID
+  productId: "prod_test_12345678", // Stripe external ID
+  priceId: "price_test_12345678", // Stripe external ID
+  paymentIntentId: "pi_test_12345678", // Stripe external ID
+  paymentMethodId: "pm_test_12345678", // Stripe external ID
+  setupIntentId: "seti_test_12345678", // Stripe external ID
+  invoiceId: "in_test_12345678", // Stripe external ID
+  couponId: "coupon_test_12345678", // Stripe external ID
+  refundId: "re_test_12345678", // Stripe external ID
+  taxRateId: "txr_test_12345678", // Stripe external ID
+  disputeId: "dp_test_12345678", // Stripe external ID
+  meterId: "meter_test_12345678", // Stripe external ID
 };
 
 // Mock Customer

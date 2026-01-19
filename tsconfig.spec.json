@@ -1,13 +1,18 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["jest", "node"],
+    "types": ["vitest/globals", "node"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "isolatedModules": true,
     "module": "ESNext",
-    "moduleResolution": "Bundler"
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rootDir": "."
   },
-  "include": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/__tests__/**/*"],
+  "include": [
+    "src/**/*",
+    "tools/**/*.spec.ts",
+    "tools/**/__tests__/**/*"
+  ],
   "exclude": ["node_modules", "dist"]
 }
