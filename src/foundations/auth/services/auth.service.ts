@@ -211,12 +211,6 @@ export class AuthService {
       marketingConsentAt: params.data.attributes.marketingConsentAt,
     });
 
-    // Queue trial creation (async, non-blocking)
-    await this.trialQueueService.queueTrialCreation({
-      companyId: company.id,
-      userId: user.id,
-    });
-
     const link: string = `${this.appConfig.url}en/activation/${user.code}`;
 
     await this.emailService.sendEmail(
@@ -325,6 +319,14 @@ export class AuthService {
     if (user.codeExpiration < new Date()) throw new HttpException("The code provided is expired", HttpStatus.NOT_FOUND);
 
     await this.repository.activateAccount({ userId: user.id });
+
+    // Queue trial creation now that account is activated
+    if (user.company?.id) {
+      await this.trialQueueService.queueTrialCreation({
+        companyId: user.company.id,
+        userId: user.id,
+      });
+    }
   }
 
   async completeOAuthRegistration(params: {

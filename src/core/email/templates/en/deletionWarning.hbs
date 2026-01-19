@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{#if isFinalWarning}}Final Warning{{else}}Data Deletion Warning{{/if}}</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background-color: {{#if isFinalWarning}}#dc3545{{else}}#ffc107{{/if}}; color: {{#if isFinalWarning}}#fff{{else}}#333{{/if}}; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+    <h1 style="margin: 0; font-size: 24px;">
+      {{#if isFinalWarning}}
+        Final Warning: Account Deletion Tomorrow
+      {{else}}
+        Your Data Will Be Deleted in {{daysRemaining}} Days
+      {{/if}}
+    </h1>
+  </div>
+
+  <div style="background-color: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px;">
+    <p>Hello,</p>
+
+    {{#if isTrialExpired}}
+    <p>Your free trial for <strong>{{companyName}}</strong> has ended without an active subscription.</p>
+    {{else}}
+    <p>Your subscription for <strong>{{companyName}}</strong> has been cancelled.</p>
+    {{/if}}
+
+    <div style="background-color: #fff; border-left: 4px solid {{#if isFinalWarning}}#dc3545{{else}}#ffc107{{/if}}; padding: 15px; margin: 20px 0;">
+      <p style="margin: 0; font-weight: bold;">
+        {{#if isFinalWarning}}
+          All your data will be permanently deleted tomorrow on {{deletionDate}}.
+        {{else}}
+          All your data will be permanently deleted on {{deletionDate}} ({{daysRemaining}} days from now).
+        {{/if}}
+      </p>
+    </div>
+
+    <p>This includes:</p>
+    <ul>
+      <li>All photographs and files</li>
+      <li>All rolls and collections</li>
+      <li>Person profiles and contact information</li>
+      <li>Galleries and moodboards</li>
+      <li>Account settings and preferences</li>
+    </ul>
+
+    <p><strong>Want to keep your data?</strong></p>
+    <p>Simply resubscribe before {{deletionDate}} and all your data will be preserved.</p>
+
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{resubscribeUrl}}" style="background-color: #007bff; color: #fff; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+        Resubscribe Now
+      </a>
+    </div>
+
+    <p style="color: #666; font-size: 14px;">
+      If you have any questions, please contact our support team.
+    </p>
+  </div>
+
+  <div style="text-align: center; padding: 20px; color: #999; font-size: 12px;">
+    <p>This is an automated message from Only35.</p>
+  </div>
+</body>
+</html>

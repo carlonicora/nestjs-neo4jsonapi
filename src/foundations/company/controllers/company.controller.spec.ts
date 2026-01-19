@@ -86,6 +86,7 @@ describe("CompanyController", () => {
       createForController: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      deleteImmediate: vi.fn(),
       activateLicense: vi.fn(),
     };
 
@@ -457,12 +458,12 @@ describe("CompanyController", () => {
   describe("delete", () => {
     it("should delete company successfully", async () => {
       const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
-      companyService.delete.mockResolvedValue();
+      companyService.deleteImmediate.mockResolvedValue();
       cacheService.invalidateByElement.mockResolvedValue();
 
       await controller.delete(mockRequest, mockReply, MOCK_COMPANY_ID);
 
-      expect(companyService.delete).toHaveBeenCalledWith({
+      expect(companyService.deleteImmediate).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
       });
       expect(mockReply.send).toHaveBeenCalledWith();
@@ -472,11 +473,11 @@ describe("CompanyController", () => {
     it("should handle service errors during deletion", async () => {
       const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
       const serviceError = new Error("Deletion failed");
-      companyService.delete.mockRejectedValue(serviceError);
+      companyService.deleteImmediate.mockRejectedValue(serviceError);
 
       await expect(controller.delete(mockRequest, mockReply, MOCK_COMPANY_ID)).rejects.toThrow("Deletion failed");
 
-      expect(companyService.delete).toHaveBeenCalledWith({
+      expect(companyService.deleteImmediate).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
       });
       expect(mockReply.send).not.toHaveBeenCalled();
@@ -486,14 +487,14 @@ describe("CompanyController", () => {
     it("should handle cache invalidation errors", async () => {
       const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
       const cacheError = new Error("Cache invalidation failed");
-      companyService.delete.mockResolvedValue();
+      companyService.deleteImmediate.mockResolvedValue();
       cacheService.invalidateByElement.mockRejectedValue(cacheError);
 
       await expect(controller.delete(mockRequest, mockReply, MOCK_COMPANY_ID)).rejects.toThrow(
         "Cache invalidation failed",
       );
 
-      expect(companyService.delete).toHaveBeenCalledWith({
+      expect(companyService.deleteImmediate).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
       });
       expect(mockReply.send).toHaveBeenCalledWith();

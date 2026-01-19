@@ -1,5 +1,5 @@
 import { InjectQueue } from "@nestjs/bullmq";
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
@@ -15,6 +15,7 @@ import { CompanyDescriptor, Company } from "../../company/entities/company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.put.dto";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
+import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
 
 @Injectable()
 export class CompanyService {
@@ -27,6 +28,9 @@ export class CompanyService {
     private readonly versionService: VersionService,
     private readonly moduleRef: ModuleRef,
     private readonly webSocketService: WebSocketService,
+    @Optional()
+    @Inject(COMPANY_DELETION_HANDLER)
+    private readonly deletionHandler?: CompanyDeletionHandler,
   ) {}
 
   async validate(params: { companyId: string }) {
@@ -164,6 +168,45 @@ export class CompanyService {
 
   async deleteFullCompany(params: { companyId: string }): Promise<void> {
     await this.companyRepository.delete({ companyId: params.companyId });
+  }
+
+  /**
+   * Synchronous immediate company deletion.
+   * Uses comprehensive deletion handler if available,
+   * otherwise falls back to simple repository delete.
+   *
+   * Cancels any active Stripe subscriptions and sends a deletion confirmation email.
+   *
+   * @param companyId - Company to delete
+   * @param companyName - Company name for audit logging (optional)
+   */
+  async deleteImmediate(params: { companyId: string; companyName?: string }): Promise<void> {
+    console.log("[CompanyService.deleteImmediate] Called with params:", JSON.stringify(params));
+    console.log("[CompanyService.deleteImmediate] deletionHandler available:", !!this.deletionHandler);
+
+    if (this.deletionHandler) {
+      const name =
+        params.companyName ??
+        (await this.companyRepository.findByCompanyId({ companyId: params.companyId }))?.name ??
+        "Unknown";
+      console.log("[CompanyService.deleteImmediate] Resolved company name:", name);
+      console.log("[CompanyService.deleteImmediate] Calling deletionHandler.deleteCompany...");
+
+      try {
+        await this.deletionHandler.deleteCompany(params.companyId, name, {
+          sendEmail: true,
+          reason: "immediate_deletion",
+        });
+        console.log("[CompanyService.deleteImmediate] deletionHandler.deleteCompany completed successfully");
+      } catch (error) {
+        console.error("[CompanyService.deleteImmediate] deletionHandler.deleteCompany FAILED:", error);
+        throw error;
+      }
+    } else {
+      console.log("[CompanyService.deleteImmediate] No deletionHandler, using direct repository delete");
+      await this.companyRepository.delete({ companyId: params.companyId });
+      console.log("[CompanyService.deleteImmediate] Repository delete completed");
+    }
   }
 
   async setDefaultCompanyRequestConfigurationForContactRequests(): Promise<void> {

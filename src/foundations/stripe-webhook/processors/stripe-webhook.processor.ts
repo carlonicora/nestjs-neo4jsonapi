@@ -217,9 +217,25 @@ export class StripeWebhookProcessor extends WorkerHost {
 
               // Send trial ended notification (only for trial expirations, not other end states)
               if (isTrialEndedWithoutPayment) {
-                try {
-                  const trialEndDate = subscription.trial_end ? new Date(subscription.trial_end * 1000) : new Date();
+                const trialEndDate = subscription.trial_end ? new Date(subscription.trial_end * 1000) : new Date();
 
+                // Schedule company deletion
+                try {
+                  await this.companyRepository.scheduleCompanyDeletion({
+                    companyId: company.id,
+                    endDate: trialEndDate,
+                    reason: "trial_expired",
+                  });
+                  this.logger.log(`Scheduled deletion for company ${company.id} (trial_expired)`);
+                } catch (error) {
+                  this.logger.error(
+                    `Failed to schedule deletion for ${company.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                  );
+                  // Don't throw - deletion scheduling failure shouldn't block webhook processing
+                }
+
+                // Send trial ended notification
+                try {
                   await this.notificationService.sendTrialEndedEmail({
                     stripeCustomerId,
                     stripeSubscriptionId: subscription.id,
@@ -245,6 +261,23 @@ export class StripeWebhookProcessor extends WorkerHost {
                   `WebSocket notification failed for company ${company.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
                 );
                 // Don't throw - WebSocket failure should not fail webhook
+              }
+
+              // Schedule company deletion for subscription cancellation (not trial expiry)
+              if (isEndState && subscription.status === "canceled") {
+                try {
+                  await this.companyRepository.scheduleCompanyDeletion({
+                    companyId: company.id,
+                    endDate: new Date(),
+                    reason: "subscription_cancelled",
+                  });
+                  this.logger.log(`Scheduled deletion for company ${company.id} (subscription_cancelled)`);
+                } catch (error) {
+                  this.logger.error(
+                    `Failed to schedule deletion for ${company.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                  );
+                  // Don't throw - deletion scheduling failure shouldn't block webhook processing
+                }
               }
             }
           } else {
@@ -459,6 +492,20 @@ export class StripeWebhookProcessor extends WorkerHost {
             `WebSocket notification failed for company ${featureSyncCompanyId}: ${error instanceof Error ? error.message : "Unknown error"}`,
           );
           // Don't throw - WebSocket failure should not fail webhook
+        }
+
+        // Clear any pending deletion schedule (user resubscribed)
+        try {
+          const company = await this.companyRepository.findByCompanyId({ companyId: featureSyncCompanyId });
+          if (company?.scheduledDeletionAt) {
+            await this.companyRepository.clearDeletionSchedule({ companyId: featureSyncCompanyId });
+            this.logger.log(`Cleared deletion schedule for company ${featureSyncCompanyId} (payment received)`);
+          }
+        } catch (error) {
+          this.logger.error(
+            `Failed to clear deletion schedule for ${featureSyncCompanyId}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          );
+          // Don't throw - deletion schedule clear failure should not fail webhook
         }
       }
 

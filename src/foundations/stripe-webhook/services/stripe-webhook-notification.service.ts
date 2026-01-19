@@ -411,4 +411,113 @@ export class StripeWebhookNotificationService {
       // Don't throw - notification failure shouldn't block webhook processing
     }
   }
+
+  /**
+   * Send deletion warning email to all company admins
+   * Context-aware: shows different message for trial_expired vs subscription_cancelled
+   */
+  async sendDeletionWarningEmail(params: {
+    companyId: string;
+    daysRemaining: number;
+    deletionDate: Date;
+    reason: "trial_expired" | "subscription_cancelled";
+  }): Promise<void> {
+    const { companyId, daysRemaining, deletionDate, reason } = params;
+
+    try {
+      await this.cls.run(async () => {
+        // Find company
+        const company = await this.companyRepository.findByCompanyId({ companyId });
+        if (!company) {
+          this.logger.warn(`Cannot send deletion warning: company ${companyId} not found`);
+          return;
+        }
+
+        // Find all admin users for this company
+        const admins = await this.userRepository.findAdminsByCompanyId({ companyId });
+        if (admins.length === 0) {
+          this.logger.warn(`Cannot send deletion warning: no admins found for company ${companyId}`);
+          return;
+        }
+
+        // Queue email for each admin
+        for (const admin of admins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "deletion-warning" as const,
+              payload: {
+                to: admin.email,
+                companyName: company.name ?? "Your company",
+                daysRemaining,
+                deletionDate: deletionDate.toISOString(),
+                reason,
+                isTrialExpired: reason === "trial_expired",
+                isSubscriptionCancelled: reason === "subscription_cancelled",
+                locale: "en",
+              },
+            },
+            {
+              attempts: 3,
+              backoff: { type: "exponential", delay: 5000 },
+            },
+          );
+        }
+
+        this.logger.log(`Queued deletion warning emails for company ${companyId} (${admins.length} admins)`);
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue deletion warning notification: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block processing
+    }
+  }
+
+  /**
+   * Send subscription cancelled email with 30-day data removal warning
+   */
+  async sendSubscriptionCancelledEmail(params: { companyId: string; dataRemovalDate: Date }): Promise<void> {
+    const { companyId, dataRemovalDate } = params;
+
+    try {
+      await this.cls.run(async () => {
+        // Find company
+        const company = await this.companyRepository.findByCompanyId({ companyId });
+        if (!company) {
+          this.logger.warn(`Cannot send cancellation email: company ${companyId} not found`);
+          return;
+        }
+
+        // Find company owner
+        const ownerEmail = company.ownerEmail;
+        if (!ownerEmail) {
+          this.logger.warn(`Cannot send cancellation email: no owner email for company ${companyId}`);
+          return;
+        }
+
+        await this.emailQueue.add(
+          "billing-notification",
+          {
+            jobType: "subscription-cancelled" as const,
+            payload: {
+              to: ownerEmail,
+              companyName: company.name ?? "Your company",
+              dataRemovalDate: dataRemovalDate.toISOString(),
+              locale: "en",
+            },
+          },
+          {
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5000 },
+          },
+        );
+
+        this.logger.log(`Queued subscription cancelled email for company ${companyId}`);
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue subscription cancelled notification: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block processing
+    }
+  }
 }

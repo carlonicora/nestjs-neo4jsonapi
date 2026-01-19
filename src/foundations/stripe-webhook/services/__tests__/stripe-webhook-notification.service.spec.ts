@@ -671,4 +671,277 @@ describe("StripeWebhookNotificationService", () => {
       );
     });
   });
+
+  describe("sendDeletionWarningEmail", () => {
+    let companyRepository: vi.Mocked<CompanyRepository>;
+    let userRepository: vi.Mocked<UserRepository>;
+
+    const MOCK_COMPANY = {
+      id: "company-test-123",
+      name: "Test Company",
+      ownerEmail: "owner@test.com",
+    };
+
+    const MOCK_ADMIN = {
+      id: "admin-user-123",
+      email: "admin@test.com",
+      name: "Admin User",
+    };
+
+    beforeEach(() => {
+      companyRepository = service["companyRepository"] as vi.Mocked<CompanyRepository>;
+      userRepository = service["userRepository"] as vi.Mocked<UserRepository>;
+    });
+
+    it("should log warning and return when company not found", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(null);
+
+      await service.sendDeletionWarningEmail({
+        companyId: "nonexistent",
+        daysRemaining: 7,
+        deletionDate: new Date("2025-02-25"),
+        reason: "trial_expired",
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot send deletion warning: company nonexistent not found"),
+      );
+      expect(emailQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should log warning and return when no admins found", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue([]);
+
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate: new Date("2025-02-25"),
+        reason: "trial_expired",
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("no admins found"),
+      );
+      expect(emailQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should queue email for each admin with correct payload", async () => {
+      const mockAdmins = [
+        { ...MOCK_ADMIN, id: "admin-1", email: "admin1@test.com" },
+        { ...MOCK_ADMIN, id: "admin-2", email: "admin2@test.com" },
+      ];
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue(mockAdmins);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      const deletionDate = new Date("2025-02-25");
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate,
+        reason: "trial_expired",
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledTimes(2);
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({
+          jobType: "deletion-warning",
+          payload: expect.objectContaining({
+            to: "admin1@test.com",
+            companyName: MOCK_COMPANY.name,
+            daysRemaining: 7,
+            deletionDate: deletionDate.toISOString(),
+            reason: "trial_expired",
+            isTrialExpired: true,
+            isSubscriptionCancelled: false,
+          }),
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it("should set correct flags for trial_expired reason", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue([MOCK_ADMIN]);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate: new Date(),
+        reason: "trial_expired",
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            isTrialExpired: true,
+            isSubscriptionCancelled: false,
+          }),
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it("should set correct flags for subscription_cancelled reason", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue([MOCK_ADMIN]);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate: new Date(),
+        reason: "subscription_cancelled",
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            isTrialExpired: false,
+            isSubscriptionCancelled: true,
+          }),
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it("should catch and log errors without throwing", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockRejectedValue(new Error("Database error"));
+
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate: new Date(),
+        reason: "trial_expired",
+      });
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to queue deletion warning notification"),
+      );
+    });
+  });
+
+  describe("sendSubscriptionCancelledEmail", () => {
+    let companyRepository: vi.Mocked<CompanyRepository>;
+
+    const MOCK_COMPANY = {
+      id: "company-test-123",
+      name: "Test Company",
+      ownerEmail: "owner@test.com",
+    };
+
+    beforeEach(() => {
+      companyRepository = service["companyRepository"] as vi.Mocked<CompanyRepository>;
+    });
+
+    it("should log warning and return when company not found", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(null);
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: "nonexistent",
+        dataRemovalDate: new Date("2025-02-25"),
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Cannot send cancellation email: company nonexistent not found"),
+      );
+      expect(emailQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should log warning and return when no owner email", async () => {
+      const companyWithoutEmail = { ...MOCK_COMPANY, ownerEmail: null };
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(companyWithoutEmail);
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate: new Date("2025-02-25"),
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("no owner email"),
+      );
+      expect(emailQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("should queue email with correct payload", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      const dataRemovalDate = new Date("2025-02-25");
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate,
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        {
+          jobType: "subscription-cancelled",
+          payload: {
+            to: MOCK_COMPANY.ownerEmail,
+            companyName: MOCK_COMPANY.name,
+            dataRemovalDate: dataRemovalDate.toISOString(),
+            locale: "en",
+          },
+        },
+        {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 5000 },
+        },
+      );
+    });
+
+    it("should catch and log errors without throwing", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockRejectedValue(new Error("Database error"));
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate: new Date(),
+      });
+
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to queue subscription cancelled notification"),
+      );
+    });
+
+    it("should log success message when email queued", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate: new Date(),
+      });
+
+      expect(logger.log).toHaveBeenCalledWith(
+        `Queued subscription cancelled email for company ${MOCK_COMPANY.id}`,
+      );
+    });
+
+    it("should use default company name when name is missing", async () => {
+      const companyWithoutName = { ...MOCK_COMPANY, name: null };
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(companyWithoutName);
+      emailQueue.add.mockResolvedValue({} as any);
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate: new Date(),
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            companyName: "Your company",
+          }),
+        }),
+        expect.any(Object),
+      );
+    });
+  });
 });

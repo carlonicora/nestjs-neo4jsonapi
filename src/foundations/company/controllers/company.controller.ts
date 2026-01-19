@@ -123,7 +123,7 @@ export class CompanyController {
     @Res() reply: FastifyReply,
     @Param("companyId") companyId: string,
   ) {
-    await this.companyService.delete({ companyId: companyId });
+    await this.companyService.deleteImmediate({ companyId });
     reply.send();
 
     await this.cacheService.invalidateByElement(companyMeta.endpoint, companyId);
@@ -137,20 +137,40 @@ export class CompanyController {
     @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("companyId") companyId: string,
-    @Body() body: { confirmation: string },
   ) {
+    console.log("[CompanyController.selfDelete] Endpoint called");
+    console.log("[CompanyController.selfDelete] companyId from URL:", companyId);
+    console.log("[CompanyController.selfDelete] User info:", {
+      userId: request.user.userId,
+      userCompanyId: request.user.companyId,
+      userRoles: request.user.roles,
+    });
+
     // Verify user belongs to this company
-    if (request.user.companyId !== companyId) throw new HttpException("Unauthorised", 401);
+    if (request.user.companyId !== companyId) {
+      console.error("[CompanyController.selfDelete] UNAUTHORIZED: User companyId mismatch");
+      console.error("[CompanyController.selfDelete] User companyId:", request.user.companyId);
+      console.error("[CompanyController.selfDelete] Requested companyId:", companyId);
+      throw new HttpException("Unauthorised", 401);
+    }
+    console.log("[CompanyController.selfDelete] Company ownership verified");
 
-    // Fetch company to verify confirmation
+    // Fetch company for audit logging
+    console.log("[CompanyController.selfDelete] Fetching company from database...");
     const company = await this.companyService.findRaw({ companyId });
-    if (body.confirmation !== company.name)
-      throw new HttpException("Confirmation does not match company name", HttpStatus.BAD_REQUEST);
+    console.log("[CompanyController.selfDelete] Company found:", {
+      id: company.id,
+      name: company.name,
+    });
 
-    // Delete company
-    await this.companyService.delete({ companyId });
+    // Delete company using immediate full deletion
+    console.log("[CompanyController.selfDelete] Starting deleteImmediate...");
+    await this.companyService.deleteImmediate({ companyId, companyName: company.name });
+    console.log("[CompanyController.selfDelete] deleteImmediate completed successfully");
     reply.send();
 
+    console.log("[CompanyController.selfDelete] Invalidating cache...");
     await this.cacheService.invalidateByElement(companyMeta.endpoint, companyId);
+    console.log("[CompanyController.selfDelete] Cache invalidated, operation complete");
   }
 }

@@ -443,6 +443,28 @@ describe("CompanyService", () => {
     });
   });
 
+  describe("deleteImmediate", () => {
+    it("should fall back to repository delete when no deletion handler is provided", async () => {
+      mockRepository.delete.mockResolvedValue();
+
+      await service.deleteImmediate({ companyId: MOCK_COMPANY_ID });
+
+      expect(mockRepository.delete).toHaveBeenCalledWith({
+        companyId: MOCK_COMPANY_ID,
+      });
+    });
+
+    it("should use provided company name when available", async () => {
+      mockRepository.delete.mockResolvedValue();
+
+      await service.deleteImmediate({ companyId: MOCK_COMPANY_ID, companyName: "Test Company" });
+
+      expect(mockRepository.delete).toHaveBeenCalledWith({
+        companyId: MOCK_COMPANY_ID,
+      });
+    });
+  });
+
   describe("setDefaultCompanyRequestConfigurationForContactRequests", () => {
     it("should not modify CLS when companyId is already set", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);

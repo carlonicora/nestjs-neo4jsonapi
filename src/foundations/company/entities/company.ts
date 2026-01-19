@@ -20,6 +20,11 @@ export type Company = Entity & {
   configurations?: string;
   configuration?: any;
 
+  // Deletion scheduling fields
+  subscriptionEndedAt?: Date;
+  scheduledDeletionAt?: Date;
+  deactivationReason?: string;
+
   feature: Feature[];
   module: Module[];
 };
@@ -45,6 +50,9 @@ export const CompanyDescriptor = defineEntity<Company>()({
     availableExtraTokens: { type: "number" },
     configurations: { type: "string" },
     configuration: { type: "string" },
+    subscriptionEndedAt: { type: "datetime" },
+    scheduledDeletionAt: { type: "datetime" },
+    deactivationReason: { type: "string" },
   },
 
   // Relationship definitions

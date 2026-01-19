@@ -635,4 +635,27 @@ export class UserRepository implements OnModuleInit {
 
     return this.neo4j.readMany(query);
   }
+
+  /**
+   * Find company admins by company ID
+   * Used for deletion warning notifications
+   */
+  async findAdminsByCompanyId(params: { companyId: string }): Promise<User[]> {
+    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+
+    query.queryParams = {
+      companyId: params.companyId,
+      companyAdminRoleId: RoleId.CompanyAdministrator,
+    };
+
+    query.query = `
+      MATCH (company:Company {id: $companyId})
+      MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
+      MATCH (user)-[:MEMBER_OF]->(role:Role {id: $companyAdminRoleId})
+      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      RETURN user, user_role
+    `;
+
+    return this.neo4j.readMany(query);
+  }
 }

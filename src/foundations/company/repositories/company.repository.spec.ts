@@ -491,4 +491,194 @@ describe("CompanyRepository", () => {
       expect(result).toBe(0);
     });
   });
+
+  describe("scheduleCompanyDeletion", () => {
+    it("should set deletion schedule with 30-day offset", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue();
+
+      const endDate = new Date("2025-01-15");
+      await repository.scheduleCompanyDeletion({
+        companyId: MOCK_COMPANY_ID,
+        endDate,
+        reason: "trial_expired",
+      });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalled();
+      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
+    });
+
+    it("should set subscriptionEndedAt, scheduledDeletionAt, and deactivationReason", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+      });
+
+      const endDate = new Date("2025-01-15");
+      await repository.scheduleCompanyDeletion({
+        companyId: MOCK_COMPANY_ID,
+        endDate,
+        reason: "subscription_cancelled",
+      });
+
+      expect(capturedQuery.queryParams.companyId).toBe(MOCK_COMPANY_ID);
+      expect(capturedQuery.queryParams.subscriptionEndedAt).toBe(endDate.toISOString());
+      expect(capturedQuery.queryParams.deactivationReason).toBe("subscription_cancelled");
+      expect(capturedQuery.query).toContain("company.subscriptionEndedAt");
+      expect(capturedQuery.query).toContain("company.scheduledDeletionAt");
+      expect(capturedQuery.query).toContain("company.deactivationReason");
+    });
+
+    it("should calculate scheduledDeletionAt as endDate + 30 days", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+      });
+
+      const endDate = new Date("2025-01-15T00:00:00.000Z");
+      await repository.scheduleCompanyDeletion({
+        companyId: MOCK_COMPANY_ID,
+        endDate,
+        reason: "trial_expired",
+      });
+
+      const expectedDeletionDate = new Date("2025-02-14T00:00:00.000Z");
+      expect(capturedQuery.queryParams.scheduledDeletionAt).toBe(expectedDeletionDate.toISOString());
+    });
+  });
+
+  describe("clearDeletionSchedule", () => {
+    it("should clear all deletion fields to null", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue();
+
+      await repository.clearDeletionSchedule({ companyId: MOCK_COMPANY_ID });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalled();
+      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
+    });
+
+    it("should set subscriptionEndedAt, scheduledDeletionAt, and deactivationReason to null", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+      });
+
+      await repository.clearDeletionSchedule({ companyId: MOCK_COMPANY_ID });
+
+      expect(capturedQuery.queryParams.companyId).toBe(MOCK_COMPANY_ID);
+      expect(capturedQuery.query).toContain("company.subscriptionEndedAt = null");
+      expect(capturedQuery.query).toContain("company.scheduledDeletionAt = null");
+      expect(capturedQuery.query).toContain("company.deactivationReason = null");
+    });
+  });
+
+  describe("findCompaniesForDeletion", () => {
+    it("should return companies past scheduledDeletionAt with inactive subscription", async () => {
+      const companiesForDeletion = [
+        { ...MOCK_COMPANY, scheduledDeletionAt: new Date("2025-01-01"), isActiveSubscription: false },
+      ];
+      mockNeo4jService.readMany.mockResolvedValue(companiesForDeletion);
+
+      const result = await repository.findCompaniesForDeletion();
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalled();
+      expect(mockNeo4jService.readMany).toHaveBeenCalled();
+      expect(result).toEqual(companiesForDeletion);
+    });
+
+    it("should return empty array when no companies match deletion criteria", async () => {
+      mockNeo4jService.readMany.mockResolvedValue([]);
+
+      const result = await repository.findCompaniesForDeletion();
+
+      expect(result).toEqual([]);
+    });
+
+    it("should query for companies with scheduledDeletionAt <= now and isActiveSubscription = false", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.readMany.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+        return [];
+      });
+
+      await repository.findCompaniesForDeletion();
+
+      expect(capturedQuery.query).toContain("scheduledDeletionAt IS NOT NULL");
+      expect(capturedQuery.query).toContain("scheduledDeletionAt <= datetime()");
+      expect(capturedQuery.query).toContain("isActiveSubscription = false");
+    });
+  });
+
+  describe("findCompaniesForDeletionWarning", () => {
+    it("should return companies N days before deletion", async () => {
+      const companiesForWarning = [
+        { ...MOCK_COMPANY, scheduledDeletionAt: new Date("2025-01-22"), isActiveSubscription: false },
+      ];
+      mockNeo4jService.readMany.mockResolvedValue(companiesForWarning);
+
+      const result = await repository.findCompaniesForDeletionWarning({ daysBeforeDeletion: 7 });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalled();
+      expect(mockNeo4jService.readMany).toHaveBeenCalled();
+      expect(result).toEqual(companiesForWarning);
+    });
+
+    it("should use day boundaries (startOfDay, endOfDay) in query", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.readMany.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+        return [];
+      });
+
+      await repository.findCompaniesForDeletionWarning({ daysBeforeDeletion: 7 });
+
+      expect(capturedQuery.queryParams.startOfDay).toBeDefined();
+      expect(capturedQuery.queryParams.endOfDay).toBeDefined();
+      expect(capturedQuery.query).toContain("scheduledDeletionAt >= datetime($startOfDay)");
+      expect(capturedQuery.query).toContain("scheduledDeletionAt <= datetime($endOfDay)");
+    });
+
+    it("should query for companies with inactive subscription", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      });
+      mockNeo4jService.readMany.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+        return [];
+      });
+
+      await repository.findCompaniesForDeletionWarning({ daysBeforeDeletion: 1 });
+
+      expect(capturedQuery.query).toContain("isActiveSubscription = false");
+    });
+
+    it("should return empty array when no companies match warning criteria", async () => {
+      mockNeo4jService.readMany.mockResolvedValue([]);
+
+      const result = await repository.findCompaniesForDeletionWarning({ daysBeforeDeletion: 7 });
+
+      expect(result).toEqual([]);
+    });
+  });
 });

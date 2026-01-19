@@ -569,4 +569,89 @@ export class CompanyRepository implements OnModuleInit {
     const result = await this.neo4j.read(query, queryParams);
     return result?.userCount || 0;
   }
+
+  async scheduleCompanyDeletion(params: {
+    companyId: string;
+    endDate: Date;
+    reason: "trial_expired" | "subscription_cancelled";
+  }): Promise<void> {
+    const { companyId, endDate, reason } = params;
+    const scheduledDeletionAt = new Date(endDate);
+    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + 30);
+
+    const query = this.neo4j.initQuery();
+    query.queryParams = {
+      companyId,
+      subscriptionEndedAt: endDate.toISOString(),
+      scheduledDeletionAt: scheduledDeletionAt.toISOString(),
+      deactivationReason: reason,
+    };
+
+    query.query = `
+      MATCH (company:Company {id: $companyId})
+      SET company.subscriptionEndedAt = datetime($subscriptionEndedAt),
+          company.scheduledDeletionAt = datetime($scheduledDeletionAt),
+          company.deactivationReason = $deactivationReason,
+          company.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  async clearDeletionSchedule(params: { companyId: string }): Promise<void> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { companyId: params.companyId };
+
+    query.query = `
+      MATCH (company:Company {id: $companyId})
+      SET company.subscriptionEndedAt = null,
+          company.scheduledDeletionAt = null,
+          company.deactivationReason = null,
+          company.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  async findCompaniesForDeletion(): Promise<Company[]> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+
+    query.query = `
+      MATCH (company:Company)
+      WHERE company.scheduledDeletionAt IS NOT NULL
+        AND company.scheduledDeletionAt <= datetime()
+        AND company.isActiveSubscription = false
+      RETURN company
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  async findCompaniesForDeletionWarning(params: { daysBeforeDeletion: number }): Promise<Company[]> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + params.daysBeforeDeletion);
+
+    const startOfDay = new Date(targetDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    query.queryParams = {
+      startOfDay: startOfDay.toISOString(),
+      endOfDay: endOfDay.toISOString(),
+    };
+
+    query.query = `
+      MATCH (company:Company)
+      WHERE company.scheduledDeletionAt IS NOT NULL
+        AND company.isActiveSubscription = false
+        AND company.scheduledDeletionAt >= datetime($startOfDay)
+        AND company.scheduledDeletionAt <= datetime($endOfDay)
+      RETURN company
+    `;
+
+    return this.neo4j.readMany(query);
+  }
 }
