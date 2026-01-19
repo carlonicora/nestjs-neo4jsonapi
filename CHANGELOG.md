@@ -1,3 +1,9 @@
+## [1.35.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.34.3...v1.35.0) (2026-01-19)
+
+### 🚀 Features
+
+* add stripe discount code ([a14474c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a14474c74f921fe77001b0108f3cb9131c495638))
+
 ## [1.34.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.34.2...v1.34.3) (2026-01-19)
 
 ### 🚨 Tests
