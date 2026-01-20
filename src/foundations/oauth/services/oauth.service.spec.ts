@@ -47,6 +47,7 @@ describe("OAuthService", () => {
         isUsed: false,
       }),
       markAuthorizationCodeUsed: vi.fn().mockResolvedValue(true),
+      findCompanyIdForUser: vi.fn().mockResolvedValue("company-id"),
     };
 
     mockClientService = {
