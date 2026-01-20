@@ -92,6 +92,14 @@ async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: 
   // Register multipart for file uploads
   await app.register(require("@fastify/multipart"), defaultMultipartOptions);
 
+  // Register JSON:API content type parser (treats application/vnd.api+json as JSON)
+  const fastifyInstance = app.getHttpAdapter().getInstance();
+  fastifyInstance.addContentTypeParser(
+    "application/vnd.api+json",
+    { parseAs: "string" },
+    fastifyInstance.getDefaultJsonParser("ignore", "ignore"),
+  );
+
   // Setup logging
   app.useLogger(loggingService);
   setupFastifyLoggingHook(app, loggingService);
