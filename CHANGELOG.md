@@ -1,3 +1,9 @@
+## [1.36.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.36.0...v1.36.1) (2026-01-20)
+
+### 🚨 Tests
+
+* correct tests ([aa8aa1a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/aa8aa1ac8ab14333a0ab2db19ed4450c9276756b))
+
 ## [1.36.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.35.0...v1.36.0) (2026-01-20)
 
 ### 🚀 Features
