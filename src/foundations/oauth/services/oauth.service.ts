@@ -504,7 +504,7 @@ export class OAuthService {
 
     // Add issuer if active
     if (result.active) {
-      const apiUrl = this.configService.get("api.url", { infer: true }) ?? "https://api.only35.com";
+      const apiUrl = this.configService.get("api.url", { infer: true }) ?? "https://api.only35.app";
       return {
         ...result,
         iss: apiUrl,
