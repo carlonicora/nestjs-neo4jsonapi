@@ -1,3 +1,15 @@
+## [1.36.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.35.0...v1.36.0) (2026-01-20)
+
+### 🚀 Features
+
+* accept application/nvd.api+json ([478bb02](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/478bb027533cfbc8a00f7c2c58a4a0f8fd33e286))
+* implement uploadToS3 method for handling file uploads to S3 and Azure ([c0439ce](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c0439ced7d61a96bf37b492d1b915454bb21baf2))
+
+### 🐛 Bug Fixes
+
+* correct guard ([52e49b1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/52e49b15e733d4aa3555f9fe176d5f5319c8cdba))
+* correct OAuth ([ce23e39](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ce23e39128e9560abcb55369c72e484068234573))
+
 ## [1.35.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.34.3...v1.35.0) (2026-01-19)
 
 ### 🚀 Features
