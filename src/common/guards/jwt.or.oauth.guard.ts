@@ -47,7 +47,7 @@ export class JwtOrOAuthGuard implements CanActivate {
     try {
       const jwtGuard = this.moduleRef.get(JwtAuthGuard, { strict: false });
       return (await jwtGuard.canActivate(context)) as boolean;
-    } catch (error) {
+    } catch (_error) {
       throw new HttpException("Invalid authentication", 401);
     }
   }
