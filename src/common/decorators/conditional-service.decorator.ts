@@ -25,11 +25,25 @@ export interface AppModeConfig {
 export const APP_MODE_TOKEN = Symbol("APP_MODE_TOKEN");
 
 /**
+ * Resolves constructor injection tokens, accounting for @Inject() decorator overrides.
+ * NestJS stores custom tokens (from @Inject, @InjectQueue, etc.) in 'self:paramtypes' metadata.
+ */
+function resolveInjectionTokens(ServiceClass: new (...args: any[]) => any): any[] {
+  const paramTypes = Reflect.getMetadata("design:paramtypes", ServiceClass) || [];
+  const customTokens: { index: number; param: any }[] = Reflect.getMetadata("self:paramtypes", ServiceClass) || [];
+
+  const tokens = [...paramTypes];
+  for (const { index, param } of customTokens) {
+    tokens[index] = param;
+  }
+  return tokens;
+}
+
+/**
  * Helper function to create conditional providers based on app mode
  */
 export function createConditionalProvider<T>(ServiceClass: new (...args: any[]) => T, modes: AppMode[]): Provider {
-  // Get the constructor parameter types using reflection
-  const paramTypes = Reflect.getMetadata("design:paramtypes", ServiceClass) || [];
+  const tokens = resolveInjectionTokens(ServiceClass);
 
   return {
     provide: ServiceClass,
@@ -38,7 +52,7 @@ export function createConditionalProvider<T>(ServiceClass: new (...args: any[]) 
 
       return new ServiceClass(...args);
     },
-    inject: [APP_MODE_TOKEN, ...paramTypes],
+    inject: [APP_MODE_TOKEN, ...tokens],
   };
 }
 
@@ -60,8 +74,7 @@ export function createApiProvider<T>(ServiceClass: new (...args: any[]) => T): P
  * Helper function to create providers that run in both modes but are mode-aware
  */
 export function createModeAwareProvider<T>(ServiceClass: new (...args: any[]) => T): Provider {
-  // Get the constructor parameter types using reflection
-  const paramTypes = Reflect.getMetadata("design:paramtypes", ServiceClass) || [];
+  const tokens = resolveInjectionTokens(ServiceClass);
 
   return {
     provide: ServiceClass,
@@ -72,7 +85,7 @@ export function createModeAwareProvider<T>(ServiceClass: new (...args: any[]) =>
 
       return instance;
     },
-    inject: [APP_MODE_TOKEN, ...paramTypes],
+    inject: [APP_MODE_TOKEN, ...tokens],
   };
 }
 
