@@ -1,3 +1,9 @@
+## [1.36.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.36.4...v1.36.5) (2026-01-23)
+
+### 📦 Code Refactoring
+
+* rename error variable in JwtOrOAuthGuard for clarity ([49ca07f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/49ca07fd8f124cc6adab5fcd83bed81a80b2947f))
+
 ## [1.36.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.36.3...v1.36.4) (2026-01-23)
 
 ### 📦 Code Refactoring
