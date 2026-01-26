@@ -17,6 +17,7 @@ import { PendingRegistrationService } from "../pending-registration.service";
 import { DiscordUserService } from "../../../discord-user/services/discord-user.service";
 import { GoogleUserService } from "../../../google-user/services/google-user.service";
 import { TrialQueueService } from "../trial-queue.service";
+import { WaitlistService } from "../../../waitlist/services/waitlist.service";
 import { Auth } from "../../entities/auth.entity";
 import { AuthCode } from "../../entities/auth.code.entity";
 import { User } from "../../../user/entities/user";
@@ -60,6 +61,7 @@ describe("AuthService", () => {
   let discordUserService: MockedObject<DiscordUserService>;
   let googleUserService: MockedObject<GoogleUserService>;
   let trialQueueService: MockedObject<TrialQueueService>;
+  let waitlistService: MockedObject<WaitlistService>;
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440000",
@@ -190,6 +192,11 @@ describe("AuthService", () => {
     queueTrialCreation: vi.fn(),
   });
 
+  const createMockWaitlistService = () => ({
+    validateInviteCode: vi.fn(),
+    markAsRegistered: vi.fn(),
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
 
@@ -211,6 +218,7 @@ describe("AuthService", () => {
         { provide: DiscordUserService, useValue: createMockDiscordUserService() },
         { provide: GoogleUserService, useValue: createMockGoogleUserService() },
         { provide: TrialQueueService, useValue: createMockTrialQueueService() },
+        { provide: WaitlistService, useValue: createMockWaitlistService() },
       ],
     }).compile();
 
@@ -230,6 +238,7 @@ describe("AuthService", () => {
     discordUserService = module.get(DiscordUserService) as MockedObject<DiscordUserService>;
     googleUserService = module.get(GoogleUserService) as MockedObject<GoogleUserService>;
     trialQueueService = module.get(TrialQueueService) as MockedObject<TrialQueueService>;
+    waitlistService = module.get(WaitlistService) as MockedObject<WaitlistService>;
   });
 
   afterEach(() => {

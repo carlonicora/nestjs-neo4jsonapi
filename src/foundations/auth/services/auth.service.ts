@@ -24,6 +24,7 @@ import { Role } from "../../role/entities/role";
 import { User } from "../../user/entities/user";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { UserService } from "../../user/services/user.service";
+import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
 
@@ -45,6 +46,7 @@ export class AuthService {
     private readonly discordUserService: DiscordUserService,
     private readonly googleUserService: GoogleUserService,
     private readonly trialQueueService: TrialQueueService,
+    private readonly waitlistService: WaitlistService,
   ) {}
 
   private get appConfig(): ConfigAppInterface {
@@ -191,6 +193,26 @@ export class AuthService {
       throw new HttpException("Registration is currently disabled", HttpStatus.FORBIDDEN);
     }
 
+    // Check registration mode
+    const registrationMode = this.authConfig.registrationMode ?? "open";
+
+    if (registrationMode === "closed") {
+      throw new HttpException("Registration is currently closed", HttpStatus.FORBIDDEN);
+    }
+
+    if (registrationMode === "waitlist") {
+      // Require invite code for waitlist mode
+      if (!params.data.attributes.inviteCode) {
+        throw new HttpException("Registration requires an invitation. Please join the waitlist.", HttpStatus.FORBIDDEN);
+      }
+
+      // Validate invite code
+      const inviteValidation = await this.waitlistService.validateInviteCode(params.data.attributes.inviteCode);
+      if (!inviteValidation || !inviteValidation.valid) {
+        throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
+      }
+    }
+
     await this.userService.expectNotExists({ email: params.data.attributes.email });
 
     const company = await this.companyRepository.createByName({
@@ -210,6 +232,14 @@ export class AuthService {
       marketingConsent: params.data.attributes.marketingConsent,
       marketingConsentAt: params.data.attributes.marketingConsentAt,
     });
+
+    // After successful registration, mark waitlist entry as registered
+    if (registrationMode === "waitlist" && params.data.attributes.inviteCode) {
+      await this.waitlistService.markAsRegistered({
+        inviteCode: params.data.attributes.inviteCode,
+        userId: user.id,
+      });
+    }
 
     const link: string = `${this.appConfig.url}en/activation/${user.code}`;
 
@@ -327,6 +357,9 @@ export class AuthService {
         userId: user.id,
       });
     }
+
+    // Notify platform administrators (non-blocking)
+    await this.notifyAdminsOfRegistration(user);
   }
 
   async completeOAuthRegistration(params: {
@@ -344,6 +377,26 @@ export class AuthService {
     // Check if registration is allowed
     if (!this.authConfig.allowRegistration) {
       throw new HttpException("Registration is currently disabled", HttpStatus.FORBIDDEN);
+    }
+
+    // Check registration mode
+    const registrationMode = this.authConfig.registrationMode ?? "open";
+
+    if (registrationMode === "closed") {
+      throw new HttpException("Registration is currently closed", HttpStatus.FORBIDDEN);
+    }
+
+    if (registrationMode === "waitlist") {
+      // Require invite code for waitlist mode
+      if (!pending.inviteCode) {
+        throw new HttpException("Registration requires an invitation. Please join the waitlist.", HttpStatus.FORBIDDEN);
+      }
+
+      // Validate invite code
+      const inviteValidation = await this.waitlistService.validateInviteCode(pending.inviteCode);
+      if (!inviteValidation || !inviteValidation.valid) {
+        throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
+      }
     }
 
     // Generate IDs for new user and company
@@ -393,11 +446,22 @@ export class AuthService {
       userId: userId,
     });
 
+    // After successful OAuth registration, mark waitlist entry as registered
+    if (registrationMode === "waitlist" && pending.inviteCode) {
+      await this.waitlistService.markAsRegistered({
+        inviteCode: pending.inviteCode,
+        userId: userId,
+      });
+    }
+
     // Delete pending registration
     await this.pendingRegistrationService.delete(params.pendingId);
 
     // Get created user
     const user = await this.users.findByUserId({ userId });
+
+    // Notify platform administrators (non-blocking)
+    await this.notifyAdminsOfRegistration(user);
 
     // Create auth token
     const token: any = await this.createToken({ user });
@@ -409,5 +473,43 @@ export class AuthService {
     });
 
     return { code: authCodeId };
+  }
+
+  /**
+   * Send notification to all platform administrators about a new user registration.
+   * Errors are logged but not thrown to avoid blocking the activation flow.
+   */
+  private async notifyAdminsOfRegistration(user: User): Promise<void> {
+    try {
+      const platformAdmins = await this.users.findPlatformAdministrators();
+
+      if (platformAdmins.length === 0) {
+        return;
+      }
+
+      const dashboardLink = `${this.appConfig.url}en/administration`;
+
+      for (const admin of platformAdmins) {
+        try {
+          await this.emailService.sendEmail(
+            "registrationAdminNotification",
+            {
+              to: admin.email,
+              adminName: admin.name || "Administrator",
+              userName: user.name,
+              userEmail: user.email,
+              companyName: user.company?.name || "N/A",
+              activatedAt: new Date().toISOString(),
+              dashboardLink,
+            },
+            "en",
+          );
+        } catch (emailError) {
+          console.error(`Failed to send registration notification to admin ${admin.email}:`, emailError);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to send registration admin notifications:", error);
+    }
   }
 }

@@ -31,11 +31,35 @@ export class AuthDiscordService {
     return this.config.get<ConfigAuthInterface>("auth");
   }
 
-  generateLoginUrl(): string {
-    return `${this._discordApiUrl}oauth2/authorize?client_id=${this.config.get<ConfigDiscordInterface>("discord").clientId}&redirect_uri=${this.config.get<ConfigApiInterface>("api").url}auth/callback/discord&response_type=code&scope=identify%20email`;
+  generateLoginUrl(inviteCode?: string): string {
+    // Encode invite code in state parameter if present
+    const stateData = {
+      nonce: randomUUID(),
+      ...(inviteCode && { invite: inviteCode }),
+    };
+    const state = Buffer.from(JSON.stringify(stateData)).toString("base64url");
+
+    const params = new URLSearchParams({
+      client_id: this.config.get<ConfigDiscordInterface>("discord").clientId,
+      redirect_uri: `${this.config.get<ConfigApiInterface>("api").url}auth/callback/discord`,
+      response_type: "code",
+      scope: "identify email",
+      state,
+    });
+
+    return `${this._discordApiUrl}oauth2/authorize?${params.toString()}`;
   }
 
-  async handleDiscordLogin(params: { userDetails: discordUser }): Promise<string> {
+  parseInviteCodeFromState(state: string): string | undefined {
+    try {
+      const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
+      return stateData.invite;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async handleDiscordLogin(params: { userDetails: discordUser; inviteCode?: string }): Promise<string> {
     const discordUser: DiscordUser = await this.discordUserRepository.findByDiscordId({
       discordId: params.userDetails.id,
     });
@@ -65,13 +89,14 @@ export class AuthDiscordService {
       return `${this.config.get<ConfigAppInterface>("app").url}auth?error=registration_disabled`;
     }
 
-    // Store pending registration in Redis
+    // Store pending registration in Redis (include invite code if present)
     const pendingId = await this.pendingRegistrationService.create({
       provider: "discord",
       providerUserId: params.userDetails.id,
       email: params.userDetails.email,
       name: params.userDetails.username,
       avatar: params.userDetails.avatar,
+      inviteCode: params.inviteCode,
     });
 
     return `${this.config.get<ConfigAppInterface>("app").url}auth/consent?pending=${pendingId}`;

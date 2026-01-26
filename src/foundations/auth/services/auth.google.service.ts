@@ -31,20 +31,36 @@ export class AuthGoogleService {
     return this.config.get<ConfigAuthInterface>("auth");
   }
 
-  generateLoginUrl(): string {
+  generateLoginUrl(inviteCode?: string): string {
+    // Encode invite code in state parameter if present
+    const stateData = {
+      nonce: randomUUID(),
+      ...(inviteCode && { invite: inviteCode }),
+    };
+    const state = Buffer.from(JSON.stringify(stateData)).toString("base64url");
+
     const params = new URLSearchParams({
       client_id: this.config.get<ConfigGoogleInterface>("google").clientId,
       redirect_uri: `${this.config.get<ConfigApiInterface>("api").url}auth/callback/google`,
       response_type: "code",
       scope: "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
       access_type: "offline",
-      state: randomUUID(),
+      state,
     });
 
     return `${this._googleAuthUrl}?${params.toString()}`;
   }
 
-  async handleGoogleLogin(params: { userDetails: googleUser }): Promise<string> {
+  parseInviteCodeFromState(state: string): string | undefined {
+    try {
+      const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
+      return stateData.invite;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async handleGoogleLogin(params: { userDetails: googleUser; inviteCode?: string }): Promise<string> {
     const googleUser: GoogleUser = await this.googleUserRepository.findByGoogleId({
       googleId: params.userDetails.id,
     });
@@ -74,13 +90,14 @@ export class AuthGoogleService {
       return `${this.config.get<ConfigAppInterface>("app").url}auth?error=registration_disabled`;
     }
 
-    // Store pending registration in Redis
+    // Store pending registration in Redis (include invite code if present)
     const pendingId = await this.pendingRegistrationService.create({
       provider: "google",
       providerUserId: params.userDetails.id,
       email: params.userDetails.email,
       name: params.userDetails.name,
       avatar: params.userDetails.picture,
+      inviteCode: params.inviteCode,
     });
 
     return `${this.config.get<ConfigAppInterface>("app").url}auth/consent?pending=${pendingId}`;

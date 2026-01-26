@@ -9,6 +9,7 @@ import { CompanyModule } from "../company/company.module";
 import { DiscordUserModule } from "../discord-user/discord-user.module";
 import { GoogleUserModule } from "../google-user/google-user.module";
 import { UserModule } from "../user/user.module";
+import { WaitlistModule } from "../waitlist/waitlist.module";
 import { AuthDiscordController } from "./controllers/auth.discord.controller";
 import { AuthGoogleController } from "./controllers/auth.google.controller";
 import { AuthCodeModel } from "./entities/auth.code.model";
@@ -39,6 +40,7 @@ import { TrialQueueService } from "./services/trial-queue.service";
     CompanyModule,
     DiscordUserModule,
     GoogleUserModule,
+    WaitlistModule,
     BullModule.registerQueue({ name: QueueId.TRIAL }),
   ],
 })

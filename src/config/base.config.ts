@@ -262,6 +262,10 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     },
     auth: {
       allowRegistration: process.env.ALLOW_REGISTRATION !== "false",
+      registrationMode:
+        (process.env.NEXT_PUBLIC_REGISTRATION_MODE as "open" | "closed" | "waitlist") ||
+        (process.env.REGISTRATION_MODE as "open" | "closed" | "waitlist") ||
+        "open",
     },
     prompts: options?.prompts ?? {},
     chunkQueues: options?.chunkQueues ?? { queueIds: [] },

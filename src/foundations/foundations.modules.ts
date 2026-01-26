@@ -28,6 +28,7 @@ import { StripeModule } from "./stripe/stripe.module";
 import { StripeTrialModule } from "./stripe-trial/stripe-trial.module";
 import { TokenUsageModule } from "./tokenusage/tokenusage.module";
 import { UserModule } from "./user/user.module";
+import { WaitlistModule } from "./waitlist/waitlist.module";
 
 /**
  * Configuration options for FoundationsModule.
@@ -60,6 +61,7 @@ const STATIC_FOUNDATION_MODULES = [
   S3Module,
   TokenUsageModule,
   UserModule,
+  WaitlistModule,
   StripeModule,
   StripePromotionCodeModule,
   StripeSubscriptionModule,

@@ -18,19 +18,25 @@ export class AuthDiscordController {
   }
 
   @Get(`${authMeta.endpoint}/discord`)
-  async loginWithDiscord(@Res() reply: FastifyReply) {
+  async loginWithDiscord(@Res() reply: FastifyReply, @Query("invite") inviteCode?: string) {
     if (!this.discordConfig.clientId || !this.discordConfig.clientSecret)
       throw new HttpException("Login with Discord is not available", HttpStatus.NOT_IMPLEMENTED);
 
-    reply.redirect(this.authDiscordService.generateLoginUrl(), 302);
+    reply.redirect(this.authDiscordService.generateLoginUrl(inviteCode), 302);
   }
 
   @Get(`${authMeta.endpoint}/callback/discord`)
-  async callbackDiscord(@Res() reply: FastifyReply, @Req() request: any, @Query("code") code: string) {
+  async callbackDiscord(@Res() reply: FastifyReply, @Req() request: any, @Query("code") code: string, @Query("state") state?: string) {
+    // Parse invite code from state if present
+    const inviteCode = state ? this.authDiscordService.parseInviteCodeFromState(state) : undefined;
+
     const accessToken = await this.authDiscordService.exchangeCodeForToken(code);
     const userDetails = await this.authDiscordService.fetchUserDetails(accessToken);
 
-    const redirectUrl = await this.authDiscordService.handleDiscordLogin({ userDetails: userDetails as discordUser });
+    const redirectUrl = await this.authDiscordService.handleDiscordLogin({
+      userDetails: userDetails as discordUser,
+      inviteCode,
+    });
 
     reply.redirect(redirectUrl, 302);
   }

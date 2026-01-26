@@ -40,6 +40,10 @@ export class AuthPostRegisterAttributesDTO {
   @IsOptional()
   @IsString()
   marketingConsentAt?: string;
+
+  @IsOptional()
+  @IsString()
+  inviteCode?: string;
 }
 
 export class AuthPostRegisterDataDTO {

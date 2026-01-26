@@ -18,19 +18,25 @@ export class AuthGoogleController {
   }
 
   @Get(`${authMeta.endpoint}/google`)
-  async loginWithGoogle(@Res() reply: FastifyReply) {
+  async loginWithGoogle(@Res() reply: FastifyReply, @Query("invite") inviteCode?: string) {
     if (!this.googleConfig.clientId || !this.googleConfig.clientSecret)
       throw new HttpException("Login with Google is not available", HttpStatus.NOT_IMPLEMENTED);
 
-    reply.redirect(this.authGoogleService.generateLoginUrl(), 302);
+    reply.redirect(this.authGoogleService.generateLoginUrl(inviteCode), 302);
   }
 
   @Get(`${authMeta.endpoint}/callback/google`)
-  async callbackGoogle(@Res() reply: FastifyReply, @Query("code") code: string) {
+  async callbackGoogle(@Res() reply: FastifyReply, @Query("code") code: string, @Query("state") state: string) {
+    // Parse invite code from state if present
+    const inviteCode = this.authGoogleService.parseInviteCodeFromState(state);
+
     const accessToken = await this.authGoogleService.exchangeCodeForToken(code);
     const userDetails = await this.authGoogleService.fetchUserDetails(accessToken);
 
-    const redirectUrl = await this.authGoogleService.handleGoogleLogin({ userDetails: userDetails as googleUser });
+    const redirectUrl = await this.authGoogleService.handleGoogleLogin({
+      userDetails: userDetails as googleUser,
+      inviteCode,
+    });
 
     reply.redirect(redirectUrl, 302);
   }
