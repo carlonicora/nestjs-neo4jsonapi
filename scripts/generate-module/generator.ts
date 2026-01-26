@@ -16,6 +16,10 @@ import { generateBaseDTOFile } from "./templates/dto.base.template";
 import { generatePostDTOFile } from "./templates/dto.post.template";
 import { generatePutDTOFile } from "./templates/dto.put.template";
 import { generateRelationshipDTOFile } from "./templates/dto.relationship.template";
+import { generateServiceSpecFile } from "./templates/service.spec.template";
+import { generateRepositorySpecFile } from "./templates/repository.spec.template";
+import { generateControllerSpecFile } from "./templates/controller.spec.template";
+import { generateDTOSpecFile } from "./templates/dto.spec.template";
 import { writeFiles, FileToWrite } from "./utils/file-writer";
 import { registerModule } from "./utils/module-registrar";
 import { normalizeCypherType, getTsType, getValidationDecorators, CypherType } from "./utils/type-utils";
@@ -171,6 +175,30 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     });
   }
 
+  // Add test files (co-located with source files)
+  filesToWrite.push(
+    // Service test
+    {
+      path: path.resolve(process.cwd(), `${basePath}/services/${names.kebabCase}.service.spec.ts`),
+      content: generateServiceSpecFile(templateData),
+    },
+    // Repository test
+    {
+      path: path.resolve(process.cwd(), `${basePath}/repositories/${names.kebabCase}.repository.spec.ts`),
+      content: generateRepositorySpecFile(templateData),
+    },
+    // Controller test
+    {
+      path: path.resolve(process.cwd(), `${basePath}/controllers/${names.kebabCase}.controller.spec.ts`),
+      content: generateControllerSpecFile(templateData),
+    },
+    // DTO test
+    {
+      path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.dto.spec.ts`),
+      content: generateDTOSpecFile(templateData),
+    },
+  );
+
   // 5. Write files
   console.log(`\n📝 Writing ${filesToWrite.length} files...\n`);
   writeFiles(filesToWrite, { dryRun, force });
@@ -197,5 +225,5 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   console.log(`   1. Review generated code`);
   console.log(`   2. Run: pnpm lint:api --fix`);
   console.log(`   3. Run: pnpm build:api`);
-  console.log(`   4. Test your new module!`);
+  console.log(`   4. Run tests: pnpm --filter only35-api test -- ${names.kebabCase}`);
 }
