@@ -1,3 +1,11 @@
+## [1.38.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.37.1...v1.38.0) (2026-01-26)
+
+### 🚀 Features
+
+* add waiting list ([ca5b1e2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ca5b1e2a0be7521b624e7eb2761528940556cee4))
+* add waiting list ([0323e28](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0323e28ca28feffef8bf48c8be49815361d78a25))
+* add waiting list ([73b4f07](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/73b4f07619b54ddccf2287af9c85e07bac050c08))
+
 ## [1.37.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.37.0...v1.37.1) (2026-01-26)
 
 ### ♻️ Chores
