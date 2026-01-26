@@ -160,9 +160,13 @@ describe("AuthDiscordService", () => {
     it("should return correctly formatted Discord OAuth2 URL", () => {
       const result = service.generateLoginUrl();
 
-      expect(result).toBe(
-        "https://discord.com/api/oauth2/authorize?client_id=discord-client-id&redirect_uri=http://api.example.com/auth/callback/discord&response_type=code&scope=identify%20email",
-      );
+      // URL contains encoded redirect_uri and state parameter
+      expect(result).toContain("https://discord.com/api/oauth2/authorize?");
+      expect(result).toContain("client_id=discord-client-id");
+      expect(result).toContain("redirect_uri=");
+      expect(result).toContain("response_type=code");
+      expect(result).toContain("scope=identify");
+      expect(result).toContain("state=");
     });
 
     it("should include client_id from config", () => {
@@ -174,13 +178,35 @@ describe("AuthDiscordService", () => {
     it("should include redirect_uri from api config", () => {
       const result = service.generateLoginUrl();
 
-      expect(result).toContain("redirect_uri=http://api.example.com/auth/callback/discord");
+      // URL-encoded redirect_uri
+      expect(result).toContain("redirect_uri=http%3A%2F%2Fapi.example.com%2Fauth%2Fcallback%2Fdiscord");
     });
 
     it("should request identify and email scopes", () => {
       const result = service.generateLoginUrl();
 
-      expect(result).toContain("scope=identify%20email");
+      // URLSearchParams encodes space as +
+      expect(result).toContain("scope=identify+email");
+    });
+
+    it("should include state parameter with nonce", () => {
+      const result = service.generateLoginUrl();
+
+      expect(result).toContain("state=");
+      // State is base64url encoded JSON containing nonce
+      const stateMatch = result.match(/state=([^&]+)/);
+      expect(stateMatch).toBeTruthy();
+      const stateData = JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
+      expect(stateData.nonce).toBe("mock-uuid-12345");
+    });
+
+    it("should include invite code in state when provided", () => {
+      const result = service.generateLoginUrl("test-invite-code");
+
+      const stateMatch = result.match(/state=([^&]+)/);
+      expect(stateMatch).toBeTruthy();
+      const stateData = JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
+      expect(stateData.invite).toBe("test-invite-code");
     });
   });
 

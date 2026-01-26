@@ -4,6 +4,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 vi.mock("../services/auth.google.service", () => ({
   AuthGoogleService: vi.fn().mockImplementation(() => ({
     generateLoginUrl: vi.fn(),
+    parseInviteCodeFromState: vi.fn(),
     exchangeCodeForToken: vi.fn(),
     fetchUserDetails: vi.fn(),
     handleGoogleLogin: vi.fn(),
@@ -51,6 +52,7 @@ describe("AuthGoogleController", () => {
   beforeEach(async () => {
     const mockAuthGoogleService = {
       generateLoginUrl: vi.fn(),
+      parseInviteCodeFromState: vi.fn(),
       exchangeCodeForToken: vi.fn(),
       fetchUserDetails: vi.fn(),
       handleGoogleLogin: vi.fn(),

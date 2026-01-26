@@ -172,10 +172,24 @@ describe("AuthGoogleService", () => {
       expect(result).toContain("access_type=offline");
     });
 
-    it("should include state parameter", () => {
+    it("should include state parameter with nonce", () => {
       const result = service.generateLoginUrl();
 
-      expect(result).toContain("state=mock-uuid-12345");
+      expect(result).toContain("state=");
+      // State is base64url encoded JSON containing nonce
+      const stateMatch = result.match(/state=([^&]+)/);
+      expect(stateMatch).toBeTruthy();
+      const stateData = JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
+      expect(stateData.nonce).toBe("mock-uuid-12345");
+    });
+
+    it("should include invite code in state when provided", () => {
+      const result = service.generateLoginUrl("test-invite-code");
+
+      const stateMatch = result.match(/state=([^&]+)/);
+      expect(stateMatch).toBeTruthy();
+      const stateData = JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
+      expect(stateData.invite).toBe("test-invite-code");
     });
   });
 
