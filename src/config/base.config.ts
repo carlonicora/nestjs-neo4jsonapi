@@ -271,7 +271,9 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       totpEncryptionKey: process.env.TOTP_ENCRYPTION_KEY || "",
       webauthnRpId: process.env.WEBAUTHN_RP_ID || "localhost",
       webauthnRpName: process.env.WEBAUTHN_RP_NAME || "Application",
-      webauthnOrigin: process.env.WEBAUTHN_ORIGIN || "http://localhost:3000",
+      webauthnOrigin: process.env.WEBAUTHN_ORIGIN
+        ? process.env.WEBAUTHN_ORIGIN.split(",").map((origin) => origin.trim())
+        : ["http://localhost:3000"],
       pendingTtl: parseInt(process.env.TWO_FACTOR_PENDING_TTL || "300", 10),
     },
     prompts: options?.prompts ?? {},

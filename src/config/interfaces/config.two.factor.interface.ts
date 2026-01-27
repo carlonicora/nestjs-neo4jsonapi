@@ -18,9 +18,10 @@ export interface ConfigTwoFactorInterface {
   webauthnRpName: string;
 
   /**
-   * Expected origin URL for WebAuthn (e.g., 'https://only35.app')
+   * Expected origin URL(s) for WebAuthn (e.g., 'https://only35.app')
+   * Can be a single origin or an array for multiple origins
    */
-  webauthnOrigin: string;
+  webauthnOrigin: string | string[];
 
   /**
    * Pending two-factor token TTL in seconds (default 300)

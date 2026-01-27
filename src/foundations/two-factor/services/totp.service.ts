@@ -192,7 +192,12 @@ export class TotpService {
     console.log("[TotpService.verifyCodeForUser] Found authenticators:", authenticators.length);
 
     for (const authenticator of authenticators) {
-      console.log("[TotpService.verifyCodeForUser] Checking authenticator:", authenticator.id, "verified:", authenticator.verified);
+      console.log(
+        "[TotpService.verifyCodeForUser] Checking authenticator:",
+        authenticator.id,
+        "verified:",
+        authenticator.verified,
+      );
 
       // Skip unverified authenticators
       if (!authenticator.verified) {
