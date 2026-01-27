@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  Logger,
   Post,
   Req,
   Res,
@@ -44,6 +45,8 @@ interface PendingAuthRequest {
  */
 @Controller("auth")
 export class TwoFactorController {
+  private readonly logger: Logger = new Logger(TwoFactorController.name);
+
   constructor(
     private readonly jsonApiService: JsonApiService,
     private readonly twoFactorService: TwoFactorService,
@@ -147,7 +150,6 @@ export class TwoFactorController {
   @Post("two-factor/verify/totp")
   async verifyTotp(@Req() req: PendingAuthRequest, @Res() reply: FastifyReply, @Body() body: TotpVerifyDTO) {
     const { pendingId, userId } = req.pendingAuth;
-    console.log("[TwoFactorController.verifyTotp] pendingAuth:", JSON.stringify(req.pendingAuth, null, 2));
     const verificationResult = await this.twoFactorService.verifyTotp(pendingId, body.data.attributes.code);
 
     // Check if verification was successful

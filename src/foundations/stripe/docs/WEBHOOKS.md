@@ -29,6 +29,7 @@ Webhooks allow Stripe to notify your application about events that happen in you
 - Responding to disputes and chargebacks
 
 **Why Webhooks?**
+
 - Real-time updates (no polling required)
 - Guaranteed delivery (Stripe retries failed webhooks)
 - Server-side processing (more secure than client-side)
@@ -49,6 +50,7 @@ STRIPE_WEBHOOK_SECRET=whsec_your_webhook_signing_secret
 ### 2. Create Webhook Endpoint in Stripe
 
 **Development (using Stripe CLI):**
+
 ```bash
 # Install Stripe CLI
 brew install stripe/stripe-cli/stripe
@@ -64,6 +66,7 @@ stripe listen --forward-to localhost:3000/webhooks/stripe
 ```
 
 **Production:**
+
 1. Go to [Stripe Dashboard → Developers → Webhooks](https://dashboard.stripe.com/webhooks)
 2. Click "Add endpoint"
 3. Enter your endpoint URL: `https://yourdomain.com/webhooks/stripe`
@@ -75,19 +78,20 @@ stripe listen --forward-to localhost:3000/webhooks/stripe
 Stripe requires the raw request body for signature verification.
 
 **main.ts:**
+
 ```typescript
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { json } from 'express';
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+import { json } from "express";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    rawBody: true,  // Enable raw body for webhook verification
+    rawBody: true, // Enable raw body for webhook verification
   });
 
   // Use JSON middleware for all routes except webhooks
   app.use((req, res, next) => {
-    if (req.originalUrl === '/webhooks/stripe') {
+    if (req.originalUrl === "/webhooks/stripe") {
       next();
     } else {
       json()(req, res, next);
@@ -106,36 +110,28 @@ bootstrap();
 ### Basic Webhook Controller
 
 ```typescript
-import { Controller, Post, Headers, RawBodyRequest, Req, HttpCode } from '@nestjs/common';
-import { StripeWebhookService } from './core/stripe/services/stripe.webhook.service';
-import Stripe from 'stripe';
+import { Controller, Post, Headers, RawBodyRequest, Req, HttpCode } from "@nestjs/common";
+import { StripeWebhookService } from "./core/stripe/services/stripe.webhook.service";
+import Stripe from "stripe";
 
-@Controller('webhooks')
+@Controller("webhooks")
 export class WebhookController {
-  constructor(
-    private readonly stripeWebhook: StripeWebhookService,
-  ) {}
+  constructor(private readonly stripeWebhook: StripeWebhookService) {}
 
-  @Post('stripe')
+  @Post("stripe")
   @HttpCode(200)
-  async handleStripeWebhook(
-    @Req() req: RawBodyRequest<Request>,
-    @Headers('stripe-signature') signature: string,
-  ) {
+  async handleStripeWebhook(@Req() req: RawBodyRequest<Request>, @Headers("stripe-signature") signature: string) {
     // Verify and construct event
-    const event = this.stripeWebhook.constructEvent(
-      req.rawBody,
-      signature,
-    );
+    const event = this.stripeWebhook.constructEvent(req.rawBody, signature);
 
-    console.log(`Received webhook: ${event.type}`);
+    console.info(`Received webhook: ${event.type}`);
 
     // Route to appropriate handler
     try {
       await this.handleEvent(event);
       return { received: true };
     } catch (error) {
-      console.error('Webhook handler error:', error);
+      console.error("Webhook handler error:", error);
       // Return 200 to acknowledge receipt even if handler fails
       // (prevents Stripe from retrying indefinitely)
       return { received: true, error: error.message };
@@ -152,7 +148,7 @@ export class WebhookController {
     } else if (this.stripeWebhook.isCustomerEvent(event.type)) {
       await this.handleCustomerEvent(event);
     } else {
-      console.log(`Unhandled event type: ${event.type}`);
+      console.info(`Unhandled event type: ${event.type}`);
     }
   }
 
@@ -160,23 +156,23 @@ export class WebhookController {
     const subscription = event.data.object as Stripe.Subscription;
 
     switch (event.type) {
-      case 'customer.subscription.created':
-        console.log('Subscription created:', subscription.id);
+      case "customer.subscription.created":
+        console.info("Subscription created:", subscription.id);
         // Update database with new subscription
         break;
 
-      case 'customer.subscription.updated':
-        console.log('Subscription updated:', subscription.id);
+      case "customer.subscription.updated":
+        console.info("Subscription updated:", subscription.id);
         // Update database with subscription changes
         break;
 
-      case 'customer.subscription.deleted':
-        console.log('Subscription canceled:', subscription.id);
+      case "customer.subscription.deleted":
+        console.info("Subscription canceled:", subscription.id);
         // Mark subscription as canceled in database
         break;
 
       default:
-        console.log(`Unhandled subscription event: ${event.type}`);
+        console.info(`Unhandled subscription event: ${event.type}`);
     }
   }
 
@@ -184,23 +180,23 @@ export class WebhookController {
     const invoice = event.data.object as Stripe.Invoice;
 
     switch (event.type) {
-      case 'invoice.paid':
-        console.log('Invoice paid:', invoice.id);
+      case "invoice.paid":
+        console.info("Invoice paid:", invoice.id);
         // Update database, grant access, send receipt
         break;
 
-      case 'invoice.payment_failed':
-        console.log('Invoice payment failed:', invoice.id);
+      case "invoice.payment_failed":
+        console.info("Invoice payment failed:", invoice.id);
         // Send payment failed notification, suspend account
         break;
 
-      case 'invoice.finalized':
-        console.log('Invoice finalized:', invoice.id);
+      case "invoice.finalized":
+        console.info("Invoice finalized:", invoice.id);
         // Invoice is ready to be paid
         break;
 
       default:
-        console.log(`Unhandled invoice event: ${event.type}`);
+        console.info(`Unhandled invoice event: ${event.type}`);
     }
   }
 
@@ -208,18 +204,18 @@ export class WebhookController {
     const paymentIntent = event.data.object as Stripe.PaymentIntent;
 
     switch (event.type) {
-      case 'payment_intent.succeeded':
-        console.log('Payment succeeded:', paymentIntent.id);
+      case "payment_intent.succeeded":
+        console.info("Payment succeeded:", paymentIntent.id);
         // Fulfill order, update database
         break;
 
-      case 'payment_intent.payment_failed':
-        console.log('Payment failed:', paymentIntent.id);
+      case "payment_intent.payment_failed":
+        console.info("Payment failed:", paymentIntent.id);
         // Notify customer, retry payment
         break;
 
       default:
-        console.log(`Unhandled payment event: ${event.type}`);
+        console.info(`Unhandled payment event: ${event.type}`);
     }
   }
 
@@ -227,22 +223,22 @@ export class WebhookController {
     const customer = event.data.object as Stripe.Customer;
 
     switch (event.type) {
-      case 'customer.created':
-        console.log('Customer created:', customer.id);
+      case "customer.created":
+        console.info("Customer created:", customer.id);
         break;
 
-      case 'customer.updated':
-        console.log('Customer updated:', customer.id);
+      case "customer.updated":
+        console.info("Customer updated:", customer.id);
         // Sync customer data to database
         break;
 
-      case 'customer.deleted':
-        console.log('Customer deleted:', customer.id);
+      case "customer.deleted":
+        console.info("Customer deleted:", customer.id);
         // Remove customer from database
         break;
 
       default:
-        console.log(`Unhandled customer event: ${event.type}`);
+        console.info(`Unhandled customer event: ${event.type}`);
     }
   }
 }
@@ -255,6 +251,7 @@ export class WebhookController {
 ### Why Verify?
 
 Event verification ensures that:
+
 - The webhook came from Stripe (not a malicious actor)
 - The payload hasn't been tampered with
 - You're processing the exact data Stripe sent
@@ -264,11 +261,12 @@ Event verification ensures that:
 Stripe signs each webhook with a secret key and includes the signature in the `stripe-signature` header.
 
 **Automatic Verification:**
+
 ```typescript
 // The StripeWebhookService.constructEvent() method automatically verifies
 const event = this.stripeWebhook.constructEvent(
-  req.rawBody,        // Raw request body (Buffer)
-  signature,          // Stripe-Signature header
+  req.rawBody, // Raw request body (Buffer)
+  signature, // Stripe-Signature header
 );
 
 // If verification fails, an error is thrown
@@ -277,22 +275,18 @@ const event = this.stripeWebhook.constructEvent(
 ### Manual Verification (if needed)
 
 ```typescript
-import Stripe from 'stripe';
+import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 try {
-  const event = stripe.webhooks.constructEvent(
-    rawBody,
-    signature,
-    process.env.STRIPE_WEBHOOK_SECRET,
-  );
+  const event = stripe.webhooks.constructEvent(rawBody, signature, process.env.STRIPE_WEBHOOK_SECRET);
 
   // Event is verified - safe to process
 } catch (err) {
-  console.error('Webhook signature verification failed:', err.message);
+  console.error("Webhook signature verification failed:", err.message);
   // Return 400 to reject the webhook
-  throw new BadRequestException('Invalid signature');
+  throw new BadRequestException("Invalid signature");
 }
 ```
 
@@ -315,19 +309,19 @@ export class WebhookEventRouter {
 
   async route(event: Stripe.Event) {
     const handlers = {
-      'customer.subscription.created': () => this.subscriptionSync.handleCreated(event),
-      'customer.subscription.updated': () => this.subscriptionSync.handleUpdated(event),
-      'customer.subscription.deleted': () => this.subscriptionSync.handleDeleted(event),
-      'invoice.paid': () => this.invoiceSync.handlePaid(event),
-      'invoice.payment_failed': () => this.invoiceSync.handleFailed(event),
-      'payment_intent.succeeded': () => this.paymentSync.handleSucceeded(event),
+      "customer.subscription.created": () => this.subscriptionSync.handleCreated(event),
+      "customer.subscription.updated": () => this.subscriptionSync.handleUpdated(event),
+      "customer.subscription.deleted": () => this.subscriptionSync.handleDeleted(event),
+      "invoice.paid": () => this.invoiceSync.handlePaid(event),
+      "invoice.payment_failed": () => this.invoiceSync.handleFailed(event),
+      "payment_intent.succeeded": () => this.paymentSync.handleSucceeded(event),
     };
 
     const handler = handlers[event.type];
     if (handler) {
       await handler();
     } else {
-      console.log(`No handler for event type: ${event.type}`);
+      console.info(`No handler for event type: ${event.type}`);
     }
   }
 }
@@ -340,33 +334,35 @@ Process webhooks asynchronously using a job queue (BullMQ, etc.).
 ```typescript
 @Injectable()
 export class WebhookQueueService {
-  constructor(
-    @InjectQueue('webhooks') private readonly webhookQueue: Queue,
-  ) {}
+  constructor(@InjectQueue("webhooks") private readonly webhookQueue: Queue) {}
 
   async queueEvent(event: Stripe.Event) {
-    await this.webhookQueue.add('process-webhook', {
-      eventId: event.id,
-      eventType: event.type,
-      eventData: event.data.object,
-    }, {
-      attempts: 3,
-      backoff: {
-        type: 'exponential',
-        delay: 2000,
+    await this.webhookQueue.add(
+      "process-webhook",
+      {
+        eventId: event.id,
+        eventType: event.type,
+        eventData: event.data.object,
       },
-    });
+      {
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 2000,
+        },
+      },
+    );
   }
 }
 
-@Processor('webhooks')
+@Processor("webhooks")
 export class WebhookProcessor {
-  @Process('process-webhook')
+  @Process("process-webhook")
   async handleWebhook(job: Job) {
     const { eventType, eventData } = job.data;
 
     // Process webhook asynchronously
-    console.log(`Processing webhook: ${eventType}`);
+    console.info(`Processing webhook: ${eventType}`);
 
     // Your processing logic here
   }
@@ -399,10 +395,7 @@ export class WebhookEventStore {
   }
 
   async markProcessed(eventId: string) {
-    await this.eventRepo.update(
-      { stripeEventId: eventId },
-      { processed: true, processedAt: new Date() }
-    );
+    await this.eventRepo.update({ stripeEventId: eventId }, { processed: true, processedAt: new Date() });
   }
 }
 ```
@@ -425,12 +418,10 @@ export class SubscriptionSyncService {
     const stripeSubscription = event.data.object as Stripe.Subscription;
 
     // Find associated company by customer ID
-    const company = await this.findCompanyByStripeCustomerId(
-      stripeSubscription.customer as string
-    );
+    const company = await this.findCompanyByStripeCustomerId(stripeSubscription.customer as string);
 
     if (!company) {
-      console.error('Company not found for customer:', stripeSubscription.customer);
+      console.error("Company not found for customer:", stripeSubscription.customer);
       return;
     }
 
@@ -442,13 +433,11 @@ export class SubscriptionSyncService {
       currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
       currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
       cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
-      trialEnd: stripeSubscription.trial_end
-        ? new Date(stripeSubscription.trial_end * 1000)
-        : null,
+      trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : null,
     });
 
     await this.subscriptionRepo.save(subscription);
-    console.log('Subscription synced:', subscription.id);
+    console.info("Subscription synced:", subscription.id);
   }
 
   async handleUpdated(event: Stripe.Event) {
@@ -462,10 +451,10 @@ export class SubscriptionSyncService {
         currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
         currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
         cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
-      }
+      },
     );
 
-    console.log('Subscription updated:', stripeSubscription.id);
+    console.info("Subscription updated:", stripeSubscription.id);
   }
 
   async handleDeleted(event: Stripe.Event) {
@@ -475,12 +464,12 @@ export class SubscriptionSyncService {
     await this.subscriptionRepo.update(
       { stripeSubscriptionId: stripeSubscription.id },
       {
-        status: 'canceled',
+        status: "canceled",
         canceledAt: new Date(),
-      }
+      },
     );
 
-    console.log('Subscription canceled:', stripeSubscription.id);
+    console.info("Subscription canceled:", stripeSubscription.id);
   }
 
   private async findCompanyByStripeCustomerId(customerId: string) {
@@ -517,7 +506,7 @@ export class IdempotentWebhookHandler {
     });
 
     if (existing) {
-      console.log(`Event already processed: ${event.id}`);
+      console.info(`Event already processed: ${event.id}`);
       return;
     }
 
@@ -553,7 +542,7 @@ await this.subscriptionRepo.upsert(
     status: subscription.status,
     // ... other fields
   },
-  ['stripeSubscriptionId']  // Conflict target
+  ["stripeSubscriptionId"], // Conflict target
 );
 ```
 
@@ -571,11 +560,11 @@ export class Subscription {
 try {
   await this.subscriptionRepo.update(
     { id: subscription.id, version: currentVersion },
-    { status: 'active', version: currentVersion + 1 }
+    { status: "active", version: currentVersion + 1 },
   );
 } catch (error) {
   // Handle optimistic lock failure
-  console.log('Concurrent update detected');
+  console.info("Concurrent update detected");
 }
 ```
 
@@ -590,7 +579,7 @@ try {
 const event = this.stripeWebhook.constructEvent(rawBody, signature);
 
 // BAD: Trust payload without verification
-const event = JSON.parse(req.body);  // DON'T DO THIS
+const event = JSON.parse(req.body); // DON'T DO THIS
 ```
 
 ### 2. Use HTTPS in Production
@@ -608,7 +597,7 @@ http://yourdomain.com/webhooks/stripe   // ❌ Bad
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 // Use secrets manager in production
-const webhookSecret = await secretsManager.getSecret('stripe-webhook-secret');
+const webhookSecret = await secretsManager.getSecret("stripe-webhook-secret");
 ```
 
 ### 4. Return 200 Quickly
@@ -631,7 +620,7 @@ async handleWebhook(@Req() req, @Headers('stripe-signature') sig: string) {
 
 ```typescript
 async handleEvent(event: Stripe.Event) {
-  console.log('Webhook received:', {
+  console.info('Webhook received:', {
     eventId: event.id,
     eventType: event.type,
     created: new Date(event.created * 1000),
@@ -639,7 +628,7 @@ async handleEvent(event: Stripe.Event) {
 
   try {
     await this.processEvent(event);
-    console.log('Webhook processed successfully:', event.id);
+    console.info('Webhook processed successfully:', event.id);
   } catch (error) {
     console.error('Webhook processing failed:', {
       eventId: event.id,
@@ -673,12 +662,12 @@ stripe trigger customer.subscription.created \
 ### Unit Testing
 
 ```typescript
-import { Test } from '@nestjs/testing';
-import { WebhookController } from './webhook.controller';
-import { StripeWebhookService } from './stripe.webhook.service';
-import { MOCK_WEBHOOK_EVENT } from './stripe/__tests__/fixtures/stripe.fixtures';
+import { Test } from "@nestjs/testing";
+import { WebhookController } from "./webhook.controller";
+import { StripeWebhookService } from "./stripe.webhook.service";
+import { MOCK_WEBHOOK_EVENT } from "./stripe/__tests__/fixtures/stripe.fixtures";
 
-describe('WebhookController', () => {
+describe("WebhookController", () => {
   let controller: WebhookController;
   let webhookService: StripeWebhookService;
 
@@ -700,18 +689,15 @@ describe('WebhookController', () => {
     webhookService = module.get(StripeWebhookService);
   });
 
-  it('should handle subscription.created webhook', async () => {
+  it("should handle subscription.created webhook", async () => {
     const mockEvent = {
       ...MOCK_WEBHOOK_EVENT,
-      type: 'customer.subscription.created',
+      type: "customer.subscription.created",
     };
 
-    jest.spyOn(webhookService, 'constructEvent').mockReturnValue(mockEvent);
+    jest.spyOn(webhookService, "constructEvent").mockReturnValue(mockEvent);
 
-    const result = await controller.handleStripeWebhook(
-      { rawBody: Buffer.from('{}') } as any,
-      'test_signature'
-    );
+    const result = await controller.handleStripeWebhook({ rawBody: Buffer.from("{}") } as any, "test_signature");
 
     expect(result).toEqual({ received: true });
     expect(webhookService.constructEvent).toHaveBeenCalled();
@@ -725,42 +711,42 @@ describe('WebhookController', () => {
 
 ### Subscription Events
 
-| Event Type | Description | Action |
-|-----------|-------------|---------|
-| `customer.subscription.created` | New subscription created | Create subscription record |
-| `customer.subscription.updated` | Subscription changed | Update subscription details |
-| `customer.subscription.deleted` | Subscription canceled | Mark as canceled, revoke access |
-| `customer.subscription.paused` | Subscription paused | Suspend service |
-| `customer.subscription.resumed` | Subscription resumed | Restore service |
-| `customer.subscription.trial_will_end` | Trial ending in 3 days | Send reminder email |
+| Event Type                             | Description              | Action                          |
+| -------------------------------------- | ------------------------ | ------------------------------- |
+| `customer.subscription.created`        | New subscription created | Create subscription record      |
+| `customer.subscription.updated`        | Subscription changed     | Update subscription details     |
+| `customer.subscription.deleted`        | Subscription canceled    | Mark as canceled, revoke access |
+| `customer.subscription.paused`         | Subscription paused      | Suspend service                 |
+| `customer.subscription.resumed`        | Subscription resumed     | Restore service                 |
+| `customer.subscription.trial_will_end` | Trial ending in 3 days   | Send reminder email             |
 
 ### Invoice Events
 
-| Event Type | Description | Action |
-|-----------|-------------|---------|
-| `invoice.created` | Invoice generated | Preview upcoming charge |
-| `invoice.finalized` | Invoice finalized | Invoice ready for payment |
-| `invoice.paid` | Payment succeeded | Grant access, send receipt |
-| `invoice.payment_failed` | Payment failed | Send notice, retry payment |
-| `invoice.payment_action_required` | 3D Secure required | Notify customer |
+| Event Type                        | Description        | Action                     |
+| --------------------------------- | ------------------ | -------------------------- |
+| `invoice.created`                 | Invoice generated  | Preview upcoming charge    |
+| `invoice.finalized`               | Invoice finalized  | Invoice ready for payment  |
+| `invoice.paid`                    | Payment succeeded  | Grant access, send receipt |
+| `invoice.payment_failed`          | Payment failed     | Send notice, retry payment |
+| `invoice.payment_action_required` | 3D Secure required | Notify customer            |
 
 ### Payment Events
 
-| Event Type | Description | Action |
-|-----------|-------------|---------|
-| `payment_intent.succeeded` | Payment successful | Fulfill order |
-| `payment_intent.payment_failed` | Payment failed | Notify customer |
-| `payment_intent.canceled` | Payment canceled | Cancel order |
-| `payment_method.attached` | Payment method added | Update default |
-| `payment_method.detached` | Payment method removed | Clean up records |
+| Event Type                      | Description            | Action           |
+| ------------------------------- | ---------------------- | ---------------- |
+| `payment_intent.succeeded`      | Payment successful     | Fulfill order    |
+| `payment_intent.payment_failed` | Payment failed         | Notify customer  |
+| `payment_intent.canceled`       | Payment canceled       | Cancel order     |
+| `payment_method.attached`       | Payment method added   | Update default   |
+| `payment_method.detached`       | Payment method removed | Clean up records |
 
 ### Customer Events
 
-| Event Type | Description | Action |
-|-----------|-------------|---------|
-| `customer.created` | New customer | Sync to database |
-| `customer.updated` | Customer info changed | Update database |
-| `customer.deleted` | Customer removed | Archive data |
+| Event Type         | Description           | Action           |
+| ------------------ | --------------------- | ---------------- |
+| `customer.created` | New customer          | Sync to database |
+| `customer.updated` | Customer info changed | Update database  |
+| `customer.deleted` | Customer removed      | Archive data     |
 
 ---
 
@@ -769,6 +755,7 @@ describe('WebhookController', () => {
 ### Webhook Not Receiving Events
 
 **Check:**
+
 1. Endpoint is accessible (use `curl` or Postman)
 2. Webhook is configured in Stripe Dashboard
 3. Events are selected in webhook settings
@@ -778,6 +765,7 @@ describe('WebhookController', () => {
 ### Signature Verification Failing
 
 **Common Causes:**
+
 ```typescript
 // Wrong: Parsed body (JSON object)
 const event = this.stripeWebhook.constructEvent(req.body, signature);
@@ -789,11 +777,12 @@ const event = this.stripeWebhook.constructEvent(req.rawBody, signature);
 ### Events Processing Multiple Times
 
 **Solution: Implement idempotency**
+
 ```typescript
 // Check if event already processed
 const processed = await this.isEventProcessed(event.id);
 if (processed) {
-  console.log('Event already processed:', event.id);
+  console.info("Event already processed:", event.id);
   return;
 }
 
@@ -805,11 +794,12 @@ await this.markEventProcessed(event.id);
 ### Missing Events
 
 **Use event retrieval API:**
+
 ```typescript
 const stripe = this.stripeService.getClient();
 
 // Retrieve specific event
-const event = await stripe.events.retrieve('evt_123');
+const event = await stripe.events.retrieve("evt_123");
 
 // List recent events
 const events = await stripe.events.list({ limit: 100 });

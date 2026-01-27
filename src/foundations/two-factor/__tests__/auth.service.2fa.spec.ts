@@ -121,6 +121,7 @@ describe("AuthService - 2FA Integration", () => {
 
     mockUserRepository = {
       findByUserId: vi.fn().mockResolvedValue(MOCK_USER),
+      findForTwoFactorLogin: vi.fn().mockResolvedValue(MOCK_USER),
       findByEmail: vi.fn().mockResolvedValue(MOCK_USER),
       findByResetCode: vi.fn(),
       updatePassword: vi.fn(),
@@ -259,7 +260,7 @@ describe("AuthService - 2FA Integration", () => {
         userId: TEST_IDS.userId,
         pendingId: TEST_IDS.pendingId,
       });
-      expect(result.data).toHaveProperty("pendingId", TEST_IDS.pendingId);
+      expect(result.data).toHaveProperty("id", TEST_IDS.pendingId);
       expect(result.data).toHaveProperty("token", "pending-jwt-token");
       expect(result.data).toHaveProperty("availableMethods");
       expect(result.data).toHaveProperty("preferredMethod", "totp");
@@ -317,20 +318,20 @@ describe("AuthService - 2FA Integration", () => {
     it("should complete login and return full auth token", async () => {
       const result = await service.completeTwoFactorLogin(TEST_IDS.userId);
 
-      expect(mockUserRepository.findByUserId).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(mockUserRepository.findForTwoFactorLogin).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
       expect(mockAuthRepository.setLastLogin).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
       expect(mockSecurityService.signJwt).toHaveBeenCalled();
       expect(result).toBeDefined();
     });
 
     it("should throw NOT_FOUND when user does not exist", async () => {
-      mockUserRepository.findByUserId.mockResolvedValue(null);
+      mockUserRepository.findForTwoFactorLogin.mockResolvedValue(null);
 
       await expect(service.completeTwoFactorLogin(TEST_IDS.userId)).rejects.toThrow(HttpException);
     });
 
     it("should throw FORBIDDEN when user is deleted", async () => {
-      mockUserRepository.findByUserId.mockResolvedValue({
+      mockUserRepository.findForTwoFactorLogin.mockResolvedValue({
         ...MOCK_USER,
         isDeleted: true,
       });
@@ -339,7 +340,7 @@ describe("AuthService - 2FA Integration", () => {
     });
 
     it("should throw FORBIDDEN when user is not active", async () => {
-      mockUserRepository.findByUserId.mockResolvedValue({
+      mockUserRepository.findForTwoFactorLogin.mockResolvedValue({
         ...MOCK_USER,
         isActive: false,
       });
@@ -349,11 +350,6 @@ describe("AuthService - 2FA Integration", () => {
 
     it("should create new auth token regardless of existing auth", async () => {
       // The implementation always creates a new auth, it doesn't update existing ones
-      mockAuthRepository.findByUserId.mockResolvedValue({
-        id: "existing-auth",
-        refreshToken: "old-token",
-        user: MOCK_USER,
-      });
 
       const result = await service.completeTwoFactorLogin(TEST_IDS.userId);
 

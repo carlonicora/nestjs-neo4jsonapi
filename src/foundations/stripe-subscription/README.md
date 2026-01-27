@@ -17,16 +17,20 @@ Provides subscription management functionality for the Stripe billing system. Ha
 The module follows a layered architecture:
 
 ### Services
+
 - **StripeSubscriptionApiService**: Direct Stripe API operations (create, update, cancel, etc.)
 - **StripeSubscriptionAdminService**: Business logic and coordination between Stripe and database
 
 ### Repository
+
 - **StripeSubscriptionRepository**: Neo4j database operations for subscription data persistence
 
 ### Controller
+
 - **StripeSubscriptionController**: REST API endpoints for subscription management
 
 ### Entities
+
 - **StripeSubscription**: Subscription entity with full lifecycle data
 - **StripeSubscriptionStatus**: Status enum (active, canceled, past_due, etc.)
 
@@ -35,7 +39,7 @@ The module follows a layered architecture:
 ### Importing the Module
 
 ```typescript
-import { StripeSubscriptionModule } from '@/foundations/stripe-subscription';
+import { StripeSubscriptionModule } from "@/foundations/stripe-subscription";
 
 @Module({
   imports: [StripeSubscriptionModule],
@@ -46,21 +50,19 @@ export class YourModule {}
 ### Creating a Subscription
 
 ```typescript
-import { StripeSubscriptionAdminService } from '@/foundations/stripe-subscription';
+import { StripeSubscriptionAdminService } from "@/foundations/stripe-subscription";
 
 @Injectable()
 export class YourService {
-  constructor(
-    private readonly subscriptionService: StripeSubscriptionAdminService
-  ) {}
+  constructor(private readonly subscriptionService: StripeSubscriptionAdminService) {}
 
   async createSubscription() {
     return this.subscriptionService.createSubscription({
-      companyId: 'company_123',
-      priceId: 'price_456',
-      paymentMethodId: 'pm_789',
+      companyId: "company_123",
+      priceId: "price_456",
+      paymentMethodId: "pm_789",
       trialPeriodDays: 14,
-      quantity: 1
+      quantity: 1,
     });
   }
 }
@@ -71,16 +73,16 @@ export class YourService {
 ```typescript
 // Cancel at end of billing period
 await subscriptionService.cancelSubscription({
-  id: 'sub_123',
-  companyId: 'company_123',
-  cancelImmediately: false
+  id: "sub_123",
+  companyId: "company_123",
+  cancelImmediately: false,
 });
 
 // Cancel immediately
 await subscriptionService.cancelSubscription({
-  id: 'sub_123',
-  companyId: 'company_123',
-  cancelImmediately: true
+  id: "sub_123",
+  companyId: "company_123",
+  cancelImmediately: true,
 });
 ```
 
@@ -88,9 +90,9 @@ await subscriptionService.cancelSubscription({
 
 ```typescript
 await subscriptionService.changePlan({
-  id: 'sub_123',
-  companyId: 'company_123',
-  newPriceId: 'price_premium'
+  id: "sub_123",
+  companyId: "company_123",
+  newPriceId: "price_premium",
 });
 ```
 
@@ -98,12 +100,12 @@ await subscriptionService.changePlan({
 
 ```typescript
 const preview = await subscriptionService.previewProration({
-  id: 'sub_123',
-  companyId: 'company_123',
-  newPriceId: 'price_premium'
+  id: "sub_123",
+  companyId: "company_123",
+  newPriceId: "price_premium",
 });
 
-console.log(`Proration amount: ${preview.amountDue}`);
+console.info(`Proration amount: ${preview.amountDue}`);
 ```
 
 ## API Endpoints
@@ -164,12 +166,14 @@ pnpm --filter @carlonicora/nestjs-neo4jsonapi test stripe-subscription
 This module was extracted from the Stripe foundation module for better separation of concerns. Update your imports:
 
 **Before:**
+
 ```typescript
-import { SubscriptionService } from '@/foundations/stripe/services/subscription.service';
-import { StripeSubscriptionService } from '@/foundations/stripe/services/stripe.subscription.service';
+import { SubscriptionService } from "@/foundations/stripe/services/subscription.service";
+import { StripeSubscriptionService } from "@/foundations/stripe/services/stripe.subscription.service";
 ```
 
 **After:**
+
 ```typescript
-import { StripeSubscriptionAdminService, StripeSubscriptionApiService } from '@/foundations/stripe-subscription';
+import { StripeSubscriptionAdminService, StripeSubscriptionApiService } from "@/foundations/stripe-subscription";
 ```

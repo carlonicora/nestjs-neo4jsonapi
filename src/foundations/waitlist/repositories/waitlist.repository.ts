@@ -66,8 +66,6 @@ export class WaitlistRepository extends AbstractRepository<Waitlist, typeof Wait
    * Find a waitlist entry by invite code.
    */
   async findByInviteCode(params: { code: string }): Promise<Waitlist | null> {
-    console.log("[WaitlistRepository.findByInviteCode] Querying for code:", params.code);
-
     const { nodeName, labelName } = this.descriptor.model;
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
@@ -81,8 +79,6 @@ export class WaitlistRepository extends AbstractRepository<Waitlist, typeof Wait
     `;
 
     const result = await this.neo4j.readOne(query);
-    console.log("[WaitlistRepository.findByInviteCode] Query result:", result ? `Found id=${result.id}` : "Not found");
-
     return result;
   }
 

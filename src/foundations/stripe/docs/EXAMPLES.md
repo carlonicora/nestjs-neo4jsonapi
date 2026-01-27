@@ -20,10 +20,10 @@ Real-world integration examples and workflows for common use cases.
 Complete example of signing up a new customer with a subscription.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeCustomerService } from './core/stripe/services/stripe.customer.service';
-import { StripeSubscriptionService } from './core/stripe/services/stripe.subscription.service';
-import { StripeError } from './core/stripe/errors/stripe.errors';
+import { Injectable } from "@nestjs/common";
+import { StripeCustomerService } from "./core/stripe/services/stripe.customer.service";
+import { StripeSubscriptionService } from "./core/stripe/services/stripe.subscription.service";
+import { StripeError } from "./core/stripe/errors/stripe.errors";
 
 @Injectable()
 export class SubscriptionSignupService {
@@ -42,31 +42,31 @@ export class SubscriptionSignupService {
   }) {
     try {
       // Step 1: Create Stripe customer
-      console.log('Creating Stripe customer...');
+      console.info("Creating Stripe customer...");
       const customer = await this.stripeCustomer.createCustomer({
         companyId: params.companyId,
         email: params.email,
         name: params.name,
         metadata: {
-          signupSource: 'web',
+          signupSource: "web",
           signupDate: new Date().toISOString(),
         },
       });
 
-      console.log('Customer created:', customer.id);
+      console.info("Customer created:", customer.id);
 
       // Step 2: Attach and set payment method as default
-      console.log('Attaching payment method...');
+      console.info("Attaching payment method...");
       await this.stripeCustomer.attachPaymentMethod({
         stripeCustomerId: customer.id,
         paymentMethodId: params.paymentMethodId,
         setAsDefault: true,
       });
 
-      console.log('Payment method attached');
+      console.info("Payment method attached");
 
       // Step 3: Create subscription with optional trial
-      console.log('Creating subscription...');
+      console.info("Creating subscription...");
       const subscription = await this.stripeSubscription.createSubscription({
         stripeCustomerId: customer.id,
         priceId: params.priceId,
@@ -74,12 +74,12 @@ export class SubscriptionSignupService {
         trialPeriodDays: params.trialDays || 14,
         metadata: {
           companyId: params.companyId,
-          planType: 'standard',
+          planType: "standard",
         },
       });
 
-      console.log('Subscription created:', subscription.id);
-      console.log('Status:', subscription.status);
+      console.info("Subscription created:", subscription.id);
+      console.info("Status:", subscription.status);
 
       // Step 4: Return signup result
       return {
@@ -87,25 +87,23 @@ export class SubscriptionSignupService {
         customerId: customer.id,
         subscriptionId: subscription.id,
         status: subscription.status,
-        trialEnd: subscription.trial_end
-          ? new Date(subscription.trial_end * 1000)
-          : null,
+        trialEnd: subscription.trial_end ? new Date(subscription.trial_end * 1000) : null,
         currentPeriodEnd: new Date(subscription.current_period_end * 1000),
       };
     } catch (error) {
       if (error instanceof StripeError) {
-        console.error('Stripe error during signup:', error.message);
+        console.error("Stripe error during signup:", error.message);
 
         // Handle specific error types
         if (error.statusCode === 402) {
-          throw new Error('Card was declined. Please try a different payment method.');
+          throw new Error("Card was declined. Please try a different payment method.");
         } else if (error.statusCode === 400) {
-          throw new Error('Invalid payment information provided.');
+          throw new Error("Invalid payment information provided.");
         } else if (error.statusCode === 429) {
-          throw new Error('Too many requests. Please try again in a moment.');
+          throw new Error("Too many requests. Please try again in a moment.");
         }
 
-        throw new Error('Failed to complete signup. Please try again.');
+        throw new Error("Failed to complete signup. Please try again.");
       }
 
       throw error;
@@ -138,10 +136,10 @@ async signup(@Body() body: SignupDto) {
 Complete workflow for usage-based billing with Stripe Billing Meters.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeUsageService } from './core/stripe/services/stripe.usage.service';
-import { StripeProductService } from './core/stripe/services/stripe.product.service';
-import { StripeSubscriptionService } from './core/stripe/services/stripe.subscription.service';
+import { Injectable } from "@nestjs/common";
+import { StripeUsageService } from "./core/stripe/services/stripe.usage.service";
+import { StripeProductService } from "./core/stripe/services/stripe.product.service";
+import { StripeSubscriptionService } from "./core/stripe/services/stripe.subscription.service";
 
 @Injectable()
 export class MeteredBillingService {
@@ -157,21 +155,21 @@ export class MeteredBillingService {
   async setupMeteredProduct() {
     // Step 1: Create product
     const product = await this.stripeProduct.createProduct({
-      name: 'API Usage',
-      description: 'Pay-as-you-go API access',
-      metadata: { type: 'metered' },
+      name: "API Usage",
+      description: "Pay-as-you-go API access",
+      metadata: { type: "metered" },
     });
 
     // Step 2: Create usage-based price
     // Note: You need to create a billing meter in Stripe Dashboard first
     const price = await this.stripeProduct.createPrice({
       productId: product.id,
-      unitAmount: 10,  // $0.10 per API call
-      currency: 'usd',
-      nickname: 'Per API Call',
+      unitAmount: 10, // $0.10 per API call
+      currency: "usd",
+      nickname: "Per API Call",
       recurring: {
-        interval: 'month',
-        meter: 'mtr_api_requests',  // Your billing meter ID
+        interval: "month",
+        meter: "mtr_api_requests", // Your billing meter ID
       },
     });
 
@@ -181,24 +179,20 @@ export class MeteredBillingService {
   /**
    * Track API usage for a customer
    */
-  async trackAPICall(params: {
-    customerId: string;
-    endpoint: string;
-    requestCount: number;
-  }) {
+  async trackAPICall(params: { customerId: string; endpoint: string; requestCount: number }) {
     try {
       // Report usage event
       await this.stripeUsage.reportUsage({
-        eventName: 'api_request',
+        eventName: "api_request",
         customerId: params.customerId,
         value: params.requestCount,
         timestamp: Math.floor(Date.now() / 1000),
         idempotencyKey: `${params.customerId}-${Date.now()}`,
       });
 
-      console.log(`Tracked ${params.requestCount} API calls for customer ${params.customerId}`);
+      console.info(`Tracked ${params.requestCount} API calls for customer ${params.customerId}`);
     } catch (error) {
-      console.error('Failed to track usage:', error);
+      console.error("Failed to track usage:", error);
       // Don't throw - usage tracking should not block API responses
     }
   }
@@ -208,9 +202,7 @@ export class MeteredBillingService {
    */
   async getUsageSummary(customerId: string) {
     const now = Math.floor(Date.now() / 1000);
-    const startOfMonth = Math.floor(
-      new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000
-    );
+    const startOfMonth = Math.floor(new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000);
 
     const summaries = await this.stripeUsage.listUsageSummaries({
       customerId,
@@ -229,7 +221,7 @@ export class MeteredBillingService {
         end: new Date(now * 1000),
       },
       totalUsage,
-      estimatedCost: totalUsage * 0.10,  // $0.10 per call
+      estimatedCost: totalUsage * 0.1, // $0.10 per call
       summaries,
     };
   }
@@ -241,7 +233,7 @@ export class MeteredBillingService {
     const subscription = await this.stripeSubscription.createSubscription({
       stripeCustomerId: customerId,
       priceId,
-      metadata: { billingType: 'metered' },
+      metadata: { billingType: "metered" },
     });
 
     return subscription;
@@ -264,11 +256,13 @@ export class UsageTrackingInterceptor implements NestInterceptor {
       tap(() => {
         if (customerId) {
           // Track API usage after successful request
-          this.meteredBilling.trackAPICall({
-            customerId,
-            endpoint: request.path,
-            requestCount: 1,
-          }).catch(err => console.error('Usage tracking failed:', err));
+          this.meteredBilling
+            .trackAPICall({
+              customerId,
+              endpoint: request.path,
+              requestCount: 1,
+            })
+            .catch((err) => console.error("Usage tracking failed:", err));
         }
       }),
     );
@@ -283,9 +277,9 @@ export class UsageTrackingInterceptor implements NestInterceptor {
 Process a one-time payment using Payment Intents.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripePaymentService } from './core/stripe/services/stripe.payment.service';
-import { StripeCustomerService } from './core/stripe/services/stripe.customer.service';
+import { Injectable } from "@nestjs/common";
+import { StripePaymentService } from "./core/stripe/services/stripe.payment.service";
+import { StripeCustomerService } from "./core/stripe/services/stripe.customer.service";
 
 @Injectable()
 export class PaymentService {
@@ -306,7 +300,7 @@ export class PaymentService {
     // Create payment intent
     const paymentIntent = await this.stripePayment.createPaymentIntent({
       amount: params.amount,
-      currency: 'usd',
+      currency: "usd",
       customerId: params.customerId,
       metadata: {
         description: params.description,
@@ -327,12 +321,10 @@ export class PaymentService {
    * Confirm payment after frontend collects payment method
    */
   async confirmPayment(paymentIntentId: string) {
-    const paymentIntent = await this.stripePayment.confirmPaymentIntent(
-      paymentIntentId,
-    );
+    const paymentIntent = await this.stripePayment.confirmPaymentIntent(paymentIntentId);
 
     return {
-      success: paymentIntent.status === 'succeeded',
+      success: paymentIntent.status === "succeeded",
       status: paymentIntent.status,
       amount: paymentIntent.amount,
     };
@@ -342,14 +334,12 @@ export class PaymentService {
    * Check payment status
    */
   async getPaymentStatus(paymentIntentId: string) {
-    const paymentIntent = await this.stripePayment.retrievePaymentIntent(
-      paymentIntentId,
-    );
+    const paymentIntent = await this.stripePayment.retrievePaymentIntent(paymentIntentId);
 
     return {
       status: paymentIntent.status,
       amount: paymentIntent.amount,
-      captured: paymentIntent.status === 'succeeded',
+      captured: paymentIntent.status === "succeeded",
       errorMessage: paymentIntent.last_payment_error?.message,
     };
   }
@@ -370,30 +360,27 @@ export class PaymentService {
 // Frontend code using Stripe.js
 const handlePayment = async () => {
   // 1. Create payment intent on backend
-  const { clientSecret } = await fetch('/api/payments/create', {
-    method: 'POST',
+  const { clientSecret } = await fetch("/api/payments/create", {
+    method: "POST",
     body: JSON.stringify({
-      customerId: 'cus_123',
-      amount: 5000,  // $50.00
-      description: 'One-time purchase',
+      customerId: "cus_123",
+      amount: 5000, // $50.00
+      description: "One-time purchase",
     }),
-  }).then(res => res.json());
+  }).then((res) => res.json());
 
   // 2. Confirm payment on frontend
-  const { error, paymentIntent } = await stripe.confirmCardPayment(
-    clientSecret,
-    {
-      payment_method: {
-        card: cardElement,
-        billing_details: { name: 'Customer Name' },
-      },
-    }
-  );
+  const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+    payment_method: {
+      card: cardElement,
+      billing_details: { name: "Customer Name" },
+    },
+  });
 
   if (error) {
-    console.error('Payment failed:', error.message);
-  } else if (paymentIntent.status === 'succeeded') {
-    console.log('Payment successful!');
+    console.error("Payment failed:", error.message);
+  } else if (paymentIntent.status === "succeeded") {
+    console.info("Payment successful!");
   }
 };
 ```
@@ -405,9 +392,9 @@ const handlePayment = async () => {
 Complete subscription lifecycle management examples.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeSubscriptionService } from './core/stripe/services/stripe.subscription.service';
-import { StripeInvoiceService } from './core/stripe/services/stripe.invoice.service';
+import { Injectable } from "@nestjs/common";
+import { StripeSubscriptionService } from "./core/stripe/services/stripe.subscription.service";
+import { StripeInvoiceService } from "./core/stripe/services/stripe.invoice.service";
 
 @Injectable()
 export class SubscriptionManagementService {
@@ -421,20 +408,17 @@ export class SubscriptionManagementService {
    */
   async upgradeSubscription(subscriptionId: string, newPriceId: string) {
     // Step 1: Preview proration
-    const prorationPreview = await this.stripeSubscription.previewProration(
-      subscriptionId,
-      newPriceId,
-    );
+    const prorationPreview = await this.stripeSubscription.previewProration(subscriptionId, newPriceId);
 
     const prorationAmount = prorationPreview.amount_due;
-    console.log('Proration amount:', prorationAmount / 100, 'USD');
+    console.info("Proration amount:", prorationAmount / 100, "USD");
 
     // Step 2: Confirm and update subscription
     const updatedSubscription = await this.stripeSubscription.updateSubscription({
       subscriptionId,
       priceId: newPriceId,
-      prorationBehavior: 'create_prorations',
-      metadata: { upgraded: 'true', upgradeDate: new Date().toISOString() },
+      prorationBehavior: "create_prorations",
+      metadata: { upgraded: "true", upgradeDate: new Date().toISOString() },
     });
 
     return {
@@ -452,14 +436,14 @@ export class SubscriptionManagementService {
     const updatedSubscription = await this.stripeSubscription.updateSubscription({
       subscriptionId,
       priceId: newPriceId,
-      prorationBehavior: 'none',
-      metadata: { downgraded: 'true', downgradeDate: new Date().toISOString() },
+      prorationBehavior: "none",
+      metadata: { downgraded: "true", downgradeDate: new Date().toISOString() },
     });
 
     return {
       subscription: updatedSubscription,
       effectiveDate: new Date(updatedSubscription.current_period_end * 1000),
-      message: 'Downgrade will take effect at the end of the current billing period',
+      message: "Downgrade will take effect at the end of the current billing period",
     };
   }
 
@@ -467,18 +451,13 @@ export class SubscriptionManagementService {
    * Pause subscription temporarily
    */
   async pauseSubscription(subscriptionId: string, resumeInDays?: number) {
-    const resumeDate = resumeInDays
-      ? new Date(Date.now() + resumeInDays * 24 * 60 * 60 * 1000)
-      : undefined;
+    const resumeDate = resumeInDays ? new Date(Date.now() + resumeInDays * 24 * 60 * 60 * 1000) : undefined;
 
-    const pausedSubscription = await this.stripeSubscription.pauseSubscription(
-      subscriptionId,
-      resumeDate,
-    );
+    const pausedSubscription = await this.stripeSubscription.pauseSubscription(subscriptionId, resumeDate);
 
     return {
       subscription: pausedSubscription,
-      pausedUntil: resumeDate || 'manual resume required',
+      pausedUntil: resumeDate || "manual resume required",
       status: pausedSubscription.status,
     };
   }
@@ -487,9 +466,7 @@ export class SubscriptionManagementService {
    * Resume paused subscription
    */
   async resumeSubscription(subscriptionId: string) {
-    const resumedSubscription = await this.stripeSubscription.resumeSubscription(
-      subscriptionId,
-    );
+    const resumedSubscription = await this.stripeSubscription.resumeSubscription(subscriptionId);
 
     return {
       subscription: resumedSubscription,
@@ -501,21 +478,15 @@ export class SubscriptionManagementService {
   /**
    * Cancel subscription
    */
-  async cancelSubscription(params: {
-    subscriptionId: string;
-    immediate: boolean;
-    reason?: string;
-  }) {
+  async cancelSubscription(params: { subscriptionId: string; immediate: boolean; reason?: string }) {
     const canceledSubscription = await this.stripeSubscription.cancelSubscription(
       params.subscriptionId,
-      !params.immediate,  // cancelAtPeriodEnd
+      !params.immediate, // cancelAtPeriodEnd
     );
 
     return {
       subscription: canceledSubscription,
-      canceledAt: params.immediate
-        ? 'immediately'
-        : new Date(canceledSubscription.current_period_end * 1000),
+      canceledAt: params.immediate ? "immediately" : new Date(canceledSubscription.current_period_end * 1000),
       status: canceledSubscription.status,
     };
   }
@@ -534,7 +505,7 @@ export class SubscriptionManagementService {
       nextCharge: {
         amount: upcomingInvoice.amount_due,
         date: new Date(upcomingInvoice.period_end * 1000),
-        items: upcomingInvoice.lines.data.map(line => ({
+        items: upcomingInvoice.lines.data.map((line) => ({
           description: line.description,
           amount: line.amount,
         })),
@@ -551,8 +522,8 @@ export class SubscriptionManagementService {
 Self-service billing portal for customers.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripePortalService } from './core/stripe/services/stripe.portal.service';
+import { Injectable } from "@nestjs/common";
+import { StripePortalService } from "./core/stripe/services/stripe.portal.service";
 
 @Injectable()
 export class CustomerPortalService {
@@ -561,7 +532,7 @@ export class CustomerPortalService {
   /**
    * Generate portal session for customer
    */
-  async createPortalSession(customerId: string, returnPath: string = '/account') {
+  async createPortalSession(customerId: string, returnPath: string = "/account") {
     const returnUrl = `${process.env.APP_URL}${returnPath}`;
 
     const session = await this.stripePortal.createPortalSession({
@@ -571,7 +542,7 @@ export class CustomerPortalService {
 
     return {
       url: session.url,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000),  // 30 minutes
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
     };
   }
 
@@ -579,10 +550,7 @@ export class CustomerPortalService {
    * Quick portal URL generator
    */
   async getPortalUrl(customerId: string) {
-    return this.stripePortal.getPortalUrl(
-      customerId,
-      `${process.env.APP_URL}/account/billing`,
-    );
+    return this.stripePortal.getPortalUrl(customerId, `${process.env.APP_URL}/account/billing`);
   }
 }
 ```
@@ -590,21 +558,16 @@ export class CustomerPortalService {
 **Controller Usage:**
 
 ```typescript
-@Controller('billing')
+@Controller("billing")
 export class BillingController {
-  constructor(
-    private readonly customerPortal: CustomerPortalService,
-  ) {}
+  constructor(private readonly customerPortal: CustomerPortalService) {}
 
-  @Get('portal')
+  @Get("portal")
   @UseGuards(AuthGuard)
   async redirectToPortal(@Req() req: Request) {
     const customerId = req.user.stripeCustomerId;
 
-    const { url } = await this.customerPortal.createPortalSession(
-      customerId,
-      '/account/billing',
-    );
+    const { url } = await this.customerPortal.createPortalSession(customerId, "/account/billing");
 
     // Redirect user to Stripe Customer Portal
     return { redirectUrl: url };
@@ -619,9 +582,9 @@ export class BillingController {
 Robust failed payment handling with retry logic.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeInvoiceService } from './core/stripe/services/stripe.invoice.service';
-import { StripeCustomerService } from './core/stripe/services/stripe.customer.service';
+import { Injectable } from "@nestjs/common";
+import { StripeInvoiceService } from "./core/stripe/services/stripe.invoice.service";
+import { StripeCustomerService } from "./core/stripe/services/stripe.customer.service";
 
 @Injectable()
 export class FailedPaymentService {
@@ -636,9 +599,9 @@ export class FailedPaymentService {
   async handleFailedPayment(invoiceId: string, customerId: string) {
     const invoice = await this.stripeInvoice.retrieveInvoice(invoiceId);
 
-    console.log('Payment failed for invoice:', invoiceId);
-    console.log('Amount due:', invoice.amount_due / 100, 'USD');
-    console.log('Attempt:', invoice.attempt_count);
+    console.info("Payment failed for invoice:", invoiceId);
+    console.info("Amount due:", invoice.amount_due / 100, "USD");
+    console.info("Attempt:", invoice.attempt_count);
 
     // Get customer details
     const customer = await this.stripeCustomer.retrieveCustomer(customerId);
@@ -681,7 +644,7 @@ export class FailedPaymentService {
     const paidInvoice = await this.stripeInvoice.payInvoice(invoiceId);
 
     return {
-      success: paidInvoice.status === 'paid',
+      success: paidInvoice.status === "paid",
       status: paidInvoice.status,
       amountPaid: paidInvoice.amount_paid,
     };
@@ -695,12 +658,12 @@ export class FailedPaymentService {
     attemptCount: number;
   }) {
     // Send email notification
-    console.log('Sending payment failure notification to:', params.email);
+    console.info("Sending payment failure notification to:", params.email);
     // Implement email sending logic here
   }
 
   private async handleMaxAttemptsReached(customerId: string, invoiceId: string) {
-    console.log('Max payment attempts reached for customer:', customerId);
+    console.info("Max payment attempts reached for customer:", customerId);
 
     // Options:
     // 1. Suspend account access
@@ -710,7 +673,7 @@ export class FailedPaymentService {
 
     // Example: Send final notice
     const customer = await this.stripeCustomer.retrieveCustomer(customerId);
-    console.log('Sending final payment notice to:', customer.email);
+    console.info("Sending final payment notice to:", customer.email);
   }
 }
 ```
@@ -722,8 +685,8 @@ export class FailedPaymentService {
 Advanced usage tracking with analytics.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeUsageService } from './core/stripe/services/stripe.usage.service';
+import { Injectable } from "@nestjs/common";
+import { StripeUsageService } from "./core/stripe/services/stripe.usage.service";
 
 @Injectable()
 export class UsageAnalyticsService {
@@ -745,7 +708,7 @@ export class UsageAnalyticsService {
       timestamp: Math.floor(Date.now() / 1000),
     });
 
-    console.log(`Tracked ${params.quantity} uses of ${params.feature} for customer ${params.customerId}`);
+    console.info(`Tracked ${params.quantity} uses of ${params.feature} for customer ${params.customerId}`);
   }
 
   /**
@@ -753,7 +716,7 @@ export class UsageAnalyticsService {
    */
   async getUsageReport(customerId: string, days: number = 30) {
     const endTime = Math.floor(Date.now() / 1000);
-    const startTime = endTime - (days * 24 * 60 * 60);
+    const startTime = endTime - days * 24 * 60 * 60;
 
     const summaries = await this.stripeUsage.listUsageSummaries({
       customerId,
@@ -762,15 +725,18 @@ export class UsageAnalyticsService {
     });
 
     // Aggregate usage by feature
-    const usageByFeature = summaries.reduce((acc, summary) => {
-      const feature = summary.meter;
-      if (!acc[feature]) {
-        acc[feature] = { total: 0, events: [] };
-      }
-      acc[feature].total += summary.aggregated_value || 0;
-      acc[feature].events.push(summary);
-      return acc;
-    }, {} as Record<string, { total: number; events: any[] }>);
+    const usageByFeature = summaries.reduce(
+      (acc, summary) => {
+        const feature = summary.meter;
+        if (!acc[feature]) {
+          acc[feature] = { total: 0, events: [] };
+        }
+        acc[feature].total += summary.aggregated_value || 0;
+        acc[feature].events.push(summary);
+        return acc;
+      },
+      {} as Record<string, { total: number; events: any[] }>,
+    );
 
     return {
       period: {
@@ -795,7 +761,7 @@ export class UsageAnalyticsService {
     const hasExceededLimit = usagePercentage >= 100;
 
     if (isApproachingLimit) {
-      console.log(`Customer ${customerId} has used ${usagePercentage.toFixed(1)}% of monthly limit`);
+      console.info(`Customer ${customerId} has used ${usagePercentage.toFixed(1)}% of monthly limit`);
     }
 
     return {
@@ -817,9 +783,9 @@ export class UsageAnalyticsService {
 Complete multi-tier pricing system implementation.
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import { StripeProductService } from './core/stripe/services/stripe.product.service';
-import { StripeSubscriptionService } from './core/stripe/services/stripe.subscription.service';
+import { Injectable } from "@nestjs/common";
+import { StripeProductService } from "./core/stripe/services/stripe.product.service";
+import { StripeSubscriptionService } from "./core/stripe/services/stripe.subscription.service";
 
 interface PlanTier {
   name: string;
@@ -834,27 +800,27 @@ interface PlanTier {
 export class MultiPlanService {
   private readonly plans: Record<string, PlanTier> = {
     free: {
-      name: 'Free',
-      description: 'Get started with basic features',
+      name: "Free",
+      description: "Get started with basic features",
       monthlyPrice: 0,
       yearlyPrice: 0,
-      features: ['5 projects', '100 API calls/month', 'Community support'],
+      features: ["5 projects", "100 API calls/month", "Community support"],
       usageLimit: 100,
     },
     pro: {
-      name: 'Professional',
-      description: 'For growing teams',
-      monthlyPrice: 2900,  // $29.00
-      yearlyPrice: 29000,  // $290.00 (2 months free)
-      features: ['Unlimited projects', '10,000 API calls/month', 'Priority support'],
+      name: "Professional",
+      description: "For growing teams",
+      monthlyPrice: 2900, // $29.00
+      yearlyPrice: 29000, // $290.00 (2 months free)
+      features: ["Unlimited projects", "10,000 API calls/month", "Priority support"],
       usageLimit: 10000,
     },
     enterprise: {
-      name: 'Enterprise',
-      description: 'For large organizations',
-      monthlyPrice: 9900,  // $99.00
-      yearlyPrice: 99000,  // $990.00
-      features: ['Everything in Pro', 'Unlimited API calls', 'Dedicated support', 'Custom integrations'],
+      name: "Enterprise",
+      description: "For large organizations",
+      monthlyPrice: 9900, // $99.00
+      yearlyPrice: 99000, // $990.00
+      features: ["Everything in Pro", "Unlimited API calls", "Dedicated support", "Custom integrations"],
     },
   };
 
@@ -870,31 +836,31 @@ export class MultiPlanService {
     const createdPlans = [];
 
     for (const [tier, plan] of Object.entries(this.plans)) {
-      if (plan.monthlyPrice === 0) continue;  // Skip free tier
+      if (plan.monthlyPrice === 0) continue; // Skip free tier
 
       // Create product
       const product = await this.stripeProduct.createProduct({
         name: plan.name,
         description: plan.description,
-        metadata: { tier, features: plan.features.join(',') },
+        metadata: { tier, features: plan.features.join(",") },
       });
 
       // Create monthly price
       const monthlyPrice = await this.stripeProduct.createPrice({
         productId: product.id,
         unitAmount: plan.monthlyPrice,
-        currency: 'usd',
+        currency: "usd",
         nickname: `${plan.name} - Monthly`,
-        recurring: { interval: 'month' },
+        recurring: { interval: "month" },
       });
 
       // Create yearly price
       const yearlyPrice = await this.stripeProduct.createPrice({
         productId: product.id,
         unitAmount: plan.yearlyPrice,
-        currency: 'usd',
+        currency: "usd",
         nickname: `${plan.name} - Yearly`,
-        recurring: { interval: 'year' },
+        recurring: { interval: "year" },
       });
 
       createdPlans.push({
@@ -913,8 +879,8 @@ export class MultiPlanService {
    */
   async subscribeToPlan(params: {
     customerId: string;
-    tier: 'free' | 'pro' | 'enterprise';
-    billingInterval: 'monthly' | 'yearly';
+    tier: "free" | "pro" | "enterprise";
+    billingInterval: "monthly" | "yearly";
     paymentMethodId?: string;
   }) {
     const plan = this.plans[params.tier];
@@ -924,14 +890,13 @@ export class MultiPlanService {
     }
 
     // Free tier doesn't need Stripe subscription
-    if (params.tier === 'free') {
-      return { tier: 'free', subscription: null };
+    if (params.tier === "free") {
+      return { tier: "free", subscription: null };
     }
 
     // Get price ID based on billing interval
-    const priceId = params.billingInterval === 'yearly'
-      ? this.getYearlyPriceId(params.tier)
-      : this.getMonthlyPriceId(params.tier);
+    const priceId =
+      params.billingInterval === "yearly" ? this.getYearlyPriceId(params.tier) : this.getMonthlyPriceId(params.tier);
 
     // Create subscription
     const subscription = await this.stripeSubscription.createSubscription({
@@ -955,16 +920,16 @@ export class MultiPlanService {
   private getMonthlyPriceId(tier: string): string {
     // In production, retrieve from database or config
     const priceIds = {
-      pro: 'price_pro_monthly',
-      enterprise: 'price_enterprise_monthly',
+      pro: "price_pro_monthly",
+      enterprise: "price_enterprise_monthly",
     };
     return priceIds[tier];
   }
 
   private getYearlyPriceId(tier: string): string {
     const priceIds = {
-      pro: 'price_pro_yearly',
-      enterprise: 'price_enterprise_yearly',
+      pro: "price_pro_yearly",
+      enterprise: "price_enterprise_yearly",
     };
     return priceIds[tier];
   }

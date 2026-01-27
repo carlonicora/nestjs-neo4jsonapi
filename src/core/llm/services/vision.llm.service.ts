@@ -111,10 +111,6 @@ export class VisionLLMService {
         const jitter = Math.random() * 500;
         const delay = baseDelay + jitter;
 
-        console.log(
-          `[VisionLLMService] Rate limited (attempt ${attempt + 1}/${this.MAX_RETRIES}), retrying in ${Math.round(delay)}ms...`,
-        );
-
         await this.sleep(delay);
       }
     }

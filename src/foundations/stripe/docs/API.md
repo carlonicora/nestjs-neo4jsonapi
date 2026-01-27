@@ -450,7 +450,7 @@ Preview proration amount for a subscription change.
 
 ```typescript
 const preview = await this.stripeSubscription.previewProration("sub_123", "price_456");
-console.log("Proration amount:", preview.amount_due);
+console.info("Proration amount:", preview.amount_due);
 ```
 
 ### listSubscriptions()
@@ -908,7 +908,7 @@ Preview the next upcoming invoice for a customer.
 
 ```typescript
 const upcomingInvoice = await this.stripeInvoice.retrieveUpcomingInvoice("cus_123");
-console.log("Next charge:", upcomingInvoice.amount_due);
+console.info("Next charge:", upcomingInvoice.amount_due);
 ```
 
 ---

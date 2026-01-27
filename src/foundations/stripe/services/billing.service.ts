@@ -1,12 +1,11 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
-import { JsonApiService } from "../../../core/jsonapi";
+import { JsonApiDataInterface, JsonApiService } from "../../../core/jsonapi";
 import {
   StripeCustomer,
+  StripeCustomerApiService,
   StripeCustomerModel,
   StripeCustomerRepository,
-  StripeCustomerApiService,
 } from "../../stripe-customer";
 import { StripePaymentService } from "./stripe.payment.service";
 import { StripePortalService } from "./stripe.portal.service";
@@ -233,7 +232,7 @@ export class BillingService {
    * const { data } = await billingService.listPaymentMethods({
    *   companyId: 'company_123'
    * });
-   * console.log(`Customer has ${data.length} payment methods`);
+   * console.info(`Customer has ${data.length} payment methods`);
    * ```
    */
   async listPaymentMethods(params: { companyId: string }): Promise<{ data: Stripe.PaymentMethod[] }> {

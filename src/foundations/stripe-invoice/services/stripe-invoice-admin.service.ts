@@ -117,7 +117,7 @@ export class StripeInvoiceAdminService {
    *   companyId: 'company_123',
    *   subscriptionId: 'sub_456'
    * });
-   * console.log(`Next charge: ${upcoming.amountDue}`);
+   * console.info(`Next charge: ${upcoming.amountDue}`);
    * ```
    */
   async getUpcomingInvoice(params: { companyId: string; subscriptionId?: string }): Promise<any> {

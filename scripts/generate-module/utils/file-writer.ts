@@ -42,7 +42,7 @@ export function writeFiles(
 
   for (const file of files) {
     if (dryRun) {
-      console.log(`[DRY RUN] Would create: ${file.path}`);
+      console.info(`[DRY RUN] Would create: ${file.path}`);
       continue;
     }
 
@@ -54,7 +54,7 @@ export function writeFiles(
 
     // Write file
     fs.writeFileSync(file.path, file.content, "utf-8");
-    console.log(`✓ Created: ${file.path}`);
+    console.info(`✓ Created: ${file.path}`);
   }
 }
 

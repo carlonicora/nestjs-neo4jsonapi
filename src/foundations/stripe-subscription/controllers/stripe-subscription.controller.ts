@@ -57,10 +57,6 @@ export class StripeSubscriptionController {
     @Res() reply: FastifyReply,
     @Body() body: StripeSubscriptionPostDTO,
   ) {
-    console.log("[StripeSubscriptionController] createSubscription body:", JSON.stringify(body, null, 2));
-    console.log("[StripeSubscriptionController] body.data.attributes:", JSON.stringify(body.data.attributes, null, 2));
-    console.log("[StripeSubscriptionController] promotionCode from body:", body.data.attributes?.promotionCode);
-
     const result = await this.subscriptionService.createSubscription({
       companyId: req.user.companyId,
       priceId: body.data.relationships.stripePrice.data.id,

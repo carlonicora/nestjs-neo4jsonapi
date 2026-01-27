@@ -42,9 +42,9 @@ export function generateDescriptor(
   if (options.useCypherRelationships !== false && options.modulePath) {
     cypherRelationships = findAndParseCypherRelationships(options.modulePath, meta.nodeName);
     if (options.verbose && cypherRelationships.length > 0) {
-      console.log(`  Found ${cypherRelationships.length} relationships from Cypher queries:`);
+      console.info(`  Found ${cypherRelationships.length} relationships from Cypher queries:`);
       for (const rel of cypherRelationships) {
-        console.log(
+        console.info(
           `    - ${rel.name}: ${rel.direction === "in" ? "<-" : ""}[:${rel.relationshipType}]${rel.direction === "out" ? "->" : ""} ${rel.relatedLabel}`,
         );
       }
@@ -69,9 +69,9 @@ export function generateDescriptor(
 
   // Log S3 transforms if verbose
   if (options.verbose && s3Transforms.length > 0) {
-    console.log(`  Auto-generated ${s3Transforms.length} S3 transform(s):`);
+    console.info(`  Auto-generated ${s3Transforms.length} S3 transform(s):`);
     for (const transform of s3Transforms) {
-      console.log(`    - ${transform.fieldName}: ${transform.isArray ? "array" : "single"} URL signing`);
+      console.info(`    - ${transform.fieldName}: ${transform.isArray ? "array" : "single"} URL signing`);
     }
   }
 
@@ -291,7 +291,7 @@ function buildRelationshipConfigs(
       contextKey = rel.name === "author" ? "userId" : undefined;
 
       if (verbose) {
-        console.log(
+        console.info(
           `    Using Cypher for '${rel.name}': ${direction === "in" ? "<-" : ""}[:${relationship}]${direction === "out" ? "->" : ""}`,
         );
       }
@@ -303,7 +303,7 @@ function buildRelationshipConfigs(
       contextKey = inferred.contextKey;
 
       if (verbose) {
-        console.log(
+        console.info(
           `    Using heuristic for '${rel.name}': ${direction === "in" ? "<-" : ""}[:${relationship}]${direction === "out" ? "->" : ""} (no Cypher match)`,
         );
       }

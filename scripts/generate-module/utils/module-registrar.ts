@@ -38,14 +38,14 @@ function addToModuleFile(params: {
 
   // Check if already imported
   if (content.includes(`import { ${moduleClassName} }`)) {
-    console.log(`ℹ️  ${moduleClassName} is already imported in ${fullPath}`);
+    console.info(`ℹ️  ${moduleClassName} is already imported in ${fullPath}`);
     return;
   }
 
   if (dryRun) {
-    console.log(`[DRY RUN] Would add import to ${fullPath}:`);
-    console.log(`  ${newImport.trim()}`);
-    console.log(`[DRY RUN] Would add ${moduleClassName} to imports array`);
+    console.info(`[DRY RUN] Would add import to ${fullPath}:`);
+    console.info(`  ${newImport.trim()}`);
+    console.info(`[DRY RUN] Would add ${moduleClassName} to imports array`);
     return;
   }
 
@@ -97,7 +97,7 @@ function addToModuleFile(params: {
 
   // Write back
   fs.writeFileSync(fullPath, content, "utf-8");
-  console.log(`✓ Registered ${moduleClassName} in ${fullPath}`);
+  console.info(`✓ Registered ${moduleClassName} in ${fullPath}`);
 }
 
 /**
@@ -122,7 +122,7 @@ export class ${pascalName}Modules {}
   const filePath = path.resolve(process.cwd(), `apps/api/src/${targetDir}/${subfolderName}.modules.ts`);
 
   if (dryRun) {
-    console.log(`[DRY RUN] Would create ${filePath}`);
+    console.info(`[DRY RUN] Would create ${filePath}`);
     return;
   }
 
@@ -133,7 +133,7 @@ export class ${pascalName}Modules {}
   }
 
   fs.writeFileSync(filePath, content, "utf-8");
-  console.log(`✓ Created ${filePath}`);
+  console.info(`✓ Created ${filePath}`);
 }
 
 /**

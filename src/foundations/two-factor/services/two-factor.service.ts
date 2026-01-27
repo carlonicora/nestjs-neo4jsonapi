@@ -3,8 +3,7 @@ import * as crypto from "crypto";
 import { baseConfig } from "../../../config/base.config";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { PendingTwoFactor } from "../entities/pending-two-factor";
-import { TwoFactorConfig } from "../entities/two-factor-config";
-import { TwoFactorConfigDescriptor } from "../entities/two-factor-config";
+import { TwoFactorConfig, TwoFactorConfigDescriptor } from "../entities/two-factor-config";
 import { TwoFactorStatusDescriptor } from "../entities/two-factor-status";
 import { TwoFactorVerificationDescriptor } from "../entities/two-factor-verification";
 import { PendingTwoFactorRepository } from "../repositories/pending-two-factor.repository";
@@ -68,9 +67,7 @@ export class TwoFactorService {
    * @returns The user's TwoFactorConfig, or null if not configured
    */
   async getConfig(userId: string): Promise<TwoFactorConfig | null> {
-    console.log("[TwoFactorService.getConfig] Looking up config for userId:", userId);
     const config = await this.twoFactorConfigRepository.findByUserId({ userId });
-    console.log("[TwoFactorService.getConfig] Result:", config);
     return config;
   }
 
@@ -115,17 +112,13 @@ export class TwoFactorService {
    * @returns JSON:API response with the 2FA config
    */
   async enable(userId: string, preferredMethod: TwoFactorMethod = "totp"): Promise<any> {
-    console.log("[TwoFactorService.enable] Enabling 2FA for userId:", userId, "preferredMethod:", preferredMethod);
-
     // Check that at least one method is available
     const [hasTotp, hasPasskey] = await Promise.all([
       this.totpService.hasVerifiedAuthenticator({ userId }),
       this.passkeyService.hasPasskeys({ userId }),
     ]);
-    console.log("[TwoFactorService.enable] Available methods:", { hasTotp, hasPasskey });
 
     if (!hasTotp && !hasPasskey) {
-      console.log("[TwoFactorService.enable] ERROR: No methods available");
       throw new BadRequestException("Cannot enable 2FA without at least one configured method (TOTP or Passkey)");
     }
 

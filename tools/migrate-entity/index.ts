@@ -30,11 +30,11 @@ program
 async function main() {
   const options = program.opts();
 
-  console.log("\n🔄 Entity Migration CLI");
-  console.log("========================\n");
+  console.info("\n🔄 Entity Migration CLI");
+  console.info("========================\n");
 
   if (options.dryRun) {
-    console.log("⚠️  DRY RUN MODE - No files will be modified\n");
+    console.info("⚠️  DRY RUN MODE - No files will be modified\n");
   }
 
   const migrator = new EntityMigrator({

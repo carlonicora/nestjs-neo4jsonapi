@@ -11,7 +11,14 @@ import { generateEntityFile, generateMetaFile } from "./descriptor-generator";
 import { discoverAllModulePaths, discoverOldFiles, isAlreadyMigrated } from "./file-discovery";
 import { findModuleFile, formatModuleContent, updateModule } from "./module-updater";
 import { findExternalReferences, summarizeReferences, updateFileReferences } from "./reference-updater";
-import { AliasModelInfo, EntityMigrationResult, FileChange, MigrationResult, MigratorOptions, OldEntityFiles } from "./types";
+import {
+  AliasModelInfo,
+  EntityMigrationResult,
+  FileChange,
+  MigrationResult,
+  MigratorOptions,
+  OldEntityFiles,
+} from "./types";
 
 export class EntityMigrator {
   private changes: FileChange[] = [];
@@ -187,7 +194,7 @@ export class EntityMigrator {
       parsed.meta.labelName,
       "src",
       [targetPath, metaTargetPath], // Exclude the entity files being migrated
-      parsed.aliasModels
+      parsed.aliasModels,
     );
 
     if (this.options.verbose) {
@@ -242,7 +249,7 @@ export class EntityMigrator {
         indexContent,
         oldFiles.entityName,
         parsed.meta.labelName,
-        parsed.aliasModels
+        parsed.aliasModels,
       );
 
       if (updatedIndexContent !== indexContent) {
@@ -262,9 +269,7 @@ export class EntityMigrator {
     }
 
     // 12. Delete old files (model, map, serialiser - not meta since we're using the same path)
-    const filesToDelete = [oldFiles.model, oldFiles.map, oldFiles.serialiser].filter(
-      (f): f is string => f !== null
-    );
+    const filesToDelete = [oldFiles.model, oldFiles.map, oldFiles.serialiser].filter((f): f is string => f !== null);
 
     // Don't delete the old meta file if it's the same as our target meta file
     if (oldFiles.meta && oldFiles.meta !== metaTargetPath) {
@@ -342,14 +347,14 @@ export class EntityMigrator {
     content: string,
     entityName: string,
     labelName: string,
-    aliasModels: AliasModelInfo[] = []
+    aliasModels: AliasModelInfo[] = [],
   ): string {
     const modelName = `${labelName}Model`;
     const descriptorName = `${labelName}Descriptor`;
     const moduleName = `${labelName}Module`;
 
     // Build the list of all descriptors to export (base + aliases)
-    const allDescriptors = [descriptorName, ...aliasModels.map(a => a.descriptorName)];
+    const allDescriptors = [descriptorName, ...aliasModels.map((a) => a.descriptorName)];
     const descriptorsExport = allDescriptors.join(", ");
 
     let updated = content;
@@ -358,11 +363,11 @@ export class EntityMigrator {
     // -> export { Entity, EntityDescriptor, AliasDescriptors... } from "./entities/entity"
     const entityExportPattern = new RegExp(
       `export\\s*\\{\\s*(${labelName})\\s*\\}\\s*from\\s*["']\\./entities/${entityName}\\.entity["']`,
-      "g"
+      "g",
     );
     updated = updated.replace(
       entityExportPattern,
-      `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`
+      `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`,
     );
 
     // Pattern 2: export { EntityModel } from "./entities/entity.model"
@@ -370,21 +375,21 @@ export class EntityMigrator {
     // Also handles lines with multiple models like: export { AssigneeModel, AuthorModel, UserModel } from ...
     const modelExportPattern = new RegExp(
       `export\\s*\\{[^}]*${modelName}[^}]*\\}\\s*from\\s*["']\\./entities/${entityName}\\.model["'];?\\n?`,
-      "g"
+      "g",
     );
     updated = updated.replace(modelExportPattern, "");
 
     // Pattern 2b: export * from "./entities/entity.map" -> remove (file deleted)
     const mapStarExportPattern = new RegExp(
       `export\\s*\\*\\s*from\\s*["']\\./entities/${entityName}\\.map["'];?\\n?`,
-      "g"
+      "g",
     );
     updated = updated.replace(mapStarExportPattern, "");
 
     // Pattern 2c: export { EntitySerialiser } from "./serialisers/entity.serialiser" -> remove (file deleted)
     const serialiserExportPattern = new RegExp(
       `export\\s*\\{[^}]*\\}\\s*from\\s*["']\\./serialisers/${entityName}\\.serialiser["'];?\\n?`,
-      "g"
+      "g",
     );
     updated = updated.replace(serialiserExportPattern, "");
 
@@ -392,23 +397,23 @@ export class EntityMigrator {
     // Handle case where entity and model are on separate lines
     const simpleEntityExport = new RegExp(
       `(export\\s*\\{\\s*${labelName}\\s*\\}\\s*from\\s*["']\\./entities/${entityName}["'])`,
-      "g"
+      "g",
     );
     if (simpleEntityExport.test(updated) && !updated.includes(descriptorName)) {
       updated = updated.replace(
         simpleEntityExport,
-        `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`
+        `export { ${labelName}, ${descriptorsExport} } from "./entities/${entityName}"`,
       );
     }
 
     // Reorder exports: entity/descriptor must come BEFORE module to avoid circular dependency
     // Find the module export line and entity export line
     const lines = updated.split("\n");
-    const moduleExportIndex = lines.findIndex(line =>
-      line.includes(moduleName) && line.includes("./") && line.includes("module")
+    const moduleExportIndex = lines.findIndex(
+      (line) => line.includes(moduleName) && line.includes("./") && line.includes("module"),
     );
-    const entityExportIndex = lines.findIndex(line =>
-      line.includes(descriptorName) || (line.includes(labelName) && line.includes("./entities/"))
+    const entityExportIndex = lines.findIndex(
+      (line) => line.includes(descriptorName) || (line.includes(labelName) && line.includes("./entities/")),
     );
 
     // If module export comes before entity export, swap them
@@ -431,7 +436,7 @@ export class EntityMigrator {
     // Find where the primary meta export ends
     const primaryMetaPattern = new RegExp(
       `export\\s+const\\s+${primaryMetaName}\\s*:\\s*DataMeta\\s*=\\s*\\{[^}]+\\};`,
-      "s"
+      "s",
     );
     const match = existingContent.match(primaryMetaPattern);
     if (!match) return null;
@@ -487,7 +492,7 @@ export class EntityMigrator {
    */
   private log(message: string): void {
     if (this.options.verbose || !message.startsWith("      ")) {
-      console.log(message);
+      console.info(message);
     }
   }
 }
@@ -496,19 +501,19 @@ export class EntityMigrator {
  * Prints a summary of the migration results.
  */
 export function printMigrationSummary(result: MigrationResult): void {
-  console.log("\n" + "=".repeat(60));
-  console.log("Migration Summary");
-  console.log("=".repeat(60));
-  console.log(`Total entities: ${result.totalEntities}`);
-  console.log(`Successful: ${result.successCount}`);
-  console.log(`Failed: ${result.failureCount}`);
+  console.info("\n" + "=".repeat(60));
+  console.info("Migration Summary");
+  console.info("=".repeat(60));
+  console.info(`Total entities: ${result.totalEntities}`);
+  console.info(`Successful: ${result.successCount}`);
+  console.info(`Failed: ${result.failureCount}`);
 
   if (result.failureCount > 0) {
-    console.log("\nFailed migrations:");
+    console.info("\nFailed migrations:");
     for (const r of result.results.filter((r) => !r.success)) {
-      console.log(`  - ${r.entityName}: ${r.error}`);
+      console.info(`  - ${r.entityName}: ${r.error}`);
     }
   }
 
-  console.log("=".repeat(60) + "\n");
+  console.info("=".repeat(60) + "\n");
 }

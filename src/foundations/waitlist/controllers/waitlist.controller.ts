@@ -100,17 +100,12 @@ export class WaitlistController {
    */
   @Get("invite/:code")
   async validateInviteCode(@Param("code") code: string) {
-    console.log("[WaitlistController.validateInviteCode] Validating code:", code);
-
     const result = await this.service.validateInviteCode(code);
-    console.log("[WaitlistController.validateInviteCode] Service result:", JSON.stringify(result));
 
     if (!result) {
-      console.log("[WaitlistController.validateInviteCode] Code not found, returning 404");
       throw new HttpException("Invalid invitation code", HttpStatus.NOT_FOUND);
     }
 
-    console.log("[WaitlistController.validateInviteCode] Returning valid response");
     return {
       data: {
         type: "invite-validation",

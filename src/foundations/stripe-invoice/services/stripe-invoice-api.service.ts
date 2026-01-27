@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { StripeService } from "../../stripe/services/stripe.service";
 import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
+import { StripeService } from "../../stripe/services/stripe.service";
 
 /**
  * Stripe Invoice API Service
@@ -93,7 +93,7 @@ export class StripeInvoiceApiService {
    * @example
    * ```typescript
    * const invoice = await service.getInvoice('in_abc123');
-   * console.log(invoice.lines.data);
+   * console.info(invoice.lines.data);
    * ```
    */
   @HandleStripeErrors()

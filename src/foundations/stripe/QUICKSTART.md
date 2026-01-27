@@ -44,8 +44,8 @@ APP_URL=http://localhost:3000
 
 ```typescript
 // app.module.ts
-import { Module } from '@nestjs/common';
-import { StripeModule } from '@carlonicora/nestjs-neo4jsonapi';
+import { Module } from "@nestjs/common";
+import { StripeModule } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Module({
   imports: [
@@ -73,6 +73,7 @@ stripe listen --forward-to http://localhost:3000/billing/webhooks/stripe
 ```
 
 Copy the webhook signing secret from the CLI output:
+
 ```
 > Ready! Your webhook signing secret is whsec_xxxxxxxxxxxxx
 ```
@@ -95,14 +96,12 @@ Copy the webhook signing secret from the CLI output:
 
 ```typescript
 // your-onboarding.service.ts
-import { Injectable } from '@nestjs/common';
-import { BillingService } from '@carlonicora/nestjs-neo4jsonapi';
+import { Injectable } from "@nestjs/common";
+import { BillingService } from "@carlonicora/nestjs-neo4jsonapi";
 
 @Injectable()
 export class OnboardingService {
-  constructor(
-    private readonly billingService: BillingService,
-  ) {}
+  constructor(private readonly billingService: BillingService) {}
 
   async onboardNewUser(companyId: string, email: string, name: string) {
     // Create Stripe customer + Neo4j record
@@ -110,10 +109,10 @@ export class OnboardingService {
       companyId,
       email,
       name,
-      currency: 'usd',
+      currency: "usd",
     });
 
-    console.log('Customer created:', customer.data.id);
+    console.info("Customer created:", customer.data.id);
     return customer;
   }
 }
@@ -141,6 +140,7 @@ curl -X POST http://localhost:3000/billing/customer \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "data": {
@@ -167,6 +167,7 @@ stripe trigger customer.created
 ```
 
 **Check logs** for:
+
 ```
 [WebhookController] Webhook event queued: customer.created (evt_...)
 [WebhookProcessor] Processing webhook event: customer.created
@@ -174,6 +175,7 @@ stripe trigger customer.created
 ```
 
 **Verify in Neo4j:**
+
 ```cypher
 MATCH (bc:BillingCustomer)
 RETURN bc
@@ -257,10 +259,10 @@ async checkPaymentStatus(companyId: string) {
 ### Collect Payment Method (React Example)
 
 ```tsx
-import { loadStripe } from '@stripe/stripe-js';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 
-const stripePromise = loadStripe('pk_test_...');
+const stripePromise = loadStripe("pk_test_...");
 
 function PaymentForm() {
   const stripe = useStripe();
@@ -270,10 +272,10 @@ function PaymentForm() {
     e.preventDefault();
 
     // 1. Get setup intent from your backend
-    const { clientSecret } = await fetch('/billing/setup-intent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }).then(r => r.json());
+    const { clientSecret } = await fetch("/billing/setup-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json());
 
     // 2. Confirm setup with Stripe
     const { setupIntent, error } = await stripe.confirmCardSetup(clientSecret, {
@@ -286,14 +288,14 @@ function PaymentForm() {
       console.error(error);
     } else {
       // 3. Payment method collected! Use setupIntent.payment_method
-      console.log('Payment method:', setupIntent.payment_method);
+      console.info("Payment method:", setupIntent.payment_method);
 
       // 4. Create subscription
-      await fetch('/billing/subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await fetch("/billing/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          priceId: 'price_...',
+          priceId: "price_...",
           paymentMethodId: setupIntent.payment_method,
         }),
       });
@@ -303,7 +305,9 @@ function PaymentForm() {
   return (
     <form onSubmit={handleSubmit}>
       <CardElement />
-      <button type="submit" disabled={!stripe}>Subscribe</button>
+      <button type="submit" disabled={!stripe}>
+        Subscribe
+      </button>
     </form>
   );
 }
@@ -338,9 +342,9 @@ async createPortalSession(@Req() req: AuthenticatedRequest) {
 // Frontend button
 function ManageBillingButton() {
   const handleClick = async () => {
-    const { url } = await fetch('/billing/customer/portal-session', {
-      method: 'POST',
-    }).then(r => r.json());
+    const { url } = await fetch("/billing/customer/portal-session", {
+      method: "POST",
+    }).then((r) => r.json());
 
     window.location.href = url; // Redirect to Stripe portal
   };

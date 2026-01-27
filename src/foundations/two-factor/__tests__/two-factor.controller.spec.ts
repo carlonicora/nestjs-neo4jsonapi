@@ -19,6 +19,7 @@ import { TwoFactorService } from "../services/two-factor.service";
 import { PasskeyService } from "../services/passkey.service";
 import { BackupCodeService } from "../services/backup-code.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AuthService } from "../../auth/services/auth.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { PendingAuthGuard } from "../guards/pending-auth.guard";
 
@@ -28,6 +29,7 @@ describe("TwoFactorController", () => {
   let mockPasskeyService: vi.Mocked<PasskeyService>;
   let mockBackupCodeService: vi.Mocked<BackupCodeService>;
   let mockJsonApiService: vi.Mocked<JsonApiService>;
+  let mockAuthService: vi.Mocked<AuthService>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -87,6 +89,10 @@ describe("TwoFactorController", () => {
       buildList: vi.fn().mockImplementation((model, data) => ({ data })),
     } as any;
 
+    mockAuthService = {
+      completeTwoFactorLogin: vi.fn().mockResolvedValue({ data: { token: "auth-token" } }),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TwoFactorController],
       providers: [
@@ -94,6 +100,7 @@ describe("TwoFactorController", () => {
         { provide: PasskeyService, useValue: mockPasskeyService },
         { provide: BackupCodeService, useValue: mockBackupCodeService },
         { provide: JsonApiService, useValue: mockJsonApiService },
+        { provide: AuthService, useValue: mockAuthService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -274,14 +281,8 @@ describe("TwoFactorController", () => {
 
       expect(mockPasskeyService.verifyAuthentication).toHaveBeenCalled();
       expect(mockTwoFactorService.deletePendingSession).toHaveBeenCalledWith(TEST_IDS.pendingId);
-      expect(mockJsonApiService.buildSingle).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          success: true,
-          userId: TEST_IDS.userId,
-        }),
-      );
-      expect(reply.send).toHaveBeenCalled();
+      expect(mockAuthService.completeTwoFactorLogin).toHaveBeenCalledWith(TEST_IDS.userId);
+      expect(reply.send).toHaveBeenCalledWith({ data: { token: "auth-token" } });
     });
 
     it("should return failure when passkey verification fails", async () => {

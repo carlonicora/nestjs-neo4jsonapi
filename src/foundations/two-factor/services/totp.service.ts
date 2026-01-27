@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import * as crypto from "crypto";
 import * as OTPAuth from "otpauth";
 import * as QRCode from "qrcode";
@@ -31,6 +31,7 @@ export interface TotpAuthenticatorInfo {
  */
 @Injectable()
 export class TotpService {
+  private readonly logger: Logger = new Logger(TotpService.name);
   private readonly issuer = "Only35";
   private readonly algorithm = "SHA1";
   private readonly digits = 6;
@@ -185,29 +186,18 @@ export class TotpService {
    * @returns The authenticator ID if verification succeeds, null otherwise
    */
   async verifyCodeForUser(params: { userId: string; code: string }): Promise<string | null> {
-    console.log("[TotpService.verifyCodeForUser] userId:", params.userId, "code:", params.code);
     const authenticators = await this.totpAuthenticatorRepository.findAllByUserIdWithSecrets({
       userId: params.userId,
     });
-    console.log("[TotpService.verifyCodeForUser] Found authenticators:", authenticators.length);
 
     for (const authenticator of authenticators) {
-      console.log(
-        "[TotpService.verifyCodeForUser] Checking authenticator:",
-        authenticator.id,
-        "verified:",
-        authenticator.verified,
-      );
-
       // Skip unverified authenticators
       if (!authenticator.verified) {
-        console.log("[TotpService.verifyCodeForUser] Skipping unverified authenticator");
         continue;
       }
 
       // Decrypt the secret
       const decryptedSecret = this.totpEncryptionService.decrypt(authenticator.secret);
-      console.log("[TotpService.verifyCodeForUser] Decrypted secret (first 4 chars):", decryptedSecret.substring(0, 4));
 
       // Create TOTP instance
       const totp = new OTPAuth.TOTP({
@@ -220,7 +210,6 @@ export class TotpService {
 
       // Validate with 1 period window
       const delta = totp.validate({ token: params.code, window: 1 });
-      console.log("[TotpService.verifyCodeForUser] Validation result delta:", delta);
 
       if (delta !== null) {
         // Update last used time
@@ -228,12 +217,10 @@ export class TotpService {
           authenticatorId: authenticator.id,
           lastUsedAt: new Date(),
         });
-        console.log("[TotpService.verifyCodeForUser] Code valid! Returning authenticator id:", authenticator.id);
         return authenticator.id;
       }
     }
 
-    console.log("[TotpService.verifyCodeForUser] No valid authenticator found, returning null");
     return null;
   }
 

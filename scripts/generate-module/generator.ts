@@ -40,7 +40,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   const { jsonPath, dryRun = false, force = false, noRegister = false } = options;
 
   // 1. Load and parse JSON
-  console.log(`📖 Loading JSON schema from: ${jsonPath}`);
+  console.info(`📖 Loading JSON schema from: ${jsonPath}`);
   const jsonContent = fs.readFileSync(jsonPath, "utf-8");
   let jsonSchema: JsonModuleDefinition = JSON.parse(jsonContent);
 
@@ -56,7 +56,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   }
 
   // 2. Validate JSON schema
-  console.log(`✓ Validating JSON schema...`);
+  console.info(`✓ Validating JSON schema...`);
   const validationErrors = validateJsonSchema(jsonSchema);
 
   if (validationErrors.length > 0) {
@@ -69,7 +69,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   }
 
   // 3. Transform data
-  console.log(`✓ Transforming data...`);
+  console.info(`✓ Transforming data...`);
   const names = transformNames(jsonSchema.moduleName, jsonSchema.endpointName);
   const relationships = mapRelationships(jsonSchema.relationships);
   const nestedRoutes = generateNestedRoutes(relationships, {
@@ -117,7 +117,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   };
 
   // 4. Generate files
-  console.log(`✓ Generating files...`);
+  console.info(`✓ Generating files...`);
   const basePath = `apps/api/src/${jsonSchema.targetDir}/${names.kebabCase}`;
 
   const filesToWrite: FileToWrite[] = [
@@ -200,12 +200,12 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   );
 
   // 5. Write files
-  console.log(`\n📝 Writing ${filesToWrite.length} files...\n`);
+  console.info(`\n📝 Writing ${filesToWrite.length} files...\n`);
   writeFiles(filesToWrite, { dryRun, force });
 
   // 6. Register module
   if (!noRegister && !dryRun) {
-    console.log(`\n📦 Registering module...`);
+    console.info(`\n📦 Registering module...`);
     try {
       registerModule({
         moduleName: names.pascalCase,
@@ -219,11 +219,11 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
   }
 
   // 7. Summary
-  console.log(`\n✅ Module generation complete!`);
-  console.log(`\n📂 Generated files in: apps/api/src/${jsonSchema.targetDir}/${names.kebabCase}/`);
-  console.log(`\n📋 Next steps:`);
-  console.log(`   1. Review generated code`);
-  console.log(`   2. Run: pnpm lint:api --fix`);
-  console.log(`   3. Run: pnpm build:api`);
-  console.log(`   4. Run tests: pnpm --filter only35-api test -- ${names.kebabCase}`);
+  console.info(`\n✅ Module generation complete!`);
+  console.info(`\n📂 Generated files in: apps/api/src/${jsonSchema.targetDir}/${names.kebabCase}/`);
+  console.info(`\n📋 Next steps:`);
+  console.info(`   1. Review generated code`);
+  console.info(`   2. Run: pnpm lint:api --fix`);
+  console.info(`   3. Run: pnpm build:api`);
+  console.info(`   4. Run tests: pnpm --filter only35-api test -- ${names.kebabCase}`);
 }

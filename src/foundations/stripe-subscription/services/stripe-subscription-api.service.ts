@@ -54,9 +54,6 @@ export class StripeSubscriptionApiService {
     metadata?: Record<string, string>;
     promotionCode?: string;
   }): Promise<Stripe.Subscription> {
-    console.log("[StripeSubscriptionApiService] createSubscription params:", JSON.stringify(params, null, 2));
-    console.log("[StripeSubscriptionApiService] promotionCode:", params.promotionCode);
-
     const stripe = this.stripeService.getClient();
 
     const subscriptionParams: Stripe.SubscriptionCreateParams = {
@@ -80,13 +77,8 @@ export class StripeSubscriptionApiService {
 
     if (params.promotionCode) {
       subscriptionParams.discounts = [{ promotion_code: params.promotionCode }];
-      console.log("[StripeSubscriptionApiService] Adding discount with promotion_code:", params.promotionCode);
     }
 
-    console.log(
-      "[StripeSubscriptionApiService] Final subscriptionParams:",
-      JSON.stringify(subscriptionParams, null, 2),
-    );
     return stripe.subscriptions.create(subscriptionParams);
   }
 
@@ -253,7 +245,7 @@ export class StripeSubscriptionApiService {
    * @example
    * ```typescript
    * const preview = await service.previewProration('sub_abc123', 'price_new789');
-   * console.log('Proration amount:', preview.amount_due);
+   * console.info('Proration amount:', preview.amount_due);
    * ```
    */
   @HandleStripeErrors()

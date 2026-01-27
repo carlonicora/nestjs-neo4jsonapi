@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
-import { generateModule } from "./generator";
 import * as path from "path";
+import { generateModule } from "./generator";
 
 const program = new Command();
 
@@ -18,11 +18,11 @@ program
     try {
       const jsonPath = path.resolve(process.cwd(), jsonFile);
 
-      console.log(`\n🚀 NestJS Module Generator\n`);
-      console.log(`   JSON File: ${jsonPath}`);
-      console.log(`   Dry Run: ${options.dryRun ? "Yes" : "No"}`);
-      console.log(`   Force: ${options.force ? "Yes" : "No"}`);
-      console.log(`   Register: ${options.register ? "Yes" : "No"}\n`);
+      console.info(`\n🚀 NestJS Module Generator\n`);
+      console.info(`   JSON File: ${jsonPath}`);
+      console.info(`   Dry Run: ${options.dryRun ? "Yes" : "No"}`);
+      console.info(`   Force: ${options.force ? "Yes" : "No"}`);
+      console.info(`   Register: ${options.register ? "Yes" : "No"}\n`);
 
       await generateModule({
         jsonPath,

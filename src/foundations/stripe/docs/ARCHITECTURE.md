@@ -20,6 +20,7 @@ Comprehensive architectural documentation for the Stripe billing foundation modu
 ## Overview
 
 The Stripe Foundation module implements a **hybrid storage architecture** that combines:
+
 - **Stripe API** as the source of truth for billing data
 - **Neo4j graph database** for relationship management and company-scoped data
 - **Redis/BullMQ** for asynchronous webhook processing
@@ -220,18 +221,21 @@ Payment Failure
 ### Hybrid Storage Rationale
 
 **Why Not Store Everything in Stripe?**
+
 - ❌ No company/tenant relationships
 - ❌ Limited metadata storage
 - ❌ No graph query capabilities
 - ❌ Cannot link to other application entities
 
 **Why Not Store Everything in Neo4j?**
+
 - ❌ Duplicate payment processing logic
 - ❌ PCI compliance complexity
 - ❌ No built-in retry/reconciliation
 - ❌ Missing Stripe's fraud detection
 
 **Hybrid Solution Benefits:**
+
 - ✅ Stripe handles all payment operations
 - ✅ Neo4j manages relationships and ownership
 - ✅ Single source of truth per entity type
@@ -240,16 +244,16 @@ Payment Failure
 
 ### Data Partitioning Strategy
 
-| Entity | Source of Truth | Also Stored In | Sync Method |
-|--------|----------------|----------------|-------------|
-| Customer | Stripe | Neo4j (metadata) | Webhook |
-| Subscription | Stripe | Neo4j (status) | Webhook |
-| Invoice | Stripe | Neo4j (status) | Webhook |
-| Payment | Stripe | Not stored | Event only |
-| Product | Stripe | Neo4j (company link) | API call |
-| Price | Stripe | Neo4j (company link) | API call |
-| UsageRecord | Stripe Meters | Neo4j (audit) | API call |
-| Company | Neo4j | Not in Stripe | N/A |
+| Entity       | Source of Truth | Also Stored In       | Sync Method |
+| ------------ | --------------- | -------------------- | ----------- |
+| Customer     | Stripe          | Neo4j (metadata)     | Webhook     |
+| Subscription | Stripe          | Neo4j (status)       | Webhook     |
+| Invoice      | Stripe          | Neo4j (status)       | Webhook     |
+| Payment      | Stripe          | Not stored           | Event only  |
+| Product      | Stripe          | Neo4j (company link) | API call    |
+| Price        | Stripe          | Neo4j (company link) | API call    |
+| UsageRecord  | Stripe Meters   | Neo4j (audit)        | API call    |
+| Company      | Neo4j           | Not in Stripe        | N/A         |
 
 ### Neo4j Relationship Schema
 
@@ -280,6 +284,7 @@ Payment Failure
 ### Neo4j Node Properties
 
 **BillingCustomer Node:**
+
 ```typescript
 {
   id: string              // Neo4j internal ID
@@ -296,18 +301,17 @@ Payment Failure
 ```
 
 **BillingSubscription Node:**
+
 ```typescript
 {
-  id: string
-  stripeSubscriptionId: string // Stripe subscription ID (unique)
-  status: string          // active, canceled, past_due, etc.
-  currentPeriodStart: DateTime
-  currentPeriodEnd: DateTime
-  cancelAtPeriodEnd: boolean
-  canceledAt: DateTime?
-  trialEnd: DateTime?
-  createdAt: DateTime
-  updatedAt: DateTime
+  id: string;
+  stripeSubscriptionId: string; // Stripe subscription ID (unique)
+  status: string; // active, canceled, past_due, etc.
+  currentPeriodStart: DateTime;
+  currentPeriodEnd: DateTime;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: DateTime ? trialEnd : DateTime ? createdAt : DateTime;
+  updatedAt: DateTime;
 }
 ```
 
@@ -339,6 +343,7 @@ The module uses a **three-tier service architecture**:
 ### Service Responsibilities
 
 **StripeCustomerService** (Stripe API Layer)
+
 - `createCustomer(params)` → calls Stripe SDK
 - `retrieveCustomer(id)` → calls Stripe SDK
 - `updateCustomer(id, params)` → calls Stripe SDK
@@ -346,6 +351,7 @@ The module uses a **three-tier service architecture**:
 - Returns: Raw `Stripe.Customer` objects
 
 **BillingService** (Business Logic Layer)
+
 - `createCustomer(params)` → orchestrates:
   1. Validate company exists
   2. Check for existing customer in Neo4j
@@ -355,6 +361,7 @@ The module uses a **three-tier service architecture**:
 - Returns: JSON:API formatted response
 
 **NotificationService** (Cross-Cutting)
+
 - `sendPaymentFailedEmail(params)` → orchestrates:
   1. Fetch BillingCustomer from Neo4j
   2. Queue email job to BullMQ
@@ -460,6 +467,7 @@ export class BillingCustomerRepository {
 ### Query Optimization Patterns
 
 **1. Index Usage**
+
 ```cypher
 // Create indexes for common lookups
 CREATE INDEX billing_customer_stripe_id FOR (bc:BillingCustomer) ON (bc.stripeCustomerId);
@@ -468,6 +476,7 @@ CREATE INDEX webhook_event_stripe_id FOR (we:WebhookEvent) ON (we.stripeEventId)
 ```
 
 **2. Relationship Traversal**
+
 ```cypher
 // Efficient: Start from indexed node
 MATCH (bc:BillingCustomer {stripeCustomerId: $stripeId})
@@ -481,6 +490,7 @@ RETURN s
 ```
 
 **3. Company Scoping Pattern**
+
 ```cypher
 // Always start from Company for multi-tenancy
 MATCH (c:Company {id: $companyId})
@@ -497,6 +507,7 @@ RETURN s
 ### Webhook Architecture
 
 **Design Goals:**
+
 1. Return 200 to Stripe immediately (< 1 second)
 2. Process events asynchronously with retries
 3. Prevent duplicate processing (idempotency)
@@ -505,6 +516,7 @@ RETURN s
 ### Webhook Flow Stages
 
 **Stage 1: Receipt & Verification**
+
 ```typescript
 @Post('billing/webhooks/stripe')
 async handleStripeWebhook(
@@ -552,19 +564,20 @@ async handleStripeWebhook(
 ```
 
 **Stage 2: Async Processing**
+
 ```typescript
 @Processor(`${process.env.QUEUE}_billing_webhook`)
 export class WebhookProcessor {
-  @Process('process-webhook')
+  @Process("process-webhook")
   async handleWebhook(job: Job<WebhookJobData>) {
     const { eventType, payload } = job.data;
 
     switch (eventType) {
-      case 'customer.subscription.updated':
+      case "customer.subscription.updated":
         await this.handleSubscriptionUpdated(payload);
         break;
 
-      case 'invoice.payment_failed':
+      case "invoice.payment_failed":
         await this.handlePaymentFailed(payload);
         break;
 
@@ -581,20 +594,20 @@ export class WebhookProcessor {
 
 ### Supported Webhook Events
 
-| Event Type | Handler | Neo4j Update | Notification |
-|-----------|---------|--------------|--------------|
-| `customer.created` | Sync customer | Create node | No |
-| `customer.updated` | Sync customer | Update node | No |
-| `customer.deleted` | Soft delete | Mark deleted | No |
-| `customer.subscription.created` | Sync subscription | Create node | No |
-| `customer.subscription.updated` | Sync subscription | Update node | Yes (if status changed) |
-| `customer.subscription.deleted` | Cancel subscription | Update status | Yes |
-| `invoice.created` | Sync invoice | Create node | No |
-| `invoice.finalized` | Sync invoice | Update status | No |
-| `invoice.paid` | Mark paid | Update status | No |
-| `invoice.payment_failed` | Mark failed | Update status | Yes (retry prompt) |
-| `payment_intent.succeeded` | Log success | No update | No |
-| `payment_intent.payment_failed` | Log failure | No update | Yes |
+| Event Type                      | Handler             | Neo4j Update  | Notification            |
+| ------------------------------- | ------------------- | ------------- | ----------------------- |
+| `customer.created`              | Sync customer       | Create node   | No                      |
+| `customer.updated`              | Sync customer       | Update node   | No                      |
+| `customer.deleted`              | Soft delete         | Mark deleted  | No                      |
+| `customer.subscription.created` | Sync subscription   | Create node   | No                      |
+| `customer.subscription.updated` | Sync subscription   | Update node   | Yes (if status changed) |
+| `customer.subscription.deleted` | Cancel subscription | Update status | Yes                     |
+| `invoice.created`               | Sync invoice        | Create node   | No                      |
+| `invoice.finalized`             | Sync invoice        | Update status | No                      |
+| `invoice.paid`                  | Mark paid           | Update status | No                      |
+| `invoice.payment_failed`        | Mark failed         | Update status | Yes (retry prompt)      |
+| `payment_intent.succeeded`      | Log success         | No update     | No                      |
+| `payment_intent.payment_failed` | Log failure         | No update     | Yes                     |
 
 ---
 
@@ -603,6 +616,7 @@ export class WebhookProcessor {
 ### Why Idempotency Matters
 
 Stripe may send webhooks multiple times. Network failures may cause retries. Idempotent operations ensure:
+
 - Duplicate events don't create duplicate records
 - Retries don't cause incorrect state
 - System remains consistent despite failures
@@ -610,6 +624,7 @@ Stripe may send webhooks multiple times. Network failures may cause retries. Ide
 ### Idempotency Strategies
 
 **1. Event ID Deduplication (Webhooks)**
+
 ```typescript
 // Check if event already processed
 const existing = await this.webhookEventRepository.findByStripeEventId({
@@ -617,7 +632,7 @@ const existing = await this.webhookEventRepository.findByStripeEventId({
 });
 
 if (existing) {
-  console.log('Event already processed, skipping');
+  console.info("Event already processed, skipping");
   return { received: true, duplicate: true };
 }
 
@@ -631,6 +646,7 @@ await this.webhookEventRepository.create({
 ```
 
 **2. Unique Constraints (Neo4j)**
+
 ```cypher
 // Create unique constraint on stripeCustomerId
 CREATE CONSTRAINT billing_customer_stripe_id_unique
@@ -649,6 +665,7 @@ RETURN bc
 ```
 
 **3. Stripe Idempotency Keys (API Calls)**
+
 ```typescript
 // Generate idempotent key for Stripe API calls
 const idempotencyKey = `${companyId}-subscription-${Date.now()}`;
@@ -660,11 +677,12 @@ const subscription = await this.stripe.subscriptions.create(
   },
   {
     idempotencyKey, // Stripe deduplicates based on this key
-  }
+  },
 );
 ```
 
 **4. Optimistic Locking (Updates)**
+
 ```typescript
 // Use version field for concurrent update detection
 const cypher = `
@@ -679,11 +697,12 @@ const cypher = `
 const result = await this.neo4jService.runQuery(cypher, params);
 
 if (result.records.length === 0) {
-  throw new ConflictException('Subscription was modified by another process');
+  throw new ConflictException("Subscription was modified by another process");
 }
 ```
 
 **5. Status Transitions (State Machine)**
+
 ```typescript
 // Only allow valid status transitions
 const VALID_TRANSITIONS = {
@@ -715,6 +734,7 @@ async updateStatus(params: { id: string; newStatus: string }) {
 ### Error Handling Layers
 
 **1. Stripe API Errors**
+
 ```typescript
 // Decorator automatically transforms Stripe errors to HTTP exceptions
 @Injectable()
@@ -731,26 +751,22 @@ export class StripeCustomerService {
 
 // Error transformation logic
 export function HandleStripeErrors() {
-  return function (
-    target: any,
-    propertyKey: string,
-    descriptor: PropertyDescriptor,
-  ) {
+  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
     descriptor.value = async function (...args: any[]) {
       try {
         return await originalMethod.apply(this, args);
       } catch (error) {
-        if (error.type === 'StripeCardError') {
+        if (error.type === "StripeCardError") {
           throw new PaymentRequiredException(error.message);
-        } else if (error.type === 'StripeInvalidRequestError') {
+        } else if (error.type === "StripeInvalidRequestError") {
           throw new BadRequestException(error.message);
-        } else if (error.type === 'StripeRateLimitError') {
-          throw new TooManyRequestsException('Rate limit exceeded');
+        } else if (error.type === "StripeRateLimitError") {
+          throw new TooManyRequestsException("Rate limit exceeded");
         }
 
-        throw new InternalServerErrorException('Payment processing failed');
+        throw new InternalServerErrorException("Payment processing failed");
       }
     };
 
@@ -760,6 +776,7 @@ export function HandleStripeErrors() {
 ```
 
 **2. Neo4j Transaction Errors**
+
 ```typescript
 async create(params: CreateParams): Promise<Entity> {
   try {
@@ -777,6 +794,7 @@ async create(params: CreateParams): Promise<Entity> {
 ```
 
 **3. Webhook Processing Errors**
+
 ```typescript
 @Process('process-webhook')
 async handleWebhook(job: Job<WebhookJobData>) {
@@ -796,6 +814,7 @@ async handleWebhook(job: Job<WebhookJobData>) {
 ```
 
 **4. Business Logic Errors**
+
 ```typescript
 async createCustomer(params: CreateCustomerParams) {
   // Validate company exists
@@ -824,10 +843,11 @@ async createCustomer(params: CreateCustomerParams) {
 ### 1. Webhook Signature Verification
 
 **Always verify Stripe signatures:**
+
 ```typescript
 const event = this.stripeWebhookService.constructEvent(
-  req.rawBody,        // Raw Buffer (NOT parsed JSON)
-  signature,          // stripe-signature header
+  req.rawBody, // Raw Buffer (NOT parsed JSON)
+  signature, // stripe-signature header
 );
 
 // If signature is invalid, throws error automatically
@@ -836,6 +856,7 @@ const event = this.stripeWebhookService.constructEvent(
 ### 2. Company Scoping (Multi-Tenancy)
 
 **All queries MUST filter by companyId:**
+
 ```typescript
 // CORRECT: Company-scoped query
 const customer = await this.billingCustomerRepository.findByCompanyId({
@@ -851,6 +872,7 @@ const customer = await this.billingCustomerRepository.findByStripeId({
 ### 3. Stripe API Key Protection
 
 **Use environment-specific keys:**
+
 ```typescript
 // Development
 STRIPE_SECRET_KEY=sk_test_51...
@@ -864,6 +886,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ### 4. PCI Compliance
 
 **Never store sensitive payment data:**
+
 - ❌ Credit card numbers
 - ❌ CVV codes
 - ❌ Expiration dates
@@ -874,6 +897,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ### 5. Soft Deletes (Data Retention)
 
 **Never hard-delete billing data:**
+
 ```typescript
 // Mark as deleted with timestamp
 async markDeleted(params: { id: string }) {

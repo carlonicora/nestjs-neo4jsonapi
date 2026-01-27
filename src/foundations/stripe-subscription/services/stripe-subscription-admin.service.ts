@@ -146,9 +146,6 @@ export class StripeSubscriptionAdminService {
     quantity?: number;
     promotionCode?: string;
   }): Promise<CreateSubscriptionResult> {
-    console.log("[StripeSubscriptionAdminService] createSubscription params:", JSON.stringify(params, null, 2));
-    console.log("[StripeSubscriptionAdminService] promotionCode:", params.promotionCode);
-
     const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
     if (!customer) {
       throw new HttpException("Stripe customer not found for this company", HttpStatus.NOT_FOUND);
@@ -482,7 +479,7 @@ export class StripeSubscriptionAdminService {
    *   companyId: 'company_123',
    *   newPriceId: 'price_premium'
    * });
-   * console.log(`Proration amount: ${preview.amountDue}`);
+   * console.info(`Proration amount: ${preview.amountDue}`);
    * ```
    */
   async previewProration(params: { id: string; companyId: string; newPriceId: string }): Promise<any> {

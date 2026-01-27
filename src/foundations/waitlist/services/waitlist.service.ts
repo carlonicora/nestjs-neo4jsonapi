@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
@@ -16,6 +16,7 @@ import { WaitlistRepository } from "../repositories/waitlist.repository";
 @Injectable()
 export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDescriptor.relationships> {
   protected readonly descriptor = WaitlistDescriptor;
+  private readonly logger: Logger = new Logger(WaitlistService.name);
 
   constructor(
     jsonApiService: JsonApiService,
@@ -194,27 +195,12 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
    * Validate an invite code (public endpoint).
    */
   async validateInviteCode(code: string): Promise<{ email: string; valid: boolean } | null> {
-    console.log("[WaitlistService.validateInviteCode] Looking up code:", code);
-
     const entry = await this.waitlistRepository.findByInviteCode({ code });
-    console.log(
-      "[WaitlistService.validateInviteCode] DB lookup result:",
-      entry ? `Found entry id=${entry.id}, status=${entry.status}` : "Not found",
-    );
 
     if (!entry) return null;
 
     const expired = entry.inviteCodeExpiration && entry.inviteCodeExpiration < new Date();
     const used = entry.status === WaitlistStatus.Registered;
-
-    console.log(
-      "[WaitlistService.validateInviteCode] expired:",
-      expired,
-      "used:",
-      used,
-      "expiration:",
-      entry.inviteCodeExpiration,
-    );
 
     return { email: entry.email, valid: !expired && !used };
   }
@@ -279,11 +265,11 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
             "en",
           );
         } catch (emailError) {
-          console.error(`Failed to send waitlist notification to admin ${admin.email}:`, emailError);
+          this.logger.error(`Failed to send waitlist notification to admin ${admin.email}:`, emailError);
         }
       }
     } catch (error) {
-      console.error("Failed to send waitlist admin notifications:", error);
+      this.logger.error("Failed to send waitlist admin notifications:", error);
     }
   }
 }
