@@ -1,3 +1,14 @@
+## [1.39.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.38.0...v1.39.0) (2026-01-27)
+
+### 🚀 Features
+
+* add comprehensive test templates for DTOs, repositories, and services during module generation ([87ed218](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/87ed2186a06bf52f13b1a3ff121f6d9755465e37))
+* enhance test templates by adding Mocked type and handling empty attributes cases ([4843e68](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4843e68cd318331c6ea195c6b3ebc9dbb0574d82))
+
+### 📚 Documentation
+
+* add architecture guide ([77bf27a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/77bf27ac7b1a1373ba3b43ffa14c7b6d0ac5872c))
+
 ## [1.38.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.37.1...v1.38.0) (2026-01-26)
 
 ### 🚀 Features

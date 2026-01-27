@@ -1,6 +1,6 @@
 {
   "name": "@carlonicora/nestjs-neo4jsonapi",
-  "version": "1.38.0",
+  "version": "1.39.0",
   "description": "NestJS foundation package with JSON:API, Neo4j, Redis, LangChain agents, and common utilities",
   "author": "Carlo Nicora",
   "license": "GPL-3.0-or-later",
