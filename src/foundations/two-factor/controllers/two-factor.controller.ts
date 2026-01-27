@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, forwardRef, Get, HttpCode, HttpStatus, Inject, Post, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AuthService } from "../../auth/services/auth.service";
 import { BackupCodeVerifyDTO } from "../dtos/two-factor-verify.dto";
 import { TwoFactorChallengeDTO } from "../dtos/two-factor-verify.dto";
 import { TwoFactorEnableDTO } from "../dtos/two-factor-verify.dto";
@@ -38,6 +39,8 @@ export class TwoFactorController {
     private readonly twoFactorService: TwoFactorService,
     private readonly passkeyService: PasskeyService,
     private readonly backupCodeService: BackupCodeService,
+    @Inject(forwardRef(() => AuthService))
+    private readonly authService: AuthService,
   ) {}
 
   /**
@@ -126,16 +129,26 @@ export class TwoFactorController {
    * POST /auth/two-factor/verify/totp
    *
    * Verify a TOTP code to complete 2FA login.
-   * On success, the full JWT tokens should be issued by the auth service.
+   * On success, the full JWT tokens are issued by the auth service.
    *
    * Requires pending 2FA token from login.
    */
   @UseGuards(PendingAuthGuard)
   @Post("two-factor/verify/totp")
   async verifyTotp(@Req() req: PendingAuthRequest, @Res() reply: FastifyReply, @Body() body: TotpVerifyDTO) {
-    const { pendingId } = req.pendingAuth;
-    const response = await this.twoFactorService.verifyTotp(pendingId, body.data.attributes.code);
-    reply.send(response);
+    const { pendingId, userId } = req.pendingAuth;
+    const verificationResult = await this.twoFactorService.verifyTotp(pendingId, body.data.attributes.code);
+
+    // Check if verification was successful
+    if (verificationResult.data?.attributes?.success) {
+      // Return full auth tokens
+      const authResponse = await this.authService.completeTwoFactorLogin(userId);
+      reply.send(authResponse);
+      return;
+    }
+
+    // Verification failed - return the error response
+    reply.send(verificationResult);
   }
 
   /**
@@ -158,7 +171,7 @@ export class TwoFactorController {
    * POST /auth/two-factor/verify/passkey
    *
    * Verify a passkey to complete 2FA login.
-   * On success, the full JWT tokens should be issued by the auth service.
+   * On success, the full JWT tokens are issued by the auth service.
    *
    * Requires pending 2FA token from login.
    */
@@ -178,10 +191,17 @@ export class TwoFactorController {
     // Delete the login pending session
     await this.twoFactorService.deletePendingSession(req.pendingAuth.pendingId);
 
+    if (passkeyId) {
+      // Verification successful - return full auth tokens
+      const authResponse = await this.authService.completeTwoFactorLogin(req.pendingAuth.userId);
+      reply.send(authResponse);
+      return;
+    }
+
+    // Verification failed
     const response = this.jsonApiService.buildSingle(TwoFactorVerificationDescriptor.model, {
       id: req.pendingAuth.pendingId,
-      success: !!passkeyId,
-      userId: req.pendingAuth.userId,
+      success: false,
     });
     reply.send(response);
   }
@@ -201,9 +221,19 @@ export class TwoFactorController {
     @Res() reply: FastifyReply,
     @Body() body: BackupCodeVerifyDTO,
   ) {
-    const { pendingId } = req.pendingAuth;
-    const response = await this.twoFactorService.verifyBackupCode(pendingId, body.data.attributes.code);
-    reply.send(response);
+    const { pendingId, userId } = req.pendingAuth;
+    const verificationResult = await this.twoFactorService.verifyBackupCode(pendingId, body.data.attributes.code);
+
+    // Check if verification was successful
+    if (verificationResult.data?.attributes?.success) {
+      // Return full auth tokens
+      const authResponse = await this.authService.completeTwoFactorLogin(userId);
+      reply.send(authResponse);
+      return;
+    }
+
+    // Verification failed - return the error response
+    reply.send(verificationResult);
   }
 
   /**

@@ -21,8 +21,8 @@ import { AuthRepository } from "../../auth/repositories/auth.repository";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { DiscordUserService } from "../../discord-user/services/discord-user.service";
 import { GoogleUserService } from "../../google-user/services/google-user.service";
-import { TwoFactorService } from "../../two-factor/services/two-factor.service";
 import { Role } from "../../role/entities/role";
+import { TwoFactorService } from "../../two-factor/services/two-factor.service";
 import { User } from "../../user/entities/user";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { UserService } from "../../user/services/user.service";
@@ -212,9 +212,13 @@ export class AuthService {
       });
       console.log("[AuthService.login] Pending token generated");
 
+      const now = new Date();
+
       // Return pending auth response requiring 2FA verification
       const response = await this.builder.buildSingle(PendingAuthModel, {
-        pendingId: pendingSession.pendingId,
+        id: pendingSession.pendingId, // ADD: id field required by JSON:API
+        createdAt: now, // ADD: for meta
+        updatedAt: now, // ADD: for meta
         token: pendingToken,
         expiration: pendingSession.expiration,
         availableMethods: availableMethods,

@@ -1,6 +1,7 @@
-import { Module, OnModuleInit } from "@nestjs/common";
+import { forwardRef, Module, OnModuleInit } from "@nestjs/common";
 import { modelRegistry } from "../../common/registries/registry";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
+import { AuthModule } from "../auth/auth.module";
 import { UserModule } from "../user/user.module";
 
 // Controllers
@@ -59,7 +60,7 @@ import { PendingAuthGuard } from "./guards/pending-auth.guard";
  * ```
  */
 @Module({
-  imports: [JsonApiModule, UserModule],
+  imports: [JsonApiModule, UserModule, forwardRef(() => AuthModule)],
   controllers: [PasskeyController, TotpController, TwoFactorController],
   providers: [
     // Serializers from descriptors
