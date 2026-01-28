@@ -1,3 +1,13 @@
+## [1.41.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.40.0...v1.41.0) (2026-01-28)
+
+### 🚀 Features
+
+* add audit and cache invalidator decorators ([6c682fd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6c682fdf3312a5c15da47c15838f2823875626e9))
+
+### 📚 Documentation
+
+* remove architecture guide and delegate it to main app ([017c92b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/017c92bc02244c8d7188edabe74c5c81571669ec))
+
 ## [1.40.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.39.0...v1.40.0) (2026-01-27)
 
 ### 🚀 Features
