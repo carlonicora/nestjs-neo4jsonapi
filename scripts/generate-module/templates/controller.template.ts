@@ -5,6 +5,7 @@ import { getManyRelationships } from "./dto.relationship.template";
 
 /**
  * Generate controller file content with CRUD and nested routes
+ * Uses handler factories pattern for cleaner, more maintainable controllers
  *
  * @param data - Template data
  * @returns Generated TypeScript code
@@ -122,14 +123,12 @@ ${manyRelationships
 `
     : "";
 
-  // Generate nested route methods
-  // The route.path is pre-computed by nested-route-generator with correct endpoint access pattern
+  // Generate nested route methods using relationship handler
   const nestedRouteMethods = nestedRoutes
     .map(
       (route) => `
   @Get(\`${route.path}\`)
   async ${route.methodName}(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${route.paramName}") ${route.paramName}: string,
     @Query() query: any,
@@ -137,16 +136,14 @@ ${manyRelationships
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
   ) {
-    const response = await this.${names.camelCase}Service.findByRelated({
+    return this.relationships.findByRelated(reply, {
       relationship: ${names.pascalCase}Descriptor.relationshipKeys.${route.relationshipKey},
       id: ${route.paramName},
-      term: search,
-      query: query,
-      fetchAll: fetchAll,
-      orderBy: orderBy,
+      query,
+      search,
+      fetchAll,
+      orderBy,
     });
-
-    reply.send(response);
   }`
     )
     .join("\n");
@@ -167,39 +164,36 @@ ${manyRelationships
   // Batch add ${dtoKey}
   @Post(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}\`)
   async add${pascalDtoKey}(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Body() body: ${names.pascalCase}${pascalDtoKey}AddDTO,
   ) {
-    const response = await this.${names.camelCase}Service.addToRelationshipFromDTO({
-      id: ${names.camelCase}Id,
-      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
-      data: body.data,
-    });
-    reply.send(response);
+    return this.relationships.addToRelationship(
+      reply,
+      ${names.camelCase}Id,
+      ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      body.data,
+    );
   }
 
   // Batch remove ${dtoKey}
   @Delete(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}\`)
   async remove${pascalDtoKey}(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Body() body: ${names.pascalCase}${pascalDtoKey}RemoveDTO,
   ) {
-    const response = await this.${names.camelCase}Service.removeFromRelationshipFromDTO({
-      id: ${names.camelCase}Id,
-      relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
-      data: body.data,
-    });
-    reply.send(response);
+    return this.relationships.removeFromRelationship(
+      reply,
+      ${names.camelCase}Id,
+      ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
+      body.data,
+    );
   }
 
   // Single add ${rel.key}
   @Post(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}/:${rel.key}Id\`)
   async add${pascalKey}(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Param("${rel.key}Id") ${rel.key}Id: string,
@@ -217,7 +211,6 @@ ${manyRelationships
   @Delete(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}/:${rel.key}Id\`)
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove${pascalKey}(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Param("${rel.key}Id") ${rel.key}Id: string,
@@ -241,20 +234,21 @@ ${manyRelationships
   HttpStatus,
   Param,
   Post,
-  PreconditionFailedException,
   Put,
   Query,
-  Req,
   Res,
   UseGuards,
 } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import {
+  Audit,
   AuditService,
-  AuthenticatedRequest,
+  CacheInvalidate,
   CacheService,
-  JsonApiDTOData,
+  createCrudHandlers,
+  createRelationshipHandlers,
   JwtAuthGuard,
+  ValidateId,
 } from "@carlonicora/nestjs-neo4jsonapi";${combinedMetaImportsCode}
 import { ${names.pascalCase}PostDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.post.dto";
 import { ${names.pascalCase}PutDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.put.dto";
@@ -266,6 +260,9 @@ import { ${names.pascalCase}Service } from "src/${targetDir}/${names.kebabCase}/
 @UseGuards(JwtAuthGuard)
 @Controller()
 export class ${names.pascalCase}Controller {
+  private readonly crud = createCrudHandlers(() => this.${names.camelCase}Service);
+  private readonly relationships = createRelationshipHandlers(() => this.${names.camelCase}Service);
+
   constructor(
     private readonly ${names.camelCase}Service: ${names.pascalCase}Service,
     private readonly cacheService: CacheService,
@@ -274,86 +271,51 @@ export class ${names.pascalCase}Controller {
 
   @Get(${names.camelCase}Meta.endpoint)
   async findAll(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Query() query: any,
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
   ) {
-    const response = await this.${names.camelCase}Service.find({
-      term: search,
-      query: query,
-      fetchAll: fetchAll,
-      orderBy: orderBy,
-    });
-
-    reply.send(response);
+    return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
   }
 
   @Get(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id\`)
+  @Audit(${names.camelCase}Meta, "${names.camelCase}Id")
   async findById(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
   ) {
-    const response = await this.${names.camelCase}Service.findById({
-      id: ${names.camelCase}Id,
-    });
-
-    reply.send(response);
-
-    this.auditService.createAuditEntry({
-      entityType: ${names.camelCase}Meta.labelName,
-      entityId: ${names.camelCase}Id,
-    });
+    return this.crud.findById(reply, ${names.camelCase}Id);
   }
 
   @Post(${names.camelCase}Meta.endpoint)
+  @CacheInvalidate(${names.camelCase}Meta)
   async create(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Body() body: ${names.pascalCase}PostDTO,
   ) {
-    const response = await this.${names.camelCase}Service.createFromDTO({
-      data: body.data as unknown as JsonApiDTOData,
-    });
-
-    reply.send(response);
-
-    await this.cacheService.invalidateByType(${names.camelCase}Meta.endpoint);
+    return this.crud.create(reply, body);
   }
 
   @Put(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id\`)
+  @ValidateId("${names.camelCase}Id")
+  @CacheInvalidate(${names.camelCase}Meta, "${names.camelCase}Id")
   async update(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
-    @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Body() body: ${names.pascalCase}PutDTO,
   ) {
-    if (${names.camelCase}Id !== body.data.id)
-      throw new PreconditionFailedException("ID in URL does not match ID in body");
-
-    const response = await this.${names.camelCase}Service.putFromDTO({
-      data: body.data as unknown as JsonApiDTOData,
-    });
-
-    reply.send(response);
-
-    await this.cacheService.invalidateByElement(${names.camelCase}Meta.endpoint, body.data.id);
+    return this.crud.update(reply, body);
   }
 
   @Delete(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id\`)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @CacheInvalidate(${names.camelCase}Meta, "${names.camelCase}Id")
   async delete(
-    @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
   ) {
-    await this.${names.camelCase}Service.delete({ id: ${names.camelCase}Id });
-    reply.send();
-
-    await this.cacheService.invalidateByElement(${names.camelCase}Meta.endpoint, ${names.camelCase}Id);
+    return this.crud.delete(reply, ${names.camelCase}Id);
   }
 ${nestedRouteMethods}
 ${relationshipEndpointMethods}
