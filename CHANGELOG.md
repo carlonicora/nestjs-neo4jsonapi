@@ -1,3 +1,14 @@
+## [1.42.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.41.0...v1.42.0) (2026-01-28)
+
+### 🚀 Features
+
+* add crud handlers for controllers ([5d86226](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5d862269d3a0878d619cb3265af81cc8d33c3ff0))
+* update generator controller template ([2426db4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2426db49222d1cb047d74573bc96c0455f92d852))
+
+### 🐛 Bug Fixes
+
+* correct controller tests ([c4063e3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c4063e34db52e745d9122bc5de4c41acdd9c6473))
+
 ## [1.41.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.40.0...v1.41.0) (2026-01-28)
 
 ### 🚀 Features
