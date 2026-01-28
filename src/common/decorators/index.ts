@@ -6,3 +6,4 @@ export * from "./oauth.scopes.decorator";
 export * from "./rate-limit.decorator";
 export * from "./roles.decorator";
 export * from "./tool.decorator";
+export * from "./validate-id.decorator";

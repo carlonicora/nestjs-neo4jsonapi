@@ -41,6 +41,9 @@ export * from "./strategies";
 // Types
 export * from "./types";
 
+// Handlers
+export * from "./handlers";
+
 // Tokens and interfaces for dependency injection
 export * from "./tokens";
 
