@@ -90,6 +90,7 @@ describe("UserController", () => {
     userId: string = TEST_IDS.userId,
     companyId: string = TEST_IDS.companyId,
     isAdmin: boolean = false,
+    params: Record<string, string> = {},
   ): AuthenticatedRequest => {
     return {
       user: {
@@ -97,6 +98,7 @@ describe("UserController", () => {
         companyId,
         roles: isAdmin ? [{ id: RoleId.Administrator, name: "Administrator" }] : [],
       },
+      params,
     } as AuthenticatedRequest;
   };
 
@@ -398,7 +400,7 @@ describe("UserController", () => {
     };
 
     it("should update own user without admin check", async () => {
-      const req = createMockRequest();
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
       securityService.isUserInRoles.mockReturnValue(false);
       userService.put.mockResolvedValue(MOCK_USER_RESPONSE);
 
@@ -426,7 +428,7 @@ describe("UserController", () => {
 
   describe("PATCH /users/:userId", () => {
     it("should reactivate user as admin", async () => {
-      const req = createMockRequest(TEST_IDS.adminUserId, TEST_IDS.companyId, true);
+      const req = createMockRequest(TEST_IDS.adminUserId, TEST_IDS.companyId, true, { userId: TEST_IDS.userId });
       userService.reactivate.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.reactivateUser(req, TEST_IDS.userId, mockReply);
@@ -439,7 +441,7 @@ describe("UserController", () => {
 
   describe("PATCH /users/:userId/rates", () => {
     it("should update user rates", async () => {
-      const req = createMockRequest();
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
       const body = {
         data: {
           type: "users",
@@ -458,7 +460,7 @@ describe("UserController", () => {
 
   describe("POST /users/:userId/send-invitation-email", () => {
     it("should send invitation email as admin", async () => {
-      const req = createMockRequest(TEST_IDS.adminUserId, TEST_IDS.companyId, true);
+      const req = createMockRequest(TEST_IDS.adminUserId, TEST_IDS.companyId, true, { userId: TEST_IDS.userId });
       userService.sendInvitationEmail.mockResolvedValue(undefined);
 
       await controller.sendInvitationEmail(req, TEST_IDS.userId);
@@ -471,9 +473,10 @@ describe("UserController", () => {
 
   describe("DELETE /users/:userId", () => {
     it("should delete user", async () => {
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
       userService.delete.mockResolvedValue(undefined);
 
-      await controller.delete(TEST_IDS.userId);
+      await controller.delete(req, TEST_IDS.userId);
 
       expect(userService.delete).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);

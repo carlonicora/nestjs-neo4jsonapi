@@ -32,7 +32,9 @@ vi.mock("../services/role.service", () => ({
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { CacheService } from "../../../core/cache/services/cache.service";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import { AuditService } from "../../audit/services/audit.service";
 import { RolePostDTO } from "../dtos/role.post.dto";
 import { RoleService } from "../services/role.service";
 import { RoleController } from "./role.controller";
@@ -69,9 +71,22 @@ describe("RoleController", () => {
       delete: vi.fn(),
     };
 
+    const mockAuditService = {
+      log: vi.fn(),
+    };
+
+    const mockCacheService = {
+      invalidateByType: vi.fn(),
+      invalidateByElement: vi.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RoleController],
-      providers: [{ provide: RoleService, useValue: mockRoleService }],
+      providers: [
+        { provide: RoleService, useValue: mockRoleService },
+        { provide: AuditService, useValue: mockAuditService },
+        { provide: CacheService, useValue: mockCacheService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })

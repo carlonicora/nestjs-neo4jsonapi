@@ -342,7 +342,7 @@ describe("CompanyController", () => {
     };
 
     it("should update company when user is administrator", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: { companyId: MOCK_COMPANY_ID } } as AuthenticatedRequest;
       companyService.update.mockResolvedValue(mockServiceResponse);
       cacheService.invalidateByElement.mockResolvedValue();
 
@@ -356,7 +356,10 @@ describe("CompanyController", () => {
     });
 
     it("should update company when user is company administrator of same company", async () => {
-      const mockRequest = { user: mockCompanyAdminUser } as AuthenticatedRequest;
+      const mockRequest = {
+        user: mockCompanyAdminUser,
+        params: { companyId: MOCK_COMPANY_ID },
+      } as AuthenticatedRequest;
       companyService.update.mockResolvedValue(mockServiceResponse);
       cacheService.invalidateByElement.mockResolvedValue();
 
@@ -401,7 +404,7 @@ describe("CompanyController", () => {
     });
 
     it("should allow administrator to update any company", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: { companyId: DIFFERENT_COMPANY_ID } } as AuthenticatedRequest;
       const differentCompanyPutDTO: CompanyPutDTO = {
         data: {
           ...mockPutDTO.data,
@@ -438,7 +441,7 @@ describe("CompanyController", () => {
     });
 
     it("should handle cache invalidation errors", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: { companyId: MOCK_COMPANY_ID } } as AuthenticatedRequest;
       const cacheError = new Error("Cache invalidation failed");
       companyService.update.mockResolvedValue(mockServiceResponse);
       cacheService.invalidateByElement.mockRejectedValue(cacheError);
@@ -457,7 +460,7 @@ describe("CompanyController", () => {
 
   describe("delete", () => {
     it("should delete company successfully", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: { companyId: MOCK_COMPANY_ID } } as AuthenticatedRequest;
       companyService.deleteImmediate.mockResolvedValue();
       cacheService.invalidateByElement.mockResolvedValue();
 
@@ -485,7 +488,7 @@ describe("CompanyController", () => {
     });
 
     it("should handle cache invalidation errors", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: { companyId: MOCK_COMPANY_ID } } as AuthenticatedRequest;
       const cacheError = new Error("Cache invalidation failed");
       companyService.deleteImmediate.mockResolvedValue();
       cacheService.invalidateByElement.mockRejectedValue(cacheError);

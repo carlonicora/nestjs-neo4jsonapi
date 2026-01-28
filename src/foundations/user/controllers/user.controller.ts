@@ -225,7 +225,7 @@ export class UserController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(`${userMeta.endpoint}/:userId`)
   @CacheInvalidate(userMeta, "userId")
-  async delete(@Param("userId") userId: string) {
+  async delete(@Req() request: any, @Param("userId") userId: string) {
     await this.users.delete({
       userId: userId,
     });

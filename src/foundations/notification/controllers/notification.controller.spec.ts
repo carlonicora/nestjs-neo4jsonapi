@@ -29,6 +29,7 @@ vi.mock("../services/notification.service", () => ({
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { CacheService } from "../../../core/cache/services/cache.service";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { NotificationPatchListDTO } from "../dtos/notification.patch.dto";
 import { NotificationServices } from "../services/notification.service";
@@ -74,9 +75,17 @@ describe("NotificationController", () => {
       archive: vi.fn(),
     };
 
+    const mockCacheService = {
+      invalidateByType: vi.fn(),
+      invalidateByElement: vi.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [NotificationController],
-      providers: [{ provide: NotificationServices, useValue: mockNotificationService }],
+      providers: [
+        { provide: NotificationServices, useValue: mockNotificationService },
+        { provide: CacheService, useValue: mockCacheService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
