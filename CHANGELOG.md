@@ -1,3 +1,10 @@
+## [1.44.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.43.2...v1.44.0) (2026-01-30)
+
+### 🚀 Features
+
+* add content from url ([c89f77e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c89f77ec6ef1a7e2eab8f28d5ead144958fb9f50))
+* add get object content ([ba6c2a5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ba6c2a5125ce95dc61c50d9dd3cdc5c5d2e72a5f))
+
 ## [1.43.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.43.1...v1.43.2) (2026-01-30)
 
 ### 🐛 Bug Fixes
