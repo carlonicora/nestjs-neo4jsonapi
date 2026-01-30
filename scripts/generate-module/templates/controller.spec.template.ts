@@ -43,7 +43,6 @@ export function generateControllerSpecFile(data: TemplateData): string {
       ${names.camelCase}Service.findByRelated.mockResolvedValue(MOCK_JSONAPI_LIST_RESPONSE);
 
       await controller.${route.methodName}(
-        mockRequest,
         mockReply,
         TEST_IDS.${route.relationshipKey}Id,
         {},
@@ -77,7 +76,6 @@ export function generateControllerSpecFile(data: TemplateData): string {
       ${names.camelCase}Service.addToRelationshipFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
 
       await controller.add${pascalDtoKey}(
-        mockRequest,
         mockReply,
         TEST_IDS.${names.camelCase}Id,
         {
@@ -100,7 +98,6 @@ export function generateControllerSpecFile(data: TemplateData): string {
       ${names.camelCase}Service.removeFromRelationshipFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
 
       await controller.remove${pascalDtoKey}(
-        mockRequest,
         mockReply,
         TEST_IDS.${names.camelCase}Id,
         {
@@ -123,7 +120,6 @@ export function generateControllerSpecFile(data: TemplateData): string {
       ${names.camelCase}Service.addToRelationshipFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
 
       await controller.add${pascalKey}(
-        mockRequest,
         mockReply,
         TEST_IDS.${names.camelCase}Id,
         TEST_IDS.${rel.key}Id,
@@ -140,7 +136,6 @@ export function generateControllerSpecFile(data: TemplateData): string {
       ${names.camelCase}Service.removeFromRelationshipFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
 
       await controller.remove${pascalKey}(
-        mockRequest,
         mockReply,
         TEST_IDS.${names.camelCase}Id,
         TEST_IDS.${rel.key}Id,
@@ -250,7 +245,7 @@ describe("${names.pascalCase}Controller", () => {
     it("should return a list of ${names.camelCase} entities", async () => {
       ${names.camelCase}Service.find.mockResolvedValue(MOCK_JSONAPI_LIST_RESPONSE);
 
-      await controller.findAll(mockRequest, mockReply, {}, undefined, undefined, undefined);
+      await controller.findAll(mockReply, {}, undefined, undefined, undefined);
 
       expect(${names.camelCase}Service.find).toHaveBeenCalledWith(
         expect.objectContaining({ query: {} }),
@@ -261,7 +256,7 @@ describe("${names.pascalCase}Controller", () => {
     it("should pass search term to service", async () => {
       ${names.camelCase}Service.find.mockResolvedValue(MOCK_JSONAPI_LIST_RESPONSE);
 
-      await controller.findAll(mockRequest, mockReply, {}, "search-term", undefined, undefined);
+      await controller.findAll(mockReply, {}, "search-term", undefined, undefined);
 
       expect(${names.camelCase}Service.find).toHaveBeenCalledWith(
         expect.objectContaining({ term: "search-term" }),
@@ -271,7 +266,7 @@ describe("${names.pascalCase}Controller", () => {
     it("should pass orderBy to service", async () => {
       ${names.camelCase}Service.find.mockResolvedValue(MOCK_JSONAPI_LIST_RESPONSE);
 
-      await controller.findAll(mockRequest, mockReply, {}, undefined, undefined, "createdAt");
+      await controller.findAll(mockReply, {}, undefined, undefined, "createdAt");
 
       expect(${names.camelCase}Service.find).toHaveBeenCalledWith(
         expect.objectContaining({ orderBy: "createdAt" }),
@@ -282,8 +277,12 @@ describe("${names.pascalCase}Controller", () => {
   describe("findById", () => {
     it("should return a single ${names.camelCase} entity", async () => {
       ${names.camelCase}Service.findById.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
+      const requestWithParams = {
+        ...mockRequest,
+        params: { ${names.camelCase}Id: TEST_IDS.${names.camelCase}Id },
+      } as AuthenticatedRequest;
 
-      await controller.findById(mockRequest, mockReply, TEST_IDS.${names.camelCase}Id);
+      await controller.findById(requestWithParams, mockReply, TEST_IDS.${names.camelCase}Id);
 
       expect(${names.camelCase}Service.findById).toHaveBeenCalledWith({ id: TEST_IDS.${names.camelCase}Id });
       expect(mockReply.send).toHaveBeenCalledWith(MOCK_JSONAPI_RESPONSE);
@@ -295,7 +294,7 @@ describe("${names.pascalCase}Controller", () => {
     it("should create a new ${names.camelCase} entity", async () => {
       ${names.camelCase}Service.createFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
 
-      await controller.create(mockRequest, mockReply, MOCK_POST_DTO as any);
+      await controller.create(mockReply, MOCK_POST_DTO as any);
 
       expect(${names.camelCase}Service.createFromDTO).toHaveBeenCalled();
       expect(mockReply.send).toHaveBeenCalledWith(MOCK_JSONAPI_RESPONSE);
@@ -306,8 +305,12 @@ describe("${names.pascalCase}Controller", () => {
   describe("update", () => {
     it("should update an existing ${names.camelCase} entity", async () => {
       ${names.camelCase}Service.putFromDTO.mockResolvedValue(MOCK_JSONAPI_RESPONSE);
+      const requestWithParams = {
+        ...mockRequest,
+        params: { ${names.camelCase}Id: TEST_IDS.${names.camelCase}Id },
+      } as AuthenticatedRequest;
 
-      await controller.update(mockRequest, mockReply, TEST_IDS.${names.camelCase}Id, MOCK_PUT_DTO as any);
+      await controller.update(requestWithParams, mockReply, MOCK_PUT_DTO as any);
 
       expect(${names.camelCase}Service.putFromDTO).toHaveBeenCalled();
       expect(mockReply.send).toHaveBeenCalledWith(MOCK_JSONAPI_RESPONSE);
@@ -324,9 +327,13 @@ describe("${names.pascalCase}Controller", () => {
           id: "different-id",
         },
       };
+      const requestWithParams = {
+        ...mockRequest,
+        params: { ${names.camelCase}Id: TEST_IDS.${names.camelCase}Id },
+      } as AuthenticatedRequest;
 
       await expect(
-        controller.update(mockRequest, mockReply, TEST_IDS.${names.camelCase}Id, invalidDTO as any),
+        controller.update(requestWithParams, mockReply, invalidDTO as any),
       ).rejects.toThrow(PreconditionFailedException);
 
       expect(${names.camelCase}Service.putFromDTO).not.toHaveBeenCalled();
@@ -336,8 +343,12 @@ describe("${names.pascalCase}Controller", () => {
   describe("delete", () => {
     it("should delete an existing ${names.camelCase} entity", async () => {
       ${names.camelCase}Service.delete.mockResolvedValue(undefined);
+      const requestWithParams = {
+        ...mockRequest,
+        params: { ${names.camelCase}Id: TEST_IDS.${names.camelCase}Id },
+      } as AuthenticatedRequest;
 
-      await controller.delete(mockRequest, mockReply, TEST_IDS.${names.camelCase}Id);
+      await controller.delete(requestWithParams, mockReply, TEST_IDS.${names.camelCase}Id);
 
       expect(${names.camelCase}Service.delete).toHaveBeenCalledWith({ id: TEST_IDS.${names.camelCase}Id });
       expect(mockReply.send).toHaveBeenCalled();

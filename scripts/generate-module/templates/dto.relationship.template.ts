@@ -29,7 +29,10 @@ export function generateRelationshipDTOFile(data: TemplateData): string | null {
     return null;
   }
 
-  // Collect all field types for imports
+  // Check if any relationship has fields (determines if IsOptional is needed)
+  const hasAnyFields = manyRelationships.some((rel) => rel.fields && rel.fields.length > 0);
+
+  // Collect all field types for additional imports
   const relPropertyTypes: CypherType[] = [];
   for (const rel of manyRelationships) {
     if (rel.fields && rel.fields.length > 0) {
@@ -39,15 +42,30 @@ export function generateRelationshipDTOFile(data: TemplateData): string | null {
     }
   }
 
-  // Build validator imports
-  const validatorImports = getValidationImports(relPropertyTypes);
-  // Always need these for relationship DTOs
-  if (!validatorImports.includes("IsUUID")) validatorImports.push("IsUUID");
-  if (!validatorImports.includes("IsString")) validatorImports.push("IsString");
-  if (!validatorImports.includes("IsArray")) validatorImports.push("IsArray");
-  if (!validatorImports.includes("ValidateNested")) validatorImports.push("ValidateNested");
-  if (!validatorImports.includes("IsOptional")) validatorImports.push("IsOptional");
-  if (!validatorImports.includes("IsDefined")) validatorImports.push("IsDefined");
+  // Build validator imports - only what's actually used in this template
+  const validatorImports: string[] = [
+    "IsArray",
+    "IsDefined",
+    "IsString",
+    "IsUUID",
+    "ValidateNested",
+  ];
+
+  // IsOptional is only used when relationships have fields
+  if (hasAnyFields) {
+    validatorImports.push("IsOptional");
+  }
+
+  // Add field-specific validators from relationship property fields
+  for (const type of relPropertyTypes) {
+    const decorators = getValidationDecorators(type, true);
+    for (const decorator of decorators) {
+      const match = decorator.match(/@(\w+)/);
+      if (match && !validatorImports.includes(match[1])) {
+        validatorImports.push(match[1]);
+      }
+    }
+  }
 
   // Generate DTO classes for each MANY relationship
   const dtoClasses: string[] = [];

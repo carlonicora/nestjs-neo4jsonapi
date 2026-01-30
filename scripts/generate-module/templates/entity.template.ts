@@ -49,6 +49,10 @@ export function generateEntityFile(data: TemplateData): string {
   const processedEntities = new Set<string>();
 
   for (const rel of relationships) {
+    // Skip self-referential relationships - the type is defined in this same file
+    if (rel.relatedEntity.name === names.pascalCase) {
+      continue;
+    }
     if (!processedEntities.has(rel.relatedEntity.name)) {
       processedEntities.add(rel.relatedEntity.name);
       const importPath = getEntityImportPath(rel);
@@ -64,6 +68,10 @@ export function generateEntityFile(data: TemplateData): string {
   const processedMetas = new Set<string>();
 
   for (const rel of relationships) {
+    // Skip self-referential relationships - own meta is imported separately at the end
+    if (rel.relatedEntity.name === names.pascalCase) {
+      continue;
+    }
     // Model is like "userMeta", "ownerMeta", "campaignMeta", etc.
     if (!processedMetas.has(rel.model)) {
       processedMetas.add(rel.model);

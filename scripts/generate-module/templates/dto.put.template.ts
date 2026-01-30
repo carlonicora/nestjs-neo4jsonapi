@@ -43,15 +43,23 @@ export function generatePutDTOFile(data: TemplateData): string {
     // Skip contextKey relationships (like Author) - same as POST
     if (rel.contextKey) continue;
 
+    const hasFields = rel.fields && rel.fields.length > 0;
+
+    // For MANY relationships with fields, ItemDTO is used (no external DTO import needed)
+    if (rel.cardinality === "many" && hasFields) {
+      continue;
+    }
+
     const importPath = getDtoImportPath(rel, targetDir, names.kebabCase);
 
     if (!dtoImportPaths.has(importPath)) {
       dtoImportPaths.set(importPath, new Set());
     }
 
-    // Add both singular and list DTOs
-    dtoImportPaths.get(importPath)!.add(`${rel.relatedEntity.name}DataDTO`);
-    if (rel.cardinality === "many") {
+    // Import DataDTO for ONE relationships, DataListDTO for MANY relationships (without fields)
+    if (rel.cardinality === "one") {
+      dtoImportPaths.get(importPath)!.add(`${rel.relatedEntity.name}DataDTO`);
+    } else {
       dtoImportPaths.get(importPath)!.add(`${rel.relatedEntity.name}DataListDTO`);
     }
   }

@@ -21,6 +21,10 @@ export function generateControllerFile(data: TemplateData): string {
   const oldMetaImportPaths = new Map<string, string[]>();
   for (const route of oldStructureRoutes) {
     const rel = data.relationships.find((r) => r.model === route.relatedMeta)!;
+    // Skip self-referential relationships - own meta is imported separately below
+    if (rel.relatedEntity.name === names.pascalCase) {
+      continue;
+    }
     const path = isFoundationImport(rel.relatedEntity.directory)
       ? FOUNDATION_PACKAGE
       : resolveMetaImportPath({
@@ -160,6 +164,9 @@ ${manyRelationships
         ? `${rel.descriptorName}.model.endpoint`
         : `${rel.model}.endpoint`;
 
+      // Check if relationship has edge property fields
+      const hasFields = rel.fields && rel.fields.length > 0;
+
       return `
   // Batch add ${dtoKey}
   @Post(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id/\${${endpointAccessor}}\`)
@@ -197,12 +204,12 @@ ${manyRelationships
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
     @Param("${rel.key}Id") ${rel.key}Id: string,
-    @Body() body: ${names.pascalCase}${pascalDtoKey}AddSingleDTO,
+    @Body() ${hasFields ? `body` : `_body`}: ${names.pascalCase}${pascalDtoKey}AddSingleDTO,
   ) {
     const response = await this.${names.camelCase}Service.addToRelationshipFromDTO({
       id: ${names.camelCase}Id,
       relationship: ${names.pascalCase}Descriptor.relationshipKeys.${rel.key},
-      data: { id: ${rel.key}Id, type: ${endpointAccessor}, meta: body.data?.meta },
+      data: { id: ${rel.key}Id, type: ${endpointAccessor}${hasFields ? `, meta: body.data?.meta` : ``} },
     });
     reply.send(response);
   }
@@ -236,6 +243,7 @@ ${manyRelationships
   Post,
   Put,
   Query,
+  Req,
   Res,
   UseGuards,
 } from "@nestjs/common";
@@ -243,6 +251,7 @@ import { FastifyReply } from "fastify";
 import {
   Audit,
   AuditService,
+  AuthenticatedRequest,
   CacheInvalidate,
   CacheService,
   createCrudHandlers,
@@ -283,6 +292,7 @@ export class ${names.pascalCase}Controller {
   @Get(\`\${${names.camelCase}Meta.endpoint}/:${names.camelCase}Id\`)
   @Audit(${names.camelCase}Meta, "${names.camelCase}Id")
   async findById(
+    @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
   ) {
@@ -302,6 +312,7 @@ export class ${names.pascalCase}Controller {
   @ValidateId("${names.camelCase}Id")
   @CacheInvalidate(${names.camelCase}Meta, "${names.camelCase}Id")
   async update(
+    @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Body() body: ${names.pascalCase}PutDTO,
   ) {
@@ -312,6 +323,7 @@ export class ${names.pascalCase}Controller {
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(${names.camelCase}Meta, "${names.camelCase}Id")
   async delete(
+    @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("${names.camelCase}Id") ${names.camelCase}Id: string,
   ) {
