@@ -128,6 +128,51 @@ export class ChunkerService {
     return response;
   }
 
+  async extractContentFromUrl(params: { url: string }): Promise<string> {
+    const response = await fetch(params.url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch content from URL: ${response.statusText}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Determine file type from content-type header
+    let fileType = "txt";
+    if (contentType.includes("pdf")) {
+      fileType = "pdf";
+    } else if (contentType.includes("word") || contentType.includes("docx")) {
+      fileType = "docx";
+    } else if (contentType.includes("markdown") || params.url.endsWith(".md")) {
+      fileType = "md";
+    } else if (contentType.includes("html")) {
+      // For HTML, extract text content
+      const text = buffer.toString("utf-8");
+      // Simple HTML tag removal for basic content extraction
+      return text
+        .replace(/<[^>]*>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    // For simple text files, return content directly
+    if (fileType === "txt" || fileType === "md") {
+      return buffer.toString("utf-8");
+    }
+
+    // For complex file types, write to temp file and process
+    const tempFilePath = `/tmp/temp-file.${randomUUID()}.${fileType}`;
+    await fs.writeFile(tempFilePath, buffer);
+
+    try {
+      const documents = await this.generateContentStructureFromFile({ fileType, filePath: params.url });
+      return documents.map((doc) => doc.pageContent).join("\n\n");
+    } finally {
+      // Clean up temp file
+      await fs.unlink(tempFilePath).catch(() => {});
+    }
+  }
+
   private async _createChunksFromImage(params: { filePath: string; fileType: string }): Promise<Document[]> {
     try {
       const imageUrl = params.filePath.toLowerCase().startsWith("http")
