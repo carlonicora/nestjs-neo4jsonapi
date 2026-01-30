@@ -1,3 +1,9 @@
+## [1.43.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.43.1...v1.43.2) (2026-01-30)
+
+### 🐛 Bug Fixes
+
+* correct module generator ([1a14b99](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1a14b99d085e2c5876bceb0c7cea02088e5dc821))
+
 ## [1.43.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.43.0...v1.43.1) (2026-01-30)
 
 ### 📚 Documentation
