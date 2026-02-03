@@ -1,53 +1,41 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Your Trial Has Ended</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body>
-  {{> header}}
-
-  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
-    <h1 style="color: #dc3545;">Your Trial Has Ended</h1>
-
-    <p>Hi {{customerName}},</p>
-
-    <p>Your free trial for <strong>{{companyName}}</strong> ended on <strong>{{trialEndDate}}</strong>.</p>
-
-    <p>Your account access is now limited, but you can subscribe at any time to restore full access and continue using all features.</p>
-
-    <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #dc3545;">
-      <p style="margin: 0;"><strong>Important: Your data will be removed on {{dataRemovalDate}}</strong></p>
-      <ul style="margin: 10px 0 0 0; padding-left: 20px;">
-        <li>All your photographs, albums, and settings will be permanently deleted</li>
-        <li>Client galleries and contact sheets will no longer be accessible</li>
-        <li>This action cannot be undone after the removal date</li>
-      </ul>
-    </div>
-
-    <div style="background: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
-      <p style="margin: 0;"><strong>Subscribe now to keep your data</strong></p>
-      <p style="margin: 10px 0 0 0;">Upgrade to a paid plan before {{dataRemovalDate}} to retain all your work and continue using the platform.</p>
-    </div>
-
-    {{#if upgradeUrl}}
-    <p style="margin: 30px 0; text-align: center;">
-      <a href="{{upgradeUrl}}" style="background: #28a745; color: white; padding: 14px 32px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold; font-size: 16px;">
-        Subscribe Now
-      </a>
-    </p>
-    {{/if}}
-
-    <p style="margin-top: 30px;">
-      We hope to see you back soon!
-    </p>
-
-    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
-      If you have any questions about our plans or need assistance, please contact our support team.
-    </p>
-  </div>
-
-  {{> footer}}
-</body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Trial Has Ended</title>
+  </head>
+  <body style="margin: 0; padding: 0; background-color: #ffffff; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+      <tr><td>{{> header}}</td></tr>
+      <tr>
+        <td style="padding: 32px;">
+          <h1 style="color: #1a1a1a; font-size: 24px; font-weight: 600; margin: 0 0 24px 0; line-height: 1.3;">Your Trial Has Ended</h1>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">Hi {{customerName}},</p>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">Your free trial for <strong>{{companyName}}</strong> ended on <strong>{{trialEndDate}}</strong>.</p>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">Your account access is now limited, but you can subscribe at any time to restore full access and continue using all features.</p>
+          <div style="background: #fef2f2; padding: 16px 20px; border-radius: 6px; border-left: 4px solid #ef4444; margin: 24px 0;">
+            <p style="margin: 0 0 12px 0; font-weight: 600; color: #1a1a1a; font-size: 14px;">Important: Your data will be removed on {{dataRemovalDate}}</p>
+            <ul style="margin: 0; padding-left: 20px; color: #666666; font-size: 14px; line-height: 1.8;">
+              <li>All your photographs, albums, and settings will be permanently deleted</li>
+              <li>Client galleries and contact sheets will no longer be accessible</li>
+              <li>This action cannot be undone after the removal date</li>
+            </ul>
+          </div>
+          <div style="background: #f9f9f9; padding: 16px 20px; border-radius: 6px; border-left: 4px solid #1a1a1a; margin: 24px 0;">
+            <p style="margin: 0 0 8px 0; font-weight: 600; color: #1a1a1a; font-size: 14px;">Subscribe now to keep your data</p>
+            <p style="margin: 0; color: #666666; font-size: 14px; line-height: 1.5;">Upgrade to a paid plan before {{dataRemovalDate}} to retain all your work and continue using the platform.</p>
+          </div>
+          {{#if upgradeUrl}}
+          <div style="text-align: center; margin: 32px 0;">
+            <a href="{{upgradeUrl}}" style="display: inline-block; background: #1a1a1a; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 16px;">Subscribe Now</a>
+          </div>
+          {{/if}}
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 24px 0 0 0;">We hope to see you back soon.</p>
+          <p style="color: #999999; font-size: 14px; line-height: 1.5; margin: 16px 0 0 0;">If you have any questions about our plans or need assistance, please contact our support team.</p>
+        </td>
+      </tr>
+      <tr><td>{{> footer}}</td></tr>
+    </table>
+  </body>
 </html>

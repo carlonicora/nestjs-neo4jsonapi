@@ -1,31 +1,27 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Payment Received - Internal Notification</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body>
-  {{> header}}
-
-  <div style="padding: 20px; font-family: Arial, sans-serif; color: #333;">
-    <h1 style="color: #17a2b8;">Payment Notification</h1>
-
-    <p>Hi {{adminName}},</p>
-
-    <p>A payment has been received:</p>
-
-    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
-      <p style="margin: 5px 0;"><strong>Company:</strong> {{companyName}}</p>
-      <p style="margin: 5px 0;"><strong>Amount:</strong> {{amount}} {{currency}}</p>
-      {{#if isOneTimePurchase}}<p style="margin: 5px 0;"><strong>Type:</strong> One-time purchase</p>{{else}}<p style="margin: 5px 0;"><strong>Type:</strong> Subscription payment</p>{{/if}}
-    </div>
-
-    <p style="color: #6c757d; font-size: 14px; margin-top: 40px;">
-      This is an automated internal notification. For detailed transaction information, please check the Stripe dashboard.
-    </p>
-  </div>
-
-  {{> footer}}
-</body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Received</title>
+  </head>
+  <body style="margin: 0; padding: 0; background-color: #ffffff; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+      <tr><td>{{> header}}</td></tr>
+      <tr>
+        <td style="padding: 32px;">
+          <h1 style="color: #1a1a1a; font-size: 24px; font-weight: 600; margin: 0 0 24px 0; line-height: 1.3;">Payment Received</h1>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">Hi {{adminName}},</p>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">A payment has been received:</p>
+          <div style="background: #f9f9f9; padding: 20px; border-radius: 6px; margin: 24px 0;">
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #333333;"><strong>Company:</strong> {{companyName}}</p>
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #333333;"><strong>Amount:</strong> {{amount}} {{currency}}</p>
+            {{#if isOneTimePurchase}}<p style="margin: 0; font-size: 14px; color: #666666;">One-time purchase</p>{{else}}<p style="margin: 0; font-size: 14px; color: #666666;">Subscription payment</p>{{/if}}
+          </div>
+          <p style="color: #999999; font-size: 14px; line-height: 1.5; margin: 24px 0 0 0;">This is an automated notification. For detailed transaction information, please check the Stripe dashboard.</p>
+        </td>
+      </tr>
+      <tr><td>{{> footer}}</td></tr>
+    </table>
+  </body>
 </html>
