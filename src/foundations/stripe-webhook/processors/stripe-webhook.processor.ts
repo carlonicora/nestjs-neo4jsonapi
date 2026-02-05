@@ -517,7 +517,8 @@ export class StripeWebhookProcessor extends WorkerHost {
         }
 
         // Complete referral if handler is provided (non-blocking)
-        if (this.referralCompletionHandler) {
+        // Only for paid invoices - skip $0 trial/free invoices
+        if (this.referralCompletionHandler && invoice.amount_paid > 0) {
           try {
             await this.referralCompletionHandler.completeReferralOnPayment({
               referredCompanyId: featureSyncCompanyId,

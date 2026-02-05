@@ -21,6 +21,7 @@ export * from "./module";
 export * from "./notification";
 export * from "./oauth";
 export * from "./push";
+export * from "./referral";
 export * from "./relevancy";
 export * from "./role";
 export * from "./s3";

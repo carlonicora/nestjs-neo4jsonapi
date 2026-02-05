@@ -116,6 +116,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // Library's foundation/domain modules (queues configured via baseConfig.chunkQueues)
           FoundationsModule.forRoot({
             contentExtension: options.contentExtension,
+            referral: options.referral,
           }),
 
           // Library's AI agents (prompts configured via baseConfig.prompts)

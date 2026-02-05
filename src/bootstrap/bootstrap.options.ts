@@ -1,6 +1,7 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { EntityDescriptor, RelationshipDef } from "../common/interfaces/entity.schema.interface";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
+import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
 
 /**
  * i18n configuration options
@@ -59,6 +60,21 @@ export interface BootstrapOptions {
    * ```
    */
   contentExtension?: ContentExtensionConfig;
+
+  /**
+   * Configuration for the referral feature module.
+   * When provided, enables referral tracking and rewards.
+   * Uses APP_URL environment variable for referral links.
+   *
+   * @example
+   * ```typescript
+   * referral: {
+   *   enabled: true,
+   *   rewardTokens: 1000,
+   * }
+   * ```
+   */
+  referral?: ReferralModuleConfig;
 
   /**
    * OpenAPI documentation configuration.

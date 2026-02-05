@@ -7,6 +7,8 @@ import { ChunkerModule } from "./chunker/chunker.module";
 import { CompanyModule } from "./company/company.module";
 import { ContentModule } from "./content/content.module";
 import { ContentExtensionConfig } from "./content/interfaces/content.extension.interface";
+import { ReferralModule } from "./referral/referral.module";
+import { ReferralModuleConfig } from "./referral/interfaces/referral.config.interface";
 import { DiscordUserModule } from "./discord-user/discord-user.module";
 import { FeatureModule } from "./feature/feature.module";
 import { KeyConceptModule } from "./keyconcept/keyconcept.module";
@@ -37,6 +39,8 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
 export interface FoundationsModuleConfig {
   /** Optional extension for Content module to add additional relationships */
   contentExtension?: ContentExtensionConfig;
+  /** Optional configuration for the referral feature module */
+  referral?: ReferralModuleConfig;
 }
 
 /**
@@ -113,8 +117,12 @@ export class FoundationsModule {
   static forRoot(config?: FoundationsModuleConfig): DynamicModule {
     return {
       module: FoundationsModule,
-      imports: [...STATIC_FOUNDATION_MODULES, ContentModule.forRoot(config?.contentExtension)],
-      exports: [...STATIC_FOUNDATION_MODULES, ContentModule],
+      imports: [
+        ...STATIC_FOUNDATION_MODULES,
+        ContentModule.forRoot(config?.contentExtension),
+        ReferralModule.forRoot(config?.referral),
+      ],
+      exports: [...STATIC_FOUNDATION_MODULES, ContentModule, ReferralModule],
     };
   }
 }

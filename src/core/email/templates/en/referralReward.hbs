@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>You've Earned Referral Tokens</title>
+  </head>
+  <body style="margin: 0; padding: 0; background-color: #ffffff; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto;">
+      <tr><td>{{> header}}</td></tr>
+      <tr>
+        <td style="padding: 32px;">
+          <h1 style="color: #1a1a1a; font-size: 24px; font-weight: 600; margin: 0 0 24px 0; line-height: 1.3;">Congratulations!</h1>
+          {{#if userName}}
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">Hi {{userName}},</p>
+          {{else}}
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;">Hi there,</p>
+          {{/if}}
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">Great news! Someone you referred has just joined Only35, and you've earned a reward.</p>
+          <div style="background: #f9f9f9; padding: 24px; border-radius: 6px; margin: 24px 0; text-align: center; border: 1px solid #e5e5e5;">
+            <p style="margin: 0; font-size: 14px; color: #666666;">You've been awarded</p>
+            <p style="margin: 12px 0; font-size: 32px; font-weight: 700; color: #1a1a1a;">{{tokensAwarded}} Tokens</p>
+            <p style="margin: 0; font-size: 14px; color: #666666;">as a thank you for spreading the word</p>
+          </div>
+          <div style="background: #f9f9f9; padding: 20px; border-radius: 6px; margin: 24px 0;">
+            <p style="margin: 0 0 12px 0; font-weight: 600; color: #1a1a1a; font-size: 14px;">How to use your tokens</p>
+            <ul style="margin: 0; padding-left: 20px; color: #666666; font-size: 14px; line-height: 1.8;">
+              <li>Use tokens to enhance your Only35 experience</li>
+              <li>Tokens can be used for premium features and services</li>
+              <li>Keep referring friends to earn more tokens</li>
+            </ul>
+          </div>
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 24px 0 0 0;">Thank you for being a valued member of our community and helping us grow.</p>
+          <p style="color: #999999; font-size: 14px; line-height: 1.5; margin: 24px 0 0 0;">If you have any questions about your tokens, please contact our support team.</p>
+        </td>
+      </tr>
+      <tr><td>{{> footer}}</td></tr>
+    </table>
+  </body>
+</html>
