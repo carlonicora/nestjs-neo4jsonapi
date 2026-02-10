@@ -1,3 +1,9 @@
+## [1.47.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.46.0...v1.47.0) (2026-02-10)
+
+### 🚀 Features
+
+* enhance relationship handling with detailed relationship info for self-referential support ([8976a38](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8976a383c468c9928a9a178b14b36737fb6db2c3))
+
 ## [1.46.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.45.1...v1.46.0) (2026-02-10)
 
 ### 🚀 Features
