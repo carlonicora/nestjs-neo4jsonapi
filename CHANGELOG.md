@@ -1,3 +1,9 @@
+## [1.46.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.45.1...v1.46.0) (2026-02-10)
+
+### 🚀 Features
+
+* update updateRelationshipQuery to handle parameter collisions ([850f6a9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/850f6a915590e9adab6579085acb4d9c41fc877a))
+
 ## [1.45.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.45.0...v1.45.1) (2026-02-05)
 
 ### 🐛 Bug Fixes
