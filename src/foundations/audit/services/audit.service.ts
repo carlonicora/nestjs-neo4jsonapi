@@ -14,7 +14,6 @@ export class AuditService {
   ) {}
 
   async createAuditEntry(params: { entityType: string; entityId: string }): Promise<void> {
-    console.log("Creating audit entry for", params.entityType, "ID:", params.entityId);
     const userId = this.clsService.get("userId");
     if (!userId) return;
 

@@ -239,7 +239,6 @@ export abstract class AbstractRepository<
       query += `RETURN ${returnParts.join(", ")}`;
     }
 
-    console.log(`[REPO] buildReturnStatement final query:\n${query}`);
     return query;
   }
 
