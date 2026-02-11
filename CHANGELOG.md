@@ -1,3 +1,9 @@
+## [1.48.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.0...v1.48.1) (2026-02-11)
+
+### 🐛 Bug Fixes
+
+* remove console logs ([0d3a011](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0d3a0112185356b48ca096706da8012868d8171c))
+
 ## [1.48.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.47.0...v1.48.0) (2026-02-11)
 
 ### 🚀 Features
