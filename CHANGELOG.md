@@ -1,3 +1,10 @@
+## [1.48.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.47.0...v1.48.0) (2026-02-11)
+
+### 🚀 Features
+
+* implement polymorphic relationship handling with discriminator support ([27fb3fa](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/27fb3faea209fcd49cb953733249dedde2006785))
+* implement polymorphic relationship handling with discriminator support ([7aed035](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7aed0350a472397b63617bff6cfa08884e9bdba7))
+
 ## [1.47.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.46.0...v1.47.0) (2026-02-10)
 
 ### 🚀 Features
