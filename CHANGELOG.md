@@ -1,3 +1,9 @@
+## [1.48.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.1...v1.48.2) (2026-02-12)
+
+### 🐛 Bug Fixes
+
+* skip company relationship for company-scoped entities in relationship matches ([2d72942](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2d729428a1dcfa8d27d46115fede4a8204dd7903))
+
 ## [1.48.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.0...v1.48.1) (2026-02-11)
 
 ### 🐛 Bug Fixes
