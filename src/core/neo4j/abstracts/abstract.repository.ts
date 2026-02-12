@@ -153,6 +153,10 @@ export abstract class AbstractRepository<
 
     // Build relationship matches from descriptor
     for (const [name, rel] of Object.entries(relationships)) {
+      // Skip company relationship for company-scoped entities - already handled above
+      if (isCompanyScoped && name === "company" && rel.relationship === "BELONGS_TO") {
+        continue;
+      }
       const relatedNodeName = `${nodeName}_${name}`;
       const relAlias = `${nodeName}_${name}_relationship`;
       // Use OPTIONAL MATCH for: many cardinality OR optional single relationships (required: false)
