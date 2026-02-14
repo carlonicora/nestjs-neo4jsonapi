@@ -152,7 +152,10 @@ export abstract class AbstractService<
    * Map JSON:API DTO data to repository params
    * Extracts attributes and relationships based on descriptor definitions
    */
-  protected mapDTOToParams(data: JsonApiDTOData): { id: string; [key: string]: any } {
+  protected mapDTOToParams(
+    data: JsonApiDTOData,
+    operation: "create" | "put" = "create",
+  ): { id: string; [key: string]: any } {
     const params: { id: string; [key: string]: any } = { id: data.id };
 
     // Map all fields from descriptor - use DTO value, default, or null
@@ -168,6 +171,11 @@ export abstract class AbstractService<
 
     // Map relationships
     for (const [relationshipKey, relationshipDef] of Object.entries(this.descriptor.relationships)) {
+      // Skip immutable relationships during PUT - they are set only on creation
+      if (operation === "put" && relationshipDef.immutable) {
+        continue;
+      }
+
       if (relationshipDef.contextKey) {
         // Value comes from CLS context (e.g., userId for author)
         params[relationshipKey] = this.clsService.get(relationshipDef.contextKey);
@@ -244,7 +252,7 @@ export abstract class AbstractService<
    * Automatically maps attributes and relationships based on descriptor
    */
   async putFromDTO(params: { data: JsonApiDTOData }): Promise<JsonApiDataInterface> {
-    const repoParams = this.mapDTOToParams(params.data);
+    const repoParams = this.mapDTOToParams(params.data, "put");
     return this.put(repoParams);
   }
 

@@ -591,6 +591,8 @@ export abstract class AbstractRepository<
     // Validate related nodes exist
     const nodesToValidate: Array<{ id: string; label: string }> = [];
     for (const [name, rel] of Object.entries(relationships)) {
+      if (rel.immutable) continue;
+
       const paramValue = params[name];
       if (paramValue) {
         const ids = Array.isArray(paramValue) ? paramValue : [paramValue];
@@ -643,6 +645,9 @@ export abstract class AbstractRepository<
       if (this.descriptor.isCompanyScoped && rel.relationship === "BELONGS_TO" && rel.model.labelName === "Company") {
         continue;
       }
+
+      // Skip immutable relationships - they are preserved as-is during PUT
+      if (rel.immutable) continue;
 
       const paramValue = params[name];
       // Add param to query params

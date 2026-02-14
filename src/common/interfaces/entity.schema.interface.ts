@@ -117,6 +117,8 @@ export interface RelationshipDef {
   fields?: RelationshipFieldDef[];
   /** For polymorphic relationships - multiple possible types for same Neo4j label */
   polymorphic?: PolymorphicConfig;
+  /** If true, relationship is set only on creation and skipped during PUT (default: false) */
+  immutable?: boolean;
 }
 
 /**
