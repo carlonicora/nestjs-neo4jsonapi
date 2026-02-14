@@ -1,3 +1,9 @@
+## [1.50.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.49.0...v1.50.0) (2026-02-14)
+
+### 🚀 Features
+
+* add drift community auto creation ([2e3c88a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2e3c88a3373f9310dc17499a951a9cf7b8e13e2b))
+
 ## [1.49.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.2...v1.49.0) (2026-02-14)
 
 ### 🚀 Features
