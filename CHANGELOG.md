@@ -1,3 +1,13 @@
+## [1.49.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.2...v1.49.0) (2026-02-14)
+
+### 🚀 Features
+
+* add immutable relationship support to skip updates during PUT operations ([edac252](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/edac252ac63f2121f43ec495363e5cae7088f592))
+
+### 🐛 Bug Fixes
+
+* handle case sensitivity in job type processing ([ad1c77b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ad1c77ba365a16e3d588d2aae52ab450455614c8))
+
 ## [1.48.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.48.1...v1.48.2) (2026-02-12)
 
 ### 🐛 Bug Fixes
