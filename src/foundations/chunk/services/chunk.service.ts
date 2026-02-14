@@ -306,7 +306,7 @@ export class ChunkService {
 
     this.tracer.addSpanEvent("Update Chunk Status");
 
-    const nextJobType = this.jobNames.process[params.type];
+    const nextJobType = this.jobNames.process[params.type] ?? this.jobNames.process[params.type.toLowerCase()];
     this.logger.debug("Chunk processing completed, queuing next job", "ChunkService", {
       chunkId: params.chunkId,
       hadAnalysis: !!chunkAnalysis,
