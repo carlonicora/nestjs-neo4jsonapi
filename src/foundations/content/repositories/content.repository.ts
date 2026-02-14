@@ -22,7 +22,8 @@ export class ContentRepository {
   ) {}
 
   private getContentTypes(): string[] {
-    return this.configService.get<ConfigContentTypesInterface>("contentTypes")?.types ?? [];
+    const types = this.configService.get<ConfigContentTypesInterface>("contentTypes")?.types ?? [];
+    return types.length > 0 ? types : [contentMeta.labelName];
   }
 
   /**

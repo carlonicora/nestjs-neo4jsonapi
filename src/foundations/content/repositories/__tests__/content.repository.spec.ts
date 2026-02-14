@@ -358,7 +358,7 @@ describe("ContentRepository", () => {
       expect(mockQuery.query).toContain("Article|Document");
     });
 
-    it("should return empty array when contentTypes not configured", async () => {
+    it("should fallback to Content label when contentTypes not configured", async () => {
       configService.get.mockReturnValue(undefined);
 
       const mockQuery = createMockQuery();
@@ -367,8 +367,8 @@ describe("ContentRepository", () => {
 
       await repository.findByIds({ contentIds: [TEST_IDS.contentId1] });
 
-      // Should result in empty types array
-      expect(mockQuery.query).toContain(":)-[:BELONGS_TO]");
+      // Should fallback to Content label instead of empty types
+      expect(mockQuery.query).toContain(":Content)-[:BELONGS_TO]");
     });
   });
 
