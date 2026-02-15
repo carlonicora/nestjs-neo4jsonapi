@@ -74,8 +74,7 @@ describe("ContentCypherService", () => {
 
       // Assert
       expect(result).toContain("MATCH (content:Article|Document|Note");
-      expect(result).toContain("WHERE content.tldr IS NOT NULL");
-      expect(result).toContain('content.tldr <> ""');
+      expect(result).toContain("WHERE $companyId IS NULL");
     });
 
     it("should include search field when provided", () => {

@@ -25,9 +25,7 @@ export class ContentCypherService {
   default(params?: { searchField: string; blockCompanyAndUser?: boolean }): string {
     return `
       MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")} ${params ? ` {${params.searchField}: $searchValue}` : ``})
-      WHERE ${contentMeta.nodeName}.tldr IS NOT NULL
-      AND ${contentMeta.nodeName}.tldr <> ""
-      AND $companyId IS NULL
+      WHERE $companyId IS NULL
       OR EXISTS {
         MATCH (${contentMeta.nodeName})-[:BELONGS_TO]-(company)
       }

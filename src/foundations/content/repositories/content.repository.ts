@@ -77,9 +77,7 @@ export class ContentRepository {
 
     query.query += `
         MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")})-[:BELONGS_TO]->(company)
-        WHERE ${contentMeta.nodeName}.id IN $ids 
-        AND ${contentMeta.nodeName}.tldr IS NOT NULL
-        AND ${contentMeta.nodeName}.tldr <> ""
+        WHERE ${contentMeta.nodeName}.id IN $ids
         ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
         ${this.contentCypherService.returnStatement()}
       `;
@@ -109,9 +107,9 @@ export class ContentRepository {
     query.query += `
       ${this.contentCypherService.default()}
       ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
-      
-      ORDER BY ${contentMeta.nodeName}.${params.orderBy ? `${params.orderBy}` : `updatedAt DESC`}
       MATCH (${contentMeta.nodeName})<-[:PUBLISHED]-(:${ownerMeta.labelName} {id: $ownerId})
+
+      ORDER BY ${contentMeta.nodeName}.${params.orderBy ? `${params.orderBy}` : `updatedAt DESC`}
       {CURSOR}
 
       ${this.contentCypherService.returnStatement()}

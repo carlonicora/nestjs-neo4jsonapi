@@ -198,8 +198,6 @@ describe("ContentRepository", () => {
 
       expect(mockQuery.queryParams.ids).toEqual(contentIds);
       expect(mockQuery.query).toContain("content.id IN $ids");
-      expect(mockQuery.query).toContain("content.tldr IS NOT NULL");
-      expect(mockQuery.query).toContain('content.tldr <> ""');
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_CONTENT]);
     });
