@@ -42,6 +42,8 @@ export function generatePutDTOFile(data: TemplateData): string {
   for (const rel of relationships) {
     // Skip contextKey relationships (like Author) - same as POST
     if (rel.contextKey) continue;
+    // Skip immutable relationships - they are set only on creation
+    if (rel.immutable) continue;
 
     const hasFields = rel.fields && rel.fields.length > 0;
 
@@ -84,7 +86,7 @@ export function generatePutDTOFile(data: TemplateData): string {
   const relPropertyTypes: CypherType[] = [];
   let hasItemDTOs = false; // Track if we need IsString for ItemDTO type field
   for (const rel of relationships) {
-    if (rel.fields && rel.fields.length > 0 && !rel.contextKey) {
+    if (rel.fields && rel.fields.length > 0 && !rel.contextKey && !rel.immutable) {
       for (const field of rel.fields) {
         relPropertyTypes.push(field.type as CypherType);
       }
@@ -108,7 +110,7 @@ export function generatePutDTOFile(data: TemplateData): string {
   // Generate meta DTOs for relationships with fields
   const metaDtoClasses: string[] = [];
   for (const rel of relationships) {
-    if (rel.fields && rel.fields.length > 0 && !rel.contextKey) {
+    if (rel.fields && rel.fields.length > 0 && !rel.contextKey && !rel.immutable) {
       const dtoKey = rel.dtoKey || rel.key;
       const metaDtoName = `${names.pascalCase}${toPascalCase(dtoKey)}MetaDTO`;
 
@@ -169,7 +171,7 @@ export class ${itemDtoName} {
 
   // Build relationship validation (exclude contextKey - same as POST)
   const relationshipFields = relationships
-    .filter((rel) => !rel.contextKey) // Exclude Author and other contextKey relationships
+    .filter((rel) => !rel.contextKey && !rel.immutable) // Exclude contextKey and immutable relationships
     .map((rel) => {
       const decorators = [];
       const dtoKey = rel.dtoKey || rel.key;

@@ -152,6 +152,14 @@ export function validateJsonSchema(schema: any): ValidationError[] {
           severity: "error",
         });
       }
+
+      if (rel.immutable && rel.nullable) {
+        errors.push({
+          field: `relationships[${index}].immutable`,
+          message: "Immutable relationships are typically required (set once at creation). Consider setting nullable to false.",
+          severity: "warning",
+        });
+      }
     });
   }
 

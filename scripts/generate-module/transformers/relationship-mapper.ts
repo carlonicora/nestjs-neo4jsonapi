@@ -113,6 +113,7 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     descriptorName,
     importPath,
     fields,
+    immutable: rel.immutable,
   };
 }
 

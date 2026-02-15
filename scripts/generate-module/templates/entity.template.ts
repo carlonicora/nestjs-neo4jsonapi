@@ -116,6 +116,10 @@ export function generateEntityFile(data: TemplateData): string {
         parts.push(`dtoKey: "${rel.dtoKey}"`);
       }
 
+      if (rel.immutable) {
+        parts.push(`immutable: true`);
+      }
+
       // Add relationship property fields if present
       if (rel.fields && rel.fields.length > 0) {
         const fieldsDef = rel.fields

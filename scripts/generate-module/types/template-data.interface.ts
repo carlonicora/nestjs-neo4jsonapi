@@ -57,6 +57,8 @@ export interface DescriptorRelationship {
   importPath?: string; // Import path for NEW structure entities
   // Relationship property fields (stored on the edge)
   fields?: TemplateField[]; // Only supported when cardinality: "one"
+  // If true, relationship is set only on creation and skipped during PUT
+  immutable?: boolean;
 }
 
 /**

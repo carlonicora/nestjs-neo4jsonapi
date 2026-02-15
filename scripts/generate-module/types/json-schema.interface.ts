@@ -27,6 +27,8 @@ export interface JsonRelationshipDefinition {
   nullable: boolean;
   /** Fields stored on the relationship (edge properties). Only supported when single: true */
   fields?: JsonFieldDefinition[];
+  /** If true, relationship is set only on creation and skipped during PUT (default: false) */
+  immutable?: boolean;
 }
 
 /**
