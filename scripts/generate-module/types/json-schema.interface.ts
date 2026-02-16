@@ -20,6 +20,8 @@ export interface JsonFieldDefinition {
 export interface JsonRelationshipDefinition {
   name: string;
   variant?: string;
+  /** PascalCase alias for disambiguation when multiple relationships target the same entity (e.g., "DestinedPerson") */
+  alias?: string;
   directory: string;
   single: boolean;
   relationshipName: string;

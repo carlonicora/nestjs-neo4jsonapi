@@ -73,6 +73,7 @@ export function generateEntityFile(data: TemplateData): string {
       continue;
     }
     // Model is like "userMeta", "ownerMeta", "campaignMeta", etc.
+    // Note: alias does NOT change the model - it only changes the key
     if (!processedMetas.has(rel.model)) {
       processedMetas.add(rel.model);
       const importPath = getMetaImportPath(rel);
@@ -131,6 +132,7 @@ export function generateEntityFile(data: TemplateData): string {
       return `    ${rel.key}: {\n      ${parts.join(",\n      ")},\n    },`;
     })
     .join("\n");
+
 
   // Build all import lines
   const importLines: string[] = [];

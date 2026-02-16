@@ -1,6 +1,6 @@
 import { JsonRelationshipDefinition } from "../types/json-schema.interface";
 import { DescriptorRelationship, TemplateField } from "../types/template-data.interface";
-import { toCamelCase, pluralize, transformNames } from "./name-transformer";
+import { toCamelCase, toKebabCase, pluralize, transformNames } from "./name-transformer";
 import {
   isNewEntityStructure,
   getModelReference,
@@ -28,9 +28,10 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
   const direction = rel.toNode ? "out" : "in";
   const cardinality = rel.single ? "one" : "many";
 
-  // Determine contextKey and dtoKey based on variant
+  // Determine contextKey, dtoKey (JSON:API wire format), and dtoPropertyKey (TS property name)
   let contextKey: string | undefined;
   let dtoKey: string | undefined;
+  let dtoPropertyKey: string | undefined;
 
   if (rel.variant === "Author") {
     // Special case: Author variant uses contextKey
@@ -39,14 +40,21 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     // Other variants: use variant name as dtoKey
     // Pluralize only for "many" cardinality
     dtoKey = rel.single ? rel.variant.toLowerCase() : pluralize(rel.variant.toLowerCase());
+    dtoPropertyKey = dtoKey; // Same as dtoKey for variants (already camelCase-compatible)
+  } else if (rel.alias) {
+    // Alias: use kebab-case of alias for JSON:API wire format
+    dtoKey = rel.single ? toKebabCase(rel.alias) : pluralize(toKebabCase(rel.alias));
+    // TS property name: camelCase of alias
+    dtoPropertyKey = rel.single ? toCamelCase(rel.alias) : pluralize(toCamelCase(rel.alias));
   } else {
-    // No variant: use entity name as dtoKey
+    // No variant or alias: use entity name as dtoKey
     // Pluralize only for "many" cardinality
     dtoKey = rel.single ? rel.name.toLowerCase() : pluralize(rel.name.toLowerCase());
+    dtoPropertyKey = dtoKey; // Same as dtoKey (already camelCase-compatible)
   }
 
   // Determine relationship key (what it's called in the descriptor)
-  const key = toCamelCase(rel.variant || rel.name);
+  const key = toCamelCase(rel.alias || rel.variant || rel.name);
 
   // Related entity name transformations
   const relatedEntityNames = transformNames(rel.name, pluralize(rel.name.toLowerCase()));
@@ -58,10 +66,13 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
   });
 
   // Get model reference based on structure type
+  // IMPORTANT: Alias does NOT change the model reference - it only changes the key
+  // The model always references the BASE entity meta (e.g., userMeta, not managedByMeta)
   const model = getModelReference({
     isNewStructure,
     entityName: rel.name,
     variantName: rel.variant,
+    // aliasName is intentionally NOT passed here - alias only affects the key, not the model
   });
 
   // NEW structure specific fields
@@ -101,6 +112,7 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     cardinality,
     contextKey,
     dtoKey,
+    dtoPropertyKey,
     required: !rel.nullable,
     relatedEntity: {
       name: rel.name,
@@ -114,6 +126,7 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     importPath,
     fields,
     immutable: rel.immutable,
+    alias: rel.alias,
   };
 }
 

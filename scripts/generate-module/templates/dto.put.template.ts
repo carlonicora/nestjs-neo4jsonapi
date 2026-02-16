@@ -174,7 +174,8 @@ export class ${itemDtoName} {
     .filter((rel) => !rel.contextKey && !rel.immutable) // Exclude contextKey and immutable relationships
     .map((rel) => {
       const decorators = [];
-      const dtoKey = rel.dtoKey || rel.key;
+      const dtoKey = rel.dtoKey || rel.key; // For meta DTO naming (JSON:API format)
+      const propertyKey = rel.dtoPropertyKey || rel.key; // For TS property name (camelCase)
       const hasFields = rel.fields && rel.fields.length > 0;
 
       if (hasFields && rel.cardinality === "one") {
@@ -191,7 +192,7 @@ export class ${itemDtoName} {
         decorators.push(`@Type(() => ${wrapperDtoName})`);
 
         const optional = !rel.required ? "?" : "";
-        return `  ${decorators.join("\n  ")}\n  ${dtoKey}${optional}: ${wrapperDtoName};`;
+        return `  ${decorators.join("\n  ")}\n  ${propertyKey}${optional}: ${wrapperDtoName};`;
       } else if (hasFields && rel.cardinality === "many") {
         // MANY relationship with fields: use ItemDTO array with per-item meta
         const itemDtoName = `${names.pascalCase}${toPascalCase(dtoKey)}ItemDTO`;
@@ -207,7 +208,7 @@ export class ${itemDtoName} {
         decorators.push(`@Type(() => ${itemDtoName})`);
 
         const optional = !rel.required ? "?" : "";
-        return `  ${decorators.join("\n  ")}\n  ${dtoKey}${optional}: ${itemDtoName}[];`;
+        return `  ${decorators.join("\n  ")}\n  ${propertyKey}${optional}: ${itemDtoName}[];`;
       } else {
         // Regular relationship without fields
         const dtoClass =
@@ -228,7 +229,7 @@ export class ${itemDtoName} {
         decorators.push(`@Type(() => ${dtoClass})`);
 
         const optional = !rel.required ? "?" : "";
-        return `  ${decorators.join("\n  ")}\n  ${dtoKey}${optional}: ${dtoClass};`;
+        return `  ${decorators.join("\n  ")}\n  ${propertyKey}${optional}: ${dtoClass};`;
       }
     })
     .join("\n\n");

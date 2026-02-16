@@ -42,7 +42,8 @@ export interface DescriptorRelationship {
   relationship: string; // Neo4j relationship name (e.g., "PUBLISHED")
   cardinality: "one" | "many";
   contextKey?: string; // e.g., "userId" for Author
-  dtoKey?: string; // e.g., "editors", "topics"
+  dtoKey?: string; // JSON:API wire format (e.g., "managed-by", "topics")
+  dtoPropertyKey?: string; // TypeScript property name (e.g., "managedBy", "topics")
   required: boolean;
   relatedEntity: {
     name: string; // e.g., "User"
@@ -59,6 +60,8 @@ export interface DescriptorRelationship {
   fields?: TemplateField[]; // Only supported when cardinality: "one"
   // If true, relationship is set only on creation and skipped during PUT
   immutable?: boolean;
+  // PascalCase alias when multiple relationships target the same entity
+  alias?: string;
 }
 
 /**

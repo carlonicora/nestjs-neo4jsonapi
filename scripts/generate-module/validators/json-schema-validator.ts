@@ -160,6 +160,55 @@ export function validateJsonSchema(schema: any): ValidationError[] {
           severity: "warning",
         });
       }
+
+      // Validate alias format if provided (must be PascalCase)
+      if (rel.alias && !/^[A-Z][a-zA-Z0-9]*$/.test(rel.alias)) {
+        errors.push({
+          field: `relationships[${index}].alias`,
+          message: 'Alias must be PascalCase (e.g., "DestinedPerson", "ReceivedByPerson")',
+          severity: "error",
+        });
+      }
+    });
+
+    // Check for duplicate relationship targets without alias
+    const nameCount = new Map<string, number[]>();
+    schema.relationships.forEach((rel: any, index: number) => {
+      const name = rel.name;
+      if (!nameCount.has(name)) {
+        nameCount.set(name, []);
+      }
+      nameCount.get(name)!.push(index);
+    });
+
+    for (const [name, indices] of nameCount.entries()) {
+      if (indices.length > 1) {
+        for (const idx of indices) {
+          const rel = schema.relationships[idx];
+          if (!rel.alias) {
+            errors.push({
+              field: `relationships[${idx}].alias`,
+              message: `Relationship to "${name}" appears ${indices.length} times. All instances must have an "alias" field to avoid key collisions. Example: "alias": "DestinedPerson"`,
+              severity: "error",
+            });
+          }
+        }
+      }
+    }
+
+    // Check for duplicate aliases
+    const aliasSet = new Set<string>();
+    schema.relationships.forEach((rel: any, index: number) => {
+      if (rel.alias) {
+        if (aliasSet.has(rel.alias)) {
+          errors.push({
+            field: `relationships[${index}].alias`,
+            message: `Duplicate alias "${rel.alias}". Each alias must be unique.`,
+            severity: "error",
+          });
+        }
+        aliasSet.add(rel.alias);
+      }
     });
   }
 

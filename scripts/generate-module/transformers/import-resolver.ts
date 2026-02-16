@@ -55,14 +55,15 @@ export function getModelReference(params: {
   isNewStructure: boolean;
   entityName: string;
   variantName?: string;
+  aliasName?: string;
 }): string {
-  const { isNewStructure, entityName, variantName } = params;
+  const { isNewStructure, entityName, variantName, aliasName } = params;
 
   if (isNewStructure) {
     return `${entityName}Descriptor.model`;
   } else {
-    // OLD structure: use variant name if provided, otherwise entity name
-    const baseName = variantName || entityName;
+    // Priority: alias > variant > entity name
+    const baseName = aliasName || variantName || entityName;
     return `${baseName.charAt(0).toLowerCase()}${baseName.slice(1)}Meta`;
   }
 }
