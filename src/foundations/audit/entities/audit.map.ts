@@ -6,6 +6,7 @@ export const mapAudit = (params: { data: any; record: any; entityFactory: Entity
   return {
     ...mapEntity({ record: params.data }),
     auditType: params.data.auditType,
+    changes: params.data.changes ?? undefined,
 
     user: undefined,
     // audited: [],

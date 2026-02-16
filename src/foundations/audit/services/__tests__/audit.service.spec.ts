@@ -87,6 +87,7 @@ describe("AuditService", () => {
         entityType: "content",
         entityId: TEST_IDS.entityId,
         auditType: "read",
+        changes: undefined,
       });
     });
 
@@ -134,6 +135,7 @@ describe("AuditService", () => {
       expect(auditRepository.create).toHaveBeenCalledWith(
         expect.objectContaining({
           auditType: "read",
+          changes: undefined,
         }),
       );
     });
@@ -148,6 +150,108 @@ describe("AuditService", () => {
         service.createAuditEntry({
           entityType: "content",
           entityId: TEST_IDS.entityId,
+        }),
+      ).rejects.toThrow("Database error");
+    });
+  });
+
+  describe("createWriteAuditEntry", () => {
+    it("should create a write audit entry with auditType 'create' and no changes", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      auditRepository.create.mockResolvedValue(undefined);
+
+      // Act
+      await service.createWriteAuditEntry({
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "create",
+      });
+
+      // Assert
+      expect(clsService.get).toHaveBeenCalledWith("userId");
+      expect(auditRepository.create).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "create",
+        changes: undefined,
+      });
+    });
+
+    it("should create a write audit entry with auditType 'edit' and changes JSON", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      auditRepository.create.mockResolvedValue(undefined);
+      const changesJson = JSON.stringify({ attributes: { name: "Updated" } });
+
+      // Act
+      await service.createWriteAuditEntry({
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "edit",
+        changes: changesJson,
+      });
+
+      // Assert
+      expect(auditRepository.create).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "edit",
+        changes: changesJson,
+      });
+    });
+
+    it("should create a write audit entry with auditType 'edit' and no changes", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      auditRepository.create.mockResolvedValue(undefined);
+
+      // Act
+      await service.createWriteAuditEntry({
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "edit",
+      });
+
+      // Assert
+      expect(auditRepository.create).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "edit",
+        changes: undefined,
+      });
+    });
+
+    it("should not create audit entry when userId is not available", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(undefined);
+
+      // Act
+      await service.createWriteAuditEntry({
+        entityType: "Warehouse",
+        entityId: TEST_IDS.entityId,
+        auditType: "create",
+      });
+
+      // Assert
+      expect(clsService.get).toHaveBeenCalledWith("userId");
+      expect(auditRepository.create).not.toHaveBeenCalled();
+    });
+
+    it("should propagate errors from repository", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      auditRepository.create.mockRejectedValue(new Error("Database error"));
+
+      // Act & Assert
+      await expect(
+        service.createWriteAuditEntry({
+          entityType: "Warehouse",
+          entityId: TEST_IDS.entityId,
+          auditType: "create",
         }),
       ).rejects.toThrow("Database error");
     });

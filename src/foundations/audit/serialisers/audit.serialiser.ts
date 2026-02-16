@@ -26,6 +26,7 @@ export class AuditSerialiser extends AbstractJsonApiSerialiser implements JsonAp
   create(): JsonApiDataInterface {
     this.attributes = {
       auditType: "auditType",
+      changes: "changes",
     };
 
     const dynamicRel = this.dynamicRelationshipFactory.createDynamicRelationship(null);

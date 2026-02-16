@@ -22,6 +22,25 @@ export class AuditService {
       entityType: params.entityType,
       entityId: params.entityId,
       auditType: "read",
+      changes: undefined,
+    });
+  }
+
+  async createWriteAuditEntry(params: {
+    entityType: string;
+    entityId: string;
+    auditType: "create" | "edit";
+    changes?: string;
+  }): Promise<void> {
+    const userId = this.clsService.get("userId");
+    if (!userId) return;
+
+    await this.auditRepository.create({
+      userId: userId,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      auditType: params.auditType,
+      changes: params.changes,
     });
   }
 

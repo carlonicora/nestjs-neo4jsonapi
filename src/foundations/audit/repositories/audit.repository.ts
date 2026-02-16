@@ -35,7 +35,13 @@ export class AuditRepository implements OnModuleInit {
     return this.neo4jService.readMany(query);
   }
 
-  async create(params: { userId: string; entityType: string; entityId: string; auditType: string }): Promise<void> {
+  async create(params: {
+    userId: string;
+    entityType: string;
+    entityId: string;
+    auditType: string;
+    changes?: string;
+  }): Promise<void> {
     const query = this.neo4jService.initQuery();
     query.queryParams = {
       ...query.queryParams,
@@ -43,6 +49,7 @@ export class AuditRepository implements OnModuleInit {
       userId: params.userId,
       entityId: params.entityId,
       auditType: params.auditType,
+      changes: params.changes ?? null,
     };
 
     query.query += `
@@ -51,6 +58,7 @@ export class AuditRepository implements OnModuleInit {
         CREATE (${auditMeta.nodeName}:${auditMeta.labelName} {
             id: $id,
             auditType: $auditType,
+            changes: $changes,
             createdAt: datetime(),
             updatedAt: datetime()
         })

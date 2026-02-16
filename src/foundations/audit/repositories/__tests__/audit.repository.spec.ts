@@ -257,6 +257,40 @@ describe("AuditRepository", () => {
 
       expect(mockQuery.queryParams.id).toBe("mocked-uuid-12345");
     });
+
+    it("should store changes field when provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      const changesJson = JSON.stringify({ attributes: { name: "New Warehouse" } });
+
+      await repository.create({
+        userId: TEST_IDS.userId,
+        entityType: "Content",
+        entityId: TEST_IDS.entityId,
+        auditType: "create",
+        changes: changesJson,
+      });
+
+      expect(mockQuery.queryParams.changes).toBe(changesJson);
+      expect(mockQuery.query).toContain("changes: $changes");
+    });
+
+    it("should store null changes when not provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.create({
+        userId: TEST_IDS.userId,
+        entityType: "Content",
+        entityId: TEST_IDS.entityId,
+        auditType: "VIEW",
+      });
+
+      expect(mockQuery.queryParams.changes).toBeNull();
+    });
   });
 
   describe("Edge Cases", () => {
