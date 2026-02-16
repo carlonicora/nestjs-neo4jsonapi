@@ -81,7 +81,7 @@ ${validAttributesCode.replace(`      ${field.name}: ${getMockValue(field.type as
       (rel) => `
     it("should fail validation when required relationship ${rel.key} is missing", () => {
       const dto = createValidPostDTO();
-      delete (dto.data.relationships as any).${rel.dtoKey || rel.key};
+      delete (dto.data.relationships as any).${rel.dtoPropertyKey || rel.key};
 
       const _errors = validateSync(dto);
       // Note: Relationship validation depends on class-validator nested validation
