@@ -1,3 +1,10 @@
+## [1.52.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.0...v1.52.1) (2026-02-16)
+
+### 🐛 Bug Fixes
+
+* add foundation import handling for alias meta generation ([61e908d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/61e908d19f8a5c13e52b5ea249feda9b32fbb6d1))
+* update relationship key reference in DTO validation tests ([72cde4e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/72cde4e904e2108b5c98416dcc5c1d77486db353))
+
 ## [1.52.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.51.0...v1.52.0) (2026-02-16)
 
 ### 🚀 Features
