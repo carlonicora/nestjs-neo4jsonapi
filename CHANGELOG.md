@@ -1,3 +1,9 @@
+## [1.52.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.1...v1.52.2) (2026-02-16)
+
+### 📦 Code Refactoring
+
+* remove auto-generation of alias metas in entity meta files ([33a1344](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/33a134470a2b2faecbfc8e4e8400d3849e5964ca))
+
 ## [1.52.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.0...v1.52.1) (2026-02-16)
 
 ### 🐛 Bug Fixes
