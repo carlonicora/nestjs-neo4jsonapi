@@ -2,9 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { JsonModuleDefinition } from "./types/json-schema.interface";
 import { TemplateData, TemplateField } from "./types/template-data.interface";
-import { transformNames, toCamelCase, toKebabCase, pluralize } from "./transformers/name-transformer";
+import { transformNames } from "./transformers/name-transformer";
 import { mapRelationships } from "./transformers/relationship-mapper";
-import { isFoundationImport } from "./transformers/import-resolver";
 import { generateNestedRoutes } from "./transformers/nested-route-generator";
 import { validateJsonSchema, validationPassed, formatValidationErrors } from "./validators/json-schema-validator";
 import { generateEntityFile } from "./templates/entity.template";
@@ -211,43 +210,6 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     console.info(`\n📝 Writing ${filesToWrite.length} files...\n`);
     writeFiles(filesToWrite, { dryRun, force });
 
-    // 5b. Auto-generate alias metas in target entity meta files
-    for (const rel of relationships) {
-      if (!rel.alias) continue;
-      if (isFoundationImport(rel.relatedEntity.directory)) continue;
-
-      const aliasCamelCase = toCamelCase(rel.alias);
-      const aliasKebabCase = toKebabCase(rel.alias);
-      const entityCamelCase = rel.relatedEntity.camelCase;
-      const exportName = `${aliasCamelCase}Meta`;
-
-      const targetMetaFilePath = path.resolve(
-        process.cwd(),
-        isFoundationImport(rel.relatedEntity.directory)
-          ? `packages/nestjs-neo4jsonapi/src/foundations/${rel.relatedEntity.kebabCase}/entities/${rel.relatedEntity.kebabCase}.meta.ts`
-          : `apps/api/src/${rel.relatedEntity.directory}/${rel.relatedEntity.kebabCase}/entities/${rel.relatedEntity.kebabCase}.meta.ts`,
-      );
-
-      if (!fs.existsSync(targetMetaFilePath)) {
-        console.warn(`⚠️  Target meta file not found: ${targetMetaFilePath}. Alias meta "${exportName}" must be added manually.`);
-        continue;
-      }
-
-      const existingContent = fs.readFileSync(targetMetaFilePath, "utf-8");
-      if (existingContent.includes(`export const ${exportName}`)) {
-        console.info(`ℹ Alias meta "${exportName}" already exists in: ${targetMetaFilePath}`);
-        continue;
-      }
-
-      const aliasExport = `\nexport const ${exportName}: DataMeta = {\n  ...${entityCamelCase}Meta,\n  endpoint: "${pluralize(aliasKebabCase)}",\n  nodeName: "${aliasCamelCase}",\n};\n`;
-
-      if (dryRun) {
-        console.info(`[DRY RUN] Would add alias meta "${exportName}" to: ${targetMetaFilePath}`);
-      } else {
-        fs.appendFileSync(targetMetaFilePath, aliasExport, "utf-8");
-        console.info(`✓ Added alias meta "${exportName}" to: ${targetMetaFilePath}`);
-      }
-    }
 
     // 6. Register module
     if (!noRegister && !dryRun) {
