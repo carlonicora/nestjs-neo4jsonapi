@@ -4,6 +4,7 @@ import { JsonModuleDefinition } from "./types/json-schema.interface";
 import { TemplateData, TemplateField } from "./types/template-data.interface";
 import { transformNames, toCamelCase, toKebabCase, pluralize } from "./transformers/name-transformer";
 import { mapRelationships } from "./transformers/relationship-mapper";
+import { isFoundationImport } from "./transformers/import-resolver";
 import { generateNestedRoutes } from "./transformers/nested-route-generator";
 import { validateJsonSchema, validationPassed, formatValidationErrors } from "./validators/json-schema-validator";
 import { generateEntityFile } from "./templates/entity.template";
@@ -213,6 +214,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     // 5b. Auto-generate alias metas in target entity meta files
     for (const rel of relationships) {
       if (!rel.alias) continue;
+      if (isFoundationImport(rel.relatedEntity.directory)) continue;
 
       const aliasCamelCase = toCamelCase(rel.alias);
       const aliasKebabCase = toKebabCase(rel.alias);
@@ -221,7 +223,9 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
 
       const targetMetaFilePath = path.resolve(
         process.cwd(),
-        `apps/api/src/${rel.relatedEntity.directory}/${rel.relatedEntity.kebabCase}/entities/${rel.relatedEntity.kebabCase}.meta.ts`,
+        isFoundationImport(rel.relatedEntity.directory)
+          ? `packages/nestjs-neo4jsonapi/src/foundations/${rel.relatedEntity.kebabCase}/entities/${rel.relatedEntity.kebabCase}.meta.ts`
+          : `apps/api/src/${rel.relatedEntity.directory}/${rel.relatedEntity.kebabCase}/entities/${rel.relatedEntity.kebabCase}.meta.ts`,
       );
 
       if (!fs.existsSync(targetMetaFilePath)) {
