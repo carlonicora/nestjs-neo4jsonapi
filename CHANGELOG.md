@@ -1,3 +1,14 @@
+## [1.52.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.51.0...v1.52.0) (2026-02-16)
+
+### 🚀 Features
+
+* add audit write ([6195618](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6195618c8ecfd19696f11d63f058b7c9f6586e81))
+* enhance relationship handling with alias support and validation ([737ae75](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/737ae7583e48cdf88ebae8640f0f33f19e5b8e90))
+
+### 🐛 Bug Fixes
+
+* correct import of multi-entity schema ([4197e03](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4197e039e818f6584d7994e15e5a301f60e9ee05))
+
 ## [1.51.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.50.0...v1.51.0) (2026-02-15)
 
 ### 🚀 Features
