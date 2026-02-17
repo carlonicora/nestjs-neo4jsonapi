@@ -1,3 +1,9 @@
+## [1.52.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.2...v1.52.3) (2026-02-17)
+
+### 🐛 Bug Fixes
+
+* enhance toPascalCase function to handle kebab-case input ([751f07c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/751f07ca073170614b79a4fba60262edecd954ca))
+
 ## [1.52.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.1...v1.52.2) (2026-02-16)
 
 ### 📦 Code Refactoring
