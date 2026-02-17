@@ -215,5 +215,8 @@ export function toCamelCase(str: string): string {
  * Convert camelCase to PascalCase
  */
 export function toPascalCase(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
+  return str
+    .split("-")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join("");
 }
