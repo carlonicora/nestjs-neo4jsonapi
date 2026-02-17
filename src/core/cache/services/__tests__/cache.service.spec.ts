@@ -16,6 +16,8 @@ const mockRedisInstance = {
   keys: vi.fn(),
   smembers: vi.fn(),
   pipeline: vi.fn().mockReturnValue(mockPipeline),
+  quit: vi.fn(),
+  disconnect: vi.fn(),
 };
 
 // Mock ioredis before imports - use a class that can be instantiated with new
@@ -27,6 +29,8 @@ vi.mock("ioredis", () => {
     keys = mockRedisInstance.keys;
     smembers = mockRedisInstance.smembers;
     pipeline = mockRedisInstance.pipeline;
+    quit = mockRedisInstance.quit;
+    disconnect = mockRedisInstance.disconnect;
   }
   return {
     Redis: MockRedis,
@@ -390,6 +394,26 @@ describe("CacheService", () => {
 
       expect(client).toBeDefined();
       expect(typeof client.get).toBe("function");
+    });
+  });
+
+  describe("onModuleDestroy", () => {
+    it("should quit Redis connection gracefully", async () => {
+      mockRedisInstance.quit.mockResolvedValue("OK");
+
+      await service.onModuleDestroy();
+
+      expect(mockRedisInstance.quit).toHaveBeenCalled();
+    });
+
+    it("should fallback to disconnect if quit fails", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockRedisInstance.quit.mockRejectedValue(new Error("Quit failed"));
+
+      await service.onModuleDestroy();
+
+      expect(mockRedisInstance.disconnect).toHaveBeenCalled();
+      consoleSpy.mockRestore();
     });
   });
 });

@@ -167,6 +167,14 @@ describe("RedisClientStorageService", () => {
         `${TEST_CONFIG.redis.queue}:ws_client:${TEST_IDS.socketId}`,
         24 * 60 * 60,
       );
+      expect(mockPipeline.expire).toHaveBeenCalledWith(
+        `${TEST_CONFIG.redis.queue}:user_clients:${TEST_IDS.userId}`,
+        24 * 60 * 60,
+      );
+      expect(mockPipeline.expire).toHaveBeenCalledWith(
+        `${TEST_CONFIG.redis.queue}:company_users:${TEST_IDS.companyId}`,
+        24 * 60 * 60,
+      );
       expect(mockPipeline.exec).toHaveBeenCalled();
     });
   });

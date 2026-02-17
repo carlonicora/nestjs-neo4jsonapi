@@ -69,8 +69,10 @@ export class RedisClientStorageService implements OnModuleDestroy {
     // Add user to company's user list
     pipeline.sadd(`${this.COMPANY_USERS_KEY_PREFIX}${companyId}`, userId);
 
-    // Set expiration for client info (24 hours)
+    // Set expiration for client info and tracking sets (24 hours)
     pipeline.expire(`${this.CLIENT_KEY_PREFIX}${socketId}`, 24 * 60 * 60);
+    pipeline.expire(`${this.USER_CLIENTS_KEY_PREFIX}${userId}`, 24 * 60 * 60);
+    pipeline.expire(`${this.COMPANY_USERS_KEY_PREFIX}${companyId}`, 24 * 60 * 60);
 
     await pipeline.exec();
   }

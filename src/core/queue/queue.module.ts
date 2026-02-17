@@ -35,6 +35,10 @@ export class QueueModule {
                 username: redis?.username,
               },
               prefix: redis?.queue,
+              defaultJobOptions: {
+                removeOnComplete: true,
+                removeOnFail: { age: 3600, count: 1000 },
+              },
             };
           },
         }),
@@ -90,6 +94,10 @@ export class QueueModule {
                 username: redis?.username,
               },
               prefix: redis?.queue,
+              defaultJobOptions: {
+                removeOnComplete: true,
+                removeOnFail: { age: 3600, count: 1000 },
+              },
             };
           },
         }),

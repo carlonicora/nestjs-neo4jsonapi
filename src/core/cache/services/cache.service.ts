@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Redis } from "ioredis";
 import { BaseConfigInterface, ConfigCacheInterface, ConfigRedisInterface } from "../../../config/interfaces";
@@ -19,7 +19,7 @@ interface JsonApiResponse {
 }
 
 @Injectable()
-export class CacheService {
+export class CacheService implements OnModuleDestroy {
   private redis: Redis;
   private readonly CACHE_KEY_PREFIX = "api_cache:";
   private readonly ELEMENT_KEY_PREFIX = "element:";
@@ -308,5 +308,14 @@ export class CacheService {
 
   getRedisClient(): Redis {
     return this.redis;
+  }
+
+  async onModuleDestroy() {
+    try {
+      await this.redis.quit();
+    } catch (error) {
+      console.error("Error closing Redis connection:", error);
+      this.redis.disconnect();
+    }
   }
 }
