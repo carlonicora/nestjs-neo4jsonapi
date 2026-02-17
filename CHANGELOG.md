@@ -1,3 +1,9 @@
+## [1.53.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.3...v1.53.0) (2026-02-17)
+
+### 🚀 Features
+
+* implement graceful Redis connection closure in CacheService and add expiration handling in RedisClientStorageService ([702440a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/702440aefbdc23fa0319047b1739e7c9db69eabb))
+
 ## [1.52.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.2...v1.52.3) (2026-02-17)
 
 ### 🐛 Bug Fixes
