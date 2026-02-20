@@ -1,3 +1,9 @@
+## [1.54.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.53.0...v1.54.0) (2026-02-20)
+
+### 🚀 Features
+
+* enhance LLM service and semantic splitter for improved embedding handling and batch processing ([659c577](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/659c577d45f66b80e5885f820081f22c3d8b0d71))
+
 ## [1.53.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.52.3...v1.53.0) (2026-02-17)
 
 ### 🚀 Features
