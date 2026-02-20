@@ -10,6 +10,7 @@ export interface ConfigAiInterface {
     apiVersion?: string;
     inputCostPer1MTokens: number;
     outputCostPer1MTokens: number;
+    maxOutputTokens?: number;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
   };

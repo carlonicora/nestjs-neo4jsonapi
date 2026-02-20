@@ -338,7 +338,7 @@ export class SemanticSplitterService {
     }
 
     try {
-      // Generate embeddings for all chunks
+      // Generate embeddings for all chunks in a single batch call
       const embeddings = this.modelService.getEmbedder();
       const chunkEmbeddings = await embeddings.embedDocuments(chunks);
 
@@ -351,6 +351,8 @@ export class SemanticSplitterService {
         hasChanges = false;
         const newChunks: string[] = [];
         const newEmbeddings: number[][] = [];
+        // Track which indices in newChunks need re-embedding (were merged)
+        const needsReembedding: number[] = [];
         let i = 0;
 
         while (i < mergedChunks.length) {
@@ -378,11 +380,9 @@ export class SemanticSplitterService {
             const combinedSize = currentChunk.length + nextChunk.length;
             if (similarity > 0.7 || combinedSize < 2000) {
               const mergedChunk = `${currentChunk} ${nextChunk}`;
+              needsReembedding.push(newChunks.length); // Track index for batch re-embedding
               newChunks.push(mergedChunk);
-
-              // Calculate new embedding for merged chunk
-              const mergedChunkEmbedding = await embeddings.embedDocuments([mergedChunk]);
-              newEmbeddings.push(mergedChunkEmbedding[0]);
+              newEmbeddings.push([]); // Placeholder, will be filled by batch call
 
               hasChanges = true;
               i += 2; // Skip the next chunk since we merged it
@@ -397,6 +397,15 @@ export class SemanticSplitterService {
             newChunks.push(currentChunk);
             newEmbeddings.push(currentEmbedding);
             i++;
+          }
+        }
+
+        // Batch re-embed all merged chunks in a single API call
+        if (needsReembedding.length > 0) {
+          const textsToEmbed = needsReembedding.map((idx) => newChunks[idx]);
+          const batchEmbeddings = await embeddings.embedDocuments(textsToEmbed);
+          for (let j = 0; j < needsReembedding.length; j++) {
+            newEmbeddings[needsReembedding[j]] = batchEmbeddings[j];
           }
         }
 
@@ -484,75 +493,72 @@ export class SemanticSplitterService {
         }
       }
 
-      const allChunks: Document[] = [];
+      // Process all sections in parallel for better performance
+      const sectionResults = await Promise.all(
+        structuredSections.map(async (section, i) => {
+          const trimmedSection = section.trim();
 
-      for (let i = 0; i < structuredSections.length; i++) {
-        const section = structuredSections[i];
-        const trimmedSection = section.trim();
-
-        if (trimmedSection.length < 50) {
-          continue;
-        }
-
-        // Extract header from section for metadata
-        const headerMatch = trimmedSection.match(/^(#+)\s+(.+)/);
-        const headerLevel = headerMatch ? headerMatch[1].length : 0;
-        const headerText = headerMatch ? headerMatch[2] : "";
-
-        if (this.isTableSection(trimmedSection)) {
-          allChunks.push(
-            new Document({
-              pageContent: trimmedSection,
-              metadata: {
-                type: "table_section",
-                split_method: "table",
-                section_index: i,
-                header_level: headerLevel,
-                header_text: headerText,
-              },
-            }),
-          );
-          continue;
-        }
-
-        // Apply hybrid logic: use semantic splitting for sections > 1500 chars
-        if (trimmedSection.length > 1500) {
-          try {
-            const semanticChunks = await this.splitContentSemanticially(trimmedSection, {
-              type: "markdown_section",
-              split_method: "semantic_section",
-              section_index: i,
-              header_level: headerLevel,
-              header_text: headerText,
-            });
-
-            allChunks.push(...semanticChunks);
-          } catch (error) {
-            console.warn(`Semantic splitting failed for section ${i}, falling back to basic splitting:`, error);
-
-            // Fallback to basic splitting
-            const splitter = new RecursiveCharacterTextSplitter({
-              chunkSize: 2000,
-              chunkOverlap: 200,
-              separators: ["\n\n", "\n", ". ", " "],
-            });
-
-            const sectionChunks = await splitter.createDocuments([trimmedSection]);
-            sectionChunks.forEach((chunk, chunkIndex) => {
-              chunk.metadata = {
-                type: "markdown_section",
-                split_method: "basic_fallback",
-                section_index: i,
-                chunk_index: chunkIndex,
-                header_level: headerLevel,
-                header_text: headerText,
-              };
-            });
-            allChunks.push(...sectionChunks);
+          if (trimmedSection.length < 50) {
+            return [];
           }
-        } else {
+
+          // Extract header from section for metadata
+          const headerMatch = trimmedSection.match(/^(#+)\s+(.+)/);
+          const headerLevel = headerMatch ? headerMatch[1].length : 0;
+          const headerText = headerMatch ? headerMatch[2] : "";
+
+          if (this.isTableSection(trimmedSection)) {
+            return [
+              new Document({
+                pageContent: trimmedSection,
+                metadata: {
+                  type: "table_section",
+                  split_method: "table",
+                  section_index: i,
+                  header_level: headerLevel,
+                  header_text: headerText,
+                },
+              }),
+            ];
+          }
+
+          // Apply hybrid logic: use semantic splitting for sections > 1500 chars
+          if (trimmedSection.length > 1500) {
+            try {
+              return await this.splitContentSemanticially(trimmedSection, {
+                type: "markdown_section",
+                split_method: "semantic_section",
+                section_index: i,
+                header_level: headerLevel,
+                header_text: headerText,
+              });
+            } catch (error) {
+              console.warn(`Semantic splitting failed for section ${i}, falling back to basic splitting:`, error);
+
+              // Fallback to basic splitting
+              const splitter = new RecursiveCharacterTextSplitter({
+                chunkSize: 2000,
+                chunkOverlap: 200,
+                separators: ["\n\n", "\n", ". ", " "],
+              });
+
+              const sectionChunks = await splitter.createDocuments([trimmedSection]);
+              sectionChunks.forEach((chunk, chunkIndex) => {
+                chunk.metadata = {
+                  type: "markdown_section",
+                  split_method: "basic_fallback",
+                  section_index: i,
+                  chunk_index: chunkIndex,
+                  header_level: headerLevel,
+                  header_text: headerText,
+                };
+              });
+              return sectionChunks;
+            }
+          }
+
           // Keep smaller sections as single coherent chunks
-          allChunks.push(
+          return [
             new Document({
               pageContent: trimmedSection,
               metadata: {
@@ -563,41 +569,15 @@ export class SemanticSplitterService {
                 header_text: headerText,
               },
             }),
-          );
-        }
-      }
+          ];
+        }),
+      );
 
-      // Apply final merging to combine small adjacent chunks while preserving semantic coherence
-      if (allChunks.length > 1) {
-        try {
-          const chunkTexts = allChunks.map((doc) => doc.pageContent);
-          const mergedChunkTexts = await this.mergeSmallChunks(chunkTexts, 1000);
+      const allChunks = sectionResults.flat();
 
-          // Convert back to Document objects, preserving metadata from first chunk in merge
-          const finalChunks: Document[] = [];
-          let originalIndex = 0;
-
-          for (const mergedText of mergedChunkTexts) {
-            // Find the metadata from the original chunk(s) that contributed to this merged chunk
-            const metadata = allChunks[originalIndex]?.metadata || { type: "markdown_section" };
-            finalChunks.push(
-              new Document({
-                pageContent: mergedText,
-                metadata: { ...metadata, merged: true },
-              }),
-            );
-
-            // Advance index - rough estimate of how many original chunks went into this merged one
-            originalIndex += Math.ceil(mergedText.length / 1500);
-            if (originalIndex >= allChunks.length) originalIndex = allChunks.length - 1;
-          }
-
-          return finalChunks;
-        } catch (mergeError) {
-          console.warn("Error merging markdown chunks, returning unmerged chunks:", mergeError);
-          return allChunks;
-        }
-      }
+      // Note: Per-section mergeSmallChunks already runs inside splitContentSemanticially.
+      // A second global merge here would re-embed ALL chunks again, doubling API cost.
+      // Skipping the redundant final merge to reduce embedding round-trips.
 
       return allChunks.length > 0 ? allChunks : [new Document({ pageContent: fullContent })];
     } catch (error) {

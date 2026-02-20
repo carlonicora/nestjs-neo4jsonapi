@@ -1,7 +1,7 @@
 import { EmbeddingsInterface } from "@langchain/core/embeddings";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatVertexAI, VertexAIEmbeddings } from "@langchain/google-vertexai";
-import { AzureOpenAIEmbeddings, ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { AzureChatOpenAI, AzureOpenAIEmbeddings, ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
@@ -24,16 +24,10 @@ interface LLMParameters {
 
 @Injectable()
 export class ModelService {
-  private _modelCache: Map<string, BaseChatModel>;
-  private _visionModelCache: Map<string, BaseChatModel>;
-
   constructor(
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
-  ) {
-    this._modelCache = new Map();
-    this._visionModelCache = new Map();
-  }
+  ) {}
 
   private get aiConfig(): ConfigAiInterface {
     return this.configService.get<ConfigAiInterface>("ai");
@@ -46,37 +40,23 @@ export class ModelService {
   /**
    * Gets a configured LLM instance based on the current config.
    *
-   * Uses caching to reuse model instances with the same configuration,
-   * improving performance by avoiding repeated instantiation.
-   *
    * Supports multiple providers:
    * - `llamacpp`/`local`: Local llama.cpp server (OpenAI-compatible API)
    * - `openrouter`: OpenRouter cloud service
+   * - `requesty`: Requesty proxy service
+   * - `vertex`: Google Vertex AI (Gemini models)
+   * - `azure`: Azure OpenAI Service
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.2)
    *                             Lower = more deterministic, Higher = more creative
-   * @returns Configured BaseChatModel instance from LangChain (cached if available)
+   * @param params.maxOutputTokens - Maximum output tokens (default from config)
+   * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
-   *
-   * @example
-   * ```typescript
-   * const chatModelService = new ChatModelService();
-   * const model = chatModelService.getLLM({ temperature: 0.8 });
-   * // Second call with same temperature returns cached instance
-   * const sameModel = chatModelService.getLLM({ temperature: 0.8 });
-   * ```
    */
-  getLLM(params?: { temperature?: number }): BaseChatModel {
+  getLLM(params?: { temperature?: number; maxOutputTokens?: number }): BaseChatModel {
     const temperature = params?.temperature ?? 0.2;
-
-    // Create cache key based on type, temperature, and region (for provider routing)
-    const cacheKey = `${this.aiConfig.ai.provider}-${temperature}-${this.aiConfig.ai.region || "default"}`;
-
-    // Return cached instance if available
-    if (this._modelCache.has(cacheKey)) {
-      return this._modelCache.get(cacheKey)!;
-    }
+    const maxOutputTokens = params?.maxOutputTokens ?? this.aiConfig.ai.maxOutputTokens;
 
     // Base configuration shared by all providers
     const llmConfig: LLMParameters = {
@@ -129,50 +109,37 @@ export class ModelService {
           process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
         }
 
-        const vertexModel = new ChatVertexAI({
+        return new ChatVertexAI({
           model: googleConfig.model,
           temperature: temperature,
           location: googleConfig.region,
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
         });
+      }
 
-        this._modelCache.set(cacheKey, vertexModel);
-        return vertexModel;
+      case "azure": {
+        const azureParameters: any = {
+          azureOpenAIApiKey: this.aiConfig.ai.apiKey,
+          azureOpenAIApiInstanceName: this.aiConfig.ai.instance,
+          azureOpenAIApiDeploymentName: this.aiConfig.ai.model,
+          azureOpenAIApiVersion: this.aiConfig.ai.apiVersion,
+          temperature,
+          ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
+        };
+
+        return new AzureChatOpenAI(azureParameters);
       }
 
       default:
         throw new Error(`Unsupported LLM type: ${this.aiConfig.ai.provider}`);
     }
 
-    // Create and cache new model instance
-    const model = new ChatOpenAI(llmConfig);
-    this._modelCache.set(cacheKey, model);
-
-    return model;
-  }
-
-  /**
-   * Clears the model cache.
-   *
-   * Useful when configuration changes or to free up memory.
-   */
-  clearCache(): void {
-    this._modelCache.clear();
-  }
-
-  /**
-   * Gets the number of cached model instances.
-   *
-   * @returns Number of cached models
-   */
-  getCacheSize(): number {
-    return this._modelCache.size;
+    // Create new model instance
+    return new ChatOpenAI({ ...llmConfig, ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}) });
   }
 
   /**
    * Gets a configured LLM instance for vision operations based on the current config.
-   *
-   * Uses caching to reuse model instances with the same configuration,
-   * improving performance by avoiding repeated instantiation.
    *
    * Supports multiple providers:
    * - `llamacpp`/`local`: Local llama.cpp server (OpenAI-compatible API)
@@ -182,19 +149,11 @@ export class ModelService {
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.1)
-   * @returns Configured BaseChatModel instance from LangChain (cached if available)
+   * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
    */
   getVisionLLM(params?: { temperature?: number }): BaseChatModel {
     const temperature = params?.temperature ?? 0.1;
-
-    // Create cache key based on type, temperature, and region
-    const cacheKey = `vision-${this.visionConfig.provider}-${temperature}-${this.visionConfig.region || "default"}`;
-
-    // Return cached instance if available
-    if (this._visionModelCache.has(cacheKey)) {
-      return this._visionModelCache.get(cacheKey)!;
-    }
 
     // Base configuration shared by all providers
     const llmConfig: LLMParameters = {
@@ -240,39 +199,19 @@ export class ModelService {
           process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
         }
 
-        const vertexModel = new ChatVertexAI({
+        return new ChatVertexAI({
           model: googleConfig.model,
           temperature: temperature,
           location: googleConfig.region,
         });
-
-        this._visionModelCache.set(cacheKey, vertexModel);
-        return vertexModel;
       }
 
       default:
         throw new Error(`Unsupported Vision LLM type: ${this.visionConfig.provider}`);
     }
 
-    // Create and cache new model instance
-    const model = new ChatOpenAI(llmConfig);
-    this._visionModelCache.set(cacheKey, model);
-
-    return model;
-  }
-
-  /**
-   * Clears the vision model cache.
-   */
-  clearVisionCache(): void {
-    this._visionModelCache.clear();
-  }
-
-  /**
-   * Gets the number of cached vision model instances.
-   */
-  getVisionCacheSize(): number {
-    return this._visionModelCache.size;
+    // Create new model instance
+    return new ChatOpenAI(llmConfig);
   }
 
   getEmbedder(): EmbeddingsInterface {
@@ -312,6 +251,7 @@ export class ModelService {
           azureOpenAIApiInstanceName: this.aiConfig.embedder.instance,
           azureOpenAIApiDeploymentName: this.aiConfig.embedder.model,
           azureOpenAIApiVersion: this.aiConfig.embedder.apiVersion,
+          batchSize: 100,
         });
         break;
       case "vertex": {

@@ -544,7 +544,66 @@ export class LLMService {
           schemaName: params.outputSchema.constructor.name,
         });
 
-        // Attempt fallback parsing
+        // Attempt fallback parsing from tool_calls first (Azure/OpenAI function calling puts structured data here)
+        const rawAnyFallback = raw as any;
+        const toolCallArgs = rawAnyFallback?.tool_calls?.[0]?.args;
+        if (toolCallArgs && typeof toolCallArgs === "object") {
+          try {
+            console.warn("[LLMService] Attempting fallback parsing from tool_calls args");
+            const validated = params.outputSchema.parse(toolCallArgs);
+
+            console.warn("[LLMService] Fallback tool_calls parsing succeeded");
+
+            return {
+              ...(validated as T),
+              tokenUsage: { input, output },
+            };
+          } catch (toolCallFallbackError) {
+            // Lenient fallback: filter out malformed array entries from tool_calls args
+            // This handles cases where the model returns mostly valid data with a few corrupt entries
+            try {
+              console.warn("[LLMService] Attempting lenient tool_calls parsing (filtering invalid array entries)");
+              const cleanedArgs = { ...toolCallArgs };
+              const shape = (params.outputSchema as any)?.shape;
+
+              if (shape) {
+                for (const [key, fieldSchema] of Object.entries(shape)) {
+                  if (Array.isArray(cleanedArgs[key])) {
+                    // In Zod v4, ZodArray exposes .element as the element schema with .safeParse()
+                    // Unwrap optional/default/nullable wrappers first if present
+                    let schema = fieldSchema as any;
+                    while (schema?.unwrap && !schema?.element) {
+                      schema = schema.unwrap();
+                    }
+                    const elementSchema = schema?.element;
+
+                    if (elementSchema && typeof elementSchema.safeParse === "function") {
+                      const original = cleanedArgs[key];
+                      cleanedArgs[key] = original.filter((entry: any) => elementSchema.safeParse(entry).success);
+                      if (cleanedArgs[key].length < original.length) {
+                        console.warn(
+                          `[LLMService] Filtered ${original.length - cleanedArgs[key].length}/${original.length} invalid entries from "${key}"`,
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+
+              const validated = params.outputSchema.parse(cleanedArgs);
+              console.warn("[LLMService] Lenient tool_calls parsing succeeded");
+
+              return {
+                ...(validated as T),
+                tokenUsage: { input, output },
+              };
+            } catch {
+              // Fall through to raw content parsing
+            }
+          }
+        }
+
+        // Attempt fallback parsing from raw content
         try {
           console.warn("[LLMService] Attempting fallback JSON parsing");
           const manualParse = JSON.parse(rawContent);
