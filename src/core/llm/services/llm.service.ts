@@ -558,7 +558,7 @@ export class LLMService {
               ...(validated as T),
               tokenUsage: { input, output },
             };
-          } catch (toolCallFallbackError) {
+          } catch (_toolCallFallbackError) {
             // Lenient fallback: filter out malformed array entries from tool_calls args
             // This handles cases where the model returns mostly valid data with a few corrupt entries
             try {
