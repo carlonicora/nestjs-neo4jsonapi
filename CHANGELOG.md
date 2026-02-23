@@ -1,3 +1,9 @@
+## [1.54.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.0...v1.54.1) (2026-02-23)
+
+### 🐛 Bug Fixes
+
+* correct linting ([6e7ae8b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6e7ae8bedf3f5063b494ee2b8e1212dbda4ed67c))
+
 ## [1.54.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.53.0...v1.54.0) (2026-02-20)
 
 ### 🚀 Features
