@@ -1,3 +1,9 @@
+## [1.54.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.1...v1.54.2) (2026-02-24)
+
+### 🐛 Bug Fixes
+
+* correct module generator for alias ([14dbbba](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/14dbbba18a4107906d2fd9989379c56039343eeb))
+
 ## [1.54.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.0...v1.54.1) (2026-02-23)
 
 ### 🐛 Bug Fixes
