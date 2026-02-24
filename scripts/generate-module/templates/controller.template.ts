@@ -11,11 +11,19 @@ import { getManyRelationships } from "./dto.relationship.template";
  * @returns Generated TypeScript code
  */
 export function generateControllerFile(data: TemplateData): string {
-  const { names, targetDir, nestedRoutes } = data;
+  const { names, targetDir, nestedRoutes, aliasMetas } = data;
 
-  // Separate OLD and NEW structure routes
-  const oldStructureRoutes = nestedRoutes.filter((route) => !route.isNewStructure);
+  // Separate OLD and NEW structure routes, excluding alias routes from external imports
+  const oldStructureRoutes = nestedRoutes.filter((route) => !route.isNewStructure && !route.aliasMetaName);
   const newStructureRoutes = nestedRoutes.filter((route) => route.isNewStructure);
+
+  // Collect alias meta names that need to be imported from own meta file
+  const aliasMetaNamesFromRoutes = new Set<string>();
+  for (const route of nestedRoutes) {
+    if (route.aliasMetaName) {
+      aliasMetaNamesFromRoutes.add(route.aliasMetaName);
+    }
+  }
 
   // Build meta imports for OLD structure nested routes
   const oldMetaImportPaths = new Map<string, string[]>();
@@ -67,6 +75,7 @@ export function generateControllerFile(data: TemplateData): string {
 
   // Get MANY relationships for add/remove endpoints
   const manyRelationships = getManyRelationships(data.relationships);
+  const needsDescriptor = nestedRoutes.length > 0 || manyRelationships.length > 0;
 
   // Build meta imports for MANY relationship endpoints (to access their endpoint)
   for (const rel of manyRelationships) {
@@ -126,6 +135,13 @@ ${manyRelationships
 } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.relationship.dto";
 `
     : "";
+
+  // Build the self-meta import line (includes alias metas if any)
+  const selfMetaImports = [
+    `${names.camelCase}Meta`,
+    ...Array.from(aliasMetaNamesFromRoutes).sort(),
+  ];
+  const selfMetaImportLine = `import { ${selfMetaImports.join(", ")} } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}.meta";`;
 
   // Generate nested route methods using relationship handler
   const nestedRouteMethods = nestedRoutes
@@ -261,9 +277,7 @@ import {
 } from "@carlonicora/nestjs-neo4jsonapi";${combinedMetaImportsCode}
 import { ${names.pascalCase}PostDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.post.dto";
 import { ${names.pascalCase}PutDTO } from "src/${targetDir}/${names.kebabCase}/dtos/${names.kebabCase}.put.dto";
-${relationshipDTOImport}
-import { ${names.pascalCase}Descriptor } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}";
-import { ${names.camelCase}Meta } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}.meta";
+${relationshipDTOImport}${needsDescriptor ? `import { ${names.pascalCase}Descriptor } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}";\n` : ``}${selfMetaImportLine}
 import { ${names.pascalCase}Service } from "src/${targetDir}/${names.kebabCase}/services/${names.kebabCase}.service";
 
 @UseGuards(JwtAuthGuard)

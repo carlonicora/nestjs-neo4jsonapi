@@ -77,6 +77,8 @@ export interface NestedRoute {
   isNewStructure: boolean; // True if related entity uses Descriptor pattern
   descriptorName?: string; // e.g., "CharacterDescriptor" (only for NEW structure)
   importPath?: string; // Import path for NEW structure entities
+  // Alias support - when set, route uses alias meta from own meta file instead of related entity meta
+  aliasMetaName?: string; // e.g., "createdByMeta" (imported from own meta file)
 }
 
 /**
@@ -103,6 +105,18 @@ export interface DTORelationship {
 }
 
 /**
+ * Alias meta information for generating alias-specific DataMeta constants
+ * Used when multiple relationships target the same entity with different aliases
+ */
+export interface AliasMetaInfo {
+  aliasName: string; // "CreatedBy"
+  aliasCamelCase: string; // "createdBy"
+  aliasKebabCase: string; // "created-by"
+  baseEntityMeta: string; // "userMeta"
+  baseEntityImportPath: string; // "@carlonicora/nestjs-neo4jsonapi" or relative path
+}
+
+/**
  * Complete template data passed to all templates
  */
 export interface TemplateData {
@@ -121,6 +135,9 @@ export interface TemplateData {
 
   // Relationships
   relationships: DescriptorRelationship[];
+
+  // Alias metas for route disambiguation
+  aliasMetas: AliasMetaInfo[];
 
   // Imports (deduplicated)
   libraryImports: ImportStatement[];

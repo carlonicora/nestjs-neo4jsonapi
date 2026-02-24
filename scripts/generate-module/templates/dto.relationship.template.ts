@@ -32,16 +32,6 @@ export function generateRelationshipDTOFile(data: TemplateData): string | null {
   // Check if any relationship has fields (determines if IsOptional is needed)
   const hasAnyFields = manyRelationships.some((rel) => rel.fields && rel.fields.length > 0);
 
-  // Collect all field types for additional imports
-  const relPropertyTypes: CypherType[] = [];
-  for (const rel of manyRelationships) {
-    if (rel.fields && rel.fields.length > 0) {
-      for (const field of rel.fields) {
-        relPropertyTypes.push(field.type as CypherType);
-      }
-    }
-  }
-
   // Build validator imports - only what's actually used in this template
   const validatorImports: string[] = [
     "IsArray",
@@ -57,12 +47,16 @@ export function generateRelationshipDTOFile(data: TemplateData): string | null {
   }
 
   // Add field-specific validators from relationship property fields
-  for (const type of relPropertyTypes) {
-    const decorators = getValidationDecorators(type, true);
-    for (const decorator of decorators) {
-      const match = decorator.match(/@(\w+)/);
-      if (match && !validatorImports.includes(match[1])) {
-        validatorImports.push(match[1]);
+  for (const rel of manyRelationships) {
+    if (rel.fields && rel.fields.length > 0) {
+      for (const field of rel.fields) {
+        const decorators = getValidationDecorators(field.type as CypherType, field.required);
+        for (const decorator of decorators) {
+          const match = decorator.match(/@(\w+)/);
+          if (match && !validatorImports.includes(match[1])) {
+            validatorImports.push(match[1]);
+          }
+        }
       }
     }
   }

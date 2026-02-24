@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
 
 export interface FileToWrite {
   path: string;
@@ -55,6 +56,26 @@ export function writeFiles(
     // Write file
     fs.writeFileSync(file.path, file.content, "utf-8");
     console.info(`✓ Created: ${file.path}`);
+  }
+}
+
+/**
+ * Format files with Prettier
+ *
+ * @param filePaths - Absolute paths of files to format
+ */
+export function formatFiles(filePaths: string[]): void {
+  if (filePaths.length === 0) return;
+
+  console.info(`\n💅 Formatting ${filePaths.length} files with Prettier...`);
+  try {
+    execSync(`npx prettier --write ${filePaths.map((p) => `"${p}"`).join(" ")}`, {
+      stdio: "pipe",
+      cwd: process.cwd(),
+    });
+    console.info(`   ✅ Formatted successfully`);
+  } catch {
+    console.warn(`   ⚠️  Prettier formatting failed — files were written but may need manual formatting`);
   }
 }
 

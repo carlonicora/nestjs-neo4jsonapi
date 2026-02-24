@@ -23,6 +23,7 @@ import {
 export function generateServiceSpecFile(data: TemplateData): string {
   const { names, targetDir, fields, relationships, endpoint } = data;
   const manyRelationships = getMANYRelationships(relationships);
+  const needsDescriptor = relationships.length > 0;
 
   // Generate test data
   const testIdsCode = generateTestIdsCode(names.pascalCase, relationships);
@@ -139,8 +140,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { NotFoundException, ForbiddenException } from "@nestjs/common";
 import { ${names.pascalCase}Service } from "./${names.kebabCase}.service";
-import { ${names.pascalCase}Repository } from "../repositories/${names.kebabCase}.repository";
-import { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";
+import { ${names.pascalCase}Repository } from "../repositories/${names.kebabCase}.repository";${needsDescriptor ? `\nimport { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";` : ``}
 import { JsonApiService } from "@carlonicora/nestjs-neo4jsonapi";
 
 describe("${names.pascalCase}Service", () => {

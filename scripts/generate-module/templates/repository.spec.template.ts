@@ -20,6 +20,7 @@ import {
 export function generateRepositorySpecFile(data: TemplateData): string {
   const { names, targetDir, fields, relationships, endpoint } = data;
   const manyRelationships = getMANYRelationships(relationships);
+  const needsDescriptor = relationships.length > 0;
 
   // Generate test data
   const testIdsCode = generateTestIdsCode(names.pascalCase, relationships);
@@ -134,8 +135,7 @@ export function generateRepositorySpecFile(data: TemplateData): string {
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { HttpException } from "@nestjs/common";
-import { ${names.pascalCase}Repository } from "./${names.kebabCase}.repository";
-import { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";
+import { ${names.pascalCase}Repository } from "./${names.kebabCase}.repository";${needsDescriptor ? `\nimport { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";` : ``}
 import { Neo4jService, SecurityService } from "@carlonicora/nestjs-neo4jsonapi";
 
 describe("${names.pascalCase}Repository", () => {

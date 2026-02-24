@@ -1,9 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { JsonModuleDefinition } from "./types/json-schema.interface";
-import { TemplateData, TemplateField } from "./types/template-data.interface";
-import { transformNames } from "./transformers/name-transformer";
+import { AliasMetaInfo, TemplateData, TemplateField } from "./types/template-data.interface";
+import { transformNames, toCamelCase, toKebabCase } from "./transformers/name-transformer";
 import { mapRelationships } from "./transformers/relationship-mapper";
+import { isFoundationImport, FOUNDATION_PACKAGE, resolveMetaImportPath } from "./transformers/import-resolver";
 import { generateNestedRoutes } from "./transformers/nested-route-generator";
 import { validateJsonSchema, validationPassed, formatValidationErrors } from "./validators/json-schema-validator";
 import { generateEntityFile } from "./templates/entity.template";
@@ -20,7 +21,7 @@ import { generateServiceSpecFile } from "./templates/service.spec.template";
 import { generateRepositorySpecFile } from "./templates/repository.spec.template";
 import { generateControllerSpecFile } from "./templates/controller.spec.template";
 import { generateDTOSpecFile } from "./templates/dto.spec.template";
-import { writeFiles, FileToWrite } from "./utils/file-writer";
+import { writeFiles, formatFiles, FileToWrite } from "./utils/file-writer";
 import { registerModule } from "./utils/module-registrar";
 import { normalizeCypherType, getTsType, getValidationDecorators, CypherType } from "./utils/type-utils";
 
@@ -79,10 +80,27 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     console.info(`✓ Transforming data...`);
     const names = transformNames(jsonSchema.moduleName, jsonSchema.endpointName);
     const relationships = mapRelationships(jsonSchema.relationships);
+
+    // Determine which aliases conflict (multiple aliases targeting the same entity)
+    const entityAliasNames = new Map<string, string[]>();
+    for (const rel of relationships) {
+      if (rel.alias) {
+        const key = rel.relatedEntity.name;
+        if (!entityAliasNames.has(key)) entityAliasNames.set(key, []);
+        entityAliasNames.get(key)!.push(rel.alias);
+      }
+    }
+    const conflictingAliases = new Set<string>();
+    for (const aliases of entityAliasNames.values()) {
+      if (aliases.length > 1) {
+        for (const alias of aliases) conflictingAliases.add(alias);
+      }
+    }
+
     const nestedRoutes = generateNestedRoutes(relationships, {
       endpoint: jsonSchema.endpointName,
       nodeName: names.camelCase,
-    });
+    }, conflictingAliases);
 
     // Map fields to template fields with type normalization
     const fields: TemplateField[] = jsonSchema.fields.map((field) => {
@@ -98,6 +116,40 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       };
     });
 
+    // Build alias metas only for relationships where multiple aliases target the same entity
+    // (e.g., CreatedBy and AssignedTo both targeting User need disambiguation,
+    //  but RelateToPartType targeting PartType alone does not)
+    const entityAliasCount = new Map<string, number>();
+    for (const rel of relationships) {
+      if (rel.alias) {
+        const key = rel.relatedEntity.name;
+        entityAliasCount.set(key, (entityAliasCount.get(key) || 0) + 1);
+      }
+    }
+
+    const aliasMetaMap = new Map<string, AliasMetaInfo>();
+    for (const rel of relationships) {
+      if (rel.alias && !aliasMetaMap.has(rel.alias) && (entityAliasCount.get(rel.relatedEntity.name) || 0) > 1) {
+        const baseEntityMeta = `${toCamelCase(rel.relatedEntity.name)}Meta`;
+        const baseEntityImportPath = isFoundationImport(rel.relatedEntity.directory)
+          ? FOUNDATION_PACKAGE
+          : resolveMetaImportPath({
+              fromDir: jsonSchema.targetDir,
+              fromModule: names.kebabCase,
+              toDir: rel.relatedEntity.directory,
+              toModule: rel.relatedEntity.kebabCase,
+            });
+        aliasMetaMap.set(rel.alias, {
+          aliasName: rel.alias,
+          aliasCamelCase: toCamelCase(rel.alias),
+          aliasKebabCase: toKebabCase(rel.alias),
+          baseEntityMeta,
+          baseEntityImportPath,
+        });
+      }
+    }
+    const aliasMetas = Array.from(aliasMetaMap.values());
+
     // Build template data
     const templateData: TemplateData = {
       names,
@@ -108,6 +160,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       targetDir: jsonSchema.targetDir,
       fields,
       relationships,
+      aliasMetas,
       libraryImports: [],
       entityImports: [],
       metaImports: [],
@@ -210,6 +263,10 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     console.info(`\n📝 Writing ${filesToWrite.length} files...\n`);
     writeFiles(filesToWrite, { dryRun, force });
 
+    // 5b. Format files with Prettier
+    if (!dryRun) {
+      formatFiles(filesToWrite.map((f) => f.path));
+    }
 
     // 6. Register module
     if (!noRegister && !dryRun) {

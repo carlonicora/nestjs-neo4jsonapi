@@ -25,6 +25,7 @@ import {
 export function generateControllerSpecFile(data: TemplateData): string {
   const { names, targetDir, fields, relationships, endpoint, nestedRoutes } = data;
   const manyRelationships = getMANYRelationships(relationships);
+  const needsDescriptor = nestedRoutes.length > 0 || manyRelationships.length > 0;
 
   // Generate test data
   const testIdsCode = generateTestIdsCode(names.pascalCase, relationships);
@@ -152,8 +153,7 @@ export function generateControllerSpecFile(data: TemplateData): string {
 import { Test, TestingModule } from "@nestjs/testing";
 import { PreconditionFailedException } from "@nestjs/common";
 import { ${names.pascalCase}Controller } from "./${names.kebabCase}.controller";
-import { ${names.pascalCase}Service } from "../services/${names.kebabCase}.service";
-import { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";
+import { ${names.pascalCase}Service } from "../services/${names.kebabCase}.service";${needsDescriptor ? `\nimport { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";` : ``}
 import { AuditService, CacheService, AuthenticatedRequest, JwtAuthGuard } from "@carlonicora/nestjs-neo4jsonapi";
 import { FastifyReply } from "fastify";
 
