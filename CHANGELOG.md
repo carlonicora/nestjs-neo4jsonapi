@@ -1,3 +1,9 @@
+## [1.55.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.2...v1.55.0) (2026-03-02)
+
+### 🚀 Features
+
+* add rbac generator ([14a99a6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/14a99a6d34a441e5e6e87a2002d8a25d2867a43b))
+
 ## [1.54.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.1...v1.54.2) (2026-02-24)
 
 ### 🐛 Bug Fixes
