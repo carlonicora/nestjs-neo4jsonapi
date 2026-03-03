@@ -1,12 +1,12 @@
 import { Entity, defineEntity, defineEntityAlias } from "../../../common";
-import { S3Service } from "../../s3";
-import { Role } from "../../role/entities/role";
 import type { Company } from "../../company/entities/company";
-import type { Module } from "../../module/entities/module.entity";
-import { roleMeta } from "../../role/entities/role.meta";
 import { CompanyDescriptor } from "../../company/entities/company";
+import type { Module } from "../../module/entities/module.entity";
 import { moduleMeta } from "../../module/entities/module.meta";
-import { userMeta, ownerMeta, assigneeMeta, authorMeta } from "./user.meta";
+import { Role } from "../../role/entities/role";
+import { roleMeta } from "../../role/entities/role.meta";
+import { S3Service } from "../../s3";
+import { assigneeMeta, authorMeta, ownerMeta, userMeta } from "./user.meta";
 
 /**
  * User Entity Type
@@ -51,7 +51,7 @@ export const UserDescriptor = defineEntity<User>()({
     name: { type: "string" },
     title: { type: "string" },
     bio: { type: "string" },
-    password: { type: "string" },
+    password: { type: "string", excludeFromJsonApi: true },
     avatar: {
       type: "string",
       transform: async (data, services) => {
