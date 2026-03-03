@@ -1,3 +1,9 @@
+## [1.55.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.55.0...v1.55.1) (2026-03-03)
+
+### 📦 Code Refactoring
+
+* reorganize imports and update password field metadata ([1835ab2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1835ab20b97a5a592ad39a9cf202ff088109e4df))
+
 ## [1.55.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.54.2...v1.55.0) (2026-03-02)
 
 ### 🚀 Features
