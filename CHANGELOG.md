@@ -1,3 +1,13 @@
+## [1.56.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.55.1...v1.56.0) (2026-03-03)
+
+### 🚀 Features
+
+* add fulltext search index for user fields and update search query logic ([b8c9828](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b8c9828970bc741e08f4d780da038717da6c4606))
+
+### 🐛 Bug Fixes
+
+* remove sensitive fields from jsonapi ([037959b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/037959b27550435036185051a470da2db1e20cab))
+
 ## [1.55.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.55.0...v1.55.1) (2026-03-03)
 
 ### 📦 Code Refactoring
