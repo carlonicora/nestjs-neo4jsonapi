@@ -29,6 +29,14 @@ export class UserRepository implements OnModuleInit {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT user_email IF NOT EXISTS FOR (user:User) REQUIRE user.email IS UNIQUE`,
     });
+
+    // Create fulltext search index for user string fields
+    if (UserDescriptor.fulltextIndexName && UserDescriptor.stringFields.length > 0) {
+      await this.neo4j.writeOne({
+        query: `CREATE FULLTEXT INDEX \`${UserDescriptor.fulltextIndexName}\` IF NOT EXISTS FOR (n:\`${userMeta.labelName}\`) ON EACH [${UserDescriptor.stringFields.map((p) => `n.\`${p}\``).join(", ")}]`,
+        queryParams: {},
+      });
+    }
   }
 
   async makeCompanyAdmin(params: { userId: string }) {
@@ -231,17 +239,30 @@ export class UserRepository implements OnModuleInit {
 
     query.queryParams = {
       ...query.queryParams,
-      term: params.term,
+      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
     };
 
+    if (params.term && UserDescriptor.fulltextIndexName) {
+      query.query += `CALL db.index.fulltext.queryNodes("${UserDescriptor.fulltextIndexName}", $term)
+      YIELD node, score
+      WHERE (node)-[:BELONGS_TO]->(company)
+
+      WITH node as ${userMeta.nodeName}, score
+      ORDER BY score DESC
+    `;
+    } else {
+      query.query += `
+      ${this.userCypherService.default()}
+
+      ORDER BY ${userMeta.nodeName}.name ASC
+    `;
+    }
+
     query.query += `
-     ${this.userCypherService.default()}
-      
-      ORDER BY user.name ASC
       {CURSOR}
 
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
-      RETURN user, user_role
+      OPTIONAL MATCH (${userMeta.nodeName})-[:MEMBER_OF]->(${userMeta.nodeName}_role:Role)
+      RETURN ${userMeta.nodeName}, ${userMeta.nodeName}_role
     `;
 
     return this.neo4j.readMany(query);
