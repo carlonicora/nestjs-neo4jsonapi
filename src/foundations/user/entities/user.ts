@@ -66,10 +66,10 @@ export const UserDescriptor = defineEntity<User>()({
     lastLogin: { type: "datetime", meta: true },
     isDeleted: { type: "boolean", meta: true },
     code: { type: "string" },
-    codeExpiration: { type: "datetime" },
-    termsAcceptedAt: { type: "datetime" },
-    marketingConsent: { type: "boolean" },
-    marketingConsentAt: { type: "datetime" },
+    codeExpiration: { type: "datetime", excludeFromJsonApi: true },
+    termsAcceptedAt: { type: "datetime", excludeFromJsonApi: true },
+    marketingConsent: { type: "boolean", excludeFromJsonApi: true },
+    marketingConsentAt: { type: "datetime", excludeFromJsonApi: true },
   },
 
   // Virtual fields (output-only, not in entity type)
