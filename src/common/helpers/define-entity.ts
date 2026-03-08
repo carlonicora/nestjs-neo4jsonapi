@@ -216,7 +216,9 @@ export function defineEntity<T>() {
     // Also populate relationship info arrays for proper self-referential support
     const singleChildrenTokens: string[] = isCompanyScoped ? ["company"] : [];
     const childrenTokens: string[] = [];
-    const singleChildrenRelationships: RelationshipInfo[] = [];
+    const singleChildrenRelationships: RelationshipInfo[] = isCompanyScoped
+      ? [{ nodeName: "company", relationshipName: "company" }]
+      : [];
     const childrenRelationships: RelationshipInfo[] = [];
 
     for (const [name, rel] of Object.entries(relationships)) {
