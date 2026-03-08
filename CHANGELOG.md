@@ -1,3 +1,9 @@
+## [1.56.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.0...v1.56.1) (2026-03-08)
+
+### 🐛 Bug Fixes
+
+* initialize singleChildrenRelationships for company-scoped entities ([b2b8577](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b2b85772ca35705ce3bc1d1e66cf90884d6cb7a0))
+
 ## [1.56.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.55.1...v1.56.0) (2026-03-03)
 
 ### 🚀 Features
