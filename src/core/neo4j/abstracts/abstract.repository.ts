@@ -569,13 +569,15 @@ export abstract class AbstractRepository<
         }
       }
 
+      const relValues = paramValue ? (Array.isArray(paramValue) ? paramValue : [paramValue]) : [];
+
       query.query += updateRelationshipQuery({
         node: nodeName,
         relationshipName: rel.relationship,
         relationshipToNode: rel.direction === "out",
         label: rel.model.labelName,
         param: name,
-        values: paramValue ? (Array.isArray(paramValue) ? paramValue : [paramValue]) : [],
+        values: relValues,
         relationshipProperties,
         queryParams: query.queryParams,
       });

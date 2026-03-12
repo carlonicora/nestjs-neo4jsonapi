@@ -18,7 +18,7 @@ export const updateRelationshipQuery = (params: {
     }
   }
 
-  let relationshipProps: string | string[] = [];
+  let relationshipProps = "";
   const propertiesMapParam = `${paramAlias}PropertiesMap`;
 
   if (params.relationshipProperties) {
@@ -74,7 +74,7 @@ export const updateRelationshipQuery = (params: {
         UNWIND ${paramAlias} AS id
         MATCH (new:${params.label} {id: id})
         MERGE (${params.node})${params.relationshipToNode ? "-" : "<-"}[rel:${params.relationshipName}]${params.relationshipToNode ? "->" : "-"}(new)
-        ${params.relationshipProperties ? `SET ${relationshipProps}, rel.updatedAt = datetime()` : ""}
+        ${relationshipProps ? `SET ${relationshipProps}, rel.updatedAt = datetime()` : `SET rel.updatedAt = datetime()`}
         `
         : ``
     }
