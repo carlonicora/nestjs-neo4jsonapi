@@ -238,7 +238,13 @@ export abstract class AbstractRepository<
       const edgePropsCollectionNames = collectParts
         .filter((p) => p.includes("_edgePropsCollection"))
         .map((p) => p.split(" AS ")[1]);
-      query += `RETURN ${returnParts.join(", ")}, ${edgePropsCollectionNames.join(", ")}`;
+      // After WITH, relationship variables used in aliases are out of scope.
+      // Use only the alias names in the RETURN clause.
+      const returnPartsForReturn = returnParts.map((part) => {
+        const asIndex = part.indexOf(" AS ");
+        return asIndex >= 0 ? part.substring(asIndex + 4) : part;
+      });
+      query += `RETURN ${returnPartsForReturn.join(", ")}, ${edgePropsCollectionNames.join(", ")}`;
     } else {
       query += `RETURN ${returnParts.join(", ")}`;
     }
