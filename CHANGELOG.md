@@ -1,3 +1,9 @@
+## [1.56.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.1...v1.56.2) (2026-03-12)
+
+### 🐛 Bug Fixes
+
+* **neo4j:** use alias names in RETURN after WITH clause ([0da838e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0da838e8912cb855034a067b3df9f5b2a2ba01b0))
+
 ## [1.56.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.0...v1.56.1) (2026-03-08)
 
 ### 🐛 Bug Fixes
