@@ -1,3 +1,9 @@
+## [1.56.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.2...v1.56.3) (2026-03-12)
+
+### 🐛 Bug Fixes
+
+* refactor relationship properties handling in updateRelationshipQuery ([0f4b265](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0f4b265a3be826e941d43996c96c7a93e1d08f30))
+
 ## [1.56.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.1...v1.56.2) (2026-03-12)
 
 ### 🐛 Bug Fixes
