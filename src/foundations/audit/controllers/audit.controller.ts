@@ -12,22 +12,6 @@ import { userMeta } from "../../user/entities/user.meta";
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
-  @Get(`${auditLogMeta.endpoint}/activity/:entityType/:entityId`)
-  async findActivityByEntity(
-    @Res() reply: FastifyReply,
-    @Query() query: any,
-    @Param("entityType") entityType: string,
-    @Param("entityId") entityId: string,
-  ) {
-    const response = await this.auditService.findActivityByEntity({
-      entityType,
-      entityId,
-      query,
-    });
-
-    reply.send(response);
-  }
-
   @Get(`${auditLogMeta.endpoint}/:entityType/:entityId`)
   async findByEntity(
     @Res() reply: FastifyReply,

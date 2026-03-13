@@ -106,47 +106,6 @@ export class AuditRepository implements OnModuleInit {
     return this.neo4jService.readMany(query);
   }
 
-  async findActivityByEntity(params: {
-    entityType: string;
-    entityId: string;
-    companyId: string;
-    cursor?: JsonApiCursorInterface;
-  }): Promise<AuditLog[]> {
-    const query = this.neo4jService.initQuery({ serialiser: auditLogModel, cursor: params.cursor });
-
-    query.queryParams = {
-      ...query.queryParams,
-      entityType: params.entityType,
-      entityId: params.entityId,
-      companyId: params.companyId,
-    };
-
-    query.query = `
-        CALL {
-          MATCH (${auditLogMeta.nodeName}_${userMeta.nodeName}:${userMeta.labelName})-[:PERFORMED]->(${auditLogMeta.nodeName}:${auditLogMeta.labelName} {
-            entity_type: $entityType,
-            entity_id: $entityId,
-            company_id: $companyId
-          })
-          WHERE ${auditLogMeta.nodeName}.action <> 'read'
-          RETURN ${auditLogMeta.nodeName}, ${auditLogMeta.nodeName}_${userMeta.nodeName}
-
-          UNION ALL
-
-          MATCH (ann:Annotation)-[:RELATES_TO]->(target {id: $entityId})
-          WHERE $entityType IN labels(target)
-          MATCH (ann)-[:BELONGS_TO]->(:Company {id: $companyId})
-          MATCH (ann)-[:CREATED_BY]->(ann_user:${userMeta.labelName})
-          RETURN ann AS ${auditLogMeta.nodeName}, ann_user AS ${auditLogMeta.nodeName}_${userMeta.nodeName}
-        }
-        ORDER BY ${auditLogMeta.nodeName}.createdAt DESC
-        {CURSOR}
-        RETURN ${auditLogMeta.nodeName}, ${auditLogMeta.nodeName}_${userMeta.nodeName}
-    `;
-
-    return this.neo4jService.readMany(query);
-  }
-
   async findByUser(params: { userId: string; cursor?: JsonApiCursorInterface }): Promise<AuditLog[]> {
     const query = this.neo4jService.initQuery({ serialiser: auditLogModel, cursor: params.cursor });
 

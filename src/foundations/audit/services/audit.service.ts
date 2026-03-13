@@ -110,21 +110,6 @@ export class AuditService {
     });
   }
 
-  async findActivityByEntity(params: { entityType: string; entityId: string; query: any }): Promise<any> {
-    const paginator = new JsonApiPaginator(params.query);
-
-    return this.builder.buildList(
-      auditLogModel,
-      await this.auditRepository.findActivityByEntity({
-        entityType: params.entityType,
-        entityId: params.entityId,
-        companyId: this.clsService.get("companyId"),
-        cursor: paginator.generateCursor(),
-      }),
-      paginator,
-    );
-  }
-
   async findByEntity(params: { entityType: string; entityId: string; query: any }): Promise<any> {
     const paginator = new JsonApiPaginator(params.query);
 

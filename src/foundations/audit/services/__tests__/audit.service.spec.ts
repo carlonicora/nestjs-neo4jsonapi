@@ -24,7 +24,6 @@ describe("AuditService", () => {
     createEntry: vi.fn(),
     findByEntity: vi.fn(),
     findByUser: vi.fn(),
-    findActivityByEntity: vi.fn(),
   });
 
   const createMockJsonApiService = () => ({
@@ -285,29 +284,6 @@ describe("AuditService", () => {
           newValue: "10",
         }),
       );
-    });
-  });
-
-  describe("findActivityByEntity", () => {
-    it("should call repository and build JSON:API response via buildList", async () => {
-      const mockEntities = [{ id: "audit-1", kind: "audit" }];
-      auditRepository.findActivityByEntity.mockResolvedValue(mockEntities);
-      jsonApiService.buildList.mockReturnValue({ data: mockEntities } as any);
-
-      const result = await service.findActivityByEntity({
-        entityType: "Account",
-        entityId: TEST_IDS.entityId,
-        query: {},
-      });
-
-      expect(auditRepository.findActivityByEntity).toHaveBeenCalledWith({
-        entityType: "Account",
-        entityId: TEST_IDS.entityId,
-        companyId: TEST_IDS.companyId,
-        cursor: expect.anything(),
-      });
-      expect(jsonApiService.buildList).toHaveBeenCalled();
-      expect(result).toBeDefined();
     });
   });
 
