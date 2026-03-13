@@ -4,6 +4,7 @@ import { ClsService } from "nestjs-cls";
 import { AuditService } from "../audit.service";
 import { AuditRepository } from "../../repositories/audit.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { EntityDescriptor, RelationshipDef } from "../../../../common/interfaces/entity.schema.interface";
 
 describe("AuditService", () => {
   let service: AuditService;
@@ -13,15 +14,16 @@ describe("AuditService", () => {
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440000",
-    entityId: "660e8400-e29b-41d4-a716-446655440001",
-    auditId: "770e8400-e29b-41d4-a716-446655440002",
+    companyId: "660e8400-e29b-41d4-a716-446655440001",
+    entityId: "770e8400-e29b-41d4-a716-446655440002",
   };
 
+  const TEST_IP = "192.168.1.1";
+
   const createMockAuditRepository = () => ({
-    create: vi.fn(),
+    createEntry: vi.fn(),
+    findByEntity: vi.fn(),
     findByUser: vi.fn(),
-    findById: vi.fn(),
-    delete: vi.fn(),
   });
 
   const createMockJsonApiService = () => ({
@@ -31,24 +33,33 @@ describe("AuditService", () => {
   });
 
   const createMockClsService = () => ({
-    get: vi.fn(),
+    get: vi.fn((key: string) => {
+      const map: Record<string, string> = {
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+        ipAddress: TEST_IP,
+      };
+      return map[key];
+    }),
     set: vi.fn(),
     run: vi.fn(),
   });
 
+  const createMockDescriptor = (
+    fieldNames: string[] = ["name", "status"],
+    relationships: Record<string, RelationshipDef> = {},
+  ) => ({
+    fieldNames,
+    relationships,
+  }) as unknown as EntityDescriptor<any, any>;
+
   beforeEach(async () => {
-    vi.clearAllMocks();
-
-    const mockAuditRepository = createMockAuditRepository();
-    const mockJsonApiService = createMockJsonApiService();
-    const mockClsService = createMockClsService();
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuditService,
-        { provide: AuditRepository, useValue: mockAuditRepository },
-        { provide: JsonApiService, useValue: mockJsonApiService },
-        { provide: ClsService, useValue: mockClsService },
+        { provide: AuditRepository, useValue: createMockAuditRepository() },
+        { provide: JsonApiService, useValue: createMockJsonApiService() },
+        { provide: ClsService, useValue: createMockClsService() },
       ],
     }).compile();
 
@@ -62,268 +73,255 @@ describe("AuditService", () => {
     vi.clearAllMocks();
   });
 
-  describe("constructor", () => {
-    it("should create the service", () => {
-      expect(service).toBeDefined();
+  describe("logCreate", () => {
+    it("should create single audit entry with action 'create'", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+
+      await service.logCreate({ entityType: "Quote", entityId: TEST_IDS.entityId });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+        ipAddress: TEST_IP,
+        action: "create",
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        fieldName: null,
+        oldValue: null,
+        newValue: null,
+      });
+    });
+
+    it("should not create entry when userId is not available", async () => {
+      clsService.get.mockReturnValue(undefined);
+
+      await service.logCreate({ entityType: "Quote", entityId: TEST_IDS.entityId });
+
+      expect(auditRepository.createEntry).not.toHaveBeenCalled();
     });
   });
 
-  describe("createAuditEntry", () => {
-    it("should create an audit entry when userId is available", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockResolvedValue(undefined);
+  describe("logRead", () => {
+    it("should create single audit entry with action 'read'", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
 
-      // Act
-      await service.createAuditEntry({
-        entityType: "content",
-        entityId: TEST_IDS.entityId,
-      });
+      await service.logRead({ entityType: "Quote", entityId: TEST_IDS.entityId });
 
-      // Assert
-      expect(clsService.get).toHaveBeenCalledWith("userId");
-      expect(auditRepository.create).toHaveBeenCalledWith({
+      expect(auditRepository.createEntry).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
-        entityType: "content",
+        companyId: TEST_IDS.companyId,
+        ipAddress: TEST_IP,
+        action: "read",
+        entityType: "Quote",
         entityId: TEST_IDS.entityId,
-        auditType: "read",
-        changes: undefined,
+        fieldName: null,
+        oldValue: null,
+        newValue: null,
       });
     });
+  });
 
-    it("should not create an audit entry when userId is not available", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(undefined);
+  describe("logDelete", () => {
+    it("should create single audit entry with snapshot in old_value", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor(["name", "status"]);
+      const snapshot = { name: "Test Quote", status: "draft" };
 
-      // Act
-      await service.createAuditEntry({
-        entityType: "content",
+      await service.logDelete({
+        entityType: "Quote",
         entityId: TEST_IDS.entityId,
+        snapshot,
+        descriptor,
       });
 
-      // Assert
-      expect(clsService.get).toHaveBeenCalledWith("userId");
-      expect(auditRepository.create).not.toHaveBeenCalled();
+      expect(auditRepository.createEntry).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+        ipAddress: TEST_IP,
+        action: "delete",
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        fieldName: null,
+        oldValue: JSON.stringify({ name: "Test Quote", status: "draft" }),
+        newValue: null,
+      });
     });
+  });
 
-    it("should not create an audit entry when userId is null", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(null);
+  describe("logUpdate", () => {
+    it("should create one entry per changed field", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor(["name", "status"]);
+      const before = { name: "Old Name", status: "draft" };
+      const after = { id: TEST_IDS.entityId, name: "New Name", status: "sent" };
 
-      // Act
-      await service.createAuditEntry({
-        entityType: "content",
+      await service.logUpdate({
+        entityType: "Quote",
         entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
       });
 
-      // Assert
-      expect(auditRepository.create).not.toHaveBeenCalled();
-    });
-
-    it("should always set auditType to read", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockResolvedValue(undefined);
-
-      // Act
-      await service.createAuditEntry({
-        entityType: "anyEntityType",
-        entityId: TEST_IDS.entityId,
-      });
-
-      // Assert
-      expect(auditRepository.create).toHaveBeenCalledWith(
+      expect(auditRepository.createEntry).toHaveBeenCalledTimes(2);
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
         expect.objectContaining({
-          auditType: "read",
-          changes: undefined,
+          action: "update",
+          fieldName: "name",
+          oldValue: '"Old Name"',
+          newValue: '"New Name"',
+        }),
+      );
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "status_change",
+          fieldName: "status",
+          oldValue: '"draft"',
+          newValue: '"sent"',
         }),
       );
     });
 
-    it("should propagate errors from repository", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockRejectedValue(new Error("Database error"));
+    it("should use 'status_change' action for status field", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor(["status"]);
+      const before = { status: "draft" };
+      const after = { id: TEST_IDS.entityId, status: "sent" };
 
-      // Act & Assert
-      await expect(
-        service.createAuditEntry({
-          entityType: "content",
-          entityId: TEST_IDS.entityId,
+      await service.logUpdate({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
+      });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "status_change" }),
+      );
+    });
+
+    it("should skip unchanged fields", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor(["name", "status"]);
+      const before = { name: "Same Name", status: "draft" };
+      const after = { id: TEST_IDS.entityId, name: "Same Name", status: "sent" };
+
+      await service.logUpdate({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
+      });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledTimes(1);
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ fieldName: "status" }),
+      );
+    });
+
+    it("should not create entries when nothing changed", async () => {
+      const descriptor = createMockDescriptor(["name"]);
+      const before = { name: "Same" };
+      const after = { id: TEST_IDS.entityId, name: "Same" };
+
+      await service.logUpdate({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
+      });
+
+      expect(auditRepository.createEntry).not.toHaveBeenCalled();
+    });
+
+    it("should track relationship changes for 'one' cardinality", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor([], {
+        owner: {
+          model: { type: "users", endpoint: "users", nodeName: "user", labelName: "User" },
+          direction: "in",
+          relationship: "CREATED",
+          cardinality: "one",
+        },
+      });
+      const before = { owner: { id: "user-a" } };
+      const after = { id: TEST_IDS.entityId, owner: "user-b" };
+
+      await service.logUpdate({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
+      });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fieldName: "owner",
+          oldValue: '"user-a"',
+          newValue: '"user-b"',
         }),
-      ).rejects.toThrow("Database error");
+      );
+    });
+
+    it("should stringify non-string values", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      const descriptor = createMockDescriptor(["count"]);
+      const before = { count: 5 };
+      const after = { id: TEST_IDS.entityId, count: 10 };
+
+      await service.logUpdate({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        before,
+        after,
+        descriptor,
+      });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          oldValue: "5",
+          newValue: "10",
+        }),
+      );
     });
   });
 
-  describe("createWriteAuditEntry", () => {
-    it("should create a write audit entry with auditType 'create' and no changes", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockResolvedValue(undefined);
+  describe("findByEntity", () => {
+    it("should build paginated JSON:API response", async () => {
+      auditRepository.findByEntity.mockResolvedValue([]);
+      jsonApiService.buildList.mockReturnValue({ data: [] } as any);
 
-      // Act
-      await service.createWriteAuditEntry({
-        entityType: "Warehouse",
+      await service.findByEntity({
+        entityType: "Quote",
         entityId: TEST_IDS.entityId,
-        auditType: "create",
+        query: {},
       });
 
-      // Assert
-      expect(clsService.get).toHaveBeenCalledWith("userId");
-      expect(auditRepository.create).toHaveBeenCalledWith({
-        userId: TEST_IDS.userId,
-        entityType: "Warehouse",
+      expect(auditRepository.findByEntity).toHaveBeenCalledWith({
+        entityType: "Quote",
         entityId: TEST_IDS.entityId,
-        auditType: "create",
-        changes: undefined,
+        companyId: TEST_IDS.companyId,
+        cursor: expect.anything(),
       });
-    });
-
-    it("should create a write audit entry with auditType 'edit' and changes JSON", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockResolvedValue(undefined);
-      const changesJson = JSON.stringify({ attributes: { name: "Updated" } });
-
-      // Act
-      await service.createWriteAuditEntry({
-        entityType: "Warehouse",
-        entityId: TEST_IDS.entityId,
-        auditType: "edit",
-        changes: changesJson,
-      });
-
-      // Assert
-      expect(auditRepository.create).toHaveBeenCalledWith({
-        userId: TEST_IDS.userId,
-        entityType: "Warehouse",
-        entityId: TEST_IDS.entityId,
-        auditType: "edit",
-        changes: changesJson,
-      });
-    });
-
-    it("should create a write audit entry with auditType 'edit' and no changes", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockResolvedValue(undefined);
-
-      // Act
-      await service.createWriteAuditEntry({
-        entityType: "Warehouse",
-        entityId: TEST_IDS.entityId,
-        auditType: "edit",
-      });
-
-      // Assert
-      expect(auditRepository.create).toHaveBeenCalledWith({
-        userId: TEST_IDS.userId,
-        entityType: "Warehouse",
-        entityId: TEST_IDS.entityId,
-        auditType: "edit",
-        changes: undefined,
-      });
-    });
-
-    it("should not create audit entry when userId is not available", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(undefined);
-
-      // Act
-      await service.createWriteAuditEntry({
-        entityType: "Warehouse",
-        entityId: TEST_IDS.entityId,
-        auditType: "create",
-      });
-
-      // Assert
-      expect(clsService.get).toHaveBeenCalledWith("userId");
-      expect(auditRepository.create).not.toHaveBeenCalled();
-    });
-
-    it("should propagate errors from repository", async () => {
-      // Arrange
-      clsService.get.mockReturnValue(TEST_IDS.userId);
-      auditRepository.create.mockRejectedValue(new Error("Database error"));
-
-      // Act & Assert
-      await expect(
-        service.createWriteAuditEntry({
-          entityType: "Warehouse",
-          entityId: TEST_IDS.entityId,
-          auditType: "create",
-        }),
-      ).rejects.toThrow("Database error");
+      expect(jsonApiService.buildList).toHaveBeenCalled();
     });
   });
 
   describe("findByUser", () => {
     it("should find audit entries by user with pagination", async () => {
-      // Arrange
-      const mockAuditEntries = [{ id: TEST_IDS.auditId, entityType: "content", entityId: TEST_IDS.entityId }];
-      const mockJsonApiResponse = { data: mockAuditEntries };
-      auditRepository.findByUser.mockResolvedValue(mockAuditEntries);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse as any);
+      auditRepository.findByUser.mockResolvedValue([]);
+      jsonApiService.buildList.mockReturnValue({ data: [] } as any);
 
-      // Act
-      const result = await service.findByUser({
-        query: {},
-        userId: TEST_IDS.userId,
-      });
+      const result = await service.findByUser({ query: {}, userId: TEST_IDS.userId });
 
-      // Assert
       expect(auditRepository.findByUser).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
         cursor: expect.anything(),
       });
-      expect(jsonApiService.buildList).toHaveBeenCalled();
-      expect(result).toBe(mockJsonApiResponse);
-    });
-
-    it("should pass pagination parameters from query", async () => {
-      // Arrange
-      const query = { page: { size: 10, after: "cursor123" } };
-      auditRepository.findByUser.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] } as any);
-
-      // Act
-      await service.findByUser({
-        query,
-        userId: TEST_IDS.userId,
-      });
-
-      // Assert
-      expect(auditRepository.findByUser).toHaveBeenCalledWith({
-        userId: TEST_IDS.userId,
-        cursor: expect.anything(),
-      });
-    });
-
-    it("should propagate errors from repository", async () => {
-      // Arrange
-      auditRepository.findByUser.mockRejectedValue(new Error("Repository error"));
-
-      // Act & Assert
-      await expect(
-        service.findByUser({
-          query: {},
-          userId: TEST_IDS.userId,
-        }),
-      ).rejects.toThrow("Repository error");
-    });
-
-    it("should handle empty results", async () => {
-      // Arrange
-      auditRepository.findByUser.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] } as any);
-
-      // Act
-      const result = await service.findByUser({
-        query: {},
-        userId: TEST_IDS.userId,
-      });
-
-      // Assert
       expect(result).toEqual({ data: [] });
     });
   });
