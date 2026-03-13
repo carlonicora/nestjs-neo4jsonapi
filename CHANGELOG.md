@@ -1,3 +1,29 @@
+## [1.58.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.57.0...v1.58.0) (2026-03-13)
+
+### 🚀 Features
+
+* **audit:** implement AuditRepository with createEntry, findByEntity, findByUser ([f4a38b2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f4a38b26f56326641fd086241cb7ba89f3ad1237))
+* **audit:** implement AuditService with logCreate, logUpdate, logDelete, logRead ([ff9f64c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ff9f64c175eafabdd1de5cc238615e5daf64a5d0))
+* **audit:** integrate automatic audit logging into AbstractService ([b7fdcff](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b7fdcff966f98f9519638e39209cc4ebab4c9f32))
+* **audit:** update controller, decorator, and JWT guard for AuditLog ([4e77307](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4e7730779cc2c4444389afc893e216732111ed9c))
+
+### 🐛 Bug Fixes
+
+* **audit:** resolve lint warnings for unused imports and variables ([4d3f567](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4d3f5674c2d0fda341238ed748900c0971027443))
+* **audit:** store string values without double-quoting ([77539da](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/77539da59e6ff5339d77b12aa96b3aacfd02cdb5))
+
+### 💎 Styles
+
+* **audit:** apply eslint formatting fixes ([3cb04a1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3cb04a1a3953b1134eaccdcb9aa1d4683bb7a0b2))
+
+### 📦 Code Refactoring
+
+* **audit:** rewrite entity layer and update module for AuditLog ([1d22f70](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1d22f703f8d00c1fc691a27b57f8938c0258fc74))
+
+### ♻️ Chores
+
+* **audit:** add data migration script for Audit -> AuditLog ([5829bd1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5829bd18efd48f4e28a2aa76c14ac0ffb10f61ee))
+
 ## [1.57.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.3...v1.57.0) (2026-03-13)
 
 ### 🚀 Features
