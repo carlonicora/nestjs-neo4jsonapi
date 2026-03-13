@@ -1,3 +1,9 @@
+## [1.57.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.3...v1.57.0) (2026-03-13)
+
+### 🚀 Features
+
+* add isCompanyScoped option to JSON module definition ([9bbfd29](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9bbfd294684a83801cca37c852697106bc354eac))
+
 ## [1.56.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.56.2...v1.56.3) (2026-03-12)
 
 ### 🐛 Bug Fixes
