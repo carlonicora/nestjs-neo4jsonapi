@@ -7,4 +7,3 @@ export * from "./rate-limit.decorator";
 export * from "./roles.decorator";
 export * from "./tool.decorator";
 export * from "./validate-id.decorator";
-export * from "./write-audit.decorator";

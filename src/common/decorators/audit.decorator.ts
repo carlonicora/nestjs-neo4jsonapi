@@ -1,7 +1,7 @@
 import { DataMeta } from "../interfaces/datamodel.interface";
 
 /**
- * Decorator that automatically logs an audit entry after the method executes.
+ * Decorator that automatically logs a read audit entry after the method executes.
  *
  * @param meta - The entity metadata (provides labelName for audit)
  * @param id - The route param name to extract the entity ID (e.g., "cullId", "rollId")
@@ -16,7 +16,7 @@ export function Audit(meta: DataMeta, id: string) {
       const paramId = req?.params?.[id];
 
       if (paramId && this.auditService) {
-        this.auditService.createAuditEntry({
+        this.auditService.logRead({
           entityType: meta.labelName,
           entityId: paramId as string,
         });

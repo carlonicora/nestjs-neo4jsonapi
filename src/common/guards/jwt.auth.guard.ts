@@ -52,6 +52,7 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     this.cls.set("roles", user.roles);
     this.cls.set("language", request.headers["x-language"]);
     this.cls.set("token", token.startsWith("Bearer ") ? token.slice(7) : token);
+    this.cls.set("ipAddress", request.ip);
 
     return user;
   }
