@@ -222,9 +222,7 @@ describe("AuditRepository", () => {
         cursor,
       });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith(
-        expect.objectContaining({ cursor }),
-      );
+      expect(neo4jService.initQuery).toHaveBeenCalledWith(expect.objectContaining({ cursor }));
     });
   });
 

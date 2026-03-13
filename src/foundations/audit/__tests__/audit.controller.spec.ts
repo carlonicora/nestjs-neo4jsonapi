@@ -76,9 +76,7 @@ describe("AuditController", () => {
     it("should propagate service errors", async () => {
       auditService.findByEntity.mockRejectedValue(new Error("DB error"));
 
-      await expect(
-        controller.findByEntity(mockReply, {}, "Quote", TEST_IDS.entityId),
-      ).rejects.toThrow("DB error");
+      await expect(controller.findByEntity(mockReply, {}, "Quote", TEST_IDS.entityId)).rejects.toThrow("DB error");
     });
   });
 
@@ -101,9 +99,7 @@ describe("AuditController", () => {
       const req = createMockRequest();
       auditService.findByUser.mockRejectedValue(new Error("DB error"));
 
-      await expect(
-        controller.findByUser(req, mockReply, {}, TEST_IDS.userId),
-      ).rejects.toThrow("DB error");
+      await expect(controller.findByUser(req, mockReply, {}, TEST_IDS.userId)).rejects.toThrow("DB error");
     });
   });
 });
