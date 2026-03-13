@@ -48,10 +48,11 @@ describe("AuditService", () => {
   const createMockDescriptor = (
     fieldNames: string[] = ["name", "status"],
     relationships: Record<string, RelationshipDef> = {},
-  ) => ({
-    fieldNames,
-    relationships,
-  }) as unknown as EntityDescriptor<any, any>;
+  ) =>
+    ({
+      fieldNames,
+      relationships,
+    }) as unknown as EntityDescriptor<any, any>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -168,16 +169,16 @@ describe("AuditService", () => {
         expect.objectContaining({
           action: "update",
           fieldName: "name",
-          oldValue: '"Old Name"',
-          newValue: '"New Name"',
+          oldValue: "Old Name",
+          newValue: "New Name",
         }),
       );
       expect(auditRepository.createEntry).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "status_change",
           fieldName: "status",
-          oldValue: '"draft"',
-          newValue: '"sent"',
+          oldValue: "draft",
+          newValue: "sent",
         }),
       );
     });
@@ -196,9 +197,7 @@ describe("AuditService", () => {
         descriptor,
       });
 
-      expect(auditRepository.createEntry).toHaveBeenCalledWith(
-        expect.objectContaining({ action: "status_change" }),
-      );
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(expect.objectContaining({ action: "status_change" }));
     });
 
     it("should skip unchanged fields", async () => {
@@ -216,9 +215,7 @@ describe("AuditService", () => {
       });
 
       expect(auditRepository.createEntry).toHaveBeenCalledTimes(1);
-      expect(auditRepository.createEntry).toHaveBeenCalledWith(
-        expect.objectContaining({ fieldName: "status" }),
-      );
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(expect.objectContaining({ fieldName: "status" }));
     });
 
     it("should not create entries when nothing changed", async () => {
@@ -261,8 +258,8 @@ describe("AuditService", () => {
       expect(auditRepository.createEntry).toHaveBeenCalledWith(
         expect.objectContaining({
           fieldName: "owner",
-          oldValue: '"user-a"',
-          newValue: '"user-b"',
+          oldValue: "user-a",
+          newValue: "user-b",
         }),
       );
     });

@@ -197,6 +197,7 @@ export class AuditService {
 
   private stringify(value: any): string | null {
     if (value === undefined || value === null) return null;
+    if (typeof value === "string") return value;
     return JSON.stringify(value);
   }
 }
