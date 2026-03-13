@@ -19,6 +19,7 @@ const createMockNeo4jService = () => ({
   writeOne: vi.fn(),
   readOne: vi.fn(),
   readMany: vi.fn(),
+  read: vi.fn(),
   initQuery: vi.fn(),
 });
 
