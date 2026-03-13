@@ -289,41 +289,10 @@ describe("AuditService", () => {
   });
 
   describe("findActivityByEntity", () => {
-    it("should return formatted activity items from repository", async () => {
-      const rawRecords = [
-        {
-          id: "audit-1",
-          kind: "audit",
-          action: "create",
-          field_name: null,
-          old_value: null,
-          new_value: null,
-          content: null,
-          annotation_id: null,
-          createdAt: "2026-03-13T10:00:00Z",
-          updatedAt: "2026-03-13T10:00:00Z",
-          user_id: "user-1",
-          user_name: "Carlo",
-          user_avatar: null,
-        },
-        {
-          id: "ann-1",
-          kind: "comment",
-          action: null,
-          field_name: null,
-          old_value: null,
-          new_value: null,
-          content: "This looks good",
-          annotation_id: "ann-1",
-          createdAt: "2026-03-13T11:00:00Z",
-          updatedAt: "2026-03-13T11:00:00Z",
-          user_id: "user-2",
-          user_name: "Stefano",
-          user_avatar: null,
-        },
-      ];
-
-      auditRepository.findActivityByEntity.mockResolvedValue(rawRecords);
+    it("should call repository and build JSON:API response via buildList", async () => {
+      const mockEntities = [{ id: "audit-1", kind: "audit" }];
+      auditRepository.findActivityByEntity.mockResolvedValue(mockEntities);
+      jsonApiService.buildList.mockReturnValue({ data: mockEntities } as any);
 
       const result = await service.findActivityByEntity({
         entityType: "Account",
@@ -337,93 +306,8 @@ describe("AuditService", () => {
         companyId: TEST_IDS.companyId,
         cursor: expect.anything(),
       });
-
+      expect(jsonApiService.buildList).toHaveBeenCalled();
       expect(result).toBeDefined();
-      expect(result.data).toHaveLength(2);
-      expect(result.data[0].type).toBe("audit-logs");
-      expect(result.data[0].attributes.kind).toBe("audit");
-      expect(result.data[1].attributes.kind).toBe("comment");
-      expect(result.data[1].attributes.content).toBe("This looks good");
-    });
-
-    it("should include unique users in response", async () => {
-      const rawRecords = [
-        {
-          id: "a1",
-          kind: "audit",
-          action: "create",
-          field_name: null,
-          old_value: null,
-          new_value: null,
-          content: null,
-          annotation_id: null,
-          createdAt: "2026-03-13T10:00:00Z",
-          updatedAt: "2026-03-13T10:00:00Z",
-          user_id: "user-1",
-          user_name: "Carlo",
-          user_avatar: "avatar.png",
-        },
-        {
-          id: "a2",
-          kind: "audit",
-          action: "update",
-          field_name: "name",
-          old_value: "Old",
-          new_value: "New",
-          content: null,
-          annotation_id: null,
-          createdAt: "2026-03-13T11:00:00Z",
-          updatedAt: "2026-03-13T11:00:00Z",
-          user_id: "user-1",
-          user_name: "Carlo",
-          user_avatar: "avatar.png",
-        },
-      ];
-
-      auditRepository.findActivityByEntity.mockResolvedValue(rawRecords);
-
-      const result = await service.findActivityByEntity({
-        entityType: "Account",
-        entityId: TEST_IDS.entityId,
-        query: {},
-      });
-
-      expect(result.included).toHaveLength(1);
-      expect(result.included[0].id).toBe("user-1");
-      expect(result.included[0].attributes.name).toBe("Carlo");
-    });
-
-    it("should include user relationship in each item", async () => {
-      const rawRecords = [
-        {
-          id: "a1",
-          kind: "audit",
-          action: "create",
-          field_name: null,
-          old_value: null,
-          new_value: null,
-          content: null,
-          annotation_id: null,
-          createdAt: "2026-03-13T10:00:00Z",
-          updatedAt: "2026-03-13T10:00:00Z",
-          user_id: "user-1",
-          user_name: "Carlo",
-          user_avatar: null,
-        },
-      ];
-
-      auditRepository.findActivityByEntity.mockResolvedValue(rawRecords);
-
-      const result = await service.findActivityByEntity({
-        entityType: "Account",
-        entityId: TEST_IDS.entityId,
-        query: {},
-      });
-
-      expect(result.data[0].relationships.user.data).toEqual({
-        type: "users",
-        id: "user-1",
-      });
     });
   });
 

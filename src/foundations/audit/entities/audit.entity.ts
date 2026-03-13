@@ -10,6 +10,9 @@ export type AuditLog = Entity & {
   new_value?: string;
   ip_address?: string;
   company_id?: string;
+  kind?: string;
+  content?: string;
+  annotation_id?: string;
 
   user: User;
   audited?: any;

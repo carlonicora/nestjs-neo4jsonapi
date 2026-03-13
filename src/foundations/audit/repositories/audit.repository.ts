@@ -111,8 +111,8 @@ export class AuditRepository implements OnModuleInit {
     entityId: string;
     companyId: string;
     cursor?: JsonApiCursorInterface;
-  }): Promise<any[]> {
-    const query = this.neo4jService.initQuery();
+  }): Promise<AuditLog[]> {
+    const query = this.neo4jService.initQuery({ serialiser: auditLogModel, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -121,64 +121,30 @@ export class AuditRepository implements OnModuleInit {
       companyId: params.companyId,
     };
 
-    // Handle cursor-based pagination
-    let paginationClause = "";
-    if (params.cursor) {
-      query.queryParams.cursor = params.cursor.cursor;
-      query.queryParams.take = params.cursor.take;
-      if (params.cursor.cursor) {
-        paginationClause = "SKIP toInteger($cursor) LIMIT toInteger($take)";
-      } else {
-        paginationClause = "LIMIT toInteger($take)";
-      }
-    }
-
     query.query = `
         CALL {
-          MATCH (al_user:${userMeta.labelName})-[:PERFORMED]->(al:${auditLogMeta.labelName} {
+          MATCH (${auditLogMeta.nodeName}_${userMeta.nodeName}:${userMeta.labelName})-[:PERFORMED]->(${auditLogMeta.nodeName}:${auditLogMeta.labelName} {
             entity_type: $entityType,
             entity_id: $entityId,
             company_id: $companyId
           })
-          RETURN al.id AS id,
-                 'audit' AS kind,
-                 al.action AS action,
-                 al.field_name AS field_name,
-                 al.old_value AS old_value,
-                 al.new_value AS new_value,
-                 null AS content,
-                 null AS annotation_id,
-                 al.createdAt AS createdAt,
-                 al.updatedAt AS updatedAt,
-                 al_user.id AS user_id,
-                 al_user.name AS user_name,
-                 al_user.avatar AS user_avatar
+          WHERE ${auditLogMeta.nodeName}.action <> 'read'
+          RETURN ${auditLogMeta.nodeName}, ${auditLogMeta.nodeName}_${userMeta.nodeName}
 
           UNION ALL
 
           MATCH (ann:Annotation)-[:RELATES_TO]->(target {id: $entityId})
           WHERE $entityType IN labels(target)
-          MATCH (ann_user:${userMeta.labelName})-[:CREATED]->(ann)
-          RETURN ann.id AS id,
-                 'comment' AS kind,
-                 null AS action,
-                 null AS field_name,
-                 null AS old_value,
-                 null AS new_value,
-                 ann.content AS content,
-                 ann.id AS annotation_id,
-                 ann.createdAt AS createdAt,
-                 ann.updatedAt AS updatedAt,
-                 ann_user.id AS user_id,
-                 ann_user.name AS user_name,
-                 ann_user.avatar AS user_avatar
+          MATCH (ann)-[:BELONGS_TO]->(:Company {id: $companyId})
+          MATCH (ann)-[:CREATED_BY]->(ann_user:${userMeta.labelName})
+          RETURN ann AS ${auditLogMeta.nodeName}, ann_user AS ${auditLogMeta.nodeName}_${userMeta.nodeName}
         }
-        ORDER BY createdAt DESC
-        ${paginationClause}
+        ORDER BY ${auditLogMeta.nodeName}.createdAt DESC
+        {CURSOR}
+        RETURN ${auditLogMeta.nodeName}, ${auditLogMeta.nodeName}_${userMeta.nodeName}
     `;
 
-    const result = await this.neo4jService.read(query.query, query.queryParams);
-    return result.records.map((record: any) => record.toObject());
+    return this.neo4jService.readMany(query);
   }
 
   async findByUser(params: { userId: string; cursor?: JsonApiCursorInterface }): Promise<AuditLog[]> {

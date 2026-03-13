@@ -33,6 +33,9 @@ export class AuditSerialiser extends AbstractJsonApiSerialiser implements JsonAp
       newValue: "new_value",
       ipAddress: "ip_address",
       companyId: "company_id",
+      kind: "kind",
+      content: "content",
+      annotationId: "annotation_id",
     };
 
     const dynamicRel = this.dynamicRelationshipFactory.createDynamicRelationship(null);

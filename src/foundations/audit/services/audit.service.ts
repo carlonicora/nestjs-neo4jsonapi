@@ -3,7 +3,6 @@ import { ClsService } from "nestjs-cls";
 import { EntityDescriptor } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
-import { auditLogMeta } from "../entities/audit.meta";
 import { auditLogModel } from "../entities/audit.model";
 import { AuditRepository } from "../repositories/audit.repository";
 
@@ -114,66 +113,16 @@ export class AuditService {
   async findActivityByEntity(params: { entityType: string; entityId: string; query: any }): Promise<any> {
     const paginator = new JsonApiPaginator(params.query);
 
-    const rawRecords = await this.auditRepository.findActivityByEntity({
-      entityType: params.entityType,
-      entityId: params.entityId,
-      companyId: this.clsService.get("companyId"),
-      cursor: paginator.generateCursor(),
-    });
-
-    const data = rawRecords.map((record: any) => ({
-      type: auditLogMeta.type,
-      id: record.id,
-      attributes: {
-        kind: record.kind,
-        action: record.action ?? null,
-        fieldName: record.field_name ?? null,
-        oldValue: record.old_value ?? null,
-        newValue: record.new_value ?? null,
-        content: record.content ?? null,
-        annotationId: record.annotation_id ?? null,
-      },
-      meta: {
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      },
-      relationships: {
-        user: {
-          data: {
-            type: "users",
-            id: record.user_id,
-          },
-        },
-      },
-    }));
-
-    const included = this.buildUniqueUserIncludes(rawRecords);
-
-    return {
-      data,
-      included,
-    };
-  }
-
-  private buildUniqueUserIncludes(records: any[]): any[] {
-    const seen = new Set<string>();
-    const includes: any[] = [];
-
-    for (const record of records) {
-      if (record.user_id && !seen.has(record.user_id)) {
-        seen.add(record.user_id);
-        includes.push({
-          type: "users",
-          id: record.user_id,
-          attributes: {
-            name: record.user_name ?? null,
-            avatar: record.user_avatar ?? null,
-          },
-        });
-      }
-    }
-
-    return includes;
+    return this.builder.buildList(
+      auditLogModel,
+      await this.auditRepository.findActivityByEntity({
+        entityType: params.entityType,
+        entityId: params.entityId,
+        companyId: this.clsService.get("companyId"),
+        cursor: paginator.generateCursor(),
+      }),
+      paginator,
+    );
   }
 
   async findByEntity(params: { entityType: string; entityId: string; query: any }): Promise<any> {
