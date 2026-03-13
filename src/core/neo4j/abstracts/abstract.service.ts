@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from "@nes
 import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
+import { AuditService } from "../../../foundations/audit/services/audit.service";
 import { JsonApiDataInterface } from "../../jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
@@ -72,6 +73,7 @@ export abstract class AbstractService<
     protected readonly repository: AbstractRepository<T, R>,
     protected readonly clsService: ClsService,
     protected readonly model: DataModelInterface<T>,
+    protected readonly auditService?: AuditService,
   ) {}
 
   /**
@@ -109,6 +111,14 @@ export abstract class AbstractService<
    */
   async create(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
     await this.repository.create(params);
+
+    if (this.auditService) {
+      await this.auditService.logCreate({
+        entityType: this.model.labelName,
+        entityId: params.id,
+      });
+    }
+
     return this.findById({ id: params.id });
   }
 
@@ -117,7 +127,20 @@ export abstract class AbstractService<
    * Override this method to map DTO fields to repository put params
    */
   async put(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+    const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
+
     await this.repository.put(params);
+
+    if (this.auditService && before) {
+      await this.auditService.logUpdate({
+        entityType: this.model.labelName,
+        entityId: params.id,
+        before,
+        after: params,
+        descriptor: this.descriptor,
+      });
+    }
+
     return this.findById({ id: params.id });
   }
 
@@ -126,7 +149,20 @@ export abstract class AbstractService<
    * Override this method to map DTO fields to repository patch params
    */
   async patch(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+    const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
+
     await this.repository.patch(params);
+
+    if (this.auditService && before) {
+      await this.auditService.logUpdate({
+        entityType: this.model.labelName,
+        entityId: params.id,
+        before,
+        after: params,
+        descriptor: this.descriptor,
+      });
+    }
+
     return this.findById({ id: params.id });
   }
 
@@ -146,6 +182,15 @@ export abstract class AbstractService<
     }
 
     await this.repository.delete({ id: params.id });
+
+    if (this.auditService) {
+      await this.auditService.logDelete({
+        entityType: this.model.labelName,
+        entityId: params.id,
+        snapshot: entity,
+        descriptor: this.descriptor,
+      });
+    }
   }
 
   /**
