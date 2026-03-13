@@ -6,7 +6,7 @@ import { DynamicRelationshipFactory } from "../../../core/jsonapi/factories/dyna
 import { JsonApiSerialiserFactory } from "../../../core/jsonapi/factories/jsonapi.serialiser.factory";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiServiceInterface } from "../../../core/jsonapi/interfaces/jsonapi.service.interface";
-import { auditMeta } from "../../audit/entities/audit.meta";
+import { auditLogMeta } from "../entities/audit.meta";
 import { UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
@@ -20,13 +20,19 @@ export class AuditSerialiser extends AbstractJsonApiSerialiser implements JsonAp
   }
 
   get type(): string {
-    return auditMeta.endpoint;
+    return auditLogMeta.endpoint;
   }
 
   create(): JsonApiDataInterface {
     this.attributes = {
-      auditType: "auditType",
-      changes: "changes",
+      action: "action",
+      entityType: "entity_type",
+      entityId: "entity_id",
+      fieldName: "field_name",
+      oldValue: "old_value",
+      newValue: "new_value",
+      ipAddress: "ip_address",
+      companyId: "company_id",
     };
 
     const dynamicRel = this.dynamicRelationshipFactory.createDynamicRelationship(null);
