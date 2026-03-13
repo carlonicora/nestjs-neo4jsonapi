@@ -1,3 +1,14 @@
+## [1.59.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.58.0...v1.59.0) (2026-03-13)
+
+### 🚀 Features
+
+* **audit:** add unified activity feed endpoint with UNION query ([ac2ef27](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ac2ef278b869e33acf1d9ecf10406f6d412c608a))
+* **audit:** enhance activity logging with additional fields and update query handling ([d1e5cc8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d1e5cc883f4cf3afec877a85c5af1086df788693))
+
+### 📦 Code Refactoring
+
+* **audit:** remove findActivityByEntity method and related tests ([ec66597](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ec66597dee1937c77d0cb307ec37388425b33826))
+
 ## [1.58.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.57.0...v1.58.0) (2026-03-13)
 
 ### 🚀 Features
