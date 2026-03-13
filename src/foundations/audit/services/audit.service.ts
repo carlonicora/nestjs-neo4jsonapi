@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
+import { EntityDescriptor } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { auditLogModel } from "../entities/audit.model";
@@ -138,11 +138,7 @@ export class AuditService {
     );
   }
 
-  private diffChanges(
-    before: any,
-    after: Record<string, any>,
-    descriptor: EntityDescriptor<any, any>,
-  ): AuditChange[] {
+  private diffChanges(before: any, after: Record<string, any>, descriptor: EntityDescriptor<any, any>): AuditChange[] {
     const changes: AuditChange[] = [];
 
     // Diff attribute fields
@@ -165,7 +161,7 @@ export class AuditService {
     }
 
     // Diff relationships
-    for (const [relationshipKey, relationshipDef] of Object.entries(descriptor.relationships)) {
+    for (const [relationshipKey, _relationshipDef] of Object.entries(descriptor.relationships)) {
       if (!(relationshipKey in after)) continue;
 
       const oldRel = before[relationshipKey];
