@@ -19,6 +19,7 @@ const createMockNeo4jService = () => ({
   writeOne: vi.fn(),
   readOne: vi.fn(),
   readMany: vi.fn(),
+  read: vi.fn(),
   initQuery: vi.fn(),
 });
 
@@ -223,6 +224,97 @@ describe("AuditRepository", () => {
       });
 
       expect(neo4jService.initQuery).toHaveBeenCalledWith(expect.objectContaining({ cursor }));
+    });
+  });
+
+  describe("findActivityByEntity", () => {
+    it("should call neo4jService.read with UNION query and correct params", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findActivityByEntity({
+        entityType: "Account",
+        entityId: "entity-123",
+        companyId: "company-456",
+      });
+
+      expect(mockQuery.queryParams).toMatchObject({
+        entityType: "Account",
+        entityId: "entity-123",
+        companyId: "company-456",
+      });
+    });
+
+    it("should include both AuditLog and Annotation in query", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findActivityByEntity({
+        entityType: "Account",
+        entityId: "entity-123",
+        companyId: "company-456",
+      });
+
+      expect(mockQuery.query).toContain("AuditLog");
+      expect(mockQuery.query).toContain("Annotation");
+      expect(mockQuery.query).toContain("UNION ALL");
+    });
+
+    it("should return mapped records from raw result", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      const mockRecord = {
+        toObject: () => ({
+          id: "audit-1",
+          kind: "audit",
+          action: "create",
+          field_name: null,
+          old_value: null,
+          new_value: null,
+          content: null,
+          annotation_id: null,
+          createdAt: "2026-03-13T10:00:00Z",
+          updatedAt: "2026-03-13T10:00:00Z",
+          user_id: "user-1",
+          user_name: "Carlo",
+          user_avatar: null,
+        }),
+      };
+      neo4jService.read.mockResolvedValue({ records: [mockRecord] });
+
+      const result = await repository.findActivityByEntity({
+        entityType: "Account",
+        entityId: "entity-123",
+        companyId: "company-456",
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        id: "audit-1",
+        kind: "audit",
+        action: "create",
+      });
+    });
+
+    it("should support cursor pagination", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findActivityByEntity({
+        entityType: "Account",
+        entityId: "entity-123",
+        companyId: "company-456",
+        cursor: { cursor: 10, take: 26 },
+      });
+
+      expect(mockQuery.queryParams.cursor).toBe(10);
+      expect(mockQuery.queryParams.take).toBe(26);
+      expect(mockQuery.query).toContain("SKIP");
+      expect(mockQuery.query).toContain("LIMIT");
     });
   });
 

@@ -35,6 +35,7 @@ describe("AuditController", () => {
     const mockAuditService = {
       findByEntity: vi.fn(),
       findByUser: vi.fn(),
+      findActivityByEntity: vi.fn(),
       logCreate: vi.fn(),
       logRead: vi.fn(),
       logUpdate: vi.fn(),
@@ -56,6 +57,28 @@ describe("AuditController", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("findActivityByEntity (GET audit-logs/activity/:entityType/:entityId)", () => {
+    it("should call auditService.findActivityByEntity and send response", async () => {
+      const mockResponse = { data: [], included: [] };
+      auditService.findActivityByEntity.mockResolvedValue(mockResponse);
+
+      await controller.findActivityByEntity(mockReply, {}, "Account", "entity-123");
+
+      expect(auditService.findActivityByEntity).toHaveBeenCalledWith({
+        entityType: "Account",
+        entityId: "entity-123",
+        query: {},
+      });
+      expect(mockReply.send).toHaveBeenCalledWith(mockResponse);
+    });
+
+    it("should propagate service errors", async () => {
+      auditService.findActivityByEntity.mockRejectedValue(new Error("DB error"));
+
+      await expect(controller.findActivityByEntity(mockReply, {}, "Account", "entity-123")).rejects.toThrow("DB error");
+    });
   });
 
   describe("findByEntity (GET audit-logs/:entityType/:entityId)", () => {
