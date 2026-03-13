@@ -156,7 +156,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       endpoint: jsonSchema.endpointName,
       labelName: names.pascalCase,
       nodeName: names.camelCase,
-      isCompanyScoped: true, // Default: true
+      isCompanyScoped: jsonSchema.isCompanyScoped !== false, // Default: true
       targetDir: jsonSchema.targetDir,
       fields,
       relationships,

@@ -41,6 +41,8 @@ export interface JsonModuleDefinition {
   moduleName: string;
   endpointName: string;
   targetDir: string;
+  /** If false, the module is global (not company-scoped). Default: true */
+  isCompanyScoped?: boolean;
   languages: string[];
   fields: JsonFieldDefinition[];
   relationships: JsonRelationshipDefinition[];
