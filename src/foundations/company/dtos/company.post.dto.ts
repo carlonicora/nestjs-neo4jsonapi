@@ -24,6 +24,46 @@ export class CompanyPostAttributesDTO {
   @IsOptional()
   @IsString()
   configurations?: string;
+
+  @IsOptional()
+  @IsString()
+  legal_address?: string;
+
+  @IsOptional()
+  @IsString()
+  street_number?: string;
+
+  @IsOptional()
+  @IsString()
+  street?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  province?: string;
+
+  @IsOptional()
+  @IsString()
+  region?: string;
+
+  @IsOptional()
+  @IsString()
+  postcode?: string;
+
+  @IsOptional()
+  @IsString()
+  country?: string;
+
+  @IsOptional()
+  @IsString()
+  country_code?: string;
+
+  @IsOptional()
+  @IsString()
+  fiscal_data?: string;
 }
 
 export class CompanyPostRelationshipsDTO {
