@@ -28,6 +28,20 @@ export type Company = Entity & {
   // Referral system
   referralCode?: string; // UUID referral code
 
+  // Address fields
+  legal_address?: string;
+  street_number?: string;
+  street?: string;
+  city?: string;
+  province?: string;
+  region?: string;
+  postcode?: string;
+  country?: string;
+  country_code?: string;
+
+  // Fiscal data
+  fiscal_data?: string;
+
   feature: Feature[];
   module: Module[];
 };
@@ -57,6 +71,16 @@ export const CompanyDescriptor = defineEntity<Company>()({
     scheduledDeletionAt: { type: "datetime" },
     deactivationReason: { type: "string" },
     referralCode: { type: "string" },
+    legal_address: { type: "string" },
+    street_number: { type: "string" },
+    street: { type: "string" },
+    city: { type: "string" },
+    province: { type: "string" },
+    region: { type: "string" },
+    postcode: { type: "string" },
+    country: { type: "string" },
+    country_code: { type: "string" },
+    fiscal_data: { type: "string" },
   },
 
   // Relationship definitions
