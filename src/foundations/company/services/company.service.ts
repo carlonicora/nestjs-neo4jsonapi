@@ -86,6 +86,16 @@ export class CompanyService {
       availableMonthlyTokens: params.data.attributes.availableMonthlyTokens,
       availableExtraTokens: params.data.attributes.availableExtraTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
+      legal_address: params.data.attributes.legal_address,
+      street_number: params.data.attributes.street_number,
+      street: params.data.attributes.street,
+      city: params.data.attributes.city,
+      province: params.data.attributes.province,
+      region: params.data.attributes.region,
+      postcode: params.data.attributes.postcode,
+      country: params.data.attributes.country,
+      country_code: params.data.attributes.country_code,
+      fiscal_data: params.data.attributes.fiscal_data,
     });
   }
 
@@ -99,6 +109,16 @@ export class CompanyService {
       availableExtraTokens: params.data.attributes.availableExtraTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       moduleIds: params.data.relationships?.modules?.data.map((module) => module.id),
+      legal_address: params.data.attributes.legal_address,
+      street_number: params.data.attributes.street_number,
+      street: params.data.attributes.street,
+      city: params.data.attributes.city,
+      province: params.data.attributes.province,
+      region: params.data.attributes.region,
+      postcode: params.data.attributes.postcode,
+      country: params.data.attributes.country,
+      country_code: params.data.attributes.country_code,
+      fiscal_data: params.data.attributes.fiscal_data,
     });
 
     return this.builder.buildSingle(
@@ -118,6 +138,16 @@ export class CompanyService {
       availableExtraTokens: params.data.attributes.availableExtraTokens,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       moduleIds: params.data.relationships?.modules?.data.map((module) => module.id),
+      legal_address: params.data.attributes.legal_address,
+      street_number: params.data.attributes.street_number,
+      street: params.data.attributes.street,
+      city: params.data.attributes.city,
+      province: params.data.attributes.province,
+      region: params.data.attributes.region,
+      postcode: params.data.attributes.postcode,
+      country: params.data.attributes.country,
+      country_code: params.data.attributes.country_code,
+      fiscal_data: params.data.attributes.fiscal_data,
     });
 
     return this.builder.buildSingle(

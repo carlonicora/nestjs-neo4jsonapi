@@ -117,6 +117,16 @@ export class CompanyRepository implements OnModuleInit {
     availableExtraTokens?: number;
     featureIds?: string[];
     moduleIds?: string[];
+    legal_address?: string;
+    street_number?: string;
+    street?: string;
+    city?: string;
+    province?: string;
+    region?: string;
+    postcode?: string;
+    country?: string;
+    country_code?: string;
+    fiscal_data?: string;
   }): Promise<Company> {
     const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
 
@@ -131,6 +141,25 @@ export class CompanyRepository implements OnModuleInit {
       ].filter(Boolean),
     });
 
+    const createSetParams: string[] = [];
+    createSetParams.push("company.name=$name");
+    createSetParams.push("company.configurations=$configurations");
+    createSetParams.push("company.monthlyTokens=$monthlyTokens");
+    createSetParams.push("company.availableMonthlyTokens=$availableMonthlyTokens");
+    createSetParams.push("company.availableExtraTokens=$availableExtraTokens");
+    if (params.legal_address !== undefined) createSetParams.push("company.legal_address=$legal_address");
+    if (params.street_number !== undefined) createSetParams.push("company.street_number=$street_number");
+    if (params.street !== undefined) createSetParams.push("company.street=$street");
+    if (params.city !== undefined) createSetParams.push("company.city=$city");
+    if (params.province !== undefined) createSetParams.push("company.province=$province");
+    if (params.region !== undefined) createSetParams.push("company.region=$region");
+    if (params.postcode !== undefined) createSetParams.push("company.postcode=$postcode");
+    if (params.country !== undefined) createSetParams.push("company.country=$country");
+    if (params.country_code !== undefined) createSetParams.push("company.country_code=$country_code");
+    if (params.fiscal_data !== undefined) createSetParams.push("company.fiscal_data=$fiscal_data");
+    createSetParams.push("company.createdAt=datetime()");
+    createSetParams.push("company.updatedAt=datetime()");
+
     query.queryParams = {
       companyId: params.companyId,
       name: params.name,
@@ -140,17 +169,21 @@ export class CompanyRepository implements OnModuleInit {
       availableExtraTokens: params.availableExtraTokens ?? 0,
       featureIds: params.featureIds ?? [],
       moduleIds: params.moduleIds ?? [],
+      ...(params.legal_address !== undefined && { legal_address: params.legal_address }),
+      ...(params.street_number !== undefined && { street_number: params.street_number }),
+      ...(params.street !== undefined && { street: params.street }),
+      ...(params.city !== undefined && { city: params.city }),
+      ...(params.province !== undefined && { province: params.province }),
+      ...(params.region !== undefined && { region: params.region }),
+      ...(params.postcode !== undefined && { postcode: params.postcode }),
+      ...(params.country !== undefined && { country: params.country }),
+      ...(params.country_code !== undefined && { country_code: params.country_code }),
+      ...(params.fiscal_data !== undefined && { fiscal_data: params.fiscal_data }),
     };
 
     query.query = `
       CREATE (company:Company {id: $companyId})
-      SET company.name=$name,
-        company.configurations=$configurations,
-        company.monthlyTokens=$monthlyTokens,
-        company.availableMonthlyTokens=$availableMonthlyTokens,
-        company.availableExtraTokens=$availableExtraTokens,
-        company.createdAt=datetime(),
-        company.updatedAt=datetime()
+      SET ${createSetParams.join(",\n        ")}
     `;
 
     const relationships = [
@@ -196,6 +229,16 @@ export class CompanyRepository implements OnModuleInit {
     availableExtraTokens?: number;
     featureIds?: string[];
     moduleIds?: string[];
+    legal_address?: string;
+    street_number?: string;
+    street?: string;
+    city?: string;
+    province?: string;
+    region?: string;
+    postcode?: string;
+    country?: string;
+    country_code?: string;
+    fiscal_data?: string;
   }): Promise<void> {
     const query = this.neo4j.initQuery();
 
@@ -219,6 +262,16 @@ export class CompanyRepository implements OnModuleInit {
       updateParams.push("company.availableMonthlyTokens = $availableMonthlyTokens");
     if (params.availableExtraTokens !== undefined)
       updateParams.push("company.availableExtraTokens = $availableExtraTokens");
+    if (params.legal_address !== undefined) updateParams.push("company.legal_address = $legal_address");
+    if (params.street_number !== undefined) updateParams.push("company.street_number = $street_number");
+    if (params.street !== undefined) updateParams.push("company.street = $street");
+    if (params.city !== undefined) updateParams.push("company.city = $city");
+    if (params.province !== undefined) updateParams.push("company.province = $province");
+    if (params.region !== undefined) updateParams.push("company.region = $region");
+    if (params.postcode !== undefined) updateParams.push("company.postcode = $postcode");
+    if (params.country !== undefined) updateParams.push("company.country = $country");
+    if (params.country_code !== undefined) updateParams.push("company.country_code = $country_code");
+    if (params.fiscal_data !== undefined) updateParams.push("company.fiscal_data = $fiscal_data");
     updateParams.push("company.updatedAt = datetime()");
     const update = updateParams.join(", ");
 
@@ -232,6 +285,16 @@ export class CompanyRepository implements OnModuleInit {
       availableExtraTokens: params.availableExtraTokens ?? 0,
       featureIds: params.featureIds ?? [],
       moduleIds: params.moduleIds ?? [],
+      ...(params.legal_address !== undefined && { legal_address: params.legal_address }),
+      ...(params.street_number !== undefined && { street_number: params.street_number }),
+      ...(params.street !== undefined && { street: params.street }),
+      ...(params.city !== undefined && { city: params.city }),
+      ...(params.province !== undefined && { province: params.province }),
+      ...(params.region !== undefined && { region: params.region }),
+      ...(params.postcode !== undefined && { postcode: params.postcode }),
+      ...(params.country !== undefined && { country: params.country }),
+      ...(params.country_code !== undefined && { country_code: params.country_code }),
+      ...(params.fiscal_data !== undefined && { fiscal_data: params.fiscal_data }),
     };
 
     query.query = `
