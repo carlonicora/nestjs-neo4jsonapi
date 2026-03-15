@@ -1,3 +1,12 @@
+## [1.60.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.59.0...v1.60.0) (2026-03-15)
+
+### 🚀 Features
+
+* **company:** add address and fiscal_data fields to entity ([30dd111](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/30dd111d54460c60165f5877573fbb86fa29b98e))
+* **company:** add address and fiscal_data fields to POST DTO ([029d496](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/029d4966a14dc464131dba399fa5ce23c04e77dd))
+* **company:** add address and fiscal_data fields to PUT DTO ([7973100](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/79731006d79119d6e881f4db3c1ac7c21dbd96d1))
+* **company:** add legal address and fiscal data fields to company DTOs ([8ff5fa4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8ff5fa47d6e8f4cda422da1f7aaf6dbcdb691d82))
+
 ## [1.59.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.58.0...v1.59.0) (2026-03-13)
 
 ### 🚀 Features
