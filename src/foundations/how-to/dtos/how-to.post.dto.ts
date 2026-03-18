@@ -1,6 +1,5 @@
 import { Type } from "class-transformer";
 import { Equals, IsDefined, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
-import { UserDataDTO } from "../../user/dtos/user.dto";
 import { howToMeta } from "../entities/how-to.meta";
 
 export class HowToPostAttributesDTO {
@@ -19,13 +18,6 @@ export class HowToPostAttributesDTO {
   pages?: string;
 }
 
-export class HowToPostRelationshipsDTO {
-  @ValidateNested()
-  @IsDefined()
-  @Type(() => UserDataDTO)
-  author: UserDataDTO;
-}
-
 export class HowToPostDataDTO {
   @Equals(howToMeta.endpoint)
   type: string;
@@ -37,11 +29,6 @@ export class HowToPostDataDTO {
   @IsNotEmpty()
   @Type(() => HowToPostAttributesDTO)
   attributes: HowToPostAttributesDTO;
-
-  @ValidateNested()
-  @IsNotEmpty()
-  @Type(() => HowToPostRelationshipsDTO)
-  relationships: HowToPostRelationshipsDTO;
 }
 
 export class HowToPostDTO {

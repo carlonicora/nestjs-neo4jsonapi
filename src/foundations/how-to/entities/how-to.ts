@@ -1,6 +1,4 @@
 import { defineEntity, Entity } from "../../../common";
-import { User } from "../../user/entities/user";
-import { authorMeta } from "../../user/entities/user.meta";
 import { howToMeta } from "./how-to.meta";
 
 /**
@@ -15,8 +13,6 @@ export type HowTo = Entity & {
   aiStatus?: string;
 
   relevance?: number;
-
-  author: User;
 };
 
 /**
@@ -50,16 +46,7 @@ export const HowToDescriptor = defineEntity<HowTo>()({
     },
   },
 
-  relationships: {
-    author: {
-      model: authorMeta,
-      direction: "in",
-      relationship: "PUBLISHED",
-      cardinality: "one",
-      dtoKey: "author",
-      immutable: true,
-    },
-  },
+  relationships: {},
 });
 
 export type HowToDescriptorType = typeof HowToDescriptor;

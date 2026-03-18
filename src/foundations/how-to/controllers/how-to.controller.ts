@@ -19,12 +19,10 @@ import { ValidateId } from "../../../common/decorators/validate-id.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { createRelationshipHandlers } from "../../../common/handlers/relationship.handlers";
-import { AuditService } from "../../audit/services/audit.service";
 import { CacheService } from "../../../core/cache/services/cache.service";
-import { authorMeta } from "../../user/entities/user.meta";
+import { AuditService } from "../../audit/services/audit.service";
 import { HowToPostDTO } from "../dtos/how-to.post.dto";
 import { HowToPutDTO } from "../dtos/how-to.put.dto";
-import { HowToDescriptor } from "../entities/how-to";
 import { howToMeta } from "../entities/how-to.meta";
 import { HowToService } from "../services/how-to.service";
 
@@ -91,24 +89,5 @@ export class HowToController {
   @CacheInvalidate(howToMeta, "howToId")
   async delete(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
     return this.crud.delete(reply, howToId);
-  }
-
-  @Get(`${authorMeta.endpoint}/:authorId/${howToMeta.endpoint}`)
-  async findByAuthor(
-    @Res() reply: FastifyReply,
-    @Param("authorId") authorId: string,
-    @Query() query: any,
-    @Query("search") search?: string,
-    @Query("fetchAll") fetchAll?: boolean,
-    @Query("orderBy") orderBy?: string,
-  ) {
-    return this.relationships.findByRelated(reply, {
-      relationship: HowToDescriptor.relationshipKeys.author,
-      id: authorId,
-      query,
-      search,
-      fetchAll,
-      orderBy,
-    });
   }
 }
