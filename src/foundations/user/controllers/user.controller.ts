@@ -32,6 +32,7 @@ import { CompanyService } from "../../company/services/company.service";
 import { contentMeta } from "../../content";
 import { RelevancyService } from "../../relevancy";
 import { roleMeta } from "../../role/entities/role.meta";
+import { UserPatchAvatarDTO } from "../../user/dtos/user.patch.avatar.dto";
 import { UserPatchRateDTO } from "../../user/dtos/user.patch.rate.dto";
 import { UserPostDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDTO } from "../../user/dtos/user.put.dto";
@@ -198,6 +199,18 @@ export class UserController {
     this.security.validateAdmin({ user: request.user });
 
     const response = await this.users.reactivate({ userId: userId });
+    reply.send(response);
+  }
+
+  @Patch(`${userMeta.endpoint}/:userId/avatar`)
+  @CacheInvalidate(userMeta, "userId")
+  async updateUserAvatar(
+    @Request() request: any,
+    @Param("userId") userId: string,
+    @Body() body: UserPatchAvatarDTO,
+    @Res() reply: FastifyReply,
+  ) {
+    const response = await this.users.patchAvatar({ data: body.data });
     reply.send(response);
   }
 

@@ -10,6 +10,7 @@ import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfa
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { UserPatchAvatarDataDTO } from "../../user/dtos/user.patch.avatar.dto";
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
@@ -192,6 +193,17 @@ export class UserService {
 
     return this.findByUserId({
       userId: params.userId,
+    });
+  }
+
+  async patchAvatar(params: { data: UserPatchAvatarDataDTO }): Promise<JsonApiDataInterface> {
+    await this.db.patchAvatar({
+      userId: params.data.id,
+      avatar: params.data.attributes.avatar,
+    });
+
+    return this.findByUserId({
+      userId: params.data.id,
     });
   }
 

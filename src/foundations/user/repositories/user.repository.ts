@@ -591,6 +591,24 @@ export class UserRepository implements OnModuleInit {
     await this.neo4j.writeOne(query);
   }
 
+  async patchAvatar(params: { userId: string; avatar: string }): Promise<void> {
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+      avatar: params.avatar,
+    };
+
+    query.query += `
+      MATCH (user:User {id: $userId})
+      SET user.avatar = $avatar,
+          user.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
   async delete(params: { userId: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 
