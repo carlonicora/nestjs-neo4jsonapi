@@ -9,5 +9,6 @@ export enum QueueId {
   COMMUNITY_SUMMARISER = "community-summariser",
   BILLING_WEBHOOK = "billing-webhook",
   EMAIL = "email",
+  HOWTO = "howto",
   TRIAL = "trial",
 }
