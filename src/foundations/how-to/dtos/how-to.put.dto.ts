@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import { Equals, IsDefined, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
-import { howToMeta } from "src/features/essentials/how-to/entities/how-to.meta";
+import { howToMeta } from "../entities/how-to.meta";
 
 export class HowToPutAttributesDTO {
   @IsDefined()
@@ -16,22 +16,6 @@ export class HowToPutAttributesDTO {
   @IsOptional()
   @IsString()
   pages?: string;
-
-  @IsOptional()
-  @IsString()
-  abstract?: string;
-
-  @IsOptional()
-  @IsString()
-  tldr?: string;
-
-  @IsOptional()
-  @IsString()
-  aiStatus?: string;
-}
-
-export class HowToPutRelationshipsDTO {
-  // No relationships (excluding contextKey relationships)
 }
 
 export class HowToPutDataDTO {
@@ -45,11 +29,6 @@ export class HowToPutDataDTO {
   @IsNotEmpty()
   @Type(() => HowToPutAttributesDTO)
   attributes: HowToPutAttributesDTO;
-
-  @ValidateNested()
-  @IsNotEmpty()
-  @Type(() => HowToPutRelationshipsDTO)
-  relationships: HowToPutRelationshipsDTO;
 }
 
 export class HowToPutDTO {

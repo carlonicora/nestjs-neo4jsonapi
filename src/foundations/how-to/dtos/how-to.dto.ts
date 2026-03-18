@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import { Equals, IsNotEmpty, IsUUID, ValidateNested } from "class-validator";
-import { howToMeta } from "src/features/essentials/how-to/entities/how-to.meta";
+import { howToMeta } from "../entities/how-to.meta";
 
 export class HowToDTO {
   @Equals(howToMeta.endpoint)
