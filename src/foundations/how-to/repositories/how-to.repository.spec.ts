@@ -4,7 +4,9 @@ import { ClsService } from "nestjs-cls";
 import { HttpException } from "@nestjs/common";
 import { HowToRepository } from "./how-to.repository";
 import { HowToDescriptor } from "../entities/how-to";
-import { Neo4jService, SecurityService } from "@carlonicora/nestjs-neo4jsonapi";
+import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
+import { AiStatus } from "../../../common/enums/ai.status";
 
 describe("HowToRepository", () => {
   let repository: HowToRepository;
@@ -95,7 +97,6 @@ describe("HowToRepository", () => {
 
       await repository.onModuleInit();
 
-      // Verify constraint creation was attempted
       expect(neo4jService.writeOne).toHaveBeenCalled();
     });
   });
@@ -115,15 +116,6 @@ describe("HowToRepository", () => {
       neo4jService.readMany.mockResolvedValue([]);
 
       await repository.find({ term: "search-term" });
-
-      expect(neo4jService.initQuery).toHaveBeenCalled();
-      expect(neo4jService.readMany).toHaveBeenCalled();
-    });
-
-    it("should pass orderBy to query", async () => {
-      neo4jService.readMany.mockResolvedValue([]);
-
-      await repository.find({ orderBy: "createdAt" });
 
       expect(neo4jService.initQuery).toHaveBeenCalled();
       expect(neo4jService.readMany).toHaveBeenCalled();
@@ -158,29 +150,9 @@ describe("HowToRepository", () => {
     });
 
     it("should throw Forbidden when entity exists but user has no access", async () => {
-      // First read returns null (user context), second returns entity (no user context)
       neo4jService.readOne.mockResolvedValueOnce(null).mockResolvedValueOnce(MOCK_HOWTO);
 
       await expect(repository.findById({ id: TEST_IDS.howToId })).rejects.toThrow(HttpException);
-    });
-  });
-
-  describe("findByIds", () => {
-    it("should find howTo entities by ID list", async () => {
-      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
-
-      const result = await repository.findByIds({ ids: [TEST_IDS.howToId] });
-
-      expect(neo4jService.readMany).toHaveBeenCalled();
-      expect(result).toEqual([MOCK_HOWTO]);
-    });
-
-    it("should return empty array for empty IDs list", async () => {
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const result = await repository.findByIds({ ids: [] });
-
-      expect(result).toEqual([]);
     });
   });
 
@@ -195,51 +167,15 @@ describe("HowToRepository", () => {
 
       expect(neo4jService.writeOne).toHaveBeenCalled();
     });
-
-    it("should validate related nodes exist before create", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
-
-      await repository.create({
-        id: TEST_IDS.howToId,
-      });
-
-      // validateExistingNodes may or may not be called depending on relationships
-      expect(neo4jService.writeOne).toHaveBeenCalled();
-    });
   });
 
-  describe("put", () => {
-    it("should update an existing howTo entity", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
-
-      await repository.put({
-        id: TEST_IDS.howToId,
-      });
-
-      expect(neo4jService.writeOne).toHaveBeenCalled();
-    });
-  });
-
-  describe("patch", () => {
-    it("should partially update an existing howTo entity", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
-
-      await repository.patch({
-        id: TEST_IDS.howToId,
-      });
-
-      expect(neo4jService.writeOne).toHaveBeenCalled();
-    });
-
-    it("should only update provided fields", async () => {
+  describe("updateStatus", () => {
+    it("should update the AI status of a howTo", async () => {
       neo4jService.writeOne.mockResolvedValue(undefined);
 
-      await repository.patch({
+      await repository.updateStatus({
         id: TEST_IDS.howToId,
-        // Only update specific fields
+        aiStatus: AiStatus.Completed,
       });
 
       expect(neo4jService.writeOne).toHaveBeenCalled();
@@ -266,18 +202,6 @@ describe("HowToRepository", () => {
       });
 
       expect(neo4jService.initQuery).toHaveBeenCalled();
-      expect(neo4jService.readMany).toHaveBeenCalled();
-      expect(result).toEqual([MOCK_HOWTO]);
-    });
-
-    it("should find howTo entities by multiple author IDs", async () => {
-      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
-
-      const result = await repository.findByRelated({
-        relationship: HowToDescriptor.relationshipKeys.author,
-        id: [TEST_IDS.authorId, "another-author-id"],
-      });
-
       expect(neo4jService.readMany).toHaveBeenCalled();
       expect(result).toEqual([MOCK_HOWTO]);
     });

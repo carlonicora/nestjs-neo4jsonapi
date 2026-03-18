@@ -1,15 +1,22 @@
-import { AuditModule, modelRegistry } from "@carlonicora/nestjs-neo4jsonapi";
 import { Module, OnModuleInit } from "@nestjs/common";
-import { HowToController } from "src/features/essentials/how-to/controllers/how-to.controller";
-import { HowToDescriptor } from "src/features/essentials/how-to/entities/how-to";
-import { HowToRepository } from "src/features/essentials/how-to/repositories/how-to.repository";
-import { HowToService } from "src/features/essentials/how-to/services/how-to.service";
+import { createWorkerProvider } from "../../common/decorators/conditional-service.decorator";
+import { modelRegistry } from "../../common/registries/registry";
+import { BlockNoteModule } from "../../core/blocknote/blocknote.module";
+import { AuditModule } from "../audit/audit.module";
+import { ChunkModule } from "../chunk/chunk.module";
+import { ChunkerModule } from "../chunker/chunker.module";
+import { TokenUsageModule } from "../tokenusage/tokenusage.module";
+import { HowToController } from "./controllers/how-to.controller";
+import { HowToDescriptor } from "./entities/how-to";
+import { HowToProcessor } from "./processors/how-to.processor";
+import { HowToRepository } from "./repositories/how-to.repository";
+import { HowToService } from "./services/how-to.service";
 
 @Module({
   controllers: [HowToController],
-  providers: [HowToDescriptor.model.serialiser, HowToRepository, HowToService],
-  exports: [],
-  imports: [AuditModule],
+  providers: [HowToDescriptor.model.serialiser, HowToRepository, HowToService, createWorkerProvider(HowToProcessor)],
+  exports: [HowToRepository, HowToService],
+  imports: [AuditModule, BlockNoteModule, ChunkModule, ChunkerModule, TokenUsageModule],
 })
 export class HowToModule implements OnModuleInit {
   onModuleInit() {

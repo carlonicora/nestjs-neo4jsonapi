@@ -11,6 +11,7 @@ import { ReferralModule } from "./referral/referral.module";
 import { ReferralModuleConfig } from "./referral/interfaces/referral.config.interface";
 import { DiscordUserModule } from "./discord-user/discord-user.module";
 import { FeatureModule } from "./feature/feature.module";
+import { HowToModule } from "./how-to/how-to.module";
 import { KeyConceptModule } from "./keyconcept/keyconcept.module";
 import { ModuleModule } from "./module/module.module";
 import { NotificationModule } from "./notification/notification.module";
@@ -56,6 +57,7 @@ const STATIC_FOUNDATION_MODULES = [
   CompanyModule,
   DiscordUserModule,
   FeatureModule,
+  HowToModule,
   KeyConceptModule,
   ModuleModule,
   NotificationModule,
