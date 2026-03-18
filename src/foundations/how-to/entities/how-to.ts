@@ -1,6 +1,6 @@
-import { defineEntity, Entity } from "@carlonicora/nestjs-neo4jsonapi";
-import { User } from "@carlonicora/nestjs-neo4jsonapi";
-import { userMeta } from "@carlonicora/nestjs-neo4jsonapi";
+import { defineEntity, Entity } from "../../../common";
+import { User } from "../../user/entities/user";
+import { authorMeta } from "../../user/entities/user.meta";
 import { howToMeta } from "./how-to.meta";
 
 /**
@@ -13,6 +13,9 @@ export type HowTo = Entity & {
   abstract?: string;
   tldr?: string;
   aiStatus?: string;
+
+  relevance?: number;
+
   author: User;
 };
 
@@ -36,9 +39,20 @@ export const HowToDescriptor = defineEntity<HowTo>()({
     aiStatus: { type: "string" },
   },
 
+  computed: {
+    relevance: {
+      compute: (params) => {
+        if (!params.record.has("score")) return undefined;
+        const score = params.record.get("score");
+        if (score?.toNumber) return score.toNumber();
+        return Number(score) || undefined;
+      },
+    },
+  },
+
   relationships: {
     author: {
-      model: userMeta,
+      model: authorMeta,
       direction: "in",
       relationship: "PUBLISHED",
       cardinality: "one",

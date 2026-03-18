@@ -1,4 +1,4 @@
-import { DataMeta } from "@carlonicora/nestjs-neo4jsonapi";
+import { DataMeta } from "../../../common/interfaces/datamodel.interface";
 
 export const howToMeta: DataMeta = {
   type: "howtos",
