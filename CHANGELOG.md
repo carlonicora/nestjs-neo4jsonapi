@@ -1,3 +1,25 @@
+## [1.62.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.61.0...v1.62.0) (2026-03-18)
+
+### 🚀 Features
+
+* **how-to:** adapt controller with AI processing triggers ([4352a79](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4352a79e11a04f9a810f185fa27355a1d672b1b0))
+* **how-to:** adapt DTOs to library-relative imports ([b80a59c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b80a59c7cccee46937ca5632c96871bc52d9bbe5))
+* **how-to:** adapt entity and meta to library-relative imports ([67856ab](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/67856ab1ad83a2242e41d73d0f4b9258a06b5757))
+* **how-to:** adapt repository with fulltext search and updateStatus ([d695485](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d69548559b9fd65cd1098857b573e24e6a5a1f18))
+* **how-to:** adapt service with AI processing pipeline ([d1512a2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d1512a2c8d1ed3e65d2280e4a491586819585ea8))
+* **how-to:** add HOWTO queue ID to library enum ([b8fd12d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b8fd12dd80a23eb4504a565b585212b9254b0303))
+* **how-to:** create BullMQ processor for HowTo queue ([d1adb77](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d1adb775e01dce8e69397785b30af7564fef0bd8))
+* **how-to:** create module, barrel exports, and register in foundations ([5cd2a5f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5cd2a5fb2e795c59ed4a7052397eb475a4be3691))
+* **how-to:** relocate generated backend module to library ([6ed3fd2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6ed3fd2adf98e3bddc9819802075f32835d50596))
+
+### 🐛 Bug Fixes
+
+* remove author from howto ([17e80ca](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/17e80ca7f91c5bd807fa81129d30ccb7635634d6))
+
+### ♻️ Chores
+
+* **how-to:** remove unused imports from service ([d5af811](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d5af8117da3783df1fa08a0af7a7cbaecc389128))
+
 ## [1.61.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.60.0...v1.61.0) (2026-03-18)
 
 ### 🚀 Features
