@@ -8,8 +8,6 @@ import { BaseConfigInterface } from "../../../config/interfaces/base.config.inte
 import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
 import { QueueId } from "../../../config/enums/queue.id";
 import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
-import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
