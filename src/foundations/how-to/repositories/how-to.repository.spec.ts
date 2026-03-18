@@ -18,7 +18,6 @@ describe("HowToRepository", () => {
     howToId: "howto000-0001-4000-a000-0000000000001",
     companyId: "company0-0001-4000-a000-0000000000001",
     userId: "user0000-0001-4000-a000-0000000000001",
-    authorId: "user0000-0001-4000-a000-0000000000001",
   };
 
   const MOCK_HOWTO = {
@@ -189,32 +188,6 @@ describe("HowToRepository", () => {
       await repository.delete({ id: TEST_IDS.howToId });
 
       expect(neo4jService.writeOne).toHaveBeenCalled();
-    });
-  });
-
-  describe("findByRelated - author", () => {
-    it("should find howTo entities by author ID", async () => {
-      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
-
-      const result = await repository.findByRelated({
-        relationship: HowToDescriptor.relationshipKeys.author,
-        id: TEST_IDS.authorId,
-      });
-
-      expect(neo4jService.initQuery).toHaveBeenCalled();
-      expect(neo4jService.readMany).toHaveBeenCalled();
-      expect(result).toEqual([MOCK_HOWTO]);
-    });
-
-    it("should return empty array when no howTo entities found", async () => {
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const result = await repository.findByRelated({
-        relationship: HowToDescriptor.relationshipKeys.author,
-        id: TEST_IDS.authorId,
-      });
-
-      expect(result).toEqual([]);
     });
   });
 });
