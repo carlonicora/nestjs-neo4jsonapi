@@ -1,3 +1,9 @@
+## [1.61.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.60.0...v1.61.0) (2026-03-18)
+
+### 🚀 Features
+
+* add PATCH /users/:userId/avatar endpoint for avatar-only updates ([4a21992](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4a2199259d528efe3567faa320d390be1d8cce09))
+
 ## [1.60.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.59.0...v1.60.0) (2026-03-15)
 
 ### 🚀 Features
