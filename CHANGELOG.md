@@ -1,3 +1,9 @@
+## [1.62.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.0...v1.62.1) (2026-03-18)
+
+### 🐛 Bug Fixes
+
+* remove authorId from TEST_IDS and related tests in HowToRepository ([7142edc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7142edcb84e69682f6f01206ed99ea6c038bc037))
+
 ## [1.62.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.61.0...v1.62.0) (2026-03-18)
 
 ### 🚀 Features
