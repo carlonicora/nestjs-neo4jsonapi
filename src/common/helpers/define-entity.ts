@@ -27,18 +27,32 @@ function convertNeo4jNumber(value: any): number | null {
 }
 
 /**
- * Convert Neo4j Date to JavaScript Date object
+ * Convert Neo4j Date to YYYY-MM-DD string.
+ * Returns a date-only string to avoid timezone shifts during JSON serialization.
  */
-function convertNeo4jDate(value: any): Date | null {
+function convertNeo4jDate(value: any): string | null {
   if (!value) return null;
 
   // Handle Neo4j Date format: {year: {low, high}, month: {low, high}, day: {low, high}}
   if (value.year?.low !== undefined) {
-    return new Date(value.year.low, value.month.low - 1, value.day.low);
+    const y = value.year.low;
+    const m = String(value.month.low).padStart(2, "0");
+    const d = String(value.day.low).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
 
-  // Already a Date or string, convert to Date
-  return new Date(value);
+  // Handle JS Date object
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  // Already a string — extract date portion
+  if (typeof value === "string") return value.substring(0, 10);
+
+  return null;
 }
 
 /**
