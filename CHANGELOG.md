@@ -1,3 +1,9 @@
+## [1.62.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.1...v1.62.2) (2026-03-28)
+
+### 🐛 Bug Fixes
+
+* **date:** return YYYY-MM-DD strings for date type fields to prevent timezone shift ([a7faa3a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a7faa3a0ea70257d7ef87e9786e2b845151be481))
+
 ## [1.62.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.0...v1.62.1) (2026-03-18)
 
 ### 🐛 Bug Fixes
