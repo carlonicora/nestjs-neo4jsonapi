@@ -1,3 +1,9 @@
+## [1.62.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.5...v1.62.6) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** upgrade Node.js version to 24 for improved compatibility ([b836f9e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b836f9e4098b7588a6d580ada44ff98f09b8efb1))
+
 ## [1.62.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.4...v1.62.5) (2026-04-14)
 
 ### 🐛 Bug Fixes
