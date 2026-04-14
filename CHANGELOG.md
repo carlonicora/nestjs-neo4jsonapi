@@ -1,3 +1,9 @@
+## [1.62.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.4...v1.62.5) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** remove unnecessary registry-url from setup-node step ([fe7baa4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fe7baa497d3b8f7abfb8a3b1db5b96399ffdc8c5))
+
 ## [1.62.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.3...v1.62.4) (2026-04-14)
 
 ### 🐛 Bug Fixes
