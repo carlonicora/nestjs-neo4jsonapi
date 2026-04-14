@@ -1,3 +1,11 @@
+## [1.62.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.2...v1.62.3) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **audit:** rename createAuditEntry to logRead in controller tests ([c754312](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c75431283df5617703c7563b143feb95c977d316))
+* **release:** update npm installation method for OIDC support ([75b9f25](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/75b9f25eb7be50c4a00701f0c3638c361583d847))
+* **release:** upgrade npm to version 11 for OIDC support ([c54668b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c54668bfe020672c304db93ae33fbc459ce07d7f))
+
 ## [1.62.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.1...v1.62.2) (2026-03-28)
 
 ### 🐛 Bug Fixes
