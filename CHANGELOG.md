@@ -1,3 +1,9 @@
+## [1.62.7](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.6...v1.62.7) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** remove debug flag from semantic-release command ([20522c6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/20522c6c3e2f4d03e83c322d41298b4e3f6bf63e))
+
 ## [1.62.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.5...v1.62.6) (2026-04-14)
 
 ### 🐛 Bug Fixes
