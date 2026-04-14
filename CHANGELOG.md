@@ -1,3 +1,9 @@
+## [1.62.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.3...v1.62.4) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** enable debug logging for semantic-release ([941f6a1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/941f6a1cc1dd6c44afb457f1878537ced673627c))
+
 ## [1.62.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.2...v1.62.3) (2026-04-14)
 
 ### 🐛 Bug Fixes
