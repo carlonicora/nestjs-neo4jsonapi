@@ -7,17 +7,7 @@
  * - gt, gte, lt, lte      → number, date, datetime
  * - isNull, isNotNull     → any type (value not used)
  */
-export type FilterOperator =
-  | "eq"
-  | "ne"
-  | "in"
-  | "like"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "isNull"
-  | "isNotNull";
+export type FilterOperator = "eq" | "ne" | "in" | "like" | "gt" | "gte" | "lt" | "lte" | "isNull" | "isNotNull";
 
 export interface FilterCriterion {
   field: string;

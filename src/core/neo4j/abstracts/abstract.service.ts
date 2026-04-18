@@ -110,14 +110,13 @@ export abstract class AbstractService<
     term?: string;
     fetchAll?: boolean;
   }): Promise<T[]> {
-    const records = await this.repository.find({
+    return this.repository.find({
       filters: params.filters,
       orderByFields: params.orderByFields,
       term: params.term,
       fetchAll: params.fetchAll,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
     });
-    if (params.limit != null) return records.slice(0, params.limit);
-    return records;
   }
 
   /**
@@ -131,15 +130,14 @@ export abstract class AbstractService<
     limit?: number;
     term?: string;
   }): Promise<T[]> {
-    const records = await this.repository.findByRelated({
+    return this.repository.findByRelated({
       relationship: params.relationship,
       id: params.id,
       term: params.term,
       filters: params.filters,
       orderByFields: params.orderByFields,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
     });
-    if (params.limit != null) return records.slice(0, params.limit);
-    return records;
   }
 
   /**

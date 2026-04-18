@@ -2,10 +2,7 @@ import { SortCriterion } from "../types/filter.criterion";
 
 const VALID_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-export function buildOrderByClause(input: {
-  nodeAlias: string;
-  sort: SortCriterion[];
-}): string {
+export function buildOrderByClause(input: { nodeAlias: string; sort: SortCriterion[] }): string {
   if (!VALID_IDENTIFIER.test(input.nodeAlias)) {
     throw new Error(`Invalid nodeAlias identifier: ${input.nodeAlias}`);
   }

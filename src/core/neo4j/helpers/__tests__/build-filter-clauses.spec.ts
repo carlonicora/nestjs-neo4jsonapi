@@ -74,9 +74,7 @@ describe("buildFilterClauses", () => {
       ],
       paramPrefix: "f",
     });
-    expect(clause).toBe(
-      "order.status <> $f_0 AND order.total > $f_1 AND order.total < $f_2 AND order.total <= $f_3"
-    );
+    expect(clause).toBe("order.status <> $f_0 AND order.total > $f_1 AND order.total < $f_2 AND order.total <= $f_3");
     expect(params).toEqual({ f_0: "cancelled", f_1: 0, f_2: 10000, f_3: 5000 });
   });
 

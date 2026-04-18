@@ -48,9 +48,25 @@ describe("AbstractService typed-records variants", () => {
     expect(repo.findByRelated).toHaveBeenCalled();
   });
 
-  it("applies limit client-side when provided", async () => {
-    repo.find.mockResolvedValueOnce([{ id: "1" }, { id: "2" }, { id: "3" }]);
-    const out = await svc.findRecords({ limit: 2 });
-    expect(out).toEqual([{ id: "1" }, { id: "2" }]);
+  it("passes limit as cursor.take to the repository", async () => {
+    await svc.findRecords({ limit: 2 });
+    expect(repo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { take: 2 },
+      }),
+    );
+  });
+
+  it("passes limit as cursor.take to findByRelated", async () => {
+    await svc.findRelatedRecords({
+      relationship: "orders",
+      id: "acme-id",
+      limit: 5,
+    });
+    expect(repo.findByRelated).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { take: 5 },
+      }),
+    );
   });
 });
