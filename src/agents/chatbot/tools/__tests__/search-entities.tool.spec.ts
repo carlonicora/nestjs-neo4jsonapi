@@ -44,11 +44,7 @@ describe("SearchEntitiesTool", () => {
 
   it("rejects sort on undescribed field", async () => {
     const tool = new SearchEntitiesTool(factory);
-    const out: any = await tool.invoke(
-      { type: "accounts", sort: [{ field: "ghost", direction: "asc" }] },
-      ctx,
-      [],
-    );
+    const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, []);
     expect(out.error).toMatch(/ghost/);
   });
 

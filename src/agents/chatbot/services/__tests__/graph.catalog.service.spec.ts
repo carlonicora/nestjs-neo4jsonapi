@@ -91,24 +91,34 @@ describe("GraphCatalogService", () => {
 
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
-      type: "a", module: "m", description: "A",
+      type: "a",
+      module: "m",
+      description: "A",
       fields: {},
       relationships: {
         self: {
           model: { type: "b", nodeName: "b", labelName: "B" },
-          direction: "out", relationship: "R", cardinality: "one",
-          description: "x", reverse: { name: "parent", description: "x" },
+          direction: "out",
+          relationship: "R",
+          cardinality: "one",
+          description: "x",
+          reverse: { name: "parent", description: "x" },
         },
       },
     });
     const c = descriptor({
-      type: "c", module: "m", description: "C",
+      type: "c",
+      module: "m",
+      description: "C",
       fields: {},
       relationships: {
         self: {
           model: { type: "b", nodeName: "b", labelName: "B" },
-          direction: "out", relationship: "R2", cardinality: "one",
-          description: "y", reverse: { name: "parent", description: "y" },
+          direction: "out",
+          relationship: "R2",
+          cardinality: "one",
+          description: "y",
+          reverse: { name: "parent", description: "y" },
         },
       },
     });

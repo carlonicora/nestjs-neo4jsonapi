@@ -20,11 +20,7 @@ export class DescribeEntityTool {
     });
   }
 
-  async invoke(
-    input: z.infer<typeof inputSchema>,
-    ctx: UserContext,
-    recorder: ToolCallRecord[],
-  ): Promise<unknown> {
+  async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
     return this.factory.capture(
       { tool: "describe_entity", input },
       async () => {

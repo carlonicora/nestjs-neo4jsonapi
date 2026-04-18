@@ -1,9 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
-import {
-  CatalogEntity,
-  CatalogField,
-  CatalogRelationship,
-} from "../interfaces/graph.catalog.interface";
+import { CatalogEntity, CatalogField, CatalogRelationship } from "../interfaces/graph.catalog.interface";
 
 const FILTERABLE_TYPES = new Set(["string", "number", "boolean", "date", "datetime"]);
 const SORTABLE_TYPES = new Set(["string", "number", "date", "datetime"]);
@@ -19,14 +15,17 @@ export interface DescriptorSource {
     description?: string;
     module: string;
     fields: Record<string, { type: string; description?: string }>;
-    relationships: Record<string, {
-      model: { type: string; nodeName: string; labelName: string };
-      direction: "in" | "out";
-      relationship: string;
-      cardinality: "one" | "many";
-      description?: string;
-      reverse?: { name: string; description: string };
-    }>;
+    relationships: Record<
+      string,
+      {
+        model: { type: string; nodeName: string; labelName: string };
+        direction: "in" | "out";
+        relationship: string;
+        cardinality: "one" | "many";
+        description?: string;
+        reverse?: { name: string; description: string };
+      }
+    >;
     chat?: { summary?: (d: any) => string; textSearchFields?: string[] };
   }>;
 }
@@ -47,9 +46,7 @@ export class GraphCatalogService implements OnModuleInit {
     this.entities.clear();
     this.renderedByModule.clear();
 
-    const descriptors = this.source.loadAll().filter(
-      (d) => typeof d.description === "string" && d.description.length,
-    );
+    const descriptors = this.source.loadAll().filter((d) => typeof d.description === "string" && d.description.length);
 
     // Pass 1: create CatalogEntity for every described descriptor (fields + forward relationships).
     for (const d of descriptors) {
@@ -97,9 +94,7 @@ export class GraphCatalogService implements OnModuleInit {
         if (!rel.description || !rel.reverse) continue;
         const target = this.entities.get(rel.model.type);
         if (!target) {
-          this.logger.warn(
-            `Reverse relationship "${rel.reverse.name}" dropped: target ${rel.model.type} not visible.`,
-          );
+          this.logger.warn(`Reverse relationship "${rel.reverse.name}" dropped: target ${rel.model.type} not visible.`);
           continue;
         }
         const collision = target.relationships.find((r) => r.name === rel.reverse!.name);
@@ -132,9 +127,7 @@ export class GraphCatalogService implements OnModuleInit {
     for (const [module, list] of byModule.entries()) {
       this.renderedByModule.set(module, this.renderModule(module, list));
     }
-    this.logger.log(
-      `Graph catalog built: ${this.entities.size} entities, ${byModule.size} modules.`,
-    );
+    this.logger.log(`Graph catalog built: ${this.entities.size} entities, ${byModule.size} modules.`);
   }
 
   private renderModule(module: string, list: CatalogEntity[]): string {
@@ -144,27 +137,16 @@ export class GraphCatalogService implements OnModuleInit {
       for (const r of e.relationships) {
         if (r.isReverse) continue; // forward-only in the rendered map; reverse names appear in the bracket pair
         const forwardName = r.name;
-        const reverse = this.entities.get(r.targetType)?.relationships.find(
-          (x) =>
-            x.isReverse &&
-            x.sourceType === r.targetType &&
-            x.cypherLabel === r.cypherLabel,
-        );
+        const reverse = this.entities
+          .get(r.targetType)
+          ?.relationships.find((x) => x.isReverse && x.sourceType === r.targetType && x.cypherLabel === r.cypherLabel);
         const names = reverse
           ? `${e.type}.${forwardName} / ${r.targetType}.${reverse.name}`
           : `${e.type}.${forwardName}`;
-        relLines.push(
-          `(${e.type}) --> (${r.targetType})  [${names}]  — ${r.description}`,
-        );
+        relLines.push(`(${e.type}) --> (${r.targetType})  [${names}]  — ${r.description}`);
       }
     }
-    return [
-      `## Entities (${module})`,
-      entityLines,
-      "",
-      `## Relationships (${module})`,
-      relLines.join("\n"),
-    ].join("\n");
+    return [`## Entities (${module})`, entityLines, "", `## Relationships (${module})`, relLines.join("\n")].join("\n");
   }
 
   getMapFor(userModules: string[]): string {

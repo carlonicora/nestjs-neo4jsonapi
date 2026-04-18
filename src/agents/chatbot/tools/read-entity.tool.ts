@@ -6,10 +6,7 @@ import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 const inputSchema = z.object({
   type: z.string(),
   id: z.string(),
-  include: z
-    .array(z.string())
-    .optional()
-    .describe("Relationship names to pull one-hop related records."),
+  include: z.array(z.string()).optional().describe("Relationship names to pull one-hop related records."),
 });
 
 @Injectable()
@@ -19,18 +16,13 @@ export class ReadEntityTool {
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
     return new DynamicStructuredTool({
       name: "read_entity",
-      description:
-        "Fetches one record by id, optionally pulling related records across described relationships.",
+      description: "Fetches one record by id, optionally pulling related records across described relationships.",
       schema: inputSchema,
       func: async (input) => JSON.stringify(await this.invoke(input, ctx, recorder)),
     });
   }
 
-  async invoke(
-    input: z.infer<typeof inputSchema>,
-    ctx: UserContext,
-    recorder: ToolCallRecord[],
-  ): Promise<unknown> {
+  async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
     return this.factory.capture(
       { tool: "read_entity", input },
       async () => {
@@ -68,7 +60,7 @@ export class ReadEntityTool {
             const summariser =
               "error" in targetEntity
                 ? (d: any) => String(d.id)
-                : targetEntity.summary ?? ((d: any) => String(d.name ?? d.id));
+                : (targetEntity.summary ?? ((d: any) => String(d.name ?? d.id)));
             related[name] = records.map((r) => ({
               id: r.id,
               type: rel.targetType,

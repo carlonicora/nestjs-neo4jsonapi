@@ -42,11 +42,7 @@ describe("ReadEntityTool", () => {
 
   it("rejects include for undescribed relationship", async () => {
     const tool = new ReadEntityTool(factory);
-    const out: any = await tool.invoke(
-      { type: "accounts", id: "a1", include: ["ghost"] },
-      ctx,
-      [],
-    );
+    const out: any = await tool.invoke({ type: "accounts", id: "a1", include: ["ghost"] }, ctx, []);
     expect(out.error).toMatch(/ghost/);
   });
 });

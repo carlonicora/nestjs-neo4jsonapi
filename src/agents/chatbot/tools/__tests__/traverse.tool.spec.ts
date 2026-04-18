@@ -40,8 +40,7 @@ describe("TraverseTool", () => {
     findRelatedRecords: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
   };
   const factory: any = {
-    resolveEntity: (t: string) =>
-      t === "accounts" ? accounts : t === "orders" ? orders : { error: "nope" },
+    resolveEntity: (t: string) => (t === "accounts" ? accounts : t === "orders" ? orders : { error: "nope" }),
     resolveService: (t: string) => (t === "orders" ? targetSvc : undefined),
     capture: async (_r: any, fn: any, rec: any[]) => {
       const v = await fn();
@@ -78,11 +77,7 @@ describe("TraverseTool", () => {
 
   it("rejects unknown relationship", async () => {
     const tool = new TraverseTool(factory);
-    const out: any = await tool.invoke(
-      { fromType: "accounts", fromId: "a1", relationship: "ghost" },
-      ctx,
-      [],
-    );
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "ghost" }, ctx, []);
     expect(out.error).toMatch(/ghost/);
   });
 

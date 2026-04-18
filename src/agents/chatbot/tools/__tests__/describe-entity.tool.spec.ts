@@ -8,9 +8,7 @@ describe("DescribeEntityTool", () => {
         type: "accounts",
         module: "crm",
         description: "A customer or supplier.",
-        fields: [
-          { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
-        ],
+        fields: [{ name: "name", type: "string", description: "Display name.", filterable: true, sortable: true }],
         relationships: [
           {
             name: "orders",
@@ -41,38 +39,22 @@ describe("DescribeEntityTool", () => {
   const tool = new DescribeEntityTool(factory);
 
   it("returns entity detail stripped of internal cypher fields", async () => {
-    const out = await tool.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModules: ["crm"] },
-      [],
-    );
+    const out = await tool.invoke({ type: "accounts" }, { companyId: "c", userId: "u", userModules: ["crm"] }, []);
     expect(out).toEqual({
       type: "accounts",
       description: "A customer or supplier.",
-      fields: [
-        { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
-      ],
-      relationships: [
-        { name: "orders", targetType: "orders", cardinality: "many", description: "Orders placed." },
-      ],
+      fields: [{ name: "name", type: "string", description: "Display name.", filterable: true, sortable: true }],
+      relationships: [{ name: "orders", targetType: "orders", cardinality: "many", description: "Orders placed." }],
     });
   });
 
   it("returns error object for unknown type without throwing", async () => {
-    const out = await tool.invoke(
-      { type: "widgets" },
-      { companyId: "c", userId: "u", userModules: ["crm"] },
-      [],
-    );
+    const out = await tool.invoke({ type: "widgets" }, { companyId: "c", userId: "u", userModules: ["crm"] }, []);
     expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
   });
 
   it("returns error object for type outside user modules", async () => {
-    const out = await tool.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModules: ["sales"] },
-      [],
-    );
+    const out = await tool.invoke({ type: "accounts" }, { companyId: "c", userId: "u", userModules: ["sales"] }, []);
     expect((out as any).error).toMatch(/not available/);
   });
 });
