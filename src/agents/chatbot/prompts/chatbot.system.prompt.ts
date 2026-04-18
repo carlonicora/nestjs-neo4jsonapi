@@ -26,6 +26,8 @@ You have access to the following tools:
 export function renderChatbotSystemPrompt(graphMap: string): string {
   return CHATBOT_SYSTEM_PROMPT_BASE.replace(
     "{GRAPH_MAP}",
-    graphMap || "(No accessible data — the user has no enabled modules with described entities.)",
+    graphMap ||
+      "(No accessible data — the user has no enabled modules with described entities. " +
+      "DO NOT attempt any tool calls. Respond politely explaining that you have no data to query.)",
   );
 }

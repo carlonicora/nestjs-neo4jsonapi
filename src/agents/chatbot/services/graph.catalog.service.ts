@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { CatalogEntity, CatalogField, CatalogRelationship } from "../interfaces/graph.catalog.interface";
 
 const FILTERABLE_TYPES = new Set(["string", "number", "boolean", "date", "datetime"]);
@@ -31,14 +31,14 @@ export interface DescriptorSource {
 }
 
 @Injectable()
-export class GraphCatalogService implements OnModuleInit {
+export class GraphCatalogService implements OnApplicationBootstrap {
   private readonly logger = new Logger(GraphCatalogService.name);
   private entities = new Map<string, CatalogEntity>();
   private renderedByModule = new Map<string, string>();
 
   constructor(private readonly source: DescriptorSource) {}
 
-  onModuleInit() {
+  onApplicationBootstrap() {
     this.buildCatalog();
   }
 
