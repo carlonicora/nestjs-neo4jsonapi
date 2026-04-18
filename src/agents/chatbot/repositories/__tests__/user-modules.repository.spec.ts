@@ -18,25 +18,13 @@ describe("UserModulesRepository", () => {
   });
 
   it("lowercases and strips whitespace from module names", async () => {
-    const neo4j = makeNeo4j([
-      { moduleName: "CRM" },
-      { moduleName: "Sales Orders" },
-      { moduleName: "procurement" },
-    ]);
+    const neo4j = makeNeo4j([{ moduleName: "CRM" }, { moduleName: "Sales Orders" }, { moduleName: "procurement" }]);
     const repo = new UserModulesRepository(neo4j);
-    expect(await repo.findModulesForRoles(["role-1"])).toEqual([
-      "crm",
-      "salesorders",
-      "procurement",
-    ]);
+    expect(await repo.findModulesForRoles(["role-1"])).toEqual(["crm", "salesorders", "procurement"]);
   });
 
   it("drops null and empty module names", async () => {
-    const neo4j = makeNeo4j([
-      { moduleName: null },
-      { moduleName: "" },
-      { moduleName: "Warehouse" },
-    ]);
+    const neo4j = makeNeo4j([{ moduleName: null }, { moduleName: "" }, { moduleName: "Warehouse" }]);
     const repo = new UserModulesRepository(neo4j);
     expect(await repo.findModulesForRoles(["r1"])).toEqual(["warehouse"]);
   });

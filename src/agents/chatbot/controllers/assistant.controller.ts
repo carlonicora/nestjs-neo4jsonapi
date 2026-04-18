@@ -14,10 +14,7 @@ export class AssistantController {
   ) {}
 
   @Post()
-  async post(
-    @Body() body: AssistantRequestDto,
-    @Req() req: AuthenticatedRequest,
-  ): Promise<any> {
+  async post(@Body() body: AssistantRequestDto, @Req() req: AuthenticatedRequest): Promise<any> {
     const userModules = await this.userModules.findModulesForRoles(req.user.roles);
 
     const response = await this.chatbot.run({
