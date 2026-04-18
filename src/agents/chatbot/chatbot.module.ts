@@ -9,6 +9,7 @@ import { ChatbotService } from "./services/chatbot.service";
 import { ConversationService } from "./services/conversation.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
 import { GraphCatalogService } from "./services/graph.catalog.service";
+import { NameEmbeddingService } from "./services/name.embedding.service";
 import { DescribeEntityTool } from "./tools/describe-entity.tool";
 import { ReadEntityTool } from "./tools/read-entity.tool";
 import { SearchEntitiesTool } from "./tools/search-entities.tool";
@@ -39,8 +40,17 @@ import { TraverseTool } from "./tools/traverse.tool";
     // Persistent conversation storage + lifecycle
     ConversationRepository,
     ConversationService,
+
+    // Name-embedding helper for chat-enabled entity services (called explicitly in their create/put/patch)
+    NameEmbeddingService,
   ],
-  exports: [ChatbotService, GraphDescriptorRegistry, ConversationService, ConversationRepository],
+  exports: [
+    ChatbotService,
+    GraphDescriptorRegistry,
+    ConversationService,
+    ConversationRepository,
+    NameEmbeddingService,
+  ],
 })
 export class ChatbotModule implements OnModuleInit {
   onModuleInit() {
