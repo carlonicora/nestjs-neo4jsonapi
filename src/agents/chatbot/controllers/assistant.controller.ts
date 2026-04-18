@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Logger, Post, Req, UseGuards } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ChatbotService } from "../services/chatbot.service";
 import { UserModulesRepository } from "../repositories/user-modules.repository";
@@ -11,6 +11,8 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 @Controller("assistants")
 @UseGuards(JwtAuthGuard)
 export class AssistantController {
+  private readonly logger = new Logger(AssistantController.name);
+
   constructor(
     private readonly chatbot: ChatbotService,
     private readonly userModules: UserModulesRepository,
@@ -19,6 +21,9 @@ export class AssistantController {
 
   @Post()
   async post(@Body() body: AssistantRequestDto, @Req() req: AuthenticatedRequest): Promise<any> {
+    this.logger.log(
+      `post: userId=${req.user.userId} companyId=${req.user.companyId} roles=${JSON.stringify(req.user.roles)} messageCount=${body.data.attributes.messages.length}`,
+    );
     const userModules = await this.userModules.findModulesForRoles(req.user.roles);
 
     const response = await this.chatbot.run({

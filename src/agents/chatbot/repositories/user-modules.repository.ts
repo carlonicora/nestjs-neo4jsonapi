@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 
 /**
@@ -7,6 +7,8 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
  */
 @Injectable()
 export class UserModulesRepository {
+  private readonly logger = new Logger(UserModulesRepository.name);
+
   constructor(private readonly neo4j: Neo4jService) {}
 
   /**
@@ -15,16 +17,23 @@ export class UserModulesRepository {
    * modules register with `GraphDescriptorRegistry.register({ descriptor, module })`.
    */
   async findModulesForRoles(roleIds: string[]): Promise<string[]> {
-    if (!roleIds.length) return [];
+    if (!roleIds.length) {
+      this.logger.log(`findModulesForRoles: no roles — returning empty module list`);
+      return [];
+    }
     const result = await this.neo4j.read(
       `MATCH (role:Role)-[:HAS_PERMISSIONS]->(m:Module)
        WHERE role.id IN $roleIds
        RETURN DISTINCT m.name AS moduleName`,
       { roleIds },
     );
-    return result.records
+    const rawNames: string[] = result.records
       .map((r: any) => r.get("moduleName"))
-      .filter((s: string | null) => typeof s === "string" && s.length > 0)
-      .map((s: string) => s.toLowerCase().replace(/\s+/g, ""));
+      .filter((s: string | null) => typeof s === "string" && s.length > 0);
+    const normalised = rawNames.map((s) => s.toLowerCase().replace(/\s+/g, ""));
+    this.logger.log(
+      `findModulesForRoles: roles=${roleIds.length}, modules raw=${JSON.stringify(rawNames)}, normalised=${JSON.stringify(normalised)}`,
+    );
+    return normalised;
   }
 }

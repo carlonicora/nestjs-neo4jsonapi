@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "./graph.catalog.service";
@@ -27,6 +27,8 @@ export interface ChatbotRunParams {
 
 @Injectable()
 export class ChatbotService {
+  private readonly logger = new Logger(ChatbotService.name);
+
   constructor(
     private readonly llm: LLMService,
     private readonly graph: GraphCatalogService,
@@ -38,7 +40,12 @@ export class ChatbotService {
   ) {}
 
   async run(params: ChatbotRunParams): Promise<ChatbotResponseInterface> {
+    this.logger.log(
+      `run: userId=${params.userId} companyId=${params.companyId} userModules=${JSON.stringify(params.userModules)} messageCount=${params.messages.length}`,
+    );
+
     if (!params.userModules.length) {
+      this.logger.warn(`run: empty userModules — returning clean refusal without invoking LLM`);
       return {
         type: AgentMessageType.Assistant,
         answer: "You have no enabled modules with described data — there is nothing I can query.",
@@ -57,7 +64,11 @@ export class ChatbotService {
     };
     const recorder: ToolCallRecord[] = [];
 
-    const systemPrompt = renderChatbotSystemPrompt(this.graph.getMapFor(params.userModules));
+    const graphMap = this.graph.getMapFor(params.userModules);
+    this.logger.log(`run: graph map length=${graphMap.length} chars`);
+    this.logger.debug(`run: graph map contents:\n${graphMap}`);
+
+    const systemPrompt = renderChatbotSystemPrompt(graphMap);
 
     const tools = [
       this.describeTool.build(ctx, recorder),
@@ -65,6 +76,7 @@ export class ChatbotService {
       this.readTool.build(ctx, recorder),
       this.traverseTool.build(ctx, recorder),
     ];
+    this.logger.log(`run: bound tools=${JSON.stringify(tools.map((t: any) => t.name))}`);
 
     const history = params.messages.map((m) => ({
       role:
@@ -76,6 +88,8 @@ export class ChatbotService {
       content: m.content,
     }));
 
+    this.logger.log(`run: calling LLM with historyLength=${history.length} maxToolIterations=10`);
+    const started = Date.now();
     const response: any = await this.llm.call({
       systemPrompts: [systemPrompt],
       history,
@@ -85,6 +99,9 @@ export class ChatbotService {
       maxToolIterations: 10,
       temperature: 0.1,
     });
+    this.logger.log(
+      `run: LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | needsClarification=${response.needsClarification} | referencesCount=${response.references?.length ?? 0} | tokens=${JSON.stringify(response.tokenUsage ?? {})}`,
+    );
 
     return {
       type: AgentMessageType.Assistant,

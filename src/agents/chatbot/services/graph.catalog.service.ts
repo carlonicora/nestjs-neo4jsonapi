@@ -127,7 +127,9 @@ export class GraphCatalogService implements OnModuleInit {
     for (const [module, list] of byModule.entries()) {
       this.renderedByModule.set(module, this.renderModule(module, list));
     }
-    this.logger.log(`Graph catalog built: ${this.entities.size} entities, ${byModule.size} modules.`);
+    this.logger.log(
+      `Graph catalog built: ${this.entities.size} entities, ${byModule.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, module: e.module })))}`,
+    );
   }
 
   private renderModule(module: string, list: CatalogEntity[]): string {
@@ -150,9 +152,18 @@ export class GraphCatalogService implements OnModuleInit {
   }
 
   getMapFor(userModules: string[]): string {
-    if (!userModules.length) return "";
-    const sections: string[] = [];
+    if (!userModules.length) {
+      this.logger.warn(`getMapFor: empty userModules`);
+      return "";
+    }
     const accessible = new Set(userModules);
+    const registeredModules = new Set(Array.from(this.entities.values()).map((e) => e.module));
+    const matchedModules = userModules.filter((m) => this.renderedByModule.has(m));
+    const unmatchedUserModules = userModules.filter((m) => !this.renderedByModule.has(m));
+    this.logger.log(
+      `getMapFor: userModules=${JSON.stringify(userModules)} registeredModules=${JSON.stringify(Array.from(registeredModules))} matched=${JSON.stringify(matchedModules)} unmatched=${JSON.stringify(unmatchedUserModules)}`,
+    );
+    const sections: string[] = [];
     for (const m of userModules) {
       const fragment = this.renderedByModule.get(m);
       if (!fragment) continue;

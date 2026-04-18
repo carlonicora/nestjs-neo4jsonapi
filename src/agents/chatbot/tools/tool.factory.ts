@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
@@ -18,6 +18,8 @@ export interface ToolCallRecord {
 
 @Injectable()
 export class ToolFactory {
+  private readonly logger = new Logger(ToolFactory.name);
+
   constructor(
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
@@ -39,18 +41,29 @@ export class ToolFactory {
     recorder: ToolCallRecord[],
   ): Promise<T> {
     const start = Date.now();
+    this.logger.log(`tool-call START: ${record.tool} input=${JSON.stringify(record.input)}`);
     return fn().then(
       (result) => {
-        recorder.push({ tool: record.tool, input: record.input, durationMs: Date.now() - start });
+        const durationMs = Date.now() - start;
+        recorder.push({ tool: record.tool, input: record.input, durationMs });
+        const hint =
+          result && typeof result === "object" && "items" in (result as any) && Array.isArray((result as any).items)
+            ? `items=${(result as any).items.length}`
+            : result && typeof result === "object" && "error" in (result as any)
+              ? `error=${(result as any).error}`
+              : "ok";
+        this.logger.log(`tool-call END: ${record.tool} in ${durationMs}ms ${hint}`);
         return result;
       },
       (err) => {
+        const durationMs = Date.now() - start;
         recorder.push({
           tool: record.tool,
           input: record.input,
-          durationMs: Date.now() - start,
+          durationMs,
           error: err.message,
         });
+        this.logger.warn(`tool-call FAILED: ${record.tool} in ${durationMs}ms message=${err.message}`);
         throw err;
       },
     );
