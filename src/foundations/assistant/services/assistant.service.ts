@@ -54,7 +54,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     roles: string[];
     firstMessage: string;
     title?: string;
-  }): Promise<Assistant> {
+  }): Promise<{ assistant: Assistant; toolCalls: ChatbotToolCall[] }> {
     const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
     const title = params.title?.trim() || this.autoTitle(params.firstMessage);
     const now = new Date().toISOString();
@@ -66,7 +66,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       createdAt: now,
     };
 
-    const { assistantMessage } = await this.runAgentTurn({
+    const { assistantMessage, toolCalls } = await this.runAgentTurn({
       companyId: params.companyId,
       userId: params.userId,
       userModules,
@@ -97,7 +97,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       },
     });
 
-    return this.loadHydrated(id);
+    return { assistant: await this.loadHydrated(id), toolCalls };
   }
 
   async appendMessage(params: {

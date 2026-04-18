@@ -15,7 +15,10 @@ describe("AssistantController", () => {
   });
 
   const assistants = {
-    createWithFirstMessage: vi.fn(async () => makeAssistant()),
+    createWithFirstMessage: vi.fn(async () => ({
+      assistant: makeAssistant(),
+      toolCalls: [{ tool: "search_entities", input: {}, durationMs: 3 }],
+    })),
     appendMessage: vi.fn(async () => ({
       assistant: makeAssistant({
         messages: [
@@ -91,6 +94,11 @@ describe("AssistantController", () => {
         AssistantDescriptor.model,
         expect.objectContaining({ id: "asst-1" }),
       );
+    });
+
+    it("includes meta.toolCalls from the first agent turn in the create response", async () => {
+      const res: any = await ctl.create(envelope("hi") as any, REQ);
+      expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 3 }] });
     });
   });
 

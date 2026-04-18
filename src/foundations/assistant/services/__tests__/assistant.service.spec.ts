@@ -117,7 +117,7 @@ describe("AssistantService", () => {
     it("persists the user+assistant pair via createFromDTO so the owner CREATED_BY edge is attached", async () => {
       const { service } = buildSut();
       const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
-      await service.createWithFirstMessage({
+      const result = await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
         roles: ["r"],
@@ -134,6 +134,10 @@ describe("AssistantService", () => {
       expect(parsed[0].role).toBe("user");
       expect(parsed[1].role).toBe("assistant");
       expect(parsed[1].references).toEqual([{ type: "accounts", id: "acc-1", reason: "hit" }]);
+
+      // toolCalls are propagated from the agent turn
+      expect(result.toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 1 }]);
+      expect(result.assistant.id).toBeDefined();
     });
   });
 

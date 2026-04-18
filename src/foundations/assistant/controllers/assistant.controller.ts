@@ -53,14 +53,16 @@ export class AssistantController {
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${firstMessage.length}`,
     );
-    const assistant = await this.assistants.createWithFirstMessage({
+    const { assistant, toolCalls } = await this.assistants.createWithFirstMessage({
       companyId: req.user.companyId,
       userId: req.user.userId,
       roles: req.user.roles,
       firstMessage,
       title: body.data.attributes.title,
     });
-    return this.jsonApi.buildSingle(AssistantDescriptor.model, assistant);
+    const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
+    document.meta = { ...(document.meta ?? {}), toolCalls };
+    return document;
   }
 
   /**

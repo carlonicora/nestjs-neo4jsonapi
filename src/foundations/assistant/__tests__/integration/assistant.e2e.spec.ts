@@ -107,7 +107,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
   });
 
   it("creates an assistant thread and persists the first user+assistant pair", async () => {
-    const assistant = await service.createWithFirstMessage({
+    const { assistant, toolCalls } = await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
       roles: ["role-1"],
@@ -119,6 +119,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(assistant.messages[1].role).toBe("assistant");
     expect(assistant.messages[1].references?.[0]).toMatchObject({ type: "accounts", id: "acc-1" });
     expect(assistant.title).toBe("Who is the top account?");
+    expect(toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 10 }]);
   });
 
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
