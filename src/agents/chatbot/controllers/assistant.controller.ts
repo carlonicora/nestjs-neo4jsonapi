@@ -8,7 +8,7 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 
-@Controller("assistant")
+@Controller("assistants")
 @UseGuards(JwtAuthGuard)
 export class AssistantController {
   constructor(

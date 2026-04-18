@@ -25,7 +25,7 @@ describe("AssistantController", () => {
   const ctl = new AssistantController(chatbot as any, userModules as any, jsonApi as any);
 
   const envelope = (messages: any[]) => ({
-    data: { type: "assistant", attributes: { messages } },
+    data: { type: "assistants", attributes: { messages } },
   });
 
   beforeEach(() => {
