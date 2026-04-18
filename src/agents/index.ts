@@ -37,3 +37,14 @@ export { ResponderResponseInterface } from "./responder/interfaces/responder.res
 // Summariser
 export { SummariserModule } from "./summariser/summariser.module";
 export { SummariserService } from "./summariser/services/summariser.service";
+
+// Chatbot
+export { ChatbotModule } from "./chatbot/chatbot.module";
+export { ChatbotService } from "./chatbot/services/chatbot.service";
+export { GraphDescriptorRegistry } from "./chatbot/services/descriptor.source";
+export type {
+  ChatbotResponseInterface,
+  ChatbotReference,
+  ChatbotToolCall,
+} from "./chatbot/interfaces/chatbot.response.interface";
+export type { ChatbotRunParams } from "./chatbot/services/chatbot.service";
