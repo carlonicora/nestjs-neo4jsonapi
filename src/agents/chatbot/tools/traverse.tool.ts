@@ -80,13 +80,15 @@ export class TraverseTool {
         if (!targetSvc) return { error: `Service not available for "${target.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
-        // Forward relationship: pass the descriptor key (the name).
-        // Reverse relationship: this path currently passes the cypher label, which works ONLY when the
-        // target entity's descriptor also defines a relationship keyed by that label. True reverse-only
-        // traversal support is a v2 task — requires AbstractRepository.findByRelated to accept a
-        // descriptor-less direction+label form. For v1, pilot entities opt in to both directions.
+        // Forward relationship: pass the descriptor key (the user-facing name matches it).
+        // Reverse relationship: pass the `inverseKey` — the descriptor key of the original forward
+        // relationship on the target side. AbstractRepository.findByRelated keys relationships by
+        // descriptor name, so the cypher label alone is insufficient.
+        if (rel.isReverse && !rel.inverseKey) {
+          return { error: `Relationship "${input.relationship}" cannot be traversed (missing inverseKey).` };
+        }
         const records: any[] = await targetSvc.findRelatedRecords({
-          relationship: rel.isReverse ? rel.cypherLabel : input.relationship,
+          relationship: rel.isReverse ? rel.inverseKey! : input.relationship,
           id: input.fromId,
           filters: input.filters,
           orderByFields: input.sort,

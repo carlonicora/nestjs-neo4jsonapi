@@ -90,7 +90,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
 
     // Pass 2: materialise reverse relationships on target entities.
     for (const d of descriptors) {
-      for (const [, rel] of Object.entries(d.relationships)) {
+      for (const [name, rel] of Object.entries(d.relationships)) {
         if (!rel.description || !rel.reverse) continue;
         const target = this.entities.get(rel.model.type);
         if (!target) {
@@ -113,6 +113,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           cypherDirection: rel.direction === "out" ? "in" : "out",
           cypherLabel: rel.relationship,
           isReverse: true,
+          inverseKey: name,
         });
       }
     }

@@ -21,6 +21,11 @@ export interface CatalogRelationship {
   cypherLabel: string;
   /** Internal: true if this relationship was materialised from a sibling's reverse: {} block. */
   isReverse: boolean;
+  /** For reverse relationships only: the descriptor key on the target side
+   *  (i.e. the forward relationship name on the target's own descriptor).
+   *  Used by the traverse tool to pass the correct lookup key to
+   *  AbstractRepository.findByRelated, which keys relationships by descriptor name. */
+  inverseKey?: string;
 }
 
 export interface CatalogEntity {

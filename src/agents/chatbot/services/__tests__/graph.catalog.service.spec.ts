@@ -64,6 +64,7 @@ describe("GraphCatalogService", () => {
     const reverse = orderDetail!.relationships.find((r) => r.name === "account");
     expect(reverse?.isReverse).toBe(true);
     expect(reverse?.cypherDirection).toBe("in");
+    expect(reverse?.inverseKey).toBe("orders");
   });
 
   it("drops fields that have no description", () => {

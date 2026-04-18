@@ -95,4 +95,46 @@ describe("TraverseTool", () => {
     );
     expect(out.error).toMatch(/ghost/);
   });
+
+  it("uses inverseKey when relationship is reverse", async () => {
+    const accountsWithReverse: any = {
+      type: "accounts",
+      module: "crm",
+      description: "A",
+      fields: [],
+      relationships: [
+        {
+          name: "orders", // reverse name
+          sourceType: "accounts",
+          targetType: "orders",
+          cardinality: "many",
+          description: "Orders placed by this account",
+          cypherDirection: "in",
+          cypherLabel: "FOR",
+          isReverse: true,
+          inverseKey: "account", // forward key on Order's side
+        },
+      ],
+      nodeName: "account",
+      labelName: "Account",
+      summary: (d: any) => d.name,
+    };
+    const reverseTargetSvc = {
+      findRelatedRecords: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
+    };
+    const reverseFactory: any = {
+      resolveEntity: (t: string) => (t === "accounts" ? accountsWithReverse : orders),
+      resolveService: (t: string) => (t === "orders" ? reverseTargetSvc : undefined),
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+    const tool = new TraverseTool(reverseFactory);
+    await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 1 }, ctx, []);
+    expect(reverseTargetSvc.findRelatedRecords).toHaveBeenCalledWith(
+      expect.objectContaining({ relationship: "account", id: "a1" }),
+    );
+  });
 });
