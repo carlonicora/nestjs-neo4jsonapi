@@ -10,6 +10,5 @@ export enum QueueId {
   BILLING_WEBHOOK = "billing-webhook",
   EMAIL = "email",
   HOWTO = "howto",
-  NAME_EMBEDDING = "name-embedding",
   TRIAL = "trial",
 }
