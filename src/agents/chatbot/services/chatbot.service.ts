@@ -88,9 +88,11 @@ export class ChatbotService {
       content: m.content,
     }));
 
-    this.logger.log(`run: calling LLM with historyLength=${history.length} maxToolIterations=10`);
-    const started = Date.now();
-    const response: any = await this.llm.call({
+    const RETRY_INSTRUCTION = `Your previous attempt did not call any tools and did not return any references. The user's question requires you to use the provided tools to retrieve data. You MUST call at least one tool (search_entities, traverse, read_entity, or describe_entity) to answer. Call the appropriate tool now.`;
+
+    this.logger.log(`run: calling LLM (first attempt) with historyLength=${history.length} maxToolIterations=10`);
+    let started = Date.now();
+    let response: any = await this.llm.call({
       systemPrompts: [systemPrompt],
       history,
       outputSchema,
@@ -100,7 +102,28 @@ export class ChatbotService {
       temperature: 0.1,
     });
     this.logger.log(
-      `run: LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | needsClarification=${response.needsClarification} | referencesCount=${response.references?.length ?? 0} | tokens=${JSON.stringify(response.tokenUsage ?? {})}`,
+      `run: first-attempt LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | referencesCount=${response.references?.length ?? 0}`,
+    );
+
+    if (recorder.length === 0 && (response.references?.length ?? 0) === 0) {
+      this.logger.warn(`run: LLM returned no tool calls AND no references — retrying once with enforcement prompt`);
+      started = Date.now();
+      response = await this.llm.call({
+        systemPrompts: [systemPrompt, RETRY_INSTRUCTION],
+        history,
+        outputSchema,
+        inputParams: {},
+        tools,
+        maxToolIterations: 10,
+        temperature: 0.1,
+      });
+      this.logger.log(
+        `run: retry LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | referencesCount=${response.references?.length ?? 0}`,
+      );
+    }
+
+    this.logger.log(
+      `run: final response | toolCallsObserved=${recorder.length} | needsClarification=${response.needsClarification} | referencesCount=${response.references?.length ?? 0} | tokens=${JSON.stringify(response.tokenUsage ?? {})}`,
     );
 
     return {
