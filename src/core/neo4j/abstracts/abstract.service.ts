@@ -148,6 +148,19 @@ export abstract class AbstractService<
   }
 
   /**
+   * Find a typed record by id (bypasses JSON:API serialisation).
+   * Used by internal agents that need raw objects.
+   * Returns null when not found — does NOT throw like the public findById() does.
+   */
+  async findRecordById(params: { id: string }): Promise<T | null> {
+    try {
+      return await this.repository.findById({ id: params.id });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Create a new entity
    * Override this method to map DTO fields to repository create params
    */
