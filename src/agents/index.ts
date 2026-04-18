@@ -49,4 +49,26 @@ export type {
 } from "./chatbot/interfaces/chatbot.response.interface";
 export type { ChatbotRunParams } from "./chatbot/services/chatbot.service";
 export { UserModulesRepository } from "./chatbot/repositories/user-modules.repository";
-export { AssistantRequestDto, AssistantMessageDto } from "./chatbot/dto/assistant.request.dto";
+
+// Persistent conversation (ChatGPT-style threads)
+export { ConversationService, MAX_MESSAGES_TO_LLM } from "./chatbot/services/conversation.service";
+export { ConversationRepository } from "./chatbot/repositories/conversation.repository";
+export { ConversationDescriptor } from "./chatbot/entities/conversation";
+export { conversationMeta } from "./chatbot/entities/conversation.meta";
+export type { Conversation, ConversationMessage } from "./chatbot/entities/conversation";
+export {
+  AssistantCreateRequestDto,
+  AssistantCreateDataDto,
+  AssistantCreateAttributesDto,
+  AssistantCreateMessageDto,
+} from "./chatbot/dto/assistant-create.request.dto";
+export {
+  AssistantAppendRequestDto,
+  AssistantAppendDataDto,
+  AssistantAppendAttributesDto,
+} from "./chatbot/dto/assistant-append.request.dto";
+export {
+  AssistantPatchRequestDto,
+  AssistantPatchDataDto,
+  AssistantPatchAttributesDto,
+} from "./chatbot/dto/assistant-patch.request.dto";

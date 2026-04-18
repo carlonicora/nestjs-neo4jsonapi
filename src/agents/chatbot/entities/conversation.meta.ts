@@ -1,8 +1,8 @@
 import { DataMeta } from "../../../common/interfaces/datamodel.interface";
 
-export const assistantMeta: DataMeta = {
+export const conversationMeta: DataMeta = {
   type: "assistants",
   endpoint: "assistants",
-  nodeName: "assistant",
-  labelName: "Assistant",
+  nodeName: "conversation",
+  labelName: "Conversation",
 };

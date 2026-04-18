@@ -1,81 +1,155 @@
-import { vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantController } from "../assistant.controller";
-import { AssistantDescriptor } from "../../entities/assistant";
+import { ConversationDescriptor } from "../../entities/conversation";
 
 describe("AssistantController", () => {
-  const chatbot = {
-    run: vi.fn(async () => ({
-      type: "assistant",
-      answer: "ok",
-      references: [],
-      needsClarification: false,
-      suggestedQuestions: [],
-      tokens: { input: 1, output: 2 },
+  const makeConversation = (overrides: Partial<any> = {}) => ({
+    id: "convo-1",
+    type: "assistants",
+    title: "Hello",
+    messages: [],
+    company: { id: "c" },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  });
+
+  const conversations = {
+    createWithFirstMessage: vi.fn(async () => makeConversation()),
+    appendMessage: vi.fn(async () => ({
+      conversation: makeConversation(),
+      userMessage: { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
+      assistantMessage: {
+        id: "a1",
+        role: "assistant",
+        content: "hey",
+        createdAt: "2026-04-17T00:00:01Z",
+        references: [],
+        suggestedQuestions: [],
+        tokens: { input: 1, output: 1 },
+      },
       toolCalls: [],
     })),
-  };
-  const userModules = {
-    findModulesForRoles: vi.fn(async (roles: string[]) => (roles.length ? ["crm"] : [])),
+    findAll: vi.fn(async () => [makeConversation()]),
+    findById: vi.fn(async () => makeConversation()),
+    rename: vi.fn(async () => makeConversation({ title: "Renamed" })),
+    remove: vi.fn(async () => undefined),
   };
   const jsonApi = {
     buildSingle: vi.fn(async (model: any, data: any) => ({
       data: { type: model.type, id: data.id, attributes: data },
     })),
+    buildList: vi.fn(async (model: any, data: any[]) => ({
+      data: data.map((d) => ({ type: model.type, id: d.id, attributes: d })),
+    })),
   };
-  const ctl = new AssistantController(chatbot as any, userModules as any, jsonApi as any);
 
-  const envelope = (messages: any[]) => ({
-    data: { type: "assistants", attributes: { messages } },
-  });
+  const ctl = new AssistantController(conversations as any, jsonApi as any);
 
   beforeEach(() => {
-    chatbot.run.mockClear();
-    userModules.findModulesForRoles.mockClear();
-    jsonApi.buildSingle.mockClear();
+    vi.clearAllMocks();
   });
 
-  it("unwraps the JSON:API envelope and passes messages to the chatbot", async () => {
-    await ctl.post(
-      envelope([{ role: "user", content: "hi" }]) as any,
-      { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any,
-    );
-    expect(userModules.findModulesForRoles).toHaveBeenCalledWith(["role-1"]);
-    expect(chatbot.run).toHaveBeenCalledWith({
-      companyId: "c",
-      userId: "u",
-      userModules: ["crm"],
-      messages: [{ role: "user", content: "hi" }],
+  const REQ = { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any;
+
+  describe("POST /assistants (create)", () => {
+    const envelope = (messages: any[], title?: string) => ({
+      data: {
+        type: "assistants",
+        attributes: { messages, ...(title !== undefined ? { title } : {}) },
+      },
+    });
+
+    it("unwraps the envelope and delegates to ConversationService with the first message", async () => {
+      await ctl.create(envelope([{ role: "user", content: "hello there" }]) as any, REQ);
+      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith({
+        companyId: "c",
+        userId: "u",
+        roles: ["role-1"],
+        firstMessage: "hello there",
+        title: undefined,
+      });
+    });
+
+    it("passes the optional title through", async () => {
+      await ctl.create(envelope([{ role: "user", content: "hi" }], "My Chat") as any, REQ);
+      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "My Chat" }),
+      );
+    });
+
+    it("builds the response via JsonApiService.buildSingle with ConversationDescriptor.model", async () => {
+      await ctl.create(envelope([{ role: "user", content: "hi" }]) as any, REQ);
+      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.objectContaining({ id: "convo-1" }));
     });
   });
 
-  it("builds the response via JsonApiService.buildSingle with AssistantDescriptor.model", async () => {
-    const result = await ctl.post(
-      envelope([{ role: "user", content: "hi" }]) as any,
-      { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any,
-    );
-    expect(jsonApi.buildSingle).toHaveBeenCalledWith(
-      AssistantDescriptor.model,
-      expect.objectContaining({
-        answer: "ok",
-        needsClarification: false,
-        suggestedQuestions: [],
-        references: [],
-        tokens: { input: 1, output: 2 },
-        toolCalls: [],
-      }),
-    );
-    const [, passedData] = jsonApi.buildSingle.mock.calls[0];
-    expect(typeof passedData.id).toBe("string");
-    expect(passedData.id.length).toBeGreaterThan(0);
-    expect(result.data.type).toBe(AssistantDescriptor.model.type);
+  describe("POST /assistants/:id/messages (append)", () => {
+    const envelope = (content: string) => ({
+      data: { type: "messages", attributes: { role: "user", content } },
+    });
+
+    it("delegates to ConversationService.appendMessage with the conversation id and new message", async () => {
+      await ctl.append("convo-1", envelope("continue") as any, REQ);
+      expect(conversations.appendMessage).toHaveBeenCalledWith({
+        conversationId: "convo-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["role-1"],
+        newMessage: "continue",
+      });
+    });
+
+    it("emits a synthetic messages collection with user + assistant messages and meta.toolCalls", async () => {
+      const res = await ctl.append("convo-1", envelope("continue") as any, REQ);
+      expect(res.data).toHaveLength(2);
+      expect(res.data[0]).toMatchObject({ type: "messages", id: "u1" });
+      expect(res.data[1]).toMatchObject({ type: "messages", id: "a1" });
+      expect(res.meta).toMatchObject({ conversationId: "convo-1", toolCalls: [] });
+      // Must NOT go through buildSingle/buildList — messages are projections, not resources.
+      expect(jsonApi.buildSingle).not.toHaveBeenCalled();
+      expect(jsonApi.buildList).not.toHaveBeenCalled();
+    });
   });
 
-  it("handles users with no roles gracefully", async () => {
-    await ctl.post(
-      envelope([{ role: "user", content: "hi" }]) as any,
-      { user: { userId: "u", companyId: "c", roles: [] } } as any,
-    );
-    expect(userModules.findModulesForRoles).toHaveBeenCalledWith([]);
-    expect(chatbot.run).toHaveBeenCalledWith(expect.objectContaining({ userModules: [] }));
+  describe("GET /assistants (list)", () => {
+    it("calls ConversationService.findAll and builds the list via JsonApiService.buildList", async () => {
+      await ctl.list();
+      expect(conversations.findAll).toHaveBeenCalledOnce();
+      expect(jsonApi.buildList).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Array));
+    });
+  });
+
+  describe("GET /assistants/:id (read)", () => {
+    it("calls ConversationService.findById and builds a single response", async () => {
+      await ctl.read("convo-1");
+      expect(conversations.findById).toHaveBeenCalledWith({ conversationId: "convo-1" });
+      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Object));
+    });
+  });
+
+  describe("PATCH /assistants/:id (rename)", () => {
+    const envelope = (title?: string) => ({
+      data: { type: "assistants", id: "convo-1", attributes: { title } },
+    });
+
+    it("delegates a title change to ConversationService.rename", async () => {
+      await ctl.rename("convo-1", envelope("New Title") as any);
+      expect(conversations.rename).toHaveBeenCalledWith({ conversationId: "convo-1", title: "New Title" });
+      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Object));
+    });
+
+    it("is a no-op rename when title is missing (returns current conversation)", async () => {
+      await ctl.rename("convo-1", envelope(undefined) as any);
+      expect(conversations.rename).not.toHaveBeenCalled();
+      expect(conversations.findById).toHaveBeenCalledWith({ conversationId: "convo-1" });
+    });
+  });
+
+  describe("DELETE /assistants/:id", () => {
+    it("delegates to ConversationService.remove", async () => {
+      await ctl.delete("convo-1");
+      expect(conversations.remove).toHaveBeenCalledWith({ conversationId: "convo-1" });
+    });
   });
 });
