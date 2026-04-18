@@ -42,9 +42,19 @@ describe("AbstractRepository.find with structured filters and multi-key sort", (
       { field: "name", op: "like", value: "acme" },
     ];
     await repo.find({ filters });
-    expect(capturedRef.query.query).toContain("AND account.status = $filter_0");
-    expect(capturedRef.query.query).toContain("AND toLower(account.name) CONTAINS toLower($filter_1)");
+    expect(capturedRef.query.query).toContain(
+      "WHERE account.status = $filter_0 AND toLower(account.name) CONTAINS toLower($filter_1)",
+    );
     expect(capturedRef.query.queryParams).toMatchObject({ filter_0: "open", filter_1: "acme" });
+  });
+
+  it("emits WHERE (not AND) when filters follow a WITH from userHasAccess", async () => {
+    const { repo, capturedRef } = buildSut();
+    // Swap the no-op securityService stub with one that emits a realistic WITH
+    (repo as any).securityService = { userHasAccess: () => "WITH account" };
+    await repo.find({ filters: [{ field: "status", op: "eq", value: "open" }] });
+    // The filter must be prefixed with WHERE (there is no upstream WHERE at this point)
+    expect(capturedRef.query.query).toMatch(/WITH account\s+WHERE account\.status = \$filter_0/);
   });
 
   it("applies multi-key orderByFields overriding legacy orderBy", async () => {
@@ -107,7 +117,7 @@ describe("AbstractRepository.findByRelated with filters and sort", () => {
       orderByFields: [{ field: "createdAt", direction: "desc" }],
     });
 
-    expect(capturedRef.query.query).toContain("AND order.status = $filter_0");
+    expect(capturedRef.query.query).toContain("WHERE order.status = $filter_0");
     expect(capturedRef.query.query).toContain("ORDER BY order.createdAt DESC");
     expect(capturedRef.query.queryParams).toMatchObject({ filter_0: "open" });
   });

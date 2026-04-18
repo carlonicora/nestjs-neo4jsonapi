@@ -75,7 +75,7 @@ export function buildFilterClauses(input: {
 
   if (!fragments.length) return { clause: "", params };
   return {
-    clause: `AND ${fragments.join(" AND ")}`,
+    clause: fragments.join(" AND "),
     params,
   };
 }

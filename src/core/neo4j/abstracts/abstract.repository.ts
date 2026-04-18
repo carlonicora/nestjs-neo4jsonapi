@@ -320,10 +320,14 @@ export abstract class AbstractRepository<
         : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
 
     if (params.term && this.descriptor.fulltextIndexName) {
+      const fulltextWhere = this.descriptor.isCompanyScoped
+        ? `WHERE (node)-[:BELONGS_TO]->(company)${filterResult.clause ? ` AND ${filterResult.clause}` : ""}`
+        : filterResult.clause
+          ? `WHERE ${filterResult.clause}`
+          : ``;
       query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
-      ${this.descriptor.isCompanyScoped ? `WHERE (node)-[:BELONGS_TO]->(company)` : ``}
-      ${filterResult.clause ? `AND ${filterResult.clause.replace(/^AND /, "")}` : ""}
+      ${fulltextWhere}
 
       WITH node as ${nodeName}, score
       ORDER BY score DESC
@@ -332,7 +336,7 @@ export abstract class AbstractRepository<
       query.query += `
       ${this.buildDefaultMatch()}
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
-      ${filterResult.clause}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
 
       ${orderByClause}
     `;
@@ -465,7 +469,7 @@ export abstract class AbstractRepository<
       }
 
       query.query += `WITH node as ${nodeName}, score
-      ${filterResult.clause}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
       ORDER BY score DESC
     `;
     } else {
@@ -485,7 +489,7 @@ export abstract class AbstractRepository<
 
       query.query += `
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
-      ${filterResult.clause}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
 
       ${orderByClause}
     `;

@@ -13,7 +13,7 @@ describe("buildFilterClauses", () => {
       filters: [{ field: "status", op: "eq", value: "open" }],
       paramPrefix: "f",
     });
-    expect(clause).toBe("AND account.status = $f_0");
+    expect(clause).toBe("account.status = $f_0");
     expect(params).toEqual({ f_0: "open" });
   });
 
@@ -23,7 +23,7 @@ describe("buildFilterClauses", () => {
       filters: [{ field: "name", op: "like", value: "Acme" }],
       paramPrefix: "f",
     });
-    expect(clause).toBe("AND toLower(account.name) CONTAINS toLower($f_0)");
+    expect(clause).toBe("toLower(account.name) CONTAINS toLower($f_0)");
     expect(params).toEqual({ f_0: "Acme" });
   });
 
@@ -33,7 +33,7 @@ describe("buildFilterClauses", () => {
       filters: [{ field: "status", op: "in", value: ["open", "draft"] }],
       paramPrefix: "f",
     });
-    expect(clause).toBe("AND account.status IN $f_0");
+    expect(clause).toBe("account.status IN $f_0");
     expect(params).toEqual({ f_0: ["open", "draft"] });
   });
 
@@ -46,7 +46,7 @@ describe("buildFilterClauses", () => {
       ],
       paramPrefix: "f",
     });
-    expect(clause).toBe("AND account.closedAt IS NULL AND account.name IS NOT NULL");
+    expect(clause).toBe("account.closedAt IS NULL AND account.name IS NOT NULL");
     expect(params).toEqual({});
   });
 
@@ -59,7 +59,7 @@ describe("buildFilterClauses", () => {
       ],
       paramPrefix: "f",
     });
-    expect(clause).toBe("AND account.status = $f_0 AND account.createdAt >= $f_1");
+    expect(clause).toBe("account.status = $f_0 AND account.createdAt >= $f_1");
     expect(params).toEqual({ f_0: "open", f_1: "2026-01-01" });
   });
 
@@ -75,7 +75,7 @@ describe("buildFilterClauses", () => {
       paramPrefix: "f",
     });
     expect(clause).toBe(
-      "AND order.status <> $f_0 AND order.total > $f_1 AND order.total < $f_2 AND order.total <= $f_3"
+      "order.status <> $f_0 AND order.total > $f_1 AND order.total < $f_2 AND order.total <= $f_3"
     );
     expect(params).toEqual({ f_0: "cancelled", f_1: 0, f_2: 10000, f_3: 5000 });
   });
