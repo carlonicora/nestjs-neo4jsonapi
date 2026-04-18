@@ -6,6 +6,7 @@ import { AuditService } from "../../../foundations/audit/services/audit.service"
 import { JsonApiDataInterface } from "../../jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
+import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
 import { AbstractRepository } from "./abstract.repository";
 
 /**
@@ -96,6 +97,49 @@ export abstract class AbstractService<
     });
 
     return this.jsonApiService.buildList(this.model, data, paginator);
+  }
+
+  /**
+   * Find typed records directly (bypasses JSON:API serialisation).
+   * For internal callers that need raw objects — e.g. the chatbot tool layer.
+   */
+  async findRecords(params: {
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+    term?: string;
+    fetchAll?: boolean;
+  }): Promise<T[]> {
+    const records = await this.repository.find({
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+      term: params.term,
+      fetchAll: params.fetchAll,
+    });
+    if (params.limit != null) return records.slice(0, params.limit);
+    return records;
+  }
+
+  /**
+   * Find typed records across a relationship. Delegates to repository.findByRelated.
+   */
+  async findRelatedRecords(params: {
+    relationship: keyof R & string;
+    id: string | string[];
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+    term?: string;
+  }): Promise<T[]> {
+    const records = await this.repository.findByRelated({
+      relationship: params.relationship,
+      id: params.id,
+      term: params.term,
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+    });
+    if (params.limit != null) return records.slice(0, params.limit);
+    return records;
   }
 
   /**
