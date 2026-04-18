@@ -33,8 +33,20 @@ describe("ConversationService", () => {
       find: vi.fn(async () => [makePersistedConvo()]),
       findById: vi.fn(async () => opts.findReturns ?? makePersistedConvo()),
     } as any;
-    const service = new ConversationService(repo, userModules, chatbot);
-    return { service, chatbot, userModules, repo };
+    const jsonApi = {
+      buildSingle: vi.fn(async (_model: any, record: any) => ({
+        data: { type: "assistants", id: record.id, attributes: record },
+      })),
+      buildList: vi.fn(async (_model: any, records: any[]) => ({
+        data: records.map((r) => ({ type: "assistants", id: r.id, attributes: r })),
+      })),
+    } as any;
+    const clsService = {
+      get: (key: string) => (key === "userId" ? "u" : key === "companyId" ? "c" : undefined),
+      has: () => true,
+    } as any;
+    const service = new ConversationService(jsonApi, repo, clsService, userModules, chatbot);
+    return { service, chatbot, userModules, repo, jsonApi };
   };
 
   beforeEach(() => {
@@ -56,7 +68,8 @@ describe("ConversationService", () => {
 
     it("trims an auto-title to <=60 chars on a word boundary", async () => {
       const { service, repo } = buildSut();
-      const longMessage = "This is a deliberately long first message that should be trimmed on a word boundary somewhere before sixty";
+      const longMessage =
+        "This is a deliberately long first message that should be trimmed on a word boundary somewhere before sixty";
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -211,44 +224,61 @@ describe("ConversationService", () => {
         roles: ["r"],
         newMessage: "hi",
       });
-      expect(repo.patch).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "convo-1", messages: expect.any(String) }),
-      );
+      expect(repo.patch).toHaveBeenCalledWith(expect.objectContaining({ id: "convo-1", messages: expect.any(String) }));
       const stored = JSON.parse(repo.patch.mock.calls[0][0].messages);
       expect(stored).toHaveLength(2);
       expect(stored[0].role).toBe("user");
       expect(stored[1].role).toBe("assistant");
     });
+
+    it("returns the updated Conversation with hydrated messages and the turn's toolCalls", async () => {
+      const { service } = buildSut({ findReturns: { ...makePersistedConvo([]) } });
+      const result = await service.appendMessage({
+        conversationId: "convo-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "hi",
+      });
+      expect(result.conversation.id).toBe("convo-1");
+      // conversation.messages was hydrated from the stringified JSON — still an array on exit.
+      expect(Array.isArray(result.conversation.messages)).toBe(true);
+      expect(result.toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 1 }]);
+    });
   });
 
-  describe("hydrate / findById / findAll", () => {
-    it("parses stringified messages on read via findById", async () => {
+  describe("hydrate helper", () => {
+    it("parses stringified messages on read via the bespoke agent-turn flow", async () => {
       const msgs = [{ id: "u1", role: "user", content: "x", createdAt: "t" }];
       const { service } = buildSut({ findReturns: makePersistedConvo(msgs) });
-      const out = await service.findById({ conversationId: "convo-1" });
-      expect(Array.isArray(out.messages)).toBe(true);
-      expect(out.messages).toHaveLength(1);
-      expect(out.messages[0].content).toBe("x");
+      // appendMessage reads via loadHydrated → returns the typed Conversation with an array.
+      const result = await service.appendMessage({
+        conversationId: "convo-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "follow-up",
+      });
+      expect(Array.isArray(result.conversation.messages)).toBe(true);
     });
 
-    it("handles an empty/absent messages field gracefully", async () => {
-      const { service } = buildSut({ findReturns: { ...makePersistedConvo(), messages: "" } });
-      const out = await service.findById({ conversationId: "convo-1" });
-      expect(out.messages).toEqual([]);
-    });
-
-    it("rename enforces ownership via findById before patching, then returns refreshed entity", async () => {
-      const { service, repo } = buildSut();
-      await service.rename({ conversationId: "convo-1", title: "New" });
-      expect(repo.findById).toHaveBeenCalled();
-      expect(repo.patch).toHaveBeenCalledWith({ id: "convo-1", title: "New" });
-    });
-
-    it("remove enforces ownership via findById before deleting", async () => {
-      const { service, repo } = buildSut();
-      await service.remove({ conversationId: "convo-1" });
-      expect(repo.findById).toHaveBeenCalled();
-      expect(repo.delete).toHaveBeenCalledWith({ id: "convo-1" });
+    it("handles an empty/absent messages field gracefully (defaults to [] on the typed result)", async () => {
+      // The repo mock returns the same entity with `messages: ""` on every findById call; the
+      // hydrate helper must turn that into an empty array rather than throwing. The repo is
+      // patched with the new messages array, but the stub still reads back the empty string.
+      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedConvo(), messages: "" } });
+      const result = await service.appendMessage({
+        conversationId: "convo-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "hi",
+      });
+      // No prior messages → no hydration system message emitted to the chatbot.
+      const passed = chatbot.run.mock.calls[0][0].messages;
+      expect(passed.every((m: any) => m.role !== "system")).toBe(true);
+      // Hydration of the "" string yields an array (not a thrown error).
+      expect(Array.isArray(result.conversation.messages)).toBe(true);
     });
   });
 });

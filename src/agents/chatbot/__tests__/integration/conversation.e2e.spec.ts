@@ -4,9 +4,13 @@ import { ChatbotService, ChatbotRunParams } from "../../services/chatbot.service
 
 /**
  * Scripted-LLM integration: exercises the full ConversationService lifecycle
- * (create → append → rename → delete → list) against in-memory repo + in-memory
- * chatbot stubs. Asserts the key behavioural contract: a 2nd turn gets a
- * reference-memory system message derived from the 1st turn's references.
+ * (create → append) against in-memory repo + in-memory chatbot stubs. Asserts
+ * the key behavioural contract: a 2nd turn gets a reference-memory system
+ * message derived from the 1st turn's references.
+ *
+ * Standard CRUD (find / findById / patch / delete) is provided by
+ * AbstractService and exercised through the framework's test suite — this
+ * integration focuses on the non-standard agent-turn flow.
  */
 describe("Conversation lifecycle (integration, scripted agent)", () => {
   let service: ConversationService;
@@ -85,7 +89,21 @@ describe("Conversation lifecycle (integration, scripted agent)", () => {
       }),
     } as unknown as ChatbotService;
 
-    service = new ConversationService(repo, userModules, chatbot);
+    const jsonApi = {
+      buildSingle: vi.fn(async (_model: any, record: any) => ({
+        data: { type: "assistants", id: record.id, attributes: record },
+      })),
+      buildList: vi.fn(async (_model: any, records: any[]) => ({
+        data: records.map((r) => ({ type: "assistants", id: r.id, attributes: r })),
+      })),
+    } as any;
+
+    const clsService = {
+      get: (key: string) => (key === "userId" ? "u-1" : key === "companyId" ? "c" : undefined),
+      has: () => true,
+    } as any;
+
+    service = new ConversationService(jsonApi, repo, clsService, userModules, chatbot);
   });
 
   it("creates a conversation and persists the first user+assistant pair", async () => {
@@ -127,28 +145,33 @@ describe("Conversation lifecycle (integration, scripted agent)", () => {
     expect(result.assistantMessage.content).toContain("ord-1");
   });
 
-  it("lists the user's conversations", async () => {
-    const list = await service.findAll();
-    expect(list).toHaveLength(1);
-    expect(list[0].messages).toHaveLength(4);
+  it("inherited find() returns the user's conversations via JsonApiService.buildList", async () => {
+    const response = await service.find({ query: {} });
+    expect(response.data).toBeDefined();
+    // At least one conversation has been created; its messages field is still the raw JSON string
+    // (AbstractService.find bypasses the service-level hydrate helper — the client deserialises).
+    expect(Array.isArray((response as any).data)).toBe(true);
+    expect((response as any).data.length).toBe(1);
   });
 
-  it("reads the conversation by id with hydrated messages array", async () => {
+  it("inherited findById() returns the conversation as a JSON:API document", async () => {
     const [id] = Array.from(storage.keys());
-    const convo = await service.findById({ conversationId: id });
-    expect(Array.isArray(convo.messages)).toBe(true);
-    expect(convo.messages).toHaveLength(4);
+    const response = await service.findById({ id });
+    expect((response as any).data).toMatchObject({ type: "assistants", id });
   });
 
-  it("renames the conversation", async () => {
+  it("inherited patch() renames via patchFromDTO envelope", async () => {
     const [id] = Array.from(storage.keys());
-    const updated = await service.rename({ conversationId: id, title: "Top account review" });
-    expect(updated.title).toBe("Top account review");
+    await service.patchFromDTO({
+      data: { id, type: "assistants", attributes: { title: "Top account review" } },
+    });
+    const stored = storage.get(id);
+    expect(stored.title).toBe("Top account review");
   });
 
-  it("deletes the conversation", async () => {
+  it("inherited delete() removes the conversation", async () => {
     const [id] = Array.from(storage.keys());
-    await service.remove({ conversationId: id });
+    await service.delete({ id });
     expect(storage.has(id)).toBe(false);
   });
 });

@@ -1,10 +1,13 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import { randomUUID } from "crypto";
-import { Conversation, ConversationMessage } from "../entities/conversation";
+import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { Conversation, ConversationDescriptor, ConversationMessage } from "../entities/conversation";
 import { ConversationRepository } from "../repositories/conversation.repository";
 import { UserModulesRepository } from "../repositories/user-modules.repository";
-import { ChatbotService } from "./chatbot.service";
 import { ChatbotToolCall } from "../interfaces/chatbot.response.interface";
+import { ChatbotService } from "./chatbot.service";
 
 /**
  * Maximum number of prior messages (turns) passed to the LLM on each turn.
@@ -15,27 +18,34 @@ export const MAX_MESSAGES_TO_LLM = 20;
 /**
  * ConversationService
  *
- * Wraps the stateless ChatbotService.run() in a stateful lifecycle:
+ * Wraps the stateless ChatbotService.run() in a stateful lifecycle. Extends
+ * AbstractService so standard CRUD (find / findById / patch / delete) is
+ * inherited and wired through the framework's JSON:API pipeline — only the
+ * agent-turn methods below are bespoke:
  *   - `createWithFirstMessage` — persists a brand-new conversation with the first turn.
  *   - `appendMessage` — appends a user turn + agent turn to an existing conversation.
- *   - `rename` / `remove` / `findById` / `findAll` — owner-scoped CRUD (enforced by repo).
  *
  * Entities in `references` from prior turns are surfaced to the LLM as a
  * system-message "entity memory" hint so the agent can call `read_entity` directly
  * without having to re-search.
  *
  * NOTE on storage: Neo4j cannot store arbitrary objects as properties, so the
- * `messages` JSON array is stringified on write and parsed on read.
+ * `messages` JSON array is stringified on write and parsed on read (see `hydrate`).
  */
 @Injectable()
-export class ConversationService {
-  private readonly logger = new Logger(ConversationService.name);
+export class ConversationService extends AbstractService<Conversation, typeof ConversationDescriptor.relationships> {
+  protected readonly descriptor = ConversationDescriptor;
+  private readonly convoLogger = new Logger(ConversationService.name);
 
   constructor(
-    private readonly conversationRepository: ConversationRepository,
+    jsonApiService: JsonApiService,
+    conversationRepository: ConversationRepository,
+    clsService: ClsService,
     private readonly userModulesRepository: UserModulesRepository,
     private readonly chatbot: ChatbotService,
-  ) {}
+  ) {
+    super(jsonApiService, conversationRepository, clsService, ConversationDescriptor.model);
+  }
 
   async createWithFirstMessage(params: {
     companyId: string;
@@ -66,17 +76,17 @@ export class ConversationService {
     const id = randomUUID();
     const messages = [userMessage, assistantMessage];
 
-    this.logger.log(
+    this.convoLogger.log(
       `createWithFirstMessage: id=${id} userId=${params.userId} companyId=${params.companyId} titleLength=${title.length} messages=${messages.length}`,
     );
 
-    await this.conversationRepository.create({
+    await this.repository.create({
       id,
       title,
       messages: JSON.stringify(messages),
     });
 
-    return this.readHydrated(id);
+    return this.loadHydrated(id);
   }
 
   async appendMessage(params: {
@@ -91,8 +101,8 @@ export class ConversationService {
     assistantMessage: ConversationMessage;
     toolCalls: ChatbotToolCall[];
   }> {
-    // Repository enforces owner-RBAC and throws 403/404 on miss.
-    const conversation = await this.readHydrated(params.conversationId);
+    // Repository enforces owner-RBAC (via buildUserHasAccess) and throws 403/404 on miss.
+    const conversation = await this.loadHydrated(params.conversationId);
     const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
 
     const userMessage: ConversationMessage = {
@@ -112,52 +122,36 @@ export class ConversationService {
 
     const messages = [...conversation.messages, userMessage, assistantMessage];
 
-    this.logger.log(
+    this.convoLogger.log(
       `appendMessage: id=${params.conversationId} userId=${params.userId} priorLen=${conversation.messages.length} newLen=${messages.length}`,
     );
 
-    await this.conversationRepository.patch({
+    await this.repository.patch({
       id: params.conversationId,
       messages: JSON.stringify(messages),
     });
 
-    const updated = await this.readHydrated(params.conversationId);
+    const updated = await this.loadHydrated(params.conversationId);
     return { conversation: updated, userMessage, assistantMessage, toolCalls };
   }
 
-  async rename(params: { conversationId: string; title: string }): Promise<Conversation> {
-    // readHydrated ensures owner-RBAC before we allow the update.
-    await this.readHydrated(params.conversationId);
-    await this.conversationRepository.patch({
-      id: params.conversationId,
-      title: params.title,
-    });
-    return this.readHydrated(params.conversationId);
-  }
-
-  async remove(params: { conversationId: string }): Promise<void> {
-    await this.readHydrated(params.conversationId);
-    await this.conversationRepository.delete({ id: params.conversationId });
-  }
-
-  async findById(params: { conversationId: string }): Promise<Conversation> {
-    return this.readHydrated(params.conversationId);
-  }
-
-  async findAll(): Promise<Conversation[]> {
-    const list = await this.conversationRepository.find({ fetchAll: true });
-    return list.map((c) => this.hydrate(c));
-  }
-
   /**
-   * Read a conversation by id and hydrate the `messages` JSON field back to an array.
-   * Repository.findById handles owner-RBAC (throws 403) and not-found (throws 404).
+   * Load a typed Conversation with its `messages` JSON hydrated to an array.
+   *
+   * Uses the inherited typed read via the repository directly (bypasses JSON:API
+   * serialisation) — callers that need JSON:API responses should go through
+   * `findById` which the framework wires through createCrudHandlers.
    */
-  private async readHydrated(id: string): Promise<Conversation> {
-    const entity = await this.conversationRepository.findById({ id });
+  private async loadHydrated(id: string): Promise<Conversation> {
+    const entity = await this.repository.findById({ id });
     return this.hydrate(entity);
   }
 
+  /**
+   * Parse `messages` JSON string back to an array. Handles the case where
+   * the driver already returned a parsed array (e.g. during tests) as well as
+   * empty/malformed strings defensively.
+   */
   private hydrate(entity: Conversation): Conversation {
     const raw = entity.messages as unknown;
     let messages: ConversationMessage[] = [];
@@ -167,8 +161,10 @@ export class ConversationService {
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) messages = parsed as ConversationMessage[];
-      } catch (err) {
-        this.logger.warn(`hydrate: failed to parse messages for conversation id=${entity.id} — using empty array`);
+      } catch {
+        this.convoLogger.warn(
+          `hydrate: failed to parse messages for conversation id=${entity.id} — using empty array`,
+        );
       }
     }
     return { ...entity, messages };

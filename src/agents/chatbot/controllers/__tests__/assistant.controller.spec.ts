@@ -17,7 +17,20 @@ describe("AssistantController", () => {
   const conversations = {
     createWithFirstMessage: vi.fn(async () => makeConversation()),
     appendMessage: vi.fn(async () => ({
-      conversation: makeConversation(),
+      conversation: makeConversation({
+        messages: [
+          { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "hey",
+            createdAt: "2026-04-17T00:00:01Z",
+            references: [],
+            suggestedQuestions: [],
+            tokens: { input: 1, output: 1 },
+          },
+        ],
+      }),
       userMessage: { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
       assistantMessage: {
         id: "a1",
@@ -28,16 +41,12 @@ describe("AssistantController", () => {
         suggestedQuestions: [],
         tokens: { input: 1, output: 1 },
       },
-      toolCalls: [],
+      toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }],
     })),
-    findAll: vi.fn(async () => [makeConversation()]),
-    findById: vi.fn(async () => makeConversation()),
-    rename: vi.fn(async () => makeConversation({ title: "Renamed" })),
-    remove: vi.fn(async () => undefined),
   };
   const jsonApi = {
     buildSingle: vi.fn(async (model: any, data: any) => ({
-      data: { type: model.type, id: data.id, attributes: data },
+      data: { type: model.type, id: data.id, attributes: { ...data } },
     })),
     buildList: vi.fn(async (model: any, data: any[]) => ({
       data: data.map((d) => ({ type: model.type, id: d.id, attributes: d })),
@@ -73,18 +82,19 @@ describe("AssistantController", () => {
 
     it("passes the optional title through", async () => {
       await ctl.create(envelope([{ role: "user", content: "hi" }], "My Chat") as any, REQ);
-      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "My Chat" }),
-      );
+      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith(expect.objectContaining({ title: "My Chat" }));
     });
 
     it("builds the response via JsonApiService.buildSingle with ConversationDescriptor.model", async () => {
       await ctl.create(envelope([{ role: "user", content: "hi" }]) as any, REQ);
-      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.objectContaining({ id: "convo-1" }));
+      expect(jsonApi.buildSingle).toHaveBeenCalledWith(
+        ConversationDescriptor.model,
+        expect.objectContaining({ id: "convo-1" }),
+      );
     });
   });
 
-  describe("POST /assistants/:id/messages (append)", () => {
+  describe("POST /assistants/:conversationId/messages (append)", () => {
     const envelope = (content: string) => ({
       data: { type: "messages", attributes: { role: "user", content } },
     });
@@ -100,56 +110,62 @@ describe("AssistantController", () => {
       });
     });
 
-    it("emits a synthetic messages collection with user + assistant messages and meta.toolCalls", async () => {
-      const res = await ctl.append("convo-1", envelope("continue") as any, REQ);
-      expect(res.data).toHaveLength(2);
-      expect(res.data[0]).toMatchObject({ type: "messages", id: "u1" });
-      expect(res.data[1]).toMatchObject({ type: "messages", id: "a1" });
-      expect(res.meta).toMatchObject({ conversationId: "convo-1", toolCalls: [] });
-      // Must NOT go through buildSingle/buildList — messages are projections, not resources.
-      expect(jsonApi.buildSingle).not.toHaveBeenCalled();
-      expect(jsonApi.buildList).not.toHaveBeenCalled();
+    it("returns the full updated Conversation via buildSingle with per-turn toolCalls in meta", async () => {
+      const res: any = await ctl.append("convo-1", envelope("continue") as any, REQ);
+      // Document was built through the descriptor-driven serialiser (no hand-assembled JSON:API).
+      expect(jsonApi.buildSingle).toHaveBeenCalledWith(
+        ConversationDescriptor.model,
+        expect.objectContaining({ id: "convo-1" }),
+      );
+      expect(res.data).toMatchObject({ type: "assistants", id: "convo-1" });
+      expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }] });
     });
   });
 
-  describe("GET /assistants (list)", () => {
-    it("calls ConversationService.findAll and builds the list via JsonApiService.buildList", async () => {
-      await ctl.list();
-      expect(conversations.findAll).toHaveBeenCalledOnce();
-      expect(jsonApi.buildList).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Array));
-    });
-  });
-
-  describe("GET /assistants/:id (read)", () => {
-    it("calls ConversationService.findById and builds a single response", async () => {
-      await ctl.read("convo-1");
-      expect(conversations.findById).toHaveBeenCalledWith({ conversationId: "convo-1" });
-      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Object));
-    });
-  });
-
-  describe("PATCH /assistants/:id (rename)", () => {
-    const envelope = (title?: string) => ({
-      data: { type: "assistants", id: "convo-1", attributes: { title } },
+  describe("standard CRUD routes delegate to createCrudHandlers", () => {
+    it("GET /assistants passes list params through to crud.findAll", async () => {
+      const send = vi.fn();
+      const reply = { send } as any;
+      // Stub the underlying service.find since the crud handler uses it.
+      (conversations as any).find = vi.fn(async () => ({ data: [] }));
+      await ctl.findAll(reply, { foo: "bar" } as any, "search-term", true, "name");
+      expect((conversations as any).find).toHaveBeenCalledWith({
+        term: "search-term",
+        query: { foo: "bar" },
+        fetchAll: true,
+        orderBy: "name",
+      });
+      expect(send).toHaveBeenCalled();
     });
 
-    it("delegates a title change to ConversationService.rename", async () => {
-      await ctl.rename("convo-1", envelope("New Title") as any);
-      expect(conversations.rename).toHaveBeenCalledWith({ conversationId: "convo-1", title: "New Title" });
-      expect(jsonApi.buildSingle).toHaveBeenCalledWith(ConversationDescriptor.model, expect.any(Object));
+    it("GET /assistants/:conversationId delegates to crud.findById", async () => {
+      const send = vi.fn();
+      const reply = { send } as any;
+      (conversations as any).findById = vi.fn(async () => ({ data: {} }));
+      await ctl.findById(reply, "convo-1");
+      expect((conversations as any).findById).toHaveBeenCalledWith({ id: "convo-1" });
+      expect(send).toHaveBeenCalled();
     });
 
-    it("is a no-op rename when title is missing (returns current conversation)", async () => {
-      await ctl.rename("convo-1", envelope(undefined) as any);
-      expect(conversations.rename).not.toHaveBeenCalled();
-      expect(conversations.findById).toHaveBeenCalledWith({ conversationId: "convo-1" });
+    it("PATCH /assistants/:conversationId delegates to crud.patch with the DTO envelope", async () => {
+      const send = vi.fn();
+      const reply = { send } as any;
+      (conversations as any).patchFromDTO = vi.fn(async () => ({ data: {} }));
+      const body = {
+        data: { type: "assistants", id: "convo-1", attributes: { title: "Renamed" } },
+      } as any;
+      await ctl.patch(reply, body);
+      expect((conversations as any).patchFromDTO).toHaveBeenCalledWith({ data: body.data });
+      expect(send).toHaveBeenCalled();
     });
-  });
 
-  describe("DELETE /assistants/:id", () => {
-    it("delegates to ConversationService.remove", async () => {
-      await ctl.delete("convo-1");
-      expect(conversations.remove).toHaveBeenCalledWith({ conversationId: "convo-1" });
+    it("DELETE /assistants/:conversationId delegates to crud.delete", async () => {
+      const send = vi.fn();
+      const reply = { send } as any;
+      (conversations as any).delete = vi.fn(async () => undefined);
+      await ctl.delete(reply, "convo-1");
+      expect((conversations as any).delete).toHaveBeenCalledWith({ id: "convo-1" });
+      expect(send).toHaveBeenCalled();
     });
   });
 });

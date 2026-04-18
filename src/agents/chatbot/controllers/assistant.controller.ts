@@ -4,26 +4,33 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpStatus,
   Logger,
   Param,
   Patch,
   Post,
+  Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AssistantAppendRequestDto } from "../dto/assistant-append.request.dto";
 import { AssistantCreateRequestDto } from "../dto/assistant-create.request.dto";
 import { AssistantPatchRequestDto } from "../dto/assistant-patch.request.dto";
 import { ConversationDescriptor } from "../entities/conversation";
+import { conversationMeta } from "../entities/conversation.meta";
 import { ConversationService } from "../services/conversation.service";
 
-@Controller("assistants")
 @UseGuards(JwtAuthGuard)
+@Controller()
 export class AssistantController {
   private readonly logger = new Logger(AssistantController.name);
+  private readonly crud = createCrudHandlers(() => this.conversations);
 
   constructor(
     private readonly conversations: ConversationService,
@@ -32,9 +39,13 @@ export class AssistantController {
 
   /**
    * POST /assistants — create a new conversation with a first user message.
-   * Runs the agent turn synchronously and stores the user+assistant pair.
+   *
+   * Stays bespoke (not `crud.create`) because the agent turn must be computed
+   * synchronously and the resulting user+assistant pair persisted atomically
+   * with the new Conversation — there is no client-supplied payload that maps
+   * cleanly onto `createFromDTO`.
    */
-  @Post()
+  @Post(conversationMeta.endpoint)
   async create(@Body() body: AssistantCreateRequestDto, @Req() req: AuthenticatedRequest): Promise<any> {
     const firstMessage = body.data.attributes.messages[0]!.content;
     this.logger.log(
@@ -51,78 +62,75 @@ export class AssistantController {
   }
 
   /**
-   * POST /assistants/:id/messages — append a user message to an existing conversation.
-   * Returns the user + assistant messages as a synthetic JSON:API collection of
-   * type `messages`, plus the tool calls observed during this turn in `meta`.
+   * POST /assistants/:conversationId/messages — append a user message to an existing conversation.
+   *
+   * Returns the full updated Conversation via the descriptor-driven serialiser
+   * (the client can read the last two `messages[]` entries for the new user +
+   * assistant pair). Per-turn `toolCalls` are surfaced in the document's
+   * top-level `meta` for debug/inspection.
    */
-  @Post(":id/messages")
+  @Post(`${conversationMeta.endpoint}/:conversationId/messages`)
   async append(
-    @Param("id") id: string,
+    @Param("conversationId") conversationId: string,
     @Body() body: AssistantAppendRequestDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
-    this.logger.log(`append: id=${id} userId=${req.user.userId} messageLen=${body.data.attributes.content.length}`);
-    const { userMessage, assistantMessage, toolCalls } = await this.conversations.appendMessage({
-      conversationId: id,
+    this.logger.log(
+      `append: conversationId=${conversationId} userId=${req.user.userId} messageLen=${body.data.attributes.content.length}`,
+    );
+    const { conversation, toolCalls } = await this.conversations.appendMessage({
+      conversationId,
       companyId: req.user.companyId,
       userId: req.user.userId,
       roles: req.user.roles,
       newMessage: body.data.attributes.content,
     });
 
-    // Messages are projections, not stored JSON:API resources, so we hand-assemble
-    // a valid JSON:API document here. `meta.conversationId` and `meta.toolCalls`
-    // let the client correlate and display agent activity.
-    return {
-      data: [
-        { type: "messages", id: userMessage.id, attributes: { ...userMessage } },
-        { type: "messages", id: assistantMessage.id, attributes: { ...assistantMessage } },
-      ],
-      meta: { conversationId: id, toolCalls },
-    };
+    const document = (await this.jsonApi.buildSingle(ConversationDescriptor.model, conversation)) as Record<
+      string,
+      any
+    >;
+    document.meta = { ...(document.meta ?? {}), toolCalls };
+    return document;
   }
 
   /**
    * GET /assistants — list the current user's conversations.
    * RBAC (company + owner) is enforced by the repository's `buildUserHasAccess` override.
    */
-  @Get()
-  async list(): Promise<any> {
-    const convos = await this.conversations.findAll();
-    return this.jsonApi.buildList(ConversationDescriptor.model, convos);
+  @Get(conversationMeta.endpoint)
+  async findAll(
+    @Res() reply: FastifyReply,
+    @Query() query: any,
+    @Query("search") search?: string,
+    @Query("fetchAll") fetchAll?: boolean,
+    @Query("orderBy") orderBy?: string,
+  ) {
+    return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
   }
 
   /**
-   * GET /assistants/:id — read a single conversation with full messages array.
+   * GET /assistants/:conversationId — read a single conversation.
    */
-  @Get(":id")
-  async read(@Param("id") id: string): Promise<any> {
-    const convo = await this.conversations.findById({ conversationId: id });
-    return this.jsonApi.buildSingle(ConversationDescriptor.model, convo);
+  @Get(`${conversationMeta.endpoint}/:conversationId`)
+  async findById(@Res() reply: FastifyReply, @Param("conversationId") conversationId: string) {
+    return this.crud.findById(reply, conversationId);
   }
 
   /**
-   * PATCH /assistants/:id — rename (update title) of an existing conversation.
+   * PATCH /assistants/:conversationId — partial update (e.g. rename) via JSON:API envelope.
    */
-  @Patch(":id")
-  async rename(@Param("id") id: string, @Body() body: AssistantPatchRequestDto): Promise<any> {
-    const title = body.data.attributes.title;
-    if (!title) {
-      return this.jsonApi.buildSingle(
-        ConversationDescriptor.model,
-        await this.conversations.findById({ conversationId: id }),
-      );
-    }
-    const updated = await this.conversations.rename({ conversationId: id, title });
-    return this.jsonApi.buildSingle(ConversationDescriptor.model, updated);
+  @Patch(`${conversationMeta.endpoint}/:conversationId`)
+  async patch(@Res() reply: FastifyReply, @Body() body: AssistantPatchRequestDto) {
+    return this.crud.patch(reply, body);
   }
 
   /**
-   * DELETE /assistants/:id — permanently remove the conversation.
+   * DELETE /assistants/:conversationId — permanently remove the conversation.
    */
-  @Delete(":id")
-  @HttpCode(204)
-  async delete(@Param("id") id: string): Promise<void> {
-    await this.conversations.remove({ conversationId: id });
+  @Delete(`${conversationMeta.endpoint}/:conversationId`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async delete(@Res() reply: FastifyReply, @Param("conversationId") conversationId: string) {
+    return this.crud.delete(reply, conversationId);
   }
 }
