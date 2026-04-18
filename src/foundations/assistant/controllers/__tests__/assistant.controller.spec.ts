@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantController } from "../assistant.controller";
-import { ConversationDescriptor } from "../../entities/conversation";
+import { AssistantDescriptor } from "../../entities/assistant";
 
 describe("AssistantController", () => {
-  const makeConversation = (overrides: Partial<any> = {}) => ({
-    id: "convo-1",
+  const makeAssistant = (overrides: Partial<any> = {}) => ({
+    id: "asst-1",
     type: "assistants",
     title: "Hello",
     messages: [],
@@ -14,10 +14,10 @@ describe("AssistantController", () => {
     ...overrides,
   });
 
-  const conversations = {
-    createWithFirstMessage: vi.fn(async () => makeConversation()),
+  const assistants = {
+    createWithFirstMessage: vi.fn(async () => makeAssistant()),
     appendMessage: vi.fn(async () => ({
-      conversation: makeConversation({
+      assistant: makeAssistant({
         messages: [
           { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
           {
@@ -53,7 +53,7 @@ describe("AssistantController", () => {
     })),
   };
 
-  const ctl = new AssistantController(conversations as any, jsonApi as any);
+  const ctl = new AssistantController(assistants as any, jsonApi as any);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,9 +69,9 @@ describe("AssistantController", () => {
       },
     });
 
-    it("unwraps the envelope and delegates to ConversationService with the first message", async () => {
+    it("unwraps the envelope and delegates to AssistantService with the first message", async () => {
       await ctl.create(envelope("hello there") as any, REQ);
-      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith({
+      expect(assistants.createWithFirstMessage).toHaveBeenCalledWith({
         companyId: "c",
         userId: "u",
         roles: ["role-1"],
@@ -82,27 +82,27 @@ describe("AssistantController", () => {
 
     it("passes the optional title through", async () => {
       await ctl.create(envelope("hi", "My Chat") as any, REQ);
-      expect(conversations.createWithFirstMessage).toHaveBeenCalledWith(expect.objectContaining({ title: "My Chat" }));
+      expect(assistants.createWithFirstMessage).toHaveBeenCalledWith(expect.objectContaining({ title: "My Chat" }));
     });
 
-    it("builds the response via JsonApiService.buildSingle with ConversationDescriptor.model", async () => {
+    it("builds the response via JsonApiService.buildSingle with AssistantDescriptor.model", async () => {
       await ctl.create(envelope("hi") as any, REQ);
       expect(jsonApi.buildSingle).toHaveBeenCalledWith(
-        ConversationDescriptor.model,
-        expect.objectContaining({ id: "convo-1" }),
+        AssistantDescriptor.model,
+        expect.objectContaining({ id: "asst-1" }),
       );
     });
   });
 
-  describe("POST /assistants/:conversationId/messages (append)", () => {
+  describe("POST /assistants/:assistantId/messages (append)", () => {
     const envelope = (content: string) => ({
       data: { type: "messages", attributes: { content } },
     });
 
-    it("delegates to ConversationService.appendMessage with the conversation id and new message", async () => {
-      await ctl.append("convo-1", envelope("continue") as any, REQ);
-      expect(conversations.appendMessage).toHaveBeenCalledWith({
-        conversationId: "convo-1",
+    it("delegates to AssistantService.appendMessage with the assistant id and new message", async () => {
+      await ctl.append("asst-1", envelope("continue") as any, REQ);
+      expect(assistants.appendMessage).toHaveBeenCalledWith({
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["role-1"],
@@ -110,14 +110,13 @@ describe("AssistantController", () => {
       });
     });
 
-    it("returns the full updated Conversation via buildSingle with per-turn toolCalls in meta", async () => {
-      const res: any = await ctl.append("convo-1", envelope("continue") as any, REQ);
-      // Document was built through the descriptor-driven serialiser (no hand-assembled JSON:API).
+    it("returns the full updated Assistant via buildSingle with per-turn toolCalls in meta", async () => {
+      const res: any = await ctl.append("asst-1", envelope("continue") as any, REQ);
       expect(jsonApi.buildSingle).toHaveBeenCalledWith(
-        ConversationDescriptor.model,
-        expect.objectContaining({ id: "convo-1" }),
+        AssistantDescriptor.model,
+        expect.objectContaining({ id: "asst-1" }),
       );
-      expect(res.data).toMatchObject({ type: "assistants", id: "convo-1" });
+      expect(res.data).toMatchObject({ type: "assistants", id: "asst-1" });
       expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }] });
     });
   });
@@ -126,10 +125,9 @@ describe("AssistantController", () => {
     it("GET /assistants passes list params through to crud.findAll", async () => {
       const send = vi.fn();
       const reply = { send } as any;
-      // Stub the underlying service.find since the crud handler uses it.
-      (conversations as any).find = vi.fn(async () => ({ data: [] }));
+      (assistants as any).find = vi.fn(async () => ({ data: [] }));
       await ctl.findAll(reply, { foo: "bar" } as any, "search-term", true, "name");
-      expect((conversations as any).find).toHaveBeenCalledWith({
+      expect((assistants as any).find).toHaveBeenCalledWith({
         term: "search-term",
         query: { foo: "bar" },
         fetchAll: true,
@@ -138,33 +136,33 @@ describe("AssistantController", () => {
       expect(send).toHaveBeenCalled();
     });
 
-    it("GET /assistants/:conversationId delegates to crud.findById", async () => {
+    it("GET /assistants/:assistantId delegates to crud.findById", async () => {
       const send = vi.fn();
       const reply = { send } as any;
-      (conversations as any).findById = vi.fn(async () => ({ data: {} }));
-      await ctl.findById(reply, "convo-1");
-      expect((conversations as any).findById).toHaveBeenCalledWith({ id: "convo-1" });
+      (assistants as any).findById = vi.fn(async () => ({ data: {} }));
+      await ctl.findById(reply, "asst-1");
+      expect((assistants as any).findById).toHaveBeenCalledWith({ id: "asst-1" });
       expect(send).toHaveBeenCalled();
     });
 
-    it("PATCH /assistants/:conversationId delegates to crud.patch with the DTO envelope", async () => {
+    it("PATCH /assistants/:assistantId delegates to crud.patch with the DTO envelope", async () => {
       const send = vi.fn();
       const reply = { send } as any;
-      (conversations as any).patchFromDTO = vi.fn(async () => ({ data: {} }));
+      (assistants as any).patchFromDTO = vi.fn(async () => ({ data: {} }));
       const body = {
-        data: { type: "assistants", id: "convo-1", attributes: { title: "Renamed" } },
+        data: { type: "assistants", id: "asst-1", attributes: { title: "Renamed" } },
       } as any;
       await ctl.patch(reply, body);
-      expect((conversations as any).patchFromDTO).toHaveBeenCalledWith({ data: body.data });
+      expect((assistants as any).patchFromDTO).toHaveBeenCalledWith({ data: body.data });
       expect(send).toHaveBeenCalled();
     });
 
-    it("DELETE /assistants/:conversationId delegates to crud.delete", async () => {
+    it("DELETE /assistants/:assistantId delegates to crud.delete", async () => {
       const send = vi.fn();
       const reply = { send } as any;
-      (conversations as any).delete = vi.fn(async () => undefined);
-      await ctl.delete(reply, "convo-1");
-      expect((conversations as any).delete).toHaveBeenCalledWith({ id: "convo-1" });
+      (assistants as any).delete = vi.fn(async () => undefined);
+      await ctl.delete(reply, "asst-1");
+      expect((assistants as any).delete).toHaveBeenCalledWith({ id: "asst-1" });
       expect(send).toHaveBeenCalled();
     });
   });

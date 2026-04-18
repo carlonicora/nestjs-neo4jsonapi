@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { ConversationService } from "../../services/conversation.service";
-import { ChatbotService, ChatbotRunParams } from "../../services/chatbot.service";
+import { AssistantService } from "../../services/assistant.service";
+import { ChatbotService, ChatbotRunParams } from "../../../../agents/chatbot/services/chatbot.service";
 
 /**
- * Scripted-LLM integration: exercises the full ConversationService lifecycle
+ * Scripted-LLM integration: exercises the full AssistantService lifecycle
  * (create → append) against in-memory repo + in-memory chatbot stubs. Asserts
  * the key behavioural contract: a 2nd turn gets a reference-memory system
  * message derived from the 1st turn's references.
@@ -12,8 +12,8 @@ import { ChatbotService, ChatbotRunParams } from "../../services/chatbot.service
  * AbstractService and exercised through the framework's test suite — this
  * integration focuses on the non-standard agent-turn flow.
  */
-describe("Conversation lifecycle (integration, scripted agent)", () => {
-  let service: ConversationService;
+describe("Assistant lifecycle (integration, scripted agent)", () => {
+  let service: AssistantService;
   let storage: Map<string, any>;
   let chatbotRunParams: ChatbotRunParams[];
 
@@ -103,28 +103,28 @@ describe("Conversation lifecycle (integration, scripted agent)", () => {
       has: () => true,
     } as any;
 
-    service = new ConversationService(jsonApi, repo, clsService, userModules, chatbot);
+    service = new AssistantService(jsonApi, repo, clsService, userModules, chatbot);
   });
 
-  it("creates a conversation and persists the first user+assistant pair", async () => {
-    const convo = await service.createWithFirstMessage({
+  it("creates an assistant thread and persists the first user+assistant pair", async () => {
+    const assistant = await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
       roles: ["role-1"],
       firstMessage: "Who is the top account?",
     });
-    expect(convo.id).toBeDefined();
-    expect(convo.messages).toHaveLength(2);
-    expect(convo.messages[0].role).toBe("user");
-    expect(convo.messages[1].role).toBe("assistant");
-    expect(convo.messages[1].references?.[0]).toMatchObject({ type: "accounts", id: "acc-1" });
-    expect(convo.title).toBe("Who is the top account?");
+    expect(assistant.id).toBeDefined();
+    expect(assistant.messages).toHaveLength(2);
+    expect(assistant.messages[0].role).toBe("user");
+    expect(assistant.messages[1].role).toBe("assistant");
+    expect(assistant.messages[1].references?.[0]).toMatchObject({ type: "accounts", id: "acc-1" });
+    expect(assistant.title).toBe("Who is the top account?");
   });
 
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
-    const [firstConvoId] = Array.from(storage.keys());
+    const [firstAssistantId] = Array.from(storage.keys());
     const result = await service.appendMessage({
-      conversationId: firstConvoId,
+      assistantId: firstAssistantId,
       companyId: "c",
       userId: "u-1",
       roles: ["role-1"],
@@ -138,23 +138,21 @@ describe("Conversation lifecycle (integration, scripted agent)", () => {
     expect(sys!.content).toContain("accounts/acc-1");
     expect(sys!.content).toContain("primary match");
 
-    // The conversation should now hold 4 messages (u1, a1, u2, a2).
-    expect(result.conversation.messages).toHaveLength(4);
+    // The assistant thread should now hold 4 messages (u1, a1, u2, a2).
+    expect(result.assistant.messages).toHaveLength(4);
     expect(result.toolCalls).toEqual([{ tool: "traverse", input: {}, durationMs: 5 }]);
     expect(result.userMessage.content).toBe("And its latest order?");
     expect(result.assistantMessage.content).toContain("ord-1");
   });
 
-  it("inherited find() returns the user's conversations via JsonApiService.buildList", async () => {
+  it("inherited find() returns the user's assistant threads via JsonApiService.buildList", async () => {
     const response = await service.find({ query: {} });
     expect(response.data).toBeDefined();
-    // At least one conversation has been created; its messages field is still the raw JSON string
-    // (AbstractService.find bypasses the service-level hydrate helper — the client deserialises).
     expect(Array.isArray((response as any).data)).toBe(true);
     expect((response as any).data.length).toBe(1);
   });
 
-  it("inherited findById() returns the conversation as a JSON:API document", async () => {
+  it("inherited findById() returns the assistant thread as a JSON:API document", async () => {
     const [id] = Array.from(storage.keys());
     const response = await service.findById({ id });
     expect((response as any).data).toMatchObject({ type: "assistants", id });
@@ -169,7 +167,7 @@ describe("Conversation lifecycle (integration, scripted agent)", () => {
     expect(stored.title).toBe("Top account review");
   });
 
-  it("inherited delete() removes the conversation", async () => {
+  it("inherited delete() removes the assistant thread", async () => {
     const [id] = Array.from(storage.keys());
     await service.delete({ id });
     expect(storage.has(id)).toBe(false);

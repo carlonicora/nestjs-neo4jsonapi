@@ -1,15 +1,15 @@
 import { Entity, defineEntity } from "../../../common";
-import type { Company } from "../../../foundations/company/entities/company";
-import type { User } from "../../../foundations/user/entities/user";
-import { ownerMeta } from "../../../foundations/user/entities/user.meta";
-import { conversationMeta } from "./conversation.meta";
+import type { Company } from "../../company/entities/company";
+import type { User } from "../../user/entities/user";
+import { ownerMeta } from "../../user/entities/user.meta";
+import { assistantMeta } from "./assistant.meta";
 
 /**
- * ConversationMessage — an entry in the `messages` JSON array on a Conversation node.
+ * AssistantMessage — an entry in the `messages` JSON array on an Assistant node.
  *
  * Stored as JSON (stringified) in Neo4j. Parsed back to an array by the service layer.
  */
-export type ConversationMessage = {
+export type AssistantMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
@@ -20,28 +20,28 @@ export type ConversationMessage = {
 };
 
 /**
- * Conversation Entity Type
+ * Assistant Entity Type
  *
- * Persistent ChatGPT-style conversation. Company-scoped and owner-scoped
+ * Persistent ChatGPT-style assistant thread. Company-scoped and owner-scoped
  * (only the creator can read/modify). Messages are embedded as a JSON array.
  */
-export type Conversation = Entity & {
+export type Assistant = Entity & {
   title: string;
-  messages: ConversationMessage[];
+  messages: AssistantMessage[];
   company: Company;
   owner?: User;
 };
 
 /**
- * Conversation Entity Descriptor
+ * Assistant Entity Descriptor
  *
  * - `isCompanyScoped: true` — framework auto-injects company filter on all queries.
  * - `owner` relationship uses `CREATED_BY` (out) and is populated automatically on create
  *   via `contextKey: "userId"` (from the CLS context).
  * - `messages` is a JSON field — the service JSON.stringify/parse's around the repo calls.
  */
-export const ConversationDescriptor = defineEntity<Conversation>()({
-  ...conversationMeta,
+export const AssistantDescriptor = defineEntity<Assistant>()({
+  ...assistantMeta,
 
   isCompanyScoped: true,
 
@@ -64,4 +64,4 @@ export const ConversationDescriptor = defineEntity<Conversation>()({
   },
 });
 
-export type ConversationDescriptorType = typeof ConversationDescriptor;
+export type AssistantDescriptorType = typeof AssistantDescriptor;

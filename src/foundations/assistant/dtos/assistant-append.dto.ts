@@ -1,5 +1,5 @@
-import { Equals, IsNotEmpty, IsString, MaxLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
+import { Equals, IsNotEmpty, IsString, MaxLength, ValidateNested } from "class-validator";
 
 export class AssistantAppendAttributesDto {
   @IsString()
@@ -17,7 +17,7 @@ export class AssistantAppendDataDto {
   attributes!: AssistantAppendAttributesDto;
 }
 
-export class AssistantAppendRequestDto {
+export class AssistantAppendDto {
   @ValidateNested()
   @Type(() => AssistantAppendDataDto)
   data!: AssistantAppendDataDto;

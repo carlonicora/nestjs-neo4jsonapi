@@ -1,13 +1,14 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ClsService } from "nestjs-cls";
 import { randomUUID } from "crypto";
+import { ClsService } from "nestjs-cls";
+import { ChatbotService } from "../../../agents/chatbot/services/chatbot.service";
+import { UserModulesRepository } from "../../../agents/chatbot/repositories/user-modules.repository";
+import { ChatbotToolCall } from "../../../agents/chatbot/interfaces/chatbot.response.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
-import { Conversation, ConversationDescriptor, ConversationMessage } from "../entities/conversation";
-import { ConversationRepository } from "../repositories/conversation.repository";
-import { UserModulesRepository } from "../repositories/user-modules.repository";
-import { ChatbotToolCall } from "../interfaces/chatbot.response.interface";
-import { ChatbotService } from "./chatbot.service";
+import { Assistant, AssistantDescriptor, AssistantMessage } from "../entities/assistant";
+import { assistantMeta } from "../entities/assistant.meta";
+import { AssistantRepository } from "../repositories/assistant.repository";
 
 /**
  * Maximum number of prior messages (turns) passed to the LLM on each turn.
@@ -16,14 +17,14 @@ import { ChatbotService } from "./chatbot.service";
 export const MAX_MESSAGES_TO_LLM = 20;
 
 /**
- * ConversationService
+ * AssistantService
  *
  * Wraps the stateless ChatbotService.run() in a stateful lifecycle. Extends
  * AbstractService so standard CRUD (find / findById / patch / delete) is
  * inherited and wired through the framework's JSON:API pipeline — only the
  * agent-turn methods below are bespoke:
- *   - `createWithFirstMessage` — persists a brand-new conversation with the first turn.
- *   - `appendMessage` — appends a user turn + agent turn to an existing conversation.
+ *   - `createWithFirstMessage` — persists a brand-new assistant thread with the first turn.
+ *   - `appendMessage` — appends a user turn + agent turn to an existing assistant thread.
  *
  * Entities in `references` from prior turns are surfaced to the LLM as a
  * system-message "entity memory" hint so the agent can call `read_entity` directly
@@ -33,18 +34,18 @@ export const MAX_MESSAGES_TO_LLM = 20;
  * `messages` JSON array is stringified on write and parsed on read (see `hydrate`).
  */
 @Injectable()
-export class ConversationService extends AbstractService<Conversation, typeof ConversationDescriptor.relationships> {
-  protected readonly descriptor = ConversationDescriptor;
-  private readonly convoLogger = new Logger(ConversationService.name);
+export class AssistantService extends AbstractService<Assistant, typeof AssistantDescriptor.relationships> {
+  protected readonly descriptor = AssistantDescriptor;
+  private readonly assistantLogger = new Logger(AssistantService.name);
 
   constructor(
     jsonApiService: JsonApiService,
-    conversationRepository: ConversationRepository,
+    assistantRepository: AssistantRepository,
     clsService: ClsService,
     private readonly userModulesRepository: UserModulesRepository,
     private readonly chatbot: ChatbotService,
   ) {
-    super(jsonApiService, conversationRepository, clsService, ConversationDescriptor.model);
+    super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
 
   async createWithFirstMessage(params: {
@@ -53,12 +54,12 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
     roles: string[];
     firstMessage: string;
     title?: string;
-  }): Promise<Conversation> {
+  }): Promise<Assistant> {
     const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
     const title = params.title?.trim() || this.autoTitle(params.firstMessage);
     const now = new Date().toISOString();
 
-    const userMessage: ConversationMessage = {
+    const userMessage: AssistantMessage = {
       id: randomUUID(),
       role: "user",
       content: params.firstMessage,
@@ -76,36 +77,46 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
     const id = randomUUID();
     const messages = [userMessage, assistantMessage];
 
-    this.convoLogger.log(
+    this.assistantLogger.log(
       `createWithFirstMessage: id=${id} userId=${params.userId} companyId=${params.companyId} titleLength=${title.length} messages=${messages.length}`,
     );
 
-    await this.repository.create({
-      id,
-      title,
-      messages: JSON.stringify(messages),
+    // Route the create through the descriptor-driven DTO pipeline so that
+    // `contextKey: "userId"` on the `owner` relationship auto-attaches the
+    // CREATED_BY edge from CLS. Calling `repository.create(...)` directly
+    // would bypass that and leave the assistant ownerless — the owner-RBAC
+    // check in `buildUserHasAccess` would then fail on the read-back.
+    await this.createFromDTO({
+      data: {
+        type: assistantMeta.type,
+        id,
+        attributes: {
+          title,
+          messages: JSON.stringify(messages),
+        },
+      },
     });
 
     return this.loadHydrated(id);
   }
 
   async appendMessage(params: {
-    conversationId: string;
+    assistantId: string;
     companyId: string;
     userId: string;
     roles: string[];
     newMessage: string;
   }): Promise<{
-    conversation: Conversation;
-    userMessage: ConversationMessage;
-    assistantMessage: ConversationMessage;
+    assistant: Assistant;
+    userMessage: AssistantMessage;
+    assistantMessage: AssistantMessage;
     toolCalls: ChatbotToolCall[];
   }> {
     // Repository enforces owner-RBAC (via buildUserHasAccess) and throws 403/404 on miss.
-    const conversation = await this.loadHydrated(params.conversationId);
+    const assistant = await this.loadHydrated(params.assistantId);
     const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
 
-    const userMessage: ConversationMessage = {
+    const userMessage: AssistantMessage = {
       id: randomUUID(),
       role: "user",
       content: params.newMessage,
@@ -116,33 +127,33 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
       companyId: params.companyId,
       userId: params.userId,
       userModules,
-      priorMessages: conversation.messages,
+      priorMessages: assistant.messages,
       newUserMessage: userMessage,
     });
 
-    const messages = [...conversation.messages, userMessage, assistantMessage];
+    const messages = [...assistant.messages, userMessage, assistantMessage];
 
-    this.convoLogger.log(
-      `appendMessage: id=${params.conversationId} userId=${params.userId} priorLen=${conversation.messages.length} newLen=${messages.length}`,
+    this.assistantLogger.log(
+      `appendMessage: id=${params.assistantId} userId=${params.userId} priorLen=${assistant.messages.length} newLen=${messages.length}`,
     );
 
     await this.repository.patch({
-      id: params.conversationId,
+      id: params.assistantId,
       messages: JSON.stringify(messages),
     });
 
-    const updated = await this.loadHydrated(params.conversationId);
-    return { conversation: updated, userMessage, assistantMessage, toolCalls };
+    const updated = await this.loadHydrated(params.assistantId);
+    return { assistant: updated, userMessage, assistantMessage, toolCalls };
   }
 
   /**
-   * Load a typed Conversation with its `messages` JSON hydrated to an array.
+   * Load a typed Assistant with its `messages` JSON hydrated to an array.
    *
    * Uses the inherited typed read via the repository directly (bypasses JSON:API
    * serialisation) — callers that need JSON:API responses should go through
    * `findById` which the framework wires through createCrudHandlers.
    */
-  private async loadHydrated(id: string): Promise<Conversation> {
+  private async loadHydrated(id: string): Promise<Assistant> {
     const entity = await this.repository.findById({ id });
     return this.hydrate(entity);
   }
@@ -152,18 +163,18 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
    * the driver already returned a parsed array (e.g. during tests) as well as
    * empty/malformed strings defensively.
    */
-  private hydrate(entity: Conversation): Conversation {
+  private hydrate(entity: Assistant): Assistant {
     const raw = entity.messages as unknown;
-    let messages: ConversationMessage[] = [];
+    let messages: AssistantMessage[] = [];
     if (Array.isArray(raw)) {
-      messages = raw as ConversationMessage[];
+      messages = raw as AssistantMessage[];
     } else if (typeof raw === "string" && raw.length > 0) {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) messages = parsed as ConversationMessage[];
+        if (Array.isArray(parsed)) messages = parsed as AssistantMessage[];
       } catch {
-        this.convoLogger.warn(
-          `hydrate: failed to parse messages for conversation id=${entity.id} — using empty array`,
+        this.assistantLogger.warn(
+          `hydrate: failed to parse messages for assistant id=${entity.id} — using empty array`,
         );
       }
     }
@@ -179,9 +190,9 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
     companyId: string;
     userId: string;
     userModules: string[];
-    priorMessages: ConversationMessage[];
-    newUserMessage: ConversationMessage;
-  }): Promise<{ assistantMessage: ConversationMessage; toolCalls: ChatbotToolCall[] }> {
+    priorMessages: AssistantMessage[];
+    newUserMessage: AssistantMessage;
+  }): Promise<{ assistantMessage: AssistantMessage; toolCalls: ChatbotToolCall[] }> {
     const hydrationContent = this.buildHydrationMessage(params.priorMessages);
     const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
       role: m.role,
@@ -200,7 +211,7 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
       messages,
     });
 
-    const assistantMessage: ConversationMessage = {
+    const assistantMessage: AssistantMessage = {
       id: randomUUID(),
       role: "assistant",
       content: response.answer,
@@ -216,7 +227,7 @@ export class ConversationService extends AbstractService<Conversation, typeof Co
    * Build the reference-memory system message — a de-duplicated list of every
    * entity referenced in prior turns. Returns null if there is nothing to hydrate.
    */
-  private buildHydrationMessage(messages: ConversationMessage[]): string | null {
+  private buildHydrationMessage(messages: AssistantMessage[]): string | null {
     const seen = new Map<string, string>(); // key: "type/id" → reason
     for (const msg of messages) {
       for (const ref of msg.references ?? []) {

@@ -1,6 +1,6 @@
 import { Type } from "class-transformer";
 import { Equals, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from "class-validator";
-import { conversationMeta } from "../entities/conversation.meta";
+import { assistantMeta } from "../entities/assistant.meta";
 
 export class AssistantPatchAttributesDto {
   @IsOptional()
@@ -11,7 +11,7 @@ export class AssistantPatchAttributesDto {
 }
 
 export class AssistantPatchDataDto {
-  @Equals(conversationMeta.endpoint)
+  @Equals(assistantMeta.endpoint)
   type!: string;
 
   @IsUUID()
@@ -23,7 +23,7 @@ export class AssistantPatchDataDto {
   attributes!: AssistantPatchAttributesDto;
 }
 
-export class AssistantPatchRequestDto {
+export class AssistantPatchDto {
   @ValidateNested()
   @IsNotEmpty()
   @Type(() => AssistantPatchDataDto)

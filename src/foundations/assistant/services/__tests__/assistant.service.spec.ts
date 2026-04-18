@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConversationService, MAX_MESSAGES_TO_LLM } from "../conversation.service";
+import { AssistantService, MAX_MESSAGES_TO_LLM } from "../assistant.service";
+import { assistantMeta } from "../../entities/assistant.meta";
 
-function makePersistedConvo(messages: any[] = [], title = "Hello there") {
+function makePersistedAssistant(messages: any[] = [], title = "Hello there") {
   return {
-    id: "convo-1",
+    id: "asst-1",
     type: "assistants",
     title,
     messages: JSON.stringify(messages),
@@ -13,7 +14,7 @@ function makePersistedConvo(messages: any[] = [], title = "Hello there") {
   };
 }
 
-describe("ConversationService", () => {
+describe("AssistantService", () => {
   const buildSut = (opts: { findReturns?: any } = {}) => {
     const chatbotResponse = {
       answer: "The answer",
@@ -30,8 +31,8 @@ describe("ConversationService", () => {
       create: vi.fn(async () => undefined),
       patch: vi.fn(async () => undefined),
       delete: vi.fn(async () => undefined),
-      find: vi.fn(async () => [makePersistedConvo()]),
-      findById: vi.fn(async () => opts.findReturns ?? makePersistedConvo()),
+      find: vi.fn(async () => [makePersistedAssistant()]),
+      findById: vi.fn(async () => opts.findReturns ?? makePersistedAssistant()),
     } as any;
     const jsonApi = {
       buildSingle: vi.fn(async (_model: any, record: any) => ({
@@ -45,7 +46,7 @@ describe("ConversationService", () => {
       get: (key: string) => (key === "userId" ? "u" : key === "companyId" ? "c" : undefined),
       has: () => true,
     } as any;
-    const service = new ConversationService(jsonApi, repo, clsService, userModules, chatbot);
+    const service = new AssistantService(jsonApi, repo, clsService, userModules, chatbot);
     return { service, chatbot, userModules, repo, jsonApi };
   };
 
@@ -56,18 +57,22 @@ describe("ConversationService", () => {
   describe("createWithFirstMessage", () => {
     it("auto-generates a title from the first message when none is provided", async () => {
       const { service, repo } = buildSut();
+      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
         roles: ["r"],
         firstMessage: "Can you show me all accounts from last month?",
       });
-      const persisted = repo.create.mock.calls[0][0];
-      expect(persisted.title).toBe("Can you show me all accounts from last month?");
+      const dtoArg = spy.mock.calls[0][0];
+      expect(dtoArg.data.attributes.title).toBe("Can you show me all accounts from last month?");
+      // repository.create is no longer called directly — flow goes through createFromDTO
+      expect(repo.create).not.toHaveBeenCalled();
     });
 
     it("trims an auto-title to <=60 chars on a word boundary", async () => {
-      const { service, repo } = buildSut();
+      const { service } = buildSut();
+      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
       const longMessage =
         "This is a deliberately long first message that should be trimmed on a word boundary somewhere before sixty";
       await service.createWithFirstMessage({
@@ -76,17 +81,16 @@ describe("ConversationService", () => {
         roles: ["r"],
         firstMessage: longMessage,
       });
-      const persisted = repo.create.mock.calls[0][0];
-      expect(persisted.title.length).toBeLessThanOrEqual(60);
-      // Title must be a prefix of the original input (no char cut) and end at a
-      // word (the original has a space immediately after the cut point, meaning
-      // we trimmed on a boundary).
-      expect(longMessage.startsWith(persisted.title)).toBe(true);
-      expect(longMessage[persisted.title.length]).toBe(" ");
+      const dtoArg = spy.mock.calls[0][0];
+      const title = dtoArg.data.attributes.title as string;
+      expect(title.length).toBeLessThanOrEqual(60);
+      expect(longMessage.startsWith(title)).toBe(true);
+      expect(longMessage[title.length]).toBe(" ");
     });
 
     it("respects a caller-supplied title when provided", async () => {
-      const { service, repo } = buildSut();
+      const { service } = buildSut();
+      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -94,12 +98,12 @@ describe("ConversationService", () => {
         firstMessage: "hi",
         title: "   My Custom Title   ",
       });
-      const persisted = repo.create.mock.calls[0][0];
-      expect(persisted.title).toBe("My Custom Title");
+      expect(spy.mock.calls[0][0].data.attributes.title).toBe("My Custom Title");
     });
 
     it("does NOT emit a hydration system message on the first turn (no prior refs)", async () => {
       const { service, chatbot } = buildSut();
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -110,16 +114,22 @@ describe("ConversationService", () => {
       expect(passedMessages.every((m: any) => m.role !== "system")).toBe(true);
     });
 
-    it("persists the user+assistant pair as JSON.stringified messages", async () => {
-      const { service, repo } = buildSut();
+    it("persists the user+assistant pair via createFromDTO so the owner CREATED_BY edge is attached", async () => {
+      const { service } = buildSut();
+      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
         roles: ["r"],
         firstMessage: "hi",
       });
-      const persisted = repo.create.mock.calls[0][0];
-      const parsed = JSON.parse(persisted.messages);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const dtoArg = spy.mock.calls[0][0];
+      expect(dtoArg.data.type).toBe(assistantMeta.type);
+      expect(typeof dtoArg.data.id).toBe("string");
+      expect(dtoArg.data.id.length).toBeGreaterThan(0);
+
+      const parsed = JSON.parse(dtoArg.data.attributes.messages);
       expect(parsed).toHaveLength(2);
       expect(parsed[0].role).toBe("user");
       expect(parsed[1].role).toBe("assistant");
@@ -139,9 +149,9 @@ describe("ConversationService", () => {
           references: [{ type: "accounts", id: "acc-1", reason: "prior mention" }],
         },
       ];
-      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedConvo(priorMessages) } });
+      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedAssistant(priorMessages) } });
       await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
@@ -174,75 +184,69 @@ describe("ConversationService", () => {
           ],
         },
       ];
-      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedConvo(priorMessages) } });
+      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedAssistant(priorMessages) } });
       await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "more",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
-      // Each entity should appear exactly once
       expect((sys.content.match(/accounts\/acc-1/g) ?? []).length).toBe(1);
       expect((sys.content.match(/orders\/ord-9/g) ?? []).length).toBe(1);
-      // First-seen reason wins
       expect(sys.content).toContain("accounts/acc-1: first");
     });
 
     it("trims history to at most MAX_MESSAGES_TO_LLM prior messages before the new user message", async () => {
-      // Build 25 prior messages — trimmed should keep only the last 20.
       const priorMessages = Array.from({ length: 25 }, (_, i) => ({
         id: `m-${i}`,
         role: i % 2 === 0 ? "user" : "assistant",
         content: `msg-${i}`,
         createdAt: `2026-04-17T00:00:${String(i).padStart(2, "0")}Z`,
       }));
-      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedConvo(priorMessages) } });
+      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedAssistant(priorMessages) } });
       await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "latest",
       });
       const passed = chatbot.run.mock.calls[0][0].messages;
-      // No prior refs so no hydration system message; should be exactly 20 prior + 1 new = 21
       expect(passed.every((m: any) => m.role !== "system")).toBe(true);
       expect(passed).toHaveLength(MAX_MESSAGES_TO_LLM + 1);
-      // The first trimmed prior should be m-5 (index 5 onwards = last 20 of 25)
       expect(passed[0].content).toBe("msg-5");
       expect(passed[passed.length - 1].content).toBe("latest");
     });
 
     it("persists the updated messages array via repository.patch", async () => {
-      const { service, repo } = buildSut({ findReturns: { ...makePersistedConvo([]) } });
+      const { service, repo } = buildSut({ findReturns: { ...makePersistedAssistant([]) } });
       await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "hi",
       });
-      expect(repo.patch).toHaveBeenCalledWith(expect.objectContaining({ id: "convo-1", messages: expect.any(String) }));
+      expect(repo.patch).toHaveBeenCalledWith(expect.objectContaining({ id: "asst-1", messages: expect.any(String) }));
       const stored = JSON.parse(repo.patch.mock.calls[0][0].messages);
       expect(stored).toHaveLength(2);
       expect(stored[0].role).toBe("user");
       expect(stored[1].role).toBe("assistant");
     });
 
-    it("returns the updated Conversation with hydrated messages and the turn's toolCalls", async () => {
-      const { service } = buildSut({ findReturns: { ...makePersistedConvo([]) } });
+    it("returns the updated Assistant with hydrated messages and the turn's toolCalls", async () => {
+      const { service } = buildSut({ findReturns: { ...makePersistedAssistant([]) } });
       const result = await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "hi",
       });
-      expect(result.conversation.id).toBe("convo-1");
-      // conversation.messages was hydrated from the stringified JSON — still an array on exit.
-      expect(Array.isArray(result.conversation.messages)).toBe(true);
+      expect(result.assistant.id).toBe("asst-1");
+      expect(Array.isArray(result.assistant.messages)).toBe(true);
       expect(result.toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 1 }]);
     });
   });
@@ -250,35 +254,29 @@ describe("ConversationService", () => {
   describe("hydrate helper", () => {
     it("parses stringified messages on read via the bespoke agent-turn flow", async () => {
       const msgs = [{ id: "u1", role: "user", content: "x", createdAt: "t" }];
-      const { service } = buildSut({ findReturns: makePersistedConvo(msgs) });
-      // appendMessage reads via loadHydrated → returns the typed Conversation with an array.
+      const { service } = buildSut({ findReturns: makePersistedAssistant(msgs) });
       const result = await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "follow-up",
       });
-      expect(Array.isArray(result.conversation.messages)).toBe(true);
+      expect(Array.isArray(result.assistant.messages)).toBe(true);
     });
 
     it("handles an empty/absent messages field gracefully (defaults to [] on the typed result)", async () => {
-      // The repo mock returns the same entity with `messages: ""` on every findById call; the
-      // hydrate helper must turn that into an empty array rather than throwing. The repo is
-      // patched with the new messages array, but the stub still reads back the empty string.
-      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedConvo(), messages: "" } });
+      const { service, chatbot } = buildSut({ findReturns: { ...makePersistedAssistant(), messages: "" } });
       const result = await service.appendMessage({
-        conversationId: "convo-1",
+        assistantId: "asst-1",
         companyId: "c",
         userId: "u",
         roles: ["r"],
         newMessage: "hi",
       });
-      // No prior messages → no hydration system message emitted to the chatbot.
       const passed = chatbot.run.mock.calls[0][0].messages;
       expect(passed.every((m: any) => m.role !== "system")).toBe(true);
-      // Hydration of the "" string yields an array (not a thrown error).
-      expect(Array.isArray(result.conversation.messages)).toBe(true);
+      expect(Array.isArray(result.assistant.messages)).toBe(true);
     });
   });
 });
