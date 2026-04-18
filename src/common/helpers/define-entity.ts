@@ -192,6 +192,8 @@ export function defineEntity<T>() {
       serialiser: customSerialiser,
       injectServices = [],
       isCompanyScoped = true,
+      description,
+      chat,
     } = schema;
 
     // Extract field information
@@ -341,6 +343,9 @@ export function defineEntity<T>() {
 
       fulltextIndexName: stringFields.length > 0 ? fulltextIndexName : "",
       defaultOrderBy: "updatedAt DESC",
+
+      description,
+      chat,
     };
 
     // Auto-generate serialiser if not provided

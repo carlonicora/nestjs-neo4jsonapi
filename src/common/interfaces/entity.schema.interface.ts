@@ -39,6 +39,8 @@ export interface FieldDef {
   transform?: FieldTransformFn;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
 }
 
 /**
@@ -61,6 +63,8 @@ export interface ComputedFieldDef<T = any> {
   meta?: boolean;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
 }
 
 /**
@@ -77,6 +81,8 @@ export interface VirtualFieldDef {
   meta?: boolean;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
 }
 
 /**
@@ -119,6 +125,13 @@ export interface RelationshipDef {
   polymorphic?: PolymorphicConfig;
   /** If true, relationship is set only on creation and skipped during PUT (default: false) */
   immutable?: boolean;
+  /** Human-readable description. Required for the relationship to be visible to the chatbot. */
+  description?: string;
+  /** Opts in reverse traversal from the target entity. Omit to keep one-way. */
+  reverse?: {
+    name: string;
+    description: string;
+  };
 }
 
 /**
@@ -193,6 +206,17 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
 
   /** Services to inject into auto-generated serialiser for field transformers */
   injectServices?: Type<any>[];
+
+  /** Entity purpose for the chatbot. Required for the entity to be visible to the LLM. */
+  description?: string;
+
+  /** Optional LLM-facing presentation hints. */
+  chat?: {
+    /** One-line summary renderer used in chatbot search/traverse results. */
+    summary?: (data: any) => string;
+    /** Described string fields used for the `text` parameter in `search_entities`. */
+    textSearchFields?: string[];
+  };
 }
 
 /**
@@ -254,4 +278,15 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
 
   /** Default ordering for queries */
   defaultOrderBy: string;
+
+  /** Entity purpose for the chatbot. Required for the entity to be visible to the LLM. */
+  description?: string;
+
+  /** Optional LLM-facing presentation hints. */
+  chat?: {
+    /** One-line summary renderer used in chatbot search/traverse results. */
+    summary?: (data: any) => string;
+    /** Described string fields used for the `text` parameter in `search_entities`. */
+    textSearchFields?: string[];
+  };
 }
