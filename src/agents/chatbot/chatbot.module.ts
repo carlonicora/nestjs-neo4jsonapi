@@ -5,6 +5,7 @@ import { AssistantController } from "./controllers/assistant.controller";
 import { ConversationDescriptor } from "./entities/conversation";
 import { ConversationRepository } from "./repositories/conversation.repository";
 import { UserModulesRepository } from "./repositories/user-modules.repository";
+import { ChatbotIndexManager } from "./services/chatbot.index.manager";
 import { ChatbotService } from "./services/chatbot.service";
 import { ConversationService } from "./services/conversation.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
@@ -43,14 +44,11 @@ import { TraverseTool } from "./tools/traverse.tool";
 
     // Name-embedding helper for chat-enabled entity services (called explicitly in their create/put/patch)
     NameEmbeddingService,
+
+    // Per-label fulltext + vector index manager (fires once on module init)
+    ChatbotIndexManager,
   ],
-  exports: [
-    ChatbotService,
-    GraphDescriptorRegistry,
-    ConversationService,
-    ConversationRepository,
-    NameEmbeddingService,
-  ],
+  exports: [ChatbotService, GraphDescriptorRegistry, ConversationService, ConversationRepository, NameEmbeddingService],
 })
 export class ChatbotModule implements OnModuleInit {
   onModuleInit() {

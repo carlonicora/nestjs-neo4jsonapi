@@ -190,6 +190,14 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     return out.join("\n");
   }
 
+  getAllChatEnabledEntities(): CatalogEntity[] {
+    const out: CatalogEntity[] = [];
+    for (const e of this.entities.values()) {
+      if (e.textSearchFields?.length) out.push(e);
+    }
+    return out;
+  }
+
   getCatalogEntityByLabel(label: string): CatalogEntity | undefined {
     for (const e of this.entities.values()) {
       if (e.labelName === label) return e;
