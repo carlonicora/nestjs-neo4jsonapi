@@ -48,3 +48,5 @@ export type {
   ChatbotToolCall,
 } from "./chatbot/interfaces/chatbot.response.interface";
 export type { ChatbotRunParams } from "./chatbot/services/chatbot.service";
+export { UserModulesRepository } from "./chatbot/repositories/user-modules.repository";
+export { AssistantRequestDto, AssistantMessageDto } from "./chatbot/dto/assistant.request.dto";
