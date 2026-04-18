@@ -1,10 +1,7 @@
+import { Equals, IsNotEmpty, IsString, MaxLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
-import { Equals, IsIn, IsNotEmpty, IsString, MaxLength, ValidateNested } from "class-validator";
 
 export class AssistantAppendAttributesDto {
-  @IsIn(["user"])
-  role!: "user";
-
   @IsString()
   @IsNotEmpty()
   @MaxLength(10_000)
@@ -16,14 +13,12 @@ export class AssistantAppendDataDto {
   type!: string;
 
   @ValidateNested()
-  @IsNotEmpty()
   @Type(() => AssistantAppendAttributesDto)
   attributes!: AssistantAppendAttributesDto;
 }
 
 export class AssistantAppendRequestDto {
   @ValidateNested()
-  @IsNotEmpty()
   @Type(() => AssistantAppendDataDto)
   data!: AssistantAppendDataDto;
 }

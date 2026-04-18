@@ -47,7 +47,7 @@ export class AssistantController {
    */
   @Post(conversationMeta.endpoint)
   async create(@Body() body: AssistantCreateRequestDto, @Req() req: AuthenticatedRequest): Promise<any> {
-    const firstMessage = body.data.attributes.messages[0]!.content;
+    const firstMessage = body.data.attributes.content;
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${firstMessage.length}`,
     );

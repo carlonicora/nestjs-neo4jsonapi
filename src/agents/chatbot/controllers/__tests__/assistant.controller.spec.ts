@@ -62,15 +62,15 @@ describe("AssistantController", () => {
   const REQ = { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any;
 
   describe("POST /assistants (create)", () => {
-    const envelope = (messages: any[], title?: string) => ({
+    const envelope = (content: string, title?: string) => ({
       data: {
         type: "assistants",
-        attributes: { messages, ...(title !== undefined ? { title } : {}) },
+        attributes: { content, ...(title !== undefined ? { title } : {}) },
       },
     });
 
     it("unwraps the envelope and delegates to ConversationService with the first message", async () => {
-      await ctl.create(envelope([{ role: "user", content: "hello there" }]) as any, REQ);
+      await ctl.create(envelope("hello there") as any, REQ);
       expect(conversations.createWithFirstMessage).toHaveBeenCalledWith({
         companyId: "c",
         userId: "u",
@@ -81,12 +81,12 @@ describe("AssistantController", () => {
     });
 
     it("passes the optional title through", async () => {
-      await ctl.create(envelope([{ role: "user", content: "hi" }], "My Chat") as any, REQ);
+      await ctl.create(envelope("hi", "My Chat") as any, REQ);
       expect(conversations.createWithFirstMessage).toHaveBeenCalledWith(expect.objectContaining({ title: "My Chat" }));
     });
 
     it("builds the response via JsonApiService.buildSingle with ConversationDescriptor.model", async () => {
-      await ctl.create(envelope([{ role: "user", content: "hi" }]) as any, REQ);
+      await ctl.create(envelope("hi") as any, REQ);
       expect(jsonApi.buildSingle).toHaveBeenCalledWith(
         ConversationDescriptor.model,
         expect.objectContaining({ id: "convo-1" }),
@@ -96,7 +96,7 @@ describe("AssistantController", () => {
 
   describe("POST /assistants/:conversationId/messages (append)", () => {
     const envelope = (content: string) => ({
-      data: { type: "messages", attributes: { role: "user", content } },
+      data: { type: "messages", attributes: { content } },
     });
 
     it("delegates to ConversationService.appendMessage with the conversation id and new message", async () => {

@@ -41,6 +41,7 @@ export { SummariserService } from "./summariser/services/summariser.service";
 // Chatbot
 export { ChatbotModule } from "./chatbot/chatbot.module";
 export { ChatbotService } from "./chatbot/services/chatbot.service";
+export { NameEmbeddingService } from "./chatbot/services/name.embedding.service";
 export { GraphDescriptorRegistry } from "./chatbot/services/descriptor.source";
 export type {
   ChatbotResponseInterface,
@@ -60,7 +61,6 @@ export {
   AssistantCreateRequestDto,
   AssistantCreateDataDto,
   AssistantCreateAttributesDto,
-  AssistantCreateMessageDto,
 } from "./chatbot/dto/assistant-create.request.dto";
 export {
   AssistantAppendRequestDto,
