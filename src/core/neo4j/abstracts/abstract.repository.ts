@@ -414,6 +414,8 @@ export abstract class AbstractRepository<
     orderBy?: string;
     fetchAll?: boolean;
     cursor?: JsonApiCursorInterface;
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
     const rel = this.descriptor.relationships[params.relationship];
@@ -436,6 +438,18 @@ export abstract class AbstractRepository<
       term: params.term,
     };
 
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+
     if (params.term && this.descriptor.fulltextIndexName) {
       // Use fulltext search with relationship filter
       query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
@@ -451,6 +465,7 @@ export abstract class AbstractRepository<
       }
 
       query.query += `WITH node as ${nodeName}, score
+      ${filterResult.clause}
       ORDER BY score DESC
     `;
     } else {
@@ -470,8 +485,9 @@ export abstract class AbstractRepository<
 
       query.query += `
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause}
 
-      ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}
+      ${orderByClause}
     `;
     }
 

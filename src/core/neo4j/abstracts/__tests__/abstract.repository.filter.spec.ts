@@ -63,3 +63,52 @@ describe("AbstractRepository.find with structured filters and multi-key sort", (
     expect(capturedRef.query.query).toContain("ORDER BY account.updatedAt DESC");
   });
 });
+
+describe("AbstractRepository.findByRelated with filters and sort", () => {
+  it("accepts filters and orderByFields and forwards them into the query", async () => {
+    const capturedRef: any = { query: null };
+    const neo4j = {
+      initQuery: () => ({ query: "", queryParams: {} }),
+      readMany: vi.fn(async (q: any) => {
+        capturedRef.query = q;
+        return [];
+      }),
+    };
+    const securityService = { userHasAccess: () => "" };
+    const descriptor = {
+      model: { nodeName: "order", type: "orders", labelName: "Order" },
+      relationships: {
+        account: {
+          model: { nodeName: "account", labelName: "Account", type: "accounts" },
+          direction: "in",
+          relationship: "PLACED",
+          cardinality: "one",
+        },
+      },
+      defaultOrderBy: "updatedAt DESC",
+      isCompanyScoped: true,
+    };
+    class TraversalTestRepo extends AbstractRepository<any, any> {
+      protected readonly descriptor: any;
+      constructor(deps: any) {
+        super(deps.neo4j, deps.securityService, {} as any);
+        this.descriptor = deps.descriptor;
+      }
+    }
+    const repo: any = new TraversalTestRepo({ neo4j, securityService, descriptor });
+    repo.buildDefaultMatch = () => "MATCH (order:Order)";
+    repo.buildReturnStatement = () => "RETURN order";
+
+    await repo.findByRelated({
+      relationship: "account",
+      id: "abc-123",
+      query: {},
+      filters: [{ field: "status", op: "eq", value: "open" }],
+      orderByFields: [{ field: "createdAt", direction: "desc" }],
+    });
+
+    expect(capturedRef.query.query).toContain("AND order.status = $filter_0");
+    expect(capturedRef.query.query).toContain("ORDER BY order.createdAt DESC");
+    expect(capturedRef.query.queryParams).toMatchObject({ filter_0: "open" });
+  });
+});
