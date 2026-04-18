@@ -3,8 +3,11 @@ import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
+import { buildFilterClauses } from "../helpers/build-filter-clauses";
+import { buildOrderByClause } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
+import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
 
 /**
  * Abstract base repository for Neo4j entities
@@ -277,12 +280,19 @@ export abstract class AbstractRepository<
   }
 
   /**
-   * Find entities with optional search term, ordering, and pagination
+   * Find entities with optional search term, ordering, pagination, and structured filters.
+   *
+   * Backwards-compatible: callers that only pass { term, orderBy, cursor, fetchAll } continue to work.
+   * New callers may pass:
+   *   - filters: FilterCriterion[]    → appended to WHERE as AND-joined parameterised fragments
+   *   - orderByFields: SortCriterion[] → multi-key ORDER BY; overrides legacy orderBy string when present
    */
   async find(params: {
     fetchAll?: boolean;
     term?: string;
     orderBy?: string;
+    orderByFields?: SortCriterion[];
+    filters?: FilterCriterion[];
     cursor?: JsonApiCursorInterface;
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
@@ -297,22 +307,34 @@ export abstract class AbstractRepository<
       term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
     };
 
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+
     if (params.term && this.descriptor.fulltextIndexName) {
-      // Use fulltext search if term is provided and index exists
       query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
       ${this.descriptor.isCompanyScoped ? `WHERE (node)-[:BELONGS_TO]->(company)` : ``}
+      ${filterResult.clause ? `AND ${filterResult.clause.replace(/^AND /, "")}` : ""}
 
       WITH node as ${nodeName}, score
       ORDER BY score DESC
     `;
     } else {
-      // Use default query with ordering
       query.query += `
       ${this.buildDefaultMatch()}
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause}
 
-      ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}
+      ${orderByClause}
     `;
     }
 
