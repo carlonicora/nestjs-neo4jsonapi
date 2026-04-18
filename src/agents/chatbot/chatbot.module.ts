@@ -1,4 +1,5 @@
-import { Module } from "@nestjs/common";
+import { Module, OnModuleInit } from "@nestjs/common";
+import { modelRegistry } from "../../common/registries/registry";
 import { LLMModule } from "../../core/llm/llm.module";
 import { GraphCatalogService } from "./services/graph.catalog.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
@@ -10,11 +11,15 @@ import { ReadEntityTool } from "./tools/read-entity.tool";
 import { TraverseTool } from "./tools/traverse.tool";
 import { UserModulesRepository } from "./repositories/user-modules.repository";
 import { AssistantController } from "./controllers/assistant.controller";
+import { AssistantDescriptor } from "./entities/assistant";
 
 @Module({
   imports: [LLMModule],
   controllers: [AssistantController],
   providers: [
+    // Serialiser from descriptor
+    AssistantDescriptor.model.serialiser,
+
     GraphDescriptorRegistry,
     {
       provide: GraphCatalogService,
@@ -31,4 +36,8 @@ import { AssistantController } from "./controllers/assistant.controller";
   ],
   exports: [ChatbotService, GraphDescriptorRegistry],
 })
-export class ChatbotModule {}
+export class ChatbotModule implements OnModuleInit {
+  onModuleInit() {
+    modelRegistry.register(AssistantDescriptor.model);
+  }
+}

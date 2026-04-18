@@ -1,7 +1,10 @@
 import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { ChatbotService } from "../services/chatbot.service";
 import { UserModulesRepository } from "../repositories/user-modules.repository";
 import { AssistantRequestDto } from "../dto/assistant.request.dto";
+import { AssistantDescriptor } from "../entities/assistant";
+import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 
@@ -11,6 +14,7 @@ export class AssistantController {
   constructor(
     private readonly chatbot: ChatbotService,
     private readonly userModules: UserModulesRepository,
+    private readonly jsonApi: JsonApiService,
   ) {}
 
   @Post()
@@ -21,24 +25,17 @@ export class AssistantController {
       companyId: req.user.companyId,
       userId: req.user.userId,
       userModules,
-      messages: body.messages,
+      messages: body.data.attributes.messages,
     });
 
-    return {
-      data: {
-        type: "assistant-messages",
-        id: `assistant-${Date.now()}`,
-        attributes: {
-          answer: response.answer,
-          needsClarification: response.needsClarification,
-          suggestedQuestions: response.suggestedQuestions,
-          references: response.references,
-          tokens: response.tokens,
-        },
-        meta: {
-          toolCalls: response.toolCalls,
-        },
-      },
-    };
+    return this.jsonApi.buildSingle(AssistantDescriptor.model, {
+      id: randomUUID(),
+      answer: response.answer,
+      needsClarification: response.needsClarification,
+      suggestedQuestions: response.suggestedQuestions,
+      references: response.references,
+      tokens: response.tokens,
+      toolCalls: response.toolCalls,
+    });
   }
 }

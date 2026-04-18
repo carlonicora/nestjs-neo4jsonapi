@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { AssistantController } from "../assistant.controller";
+import { AssistantDescriptor } from "../../entities/assistant";
 
 describe("AssistantController", () => {
   const chatbot = {
@@ -16,16 +17,26 @@ describe("AssistantController", () => {
   const userModules = {
     findModulesForRoles: vi.fn(async (roles: string[]) => (roles.length ? ["crm"] : [])),
   };
-  const ctl = new AssistantController(chatbot as any, userModules as any);
+  const jsonApi = {
+    buildSingle: vi.fn(async (model: any, data: any) => ({
+      data: { type: model.type, id: data.id, attributes: data },
+    })),
+  };
+  const ctl = new AssistantController(chatbot as any, userModules as any, jsonApi as any);
+
+  const envelope = (messages: any[]) => ({
+    data: { type: "assistant", attributes: { messages } },
+  });
 
   beforeEach(() => {
     chatbot.run.mockClear();
     userModules.findModulesForRoles.mockClear();
+    jsonApi.buildSingle.mockClear();
   });
 
-  it("resolves user modules from roles and passes them to the chatbot", async () => {
+  it("unwraps the JSON:API envelope and passes messages to the chatbot", async () => {
     await ctl.post(
-      { messages: [{ role: "user", content: "hi" }] } as any,
+      envelope([{ role: "user", content: "hi" }]) as any,
       { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any,
     );
     expect(userModules.findModulesForRoles).toHaveBeenCalledWith(["role-1"]);
@@ -37,19 +48,31 @@ describe("AssistantController", () => {
     });
   });
 
-  it("wraps the response as a JSON:API assistant-messages document", async () => {
+  it("builds the response via JsonApiService.buildSingle with AssistantDescriptor.model", async () => {
     const result = await ctl.post(
-      { messages: [{ role: "user", content: "hi" }] } as any,
+      envelope([{ role: "user", content: "hi" }]) as any,
       { user: { userId: "u", companyId: "c", roles: ["role-1"] } } as any,
     );
-    expect(result.data.type).toBe("assistant-messages");
-    expect(result.data.attributes.answer).toBe("ok");
-    expect(result.data.meta.toolCalls).toEqual([]);
+    expect(jsonApi.buildSingle).toHaveBeenCalledWith(
+      AssistantDescriptor.model,
+      expect.objectContaining({
+        answer: "ok",
+        needsClarification: false,
+        suggestedQuestions: [],
+        references: [],
+        tokens: { input: 1, output: 2 },
+        toolCalls: [],
+      }),
+    );
+    const [, passedData] = jsonApi.buildSingle.mock.calls[0];
+    expect(typeof passedData.id).toBe("string");
+    expect(passedData.id.length).toBeGreaterThan(0);
+    expect(result.data.type).toBe(AssistantDescriptor.model.type);
   });
 
   it("handles users with no roles gracefully", async () => {
     await ctl.post(
-      { messages: [{ role: "user", content: "hi" }] } as any,
+      envelope([{ role: "user", content: "hi" }]) as any,
       { user: { userId: "u", companyId: "c", roles: [] } } as any,
     );
     expect(userModules.findModulesForRoles).toHaveBeenCalledWith([]);
