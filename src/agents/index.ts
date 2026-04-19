@@ -41,6 +41,19 @@ export { SummariserService } from "./summariser/services/summariser.service";
 // Chatbot
 export { ChatbotModule } from "./chatbot/chatbot.module";
 export { ChatbotService } from "./chatbot/services/chatbot.service";
+export { ChatbotSearchService } from "./chatbot/services/chatbot.search.service";
+export type {
+  MatchMode,
+  SearchItem,
+  SearchResult,
+  RunSearchParams,
+} from "./chatbot/services/chatbot.search.service";
+export {
+  CHATBOT_EXACT_MAX_RESULTS,
+  CHATBOT_FUZZY_MAX_RESULTS,
+  CHATBOT_SEMANTIC_MAX_RESULTS,
+  CHATBOT_SEMANTIC_MIN_SCORE,
+} from "./chatbot/services/chatbot.search.service";
 export { GraphDescriptorRegistry } from "./chatbot/services/descriptor.source";
 export type {
   ChatbotResponseInterface,
