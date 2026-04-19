@@ -73,7 +73,7 @@ describe("ChatbotService", () => {
       expect.objectContaining({
         systemPrompts: expect.arrayContaining([expect.stringContaining("accounts")]),
         tools: expect.arrayContaining([{ name: "describe_entity" }]),
-        maxToolIterations: 10,
+        maxToolIterations: 15,
         temperature: 0.1,
       }),
     );

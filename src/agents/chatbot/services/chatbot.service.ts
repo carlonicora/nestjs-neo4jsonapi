@@ -11,6 +11,8 @@ import { renderChatbotSystemPrompt } from "../prompts/chatbot.system.prompt";
 import { ChatbotResponseInterface } from "../interfaces/chatbot.response.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 
+const MAX_TOOL_ITERATIONS = 15;
+
 const outputSchema = z.object({
   answer: z.string(),
   references: z.array(z.object({ type: z.string(), id: z.string(), reason: z.string() })),
@@ -90,7 +92,9 @@ export class ChatbotService {
 
     const RETRY_INSTRUCTION = `Your previous attempt did not call any tools and did not return any references. The user's question requires you to use the provided tools to retrieve data. You MUST call at least one tool (search_entities, traverse, read_entity, or describe_entity) to answer. Call the appropriate tool now.`;
 
-    this.logger.log(`run: calling LLM (first attempt) with historyLength=${history.length} maxToolIterations=10`);
+    this.logger.log(
+      `run: calling LLM (first attempt) with historyLength=${history.length} maxToolIterations=${MAX_TOOL_ITERATIONS}`,
+    );
     let started = Date.now();
     let response: any = await this.llm.call({
       systemPrompts: [systemPrompt],
@@ -98,7 +102,7 @@ export class ChatbotService {
       outputSchema,
       inputParams: {},
       tools,
-      maxToolIterations: 10,
+      maxToolIterations: MAX_TOOL_ITERATIONS,
       temperature: 0.1,
     });
     this.logger.log(
@@ -114,7 +118,7 @@ export class ChatbotService {
         outputSchema,
         inputParams: {},
         tools,
-        maxToolIterations: 10,
+        maxToolIterations: MAX_TOOL_ITERATIONS,
         temperature: 0.1,
       });
       this.logger.log(
