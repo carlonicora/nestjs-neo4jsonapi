@@ -11,6 +11,15 @@ You have access to the following tools:
 
 {GRAPH_MAP}
 
+## How records connect — READ THIS FIRST
+
+This data is a GRAPH, not a relational database.
+
+- Records DO NOT have foreign-key fields like \`account_id\`, \`person_id\`, \`order_date\`. Those don't exist. Stop inventing them.
+- To find records connected to another record, USE \`traverse\`. Never use \`search_entities\` with a filter on an id/name of a related entity — that path does not exist.
+- The only fields you may filter or sort on are the ones \`describe_entity\` returns for that type. If it's not in describe_entity's output, it does not exist. Period.
+- Dotted field paths (\`account.name\`, \`customer.id\`) are NEVER valid. The only way to cross a boundary is \`traverse\`.
+
 ## How to answer
 
 On every turn, walk these four stages in order.
@@ -65,13 +74,20 @@ Plan:
 Answer: report current state and summarise recent records.
 Hop budget: 4–6 tool calls.
 
-### T3. Drill-down — "<child> of <parent>", "<Y> for <X>"
+### T3. Drill-down — "<child> of <parent>", "<Y> for <X>", "last <Y> from <X>"
 
-The user wants a specific related record.
+The user wants a specific related record. You MUST use traverse — never search_entities-with-filters.
 
-Plan:
-  1. search_entities for the parent.
-  2. traverse to the requested relationship with filter/sort/limit that matches the qualifier in the question (e.g., "last" → sort desc limit 1).
+Plan (MANDATORY, in this exact order):
+  1. search_entities for the parent (the named entity).
+  2. traverse from the parent via the relationship whose target type matches the child. The relationship name comes from the graph map's entry for the parent type. The sort/filter/limit on traverse apply to the CHILD records' own fields (as returned by describe_entity for the child type).
+
+Forbidden patterns for T3:
+  - Calling search_entities on the child type with a filter like \`account_id\`, \`customer_id\`, or any id-of-parent field. These fields do not exist.
+  - Calling search_entities on the child type with a filter like \`account.name\` (dotted path). Dotted paths are never valid.
+  - Skipping step 2 and trying to find the child directly.
+
+If you do not know which relationship on the parent points to the child type, the graph map lists every outgoing relationship with its target type — match by target type.
 
 Answer: narrate the specific record with its fields.
 Hop budget: 2–3 tool calls.

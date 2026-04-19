@@ -505,6 +505,85 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * Find entities connected to a related node by an arbitrary Cypher edge,
+   * without requiring the relationship to be declared in THIS descriptor.
+   *
+   * Necessary for the chatbot traverse/read-entity tools, which walk
+   * relationships using catalog-level metadata. When a relationship is
+   * declared only on the source side via `reverse: {}`, the target's own
+   * descriptor does not list it — so `findByRelated` (which keys off
+   * `this.descriptor.relationships`) fails. This method accepts the raw
+   * edge spec instead.
+   *
+   * Direction is from THIS node's perspective:
+   *   - "out": MATCH (this)-[:cypherLabel]->(related)
+   *   - "in":  MATCH (this)<-[:cypherLabel]-(related)
+   */
+  async findByRelatedEdge(params: {
+    cypherLabel: string;
+    cypherDirection: "out" | "in";
+    relatedLabel: string;
+    relatedId: string | string[];
+    cursor?: JsonApiCursorInterface;
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    fetchAll?: boolean;
+  }): Promise<T[]> {
+    const { nodeName } = this.descriptor.model;
+    const relatedIds = Array.isArray(params.relatedId) ? params.relatedId : [params.relatedId];
+
+    const query = this.neo4j.initQuery({
+      cursor: params.cursor,
+      serialiser: this.descriptor.model,
+      fetchAll: params.fetchAll,
+    });
+
+    query.queryParams = {
+      ...query.queryParams,
+      relatedIds,
+    };
+
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+    `;
+
+    if (params.cypherDirection === "in") {
+      query.query += `MATCH (${nodeName})<-[:${params.cypherLabel}]-(related:${params.relatedLabel})
+        WHERE related.id IN $relatedIds\n`;
+    } else {
+      query.query += `MATCH (${nodeName})-[:${params.cypherLabel}]->(related:${params.relatedLabel})
+        WHERE related.id IN $relatedIds\n`;
+    }
+
+    query.query += `
+      ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
+
+      ${orderByClause}
+    `;
+
+    query.query += `
+      {CURSOR}
+
+      ${this.buildReturnStatement()}
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
    * Create a new entity with relationships
    * Uses descriptor.fieldNames and descriptor.fieldDefaults for properties
    * Uses descriptor.relationships for creating relationships

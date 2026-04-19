@@ -37,7 +37,7 @@ describe("TraverseTool", () => {
   };
   const ctx = { companyId: "c", userId: "u", userModules: ["crm", "sales"] };
   const targetSvc = {
-    findRelatedRecords: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
+    findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
   };
   const factory: any = {
     resolveEntity: (t: string) => (t === "accounts" ? accounts : t === "orders" ? orders : { error: "nope" }),
@@ -49,7 +49,8 @@ describe("TraverseTool", () => {
     },
   };
 
-  it("traverses and applies target-field filter + sort", async () => {
+  it("traverses via catalog edge spec and applies target-field filter + sort", async () => {
+    targetSvc.findRelatedRecordsByEdge.mockClear();
     const tool = new TraverseTool(factory);
     const out: any = await tool.invoke(
       {
@@ -63,10 +64,12 @@ describe("TraverseTool", () => {
       ctx,
       [],
     );
-    expect(targetSvc.findRelatedRecords).toHaveBeenCalledWith(
+    expect(targetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
       expect.objectContaining({
-        relationship: "orders",
-        id: "a1",
+        cypherLabel: "PLACED",
+        cypherDirection: "in", // inverted from source-perspective "out"
+        relatedLabel: "Account",
+        relatedId: "a1",
         filters: [{ field: "total", op: "gte", value: 50 }],
         orderByFields: [{ field: "createdAt", direction: "desc" }],
         limit: 1,
@@ -96,7 +99,7 @@ describe("TraverseTool", () => {
     expect(out.error).toMatch(/ghost/);
   });
 
-  it("uses inverseKey when relationship is reverse", async () => {
+  it("walks a reverse catalog relationship via the edge spec (no inverseKey required)", async () => {
     const accountsWithReverse: any = {
       type: "accounts",
       module: "crm",
@@ -104,15 +107,15 @@ describe("TraverseTool", () => {
       fields: [],
       relationships: [
         {
-          name: "orders", // reverse name
+          name: "orders", // reverse name as it appears on the account catalog
           sourceType: "accounts",
           targetType: "orders",
           cardinality: "many",
           description: "Orders placed by this account",
-          cypherDirection: "in",
+          cypherDirection: "in", // account sees FOR edge as incoming
           cypherLabel: "FOR",
           isReverse: true,
-          inverseKey: "account", // forward key on Order's side
+          inverseKey: "account",
         },
       ],
       nodeName: "account",
@@ -120,7 +123,7 @@ describe("TraverseTool", () => {
       summary: (d: any) => d.name,
     };
     const reverseTargetSvc = {
-      findRelatedRecords: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
+      findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
     };
     const reverseFactory: any = {
       resolveEntity: (t: string) => (t === "accounts" ? accountsWithReverse : orders),
@@ -133,8 +136,66 @@ describe("TraverseTool", () => {
     };
     const tool = new TraverseTool(reverseFactory);
     await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 1 }, ctx, []);
-    expect(reverseTargetSvc.findRelatedRecords).toHaveBeenCalledWith(
-      expect.objectContaining({ relationship: "account", id: "a1" }),
+    expect(reverseTargetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cypherLabel: "FOR",
+        cypherDirection: "out", // inverted from source-perspective "in"
+        relatedLabel: "Account",
+        relatedId: "a1",
+      }),
+    );
+  });
+
+  it("walks a forward asymmetric relationship (target descriptor lacks the key)", async () => {
+    // Person → Account via "account": forward, cypherDirection "out" on Person's catalog.
+    // The Account descriptor does not declare "account" — edge-based lookup is required.
+    const personsEntity: any = {
+      type: "persons",
+      module: "crm",
+      description: "A person",
+      fields: [],
+      relationships: [
+        {
+          name: "account",
+          sourceType: "persons",
+          targetType: "accounts",
+          cardinality: "one",
+          description: "Account this person works for",
+          cypherDirection: "out",
+          cypherLabel: "WORKS_FOR",
+          isReverse: false,
+        },
+      ],
+      nodeName: "person",
+      labelName: "Person",
+      summary: (d: any) => d.name,
+    };
+    const accountSvc = {
+      findRelatedRecordsByEdge: vi.fn(async () => [{ id: "a1", name: "Acme" }]),
+    };
+    const f: any = {
+      resolveEntity: (t: string) =>
+        t === "persons"
+          ? personsEntity
+          : t === "accounts"
+            ? { ...accounts, relationships: [] } // no keys needed on Account side
+            : { error: "nope" },
+      resolveService: (t: string) => (t === "accounts" ? accountSvc : undefined),
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+    const tool = new TraverseTool(f);
+    await tool.invoke({ fromType: "persons", fromId: "p1", relationship: "account", limit: 1 }, ctx, []);
+    expect(accountSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cypherLabel: "WORKS_FOR",
+        cypherDirection: "in", // inverted from "out"
+        relatedLabel: "Person",
+        relatedId: "p1",
+      }),
     );
   });
 });

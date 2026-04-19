@@ -31,7 +31,7 @@ function makeFakeServiceRegistry() {
   services.set("orders", {
     model: { type: "orders" },
     findRecords: vi.fn(async () => []),
-    findRelatedRecords: vi.fn(async () => [{ id: "ord-1", total: 1000, createdAt: "2026-04-01" }]),
+    findRelatedRecordsByEdge: vi.fn(async () => [{ id: "ord-1", total: 1000, createdAt: "2026-04-01" }]),
   });
   return {
     get: (t: string) => services.get(t),
@@ -187,7 +187,7 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
           return {
             model: { type: "orders" },
             findRecords: vi.fn(async () => []),
-            findRelatedRecords: vi.fn(async () => []),
+            findRelatedRecordsByEdge: vi.fn(async () => []),
           };
         }
         return undefined;

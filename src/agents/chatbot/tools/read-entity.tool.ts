@@ -51,9 +51,14 @@ export class ReadEntityTool {
               related[name] = { error: `Service for ${rel.targetType} not available.` };
               continue;
             }
-            const records: any[] = await targetSvc.findRelatedRecords({
-              relationship: rel.isReverse ? rel.cypherLabel : rel.name,
-              id: input.id,
+            // Use edge-based lookup so this works for relationships that are
+            // reverse-only on the catalog (not declared on the target descriptor).
+            const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
+            const records: any[] = await targetSvc.findRelatedRecordsByEdge({
+              cypherLabel: rel.cypherLabel,
+              cypherDirection: targetDirection,
+              relatedLabel: entity.labelName,
+              relatedId: input.id,
               limit: 50,
             });
             const targetEntity = this.factory.resolveEntity(rel.targetType, ctx);

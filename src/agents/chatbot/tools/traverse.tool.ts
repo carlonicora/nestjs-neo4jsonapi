@@ -80,16 +80,18 @@ export class TraverseTool {
         if (!targetSvc) return { error: `Service not available for "${target.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
-        // Forward relationship: pass the descriptor key (the user-facing name matches it).
-        // Reverse relationship: pass the `inverseKey` — the descriptor key of the original forward
-        // relationship on the target side. AbstractRepository.findByRelated keys relationships by
-        // descriptor name, so the cypher label alone is insufficient.
-        if (rel.isReverse && !rel.inverseKey) {
-          return { error: `Relationship "${input.relationship}" cannot be traversed (missing inverseKey).` };
-        }
-        const records: any[] = await targetSvc.findRelatedRecords({
-          relationship: rel.isReverse ? rel.inverseKey! : input.relationship,
-          id: input.fromId,
+        // Walk via the catalog's raw edge spec so the traversal works even
+        // when the target's own descriptor does not declare the relationship
+        // (e.g. a reverse-only materialisation). Direction is inverted
+        // because catalog.cypherDirection is from the source's perspective,
+        // but findRelatedRecordsByEdge expects it from the target's (this-node)
+        // perspective.
+        const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
+        const records: any[] = await targetSvc.findRelatedRecordsByEdge({
+          cypherLabel: rel.cypherLabel,
+          cypherDirection: targetDirection,
+          relatedLabel: source.labelName,
+          relatedId: input.fromId,
           filters: input.filters,
           orderByFields: input.sort,
           limit,

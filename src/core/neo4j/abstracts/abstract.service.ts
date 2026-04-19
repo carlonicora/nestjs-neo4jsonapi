@@ -141,6 +141,33 @@ export abstract class AbstractService<
   }
 
   /**
+   * Find typed records connected to a related node via an arbitrary Cypher
+   * edge, when the relationship is not declared in this entity's descriptor
+   * (e.g., reverse-only relationships materialised on the catalog). Used by
+   * the chatbot traverse/read-entity tools. Direction is from THIS node's
+   * perspective.
+   */
+  async findRelatedRecordsByEdge(params: {
+    cypherLabel: string;
+    cypherDirection: "out" | "in";
+    relatedLabel: string;
+    relatedId: string | string[];
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+  }): Promise<T[]> {
+    return this.repository.findByRelatedEdge({
+      cypherLabel: params.cypherLabel,
+      cypherDirection: params.cypherDirection,
+      relatedLabel: params.relatedLabel,
+      relatedId: params.relatedId,
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
+    });
+  }
+
+  /**
    * Find entity by ID
    */
   async findById(params: { id: string }): Promise<JsonApiDataInterface> {
