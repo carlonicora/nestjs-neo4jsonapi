@@ -22,10 +22,21 @@ export interface NormalisedSort {
   field: string;
   direction: "asc" | "desc";
 }
+export type NormalisedFilterValue = string | number | boolean | string[] | number[];
 export interface NormalisedFilter {
   field: string;
   op: z.infer<typeof FilterOpEnum>;
-  value?: unknown;
+  value?: NormalisedFilterValue;
+}
+
+function coerceFilterValue(v: unknown): NormalisedFilterValue | undefined {
+  if (v == null) return undefined;
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
+  if (Array.isArray(v)) {
+    if (v.every((x) => typeof x === "string")) return v as string[];
+    if (v.every((x) => typeof x === "number")) return v as number[];
+  }
+  return undefined;
 }
 
 /**
@@ -79,7 +90,7 @@ export function coerceFilters(raw: unknown): NormalisedFilter[] {
       if (typeof rec.field === "string" && typeof rec.op === "string") {
         const opResult = FilterOpEnum.safeParse(rec.op);
         if (opResult.success) {
-          out.push({ field: rec.field, op: opResult.data, value: rec.value });
+          out.push({ field: rec.field, op: opResult.data, value: coerceFilterValue(rec.value) });
         }
       }
     }
