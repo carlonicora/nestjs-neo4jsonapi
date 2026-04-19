@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { LLMModule } from "../../core/llm/llm.module";
 import { UserModulesRepository } from "./repositories/user-modules.repository";
 import { ChatbotIndexManager } from "./services/chatbot.index.manager";
+import { ChatbotSearchService } from "./services/chatbot.search.service";
 import { ChatbotService } from "./services/chatbot.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
 import { GraphCatalogService } from "./services/graph.catalog.service";
@@ -30,6 +31,9 @@ import { TraverseTool } from "./tools/traverse.tool";
 
     // Per-label fulltext + vector index manager (fires once on module init)
     ChatbotIndexManager,
+
+    // Cascading search: substring fulltext → Lucene fuzzy → semantic vector
+    ChatbotSearchService,
   ],
   exports: [
     ChatbotService,
@@ -41,6 +45,7 @@ import { TraverseTool } from "./tools/traverse.tool";
     SearchEntitiesTool,
     ReadEntityTool,
     TraverseTool,
+    ChatbotSearchService,
   ],
 })
 export class ChatbotModule {}
