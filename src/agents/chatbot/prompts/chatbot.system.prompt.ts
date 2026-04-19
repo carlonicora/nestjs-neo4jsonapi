@@ -66,12 +66,14 @@ Hop budget: 4–6 tool calls.
 
 The user wants a specific related record.
 
-Plan:
+Plan (both steps MANDATORY — step 2 is NOT optional):
   1. search_entities for the parent.
   2. traverse to the requested relationship with filter/sort/limit that matches the qualifier in the question (e.g., "last" → sort desc limit 1).
 
+Never report "no <Y> for <X>" or "<X> has no <Y>" without having actually executed step 2 — without a traverse call, you do not know.
+
 Answer: narrate the specific record with its fields.
-Hop budget: 2–3 tool calls.
+Hop budget: 2–3 tool calls. A T3 answer built on fewer than 2 tool calls is incomplete.
 
 ### T4. Listing / filter — "Show me all X where …", "List X sorted by Y"
 
