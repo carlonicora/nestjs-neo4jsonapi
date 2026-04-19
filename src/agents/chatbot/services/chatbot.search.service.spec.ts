@@ -73,3 +73,58 @@ describe("ChatbotSearchService — tier 2 fuzzy", () => {
     expect(tier2Params.term).toMatch(/~$/);
   });
 });
+
+describe("ChatbotSearchService — tier 3 semantic", () => {
+  it("falls back to vector search when both fulltext tiers are empty", async () => {
+    const neo4j = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({
+          records: [
+            { get: (k: string) => ({ id: "a3", score: 0.82 } as any)[k] },
+            { get: (k: string) => ({ id: "a4", score: 0.71 } as any)[k] },
+          ],
+        }),
+    };
+    const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1, 0.2]) };
+
+    const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any);
+    const out = await svc.runCascadingSearch({
+      entity,
+      text: "the German guys we ship pumps to",
+      companyId: "co1",
+      limit: 5,
+    });
+
+    expect(out.matchMode).toBe("semantic");
+    expect(out.items.map((i) => i.id)).toEqual(["a3", "a4"]);
+    expect(embedder.vectoriseText).toHaveBeenCalledWith({ text: "the German guys we ship pumps to" });
+
+    const semanticArgs = neo4j.read.mock.calls[2];
+    expect(semanticArgs[0]).toContain("db.index.vector.queryNodes");
+    expect(semanticArgs[1]).toMatchObject({
+      indexName: "account_chat_embedding",
+      companyId: "co1",
+      minScore: 0.6,
+    });
+  });
+
+  it("returns matchMode='none' when even semantic tier yields nothing above the floor", async () => {
+    const neo4j = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({ records: [] }),
+    };
+    const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
+
+    const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any);
+    const out = await svc.runCascadingSearch({ entity, text: "nonsense", companyId: "co1", limit: 5 });
+
+    expect(out.matchMode).toBe("none");
+    expect(out.items).toHaveLength(0);
+  });
+});
