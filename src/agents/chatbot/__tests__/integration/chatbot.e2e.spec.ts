@@ -253,8 +253,6 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
     expect(out.needsClarification).toBe(false);
 
     // The cascading search service was invoked with the literal phrase
-    expect(searchMock.runCascadingSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "Faby and Carlo" }),
-    );
+    expect(searchMock.runCascadingSearch).toHaveBeenCalledWith(expect.objectContaining({ text: "Faby and Carlo" }));
   });
 });
