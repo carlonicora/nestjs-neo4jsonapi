@@ -35,6 +35,12 @@ R2. **Deduplicate across tool calls.** Combine outputs and dedupe by \`id\`. Two
 
 R3. **One unique id = proceed.** If combined deduped searches resolve to one id, continue with the plan. Only ask for clarification if DISTINCT multiple ids match for the SAME user query.
 
+R3a. **Interpret \`matchMode\` in the search_entities result.** Each result set carries a \`matchMode\` field describing how the match was made:
+  - \`"exact"\`   — the text matched directly. Use the result.
+  - \`"fuzzy"\`   — matched approximately (typo or punctuation difference). Use the top result, but mention the matched name in your answer so the user can verify it.
+  - \`"semantic"\` — matched by meaning rather than spelling. Present the candidates with their \`summary\` and ask the user to confirm which one they meant before acting. Set \`needsClarification = true\`.
+  - \`"none"\`    — no matches at all. Report that and stop (rule R7).
+
 ### Answering
 
 R4. **"Tell me about X"** — once resolved, summarise described fields. Put ids in \`references\`. Do not bounce the question back to the user.
