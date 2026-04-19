@@ -50,3 +50,26 @@ describe("ChatbotSearchService — tier 1 substring", () => {
     expect(params.term).toContain("\\&");
   });
 });
+
+describe("ChatbotSearchService — tier 2 fuzzy", () => {
+  it("falls back to fuzzy when substring returns nothing, returns matchMode='fuzzy'", async () => {
+    const neo4j = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ records: [] }) // tier 1 empty
+        .mockResolvedValueOnce({ records: [{ get: (k: string) => ({ id: "a2", score: 4.4 } as any)[k] }] }), // tier 2 hits
+    };
+    const embedder = { vectoriseText: vi.fn() };
+
+    const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any);
+    const out = await svc.runCascadingSearch({ entity, text: "Fabby", companyId: "co1", limit: 10 });
+
+    expect(out.matchMode).toBe("fuzzy");
+    expect(out.items[0].id).toBe("a2");
+    expect(neo4j.read).toHaveBeenCalledTimes(2);
+    expect(embedder.vectoriseText).not.toHaveBeenCalled();
+
+    const tier2Params = neo4j.read.mock.calls[1][1];
+    expect(tier2Params.term).toMatch(/~$/);
+  });
+});
