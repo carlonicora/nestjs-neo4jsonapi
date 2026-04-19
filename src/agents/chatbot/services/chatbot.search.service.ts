@@ -62,7 +62,7 @@ export class ChatbotSearchService {
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
       RETURN node.id AS id, score
       ORDER BY score DESC
-      LIMIT $limit
+      LIMIT toInteger($limit)
       `,
       { indexName, term, companyId: params.companyId, limit: Math.min(params.limit, max) },
     );
@@ -80,13 +80,13 @@ export class ChatbotSearchService {
 
     const result = await this.neo4j.read(
       `
-      CALL db.index.vector.queryNodes($indexName, $overFetch, $queryEmbedding)
+      CALL db.index.vector.queryNodes($indexName, toInteger($overFetch), $queryEmbedding)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
         AND score >= $minScore
       RETURN node.id AS id, score
       ORDER BY score DESC
-      LIMIT $limit
+      LIMIT toInteger($limit)
       `,
       {
         indexName,
