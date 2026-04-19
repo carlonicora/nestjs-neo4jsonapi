@@ -52,27 +52,38 @@ export class TraverseTool {
 
         const rel = source.relationships.find((r) => r.name === input.relationship);
         if (!rel) {
-          return { error: `Relationship "${input.relationship}" is not available on ${source.type}.` };
+          const relationshipNames = source.relationships.map((r) => r.name).join(", ");
+          return {
+            error: `Relationship "${input.relationship}" is not available on ${source.type}. Valid relationships on ${source.type}: [${relationshipNames || "none"}].`,
+          };
         }
 
         const target = this.factory.resolveEntity(rel.targetType, ctx);
         if ("error" in target) return target;
 
         const byName = new Map(target.fields.map((f) => [f.name, f]));
+        const validFieldNames = target.fields.map((f) => f.name).join(", ");
+        const sortableFieldNames = target.fields.filter((f) => f.sortable).map((f) => f.name).join(", ");
         for (const f of input.filters ?? []) {
           const def = byName.get(f.field);
-          if (!def) return { error: `Field "${f.field}" is not available on ${target.type}.` };
+          if (!def) {
+            return {
+              error: `Field "${f.field}" is not available on ${target.type}. Valid fields on ${target.type}: [${validFieldNames}].`,
+            };
+          }
           const allowed = TYPE_TO_OP_ALLOWED[def.type] ?? new Set();
           if (!allowed.has(f.op)) {
             return {
-              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}.`,
+              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}. Allowed operators: [${Array.from(allowed).join(", ")}].`,
             };
           }
         }
         for (const s of input.sort ?? []) {
           const def = byName.get(s.field);
           if (!def || !def.sortable) {
-            return { error: `Field "${s.field}" is not sortable on ${target.type}.` };
+            return {
+              error: `Field "${s.field}" is not sortable on ${target.type}. Sortable fields on ${target.type}: [${sortableFieldNames || "none"}].`,
+            };
           }
         }
 

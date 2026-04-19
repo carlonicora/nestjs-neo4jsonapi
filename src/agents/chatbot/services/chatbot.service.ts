@@ -90,7 +90,13 @@ export class ChatbotService {
       content: m.content,
     }));
 
-    const RETRY_INSTRUCTION = `Your previous attempt did not call any tools and did not return any references. The user's question requires you to use the provided tools to retrieve data. You MUST call at least one tool (search_entities, traverse, read_entity, or describe_entity) to answer. Call the appropriate tool now.`;
+    const RETRY_INSTRUCTION = `Your previous attempt did not call any tools and did not return any references. You cannot know whether the user's question is ambiguous without searching first — so "needsClarification: true" is NOT a valid response at this stage.
+
+You MUST call at least one tool BEFORE responding. For a question that names an entity (e.g., "Show me the last order from Acme"), the first tool call is always:
+
+    search_entities({ type: "<type from the data graph above>", text: "<the user's literal string>" })
+
+Use the entity types listed in the data graph above. Do not respond with text — call the tool now.`;
 
     this.logger.log(
       `run: calling LLM (first attempt) with historyLength=${history.length} maxToolIterations=${MAX_TOOL_ITERATIONS}`,
@@ -124,6 +130,62 @@ export class ChatbotService {
       this.logger.log(
         `run: retry LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | referencesCount=${response.references?.length ?? 0}`,
       );
+    }
+
+    // Error-recovery retry. If the LLM hit a tool error and bounced an
+    // apology to the user instead of correcting the call, force another pass
+    // with the error details and instructions to retry the failing tool
+    // with valid arguments. The enhanced error messages from the tools
+    // already include the list of valid fields/relationships — the retry
+    // just has to point the LLM back at them.
+    const erroredCalls = recorder.filter((c) => c.error);
+    const answerSoundsApologetic = /^\s*(i am sorry|i'm sorry|i am unable|i cannot|please provide|could you (please )?specify)/i.test(
+      response.answer ?? "",
+    );
+    if (erroredCalls.length > 0 && answerSoundsApologetic) {
+      this.logger.warn(
+        `run: LLM bounced apology after tool error(s) — retrying with recovery prompt (${erroredCalls.length} errored calls)`,
+      );
+      const lastError = erroredCalls[erroredCalls.length - 1];
+      const recoveryInstruction = `A previous tool call failed and you responded to the user with an apology instead of retrying. That is wrong — the user did not cause the error. Read the error message carefully, correct the arguments, and call the tool again.
+
+Most recent failing call:
+  tool: ${lastError.tool}
+  input: ${JSON.stringify(lastError.input)}
+  error: ${lastError.error}
+
+If the error lists valid fields or relationships, pick one of those and retry NOW. Do not respond to the user until the tool succeeds or you have exhausted sensible options. Do not open your final answer with "I am sorry" or "I cannot".`;
+      started = Date.now();
+      response = await this.llm.call({
+        systemPrompts: [systemPrompt, recoveryInstruction],
+        history,
+        outputSchema,
+        inputParams: {},
+        tools,
+        maxToolIterations: MAX_TOOL_ITERATIONS,
+        temperature: 0.1,
+      });
+      this.logger.log(
+        `run: recovery retry LLM returned in ${Date.now() - started}ms | toolCallsObserved=${recorder.length} | referencesCount=${response.references?.length ?? 0}`,
+      );
+    }
+
+    // Post-retry honesty guard. If the LLM still ships needsClarification: true
+    // without having called any tool, it is refusing to search — not actually
+    // dealing with ambiguous data. Replace the lazy clarification with a clear
+    // failure message so the user knows the assistant did not even look.
+    if (recorder.length === 0 && response.needsClarification) {
+      this.logger.warn(
+        `run: LLM set needsClarification=true with 0 tool calls after retry — rewriting to honest failure`,
+      );
+      response = {
+        ...response,
+        answer:
+          "I was unable to answer this question — I did not call any tool to look up data for it, so I cannot provide a real response. Please try rephrasing, or ask about a specific entity by name.",
+        references: [],
+        suggestedQuestions: [],
+        needsClarification: false,
+      };
     }
 
     this.logger.log(

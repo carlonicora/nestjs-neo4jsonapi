@@ -56,17 +56,30 @@ export class SearchEntitiesTool {
 
         const byName = new Map<string, CatalogField>(entity.fields.map((f) => [f.name, f]));
         const filters = input.filters ?? [];
+        const validFieldNames = entity.fields.map((f) => f.name).join(", ");
+        const relationshipNames = entity.relationships.map((r) => r.name).join(", ");
         for (const f of filters) {
           const def = byName.get(f.field);
-          if (!def) return { error: `Field "${f.field}" is not available on ${entity.type}.` };
+          if (!def) {
+            return {
+              error: `Field "${f.field}" is not available on ${entity.type}. Valid fields for filter/sort on ${entity.type}: [${validFieldNames}]. To reach records connected via a relationship, use the traverse tool — relationships on ${entity.type}: [${relationshipNames || "none"}]. Dotted paths like "account.name" are never valid here.`,
+            };
+          }
           const allowed = TYPE_TO_OP_ALLOWED[def.type] ?? new Set();
           if (!allowed.has(f.op)) {
-            return { error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}.` };
+            return {
+              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}. Allowed operators: [${Array.from(allowed).join(", ")}].`,
+            };
           }
         }
+        const sortableFieldNames = entity.fields.filter((f) => f.sortable).map((f) => f.name).join(", ");
         for (const s of input.sort ?? []) {
           const def = byName.get(s.field);
-          if (!def || !def.sortable) return { error: `Field "${s.field}" is not available for sort.` };
+          if (!def || !def.sortable) {
+            return {
+              error: `Field "${s.field}" is not available for sort on ${entity.type}. Sortable fields on ${entity.type}: [${sortableFieldNames || "none"}].`,
+            };
+          }
         }
 
         const svc = this.factory.resolveService(entity.type);

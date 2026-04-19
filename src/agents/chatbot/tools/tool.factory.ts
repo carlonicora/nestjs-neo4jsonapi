@@ -45,12 +45,16 @@ export class ToolFactory {
     return fn().then(
       (result) => {
         const durationMs = Date.now() - start;
-        recorder.push({ tool: record.tool, input: record.input, durationMs });
+        const resultError =
+          result && typeof result === "object" && "error" in (result as any)
+            ? String((result as any).error)
+            : undefined;
+        recorder.push({ tool: record.tool, input: record.input, durationMs, ...(resultError ? { error: resultError } : {}) });
         const hint =
           result && typeof result === "object" && "items" in (result as any) && Array.isArray((result as any).items)
             ? `items=${(result as any).items.length}`
-            : result && typeof result === "object" && "error" in (result as any)
-              ? `error=${(result as any).error}`
+            : resultError
+              ? `error=${resultError}`
               : "ok";
         this.logger.log(`tool-call END: ${record.tool} in ${durationMs}ms ${hint}`);
         return result;
