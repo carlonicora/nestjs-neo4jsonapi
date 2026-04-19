@@ -1,11 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "./graph.catalog.service";
 
 @Injectable()
-export class ChatbotIndexManager implements OnModuleInit {
+export class ChatbotIndexManager implements OnApplicationBootstrap {
   private readonly logger = new Logger(ChatbotIndexManager.name);
 
   constructor(
@@ -14,7 +14,11 @@ export class ChatbotIndexManager implements OnModuleInit {
     private readonly models: ModelService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  // Fires in onApplicationBootstrap (after all onModuleInit). GraphCatalogService
+  // builds its catalog in its own onApplicationBootstrap; because it's declared
+  // before this manager in chatbot.module.ts, its bootstrap runs first and the
+  // catalog is populated by the time we read it here.
+  async onApplicationBootstrap(): Promise<void> {
     const entities = this.catalog.getAllChatEnabledEntities();
     if (!entities.length) return;
 

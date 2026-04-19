@@ -14,7 +14,7 @@ describe("ChatbotIndexManager", () => {
     };
 
     const mgr = new ChatbotIndexManager(neo4j as any, catalog as any, makeModelService() as any);
-    await mgr.onModuleInit();
+    await mgr.onApplicationBootstrap();
 
     const queries = neo4j.writeOne.mock.calls.map((c: any[]) => c[0].query as string);
     expect(queries.some((q) => q.includes("CREATE FULLTEXT INDEX `account_chat_fulltext`"))).toBe(true);
@@ -32,7 +32,7 @@ describe("ChatbotIndexManager", () => {
     const catalog = { getAllChatEnabledEntities: vi.fn().mockReturnValue([]) };
 
     const mgr = new ChatbotIndexManager(neo4j as any, catalog as any, makeModelService() as any);
-    await mgr.onModuleInit();
+    await mgr.onApplicationBootstrap();
 
     expect(neo4j.writeOne).not.toHaveBeenCalled();
   });
@@ -44,7 +44,7 @@ describe("ChatbotIndexManager", () => {
     };
 
     const mgr = new ChatbotIndexManager(neo4j as any, catalog as any, makeModelService() as any);
-    await mgr.onModuleInit();
+    await mgr.onApplicationBootstrap();
 
     expect(neo4j.writeOne).not.toHaveBeenCalled();
   });
