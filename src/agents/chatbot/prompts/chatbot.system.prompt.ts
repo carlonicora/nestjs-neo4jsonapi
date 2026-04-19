@@ -62,7 +62,7 @@ Plan:
 Answer: report current state and summarise recent records.
 Hop budget: 4–6 tool calls.
 
-### T3. Drill-down — "<child> of <parent>", "<Y> for <X>"
+### T3. Drill-down — "<child> of <parent>", "<Y> for <X>", "<Y> from <X>", "last/first <Y> of/for/from <X>"
 
 The user wants a specific related record.
 
@@ -91,12 +91,12 @@ Hop budget: up to 15 tool calls. Stop as soon as you can justify the ranking.
 
 ### T6. Ambiguous — entity cannot be uniquely resolved
 
-Multiple distinct ids match, or the question has no identifiable entity.
+T6 applies ONLY after a literal search_entities call returns multiple distinct ids for the user's phrase, OR the question contains no nameable entity at all. You cannot classify a question as T6 from the phrasing alone — you must have searched first. "Faby and Carlo", "Smith & Sons", etc. look like compound names but must be searched as literals before you can call them ambiguous (see Tool discipline R1).
 
-Plan: at most one exploratory search_entities call.
-Answer: brief explanation of the ambiguity.
+Plan: exactly one search_entities call with the user's literal phrase. If it returns one id, the question is NOT T6 — reclassify.
+Answer: brief explanation of the ambiguity, listing the candidate summaries returned by the search.
 Set \`needsClarification: true\`.
-Hop budget: 0–1 tool calls.
+Hop budget: exactly 1 tool call.
 
 ### Choosing between types
 
