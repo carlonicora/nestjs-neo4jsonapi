@@ -5,26 +5,87 @@ import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
-const filterSchema = z.object({
-  field: z.string(),
-  op: FilterOpEnum,
-  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
-});
-const sortSchema = z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) });
-
-// Small models frequently send a single object where an array is expected.
-// Accept either form and normalise to array downstream.
-const toArray = <T>(v: T | T[] | undefined): T[] | undefined =>
-  v == null ? undefined : Array.isArray(v) ? v : [v];
-
+// Schemas accept `any` at the input boundary because small models emit many
+// non-canonical shapes for filters and sort — single-object-instead-of-array,
+// map-style `{field: "asc"}`, nested arrays. We coerce everything to the
+// canonical array of `{field, direction}` / `{field, op, value}` in code.
 const inputSchema = z.object({
   fromType: z.string(),
   fromId: z.string(),
   relationship: z.string().describe("Traversal name from the graph map."),
-  filters: z.union([z.array(filterSchema), filterSchema]).optional(),
-  sort: z.union([z.array(sortSchema), sortSchema]).optional(),
+  filters: z.any().optional(),
+  sort: z.any().optional(),
   limit: z.number().int().optional(),
 });
+
+export interface NormalisedSort {
+  field: string;
+  direction: "asc" | "desc";
+}
+export interface NormalisedFilter {
+  field: string;
+  op: z.infer<typeof FilterOpEnum>;
+  value?: unknown;
+}
+
+/**
+ * Coerce any LLM-emitted sort shape into an array of {field, direction}.
+ * Accepts:
+ *   [{field:"date", direction:"desc"}]     — canonical
+ *   {field:"date", direction:"desc"}       — single object
+ *   {date:"desc"}                          — map form
+ *   [{date:"desc"}, {name:"asc"}]          — array of maps
+ *   "date"                                 — bare field (asc default)
+ *   "date desc"                            — bare field with direction
+ *   ["date", "name desc"]                  — array of strings
+ */
+export function coerceSort(raw: unknown): NormalisedSort[] {
+  if (raw == null) return [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  const out: NormalisedSort[] = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      const [field, dir] = item.trim().split(/\s+/);
+      if (field) out.push({ field, direction: dir === "desc" ? "desc" : "asc" });
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.field === "string") {
+        const direction = rec.direction === "desc" ? "desc" : "asc";
+        out.push({ field: rec.field, direction });
+        continue;
+      }
+      // Map form: { date: "desc" } — one or more entries.
+      for (const [k, v] of Object.entries(rec)) {
+        out.push({ field: k, direction: v === "desc" ? "desc" : "asc" });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Coerce any LLM-emitted filters shape into an array of {field, op, value}.
+ * Accepts the canonical shape or a single object.
+ */
+export function coerceFilters(raw: unknown): NormalisedFilter[] {
+  if (raw == null) return [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  const out: NormalisedFilter[] = [];
+  for (const item of items) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.field === "string" && typeof rec.op === "string") {
+        const opResult = FilterOpEnum.safeParse(rec.op);
+        if (opResult.success) {
+          out.push({ field: rec.field, op: opResult.data, value: rec.value });
+        }
+      }
+    }
+  }
+  return out;
+}
 
 const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
   string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
@@ -48,8 +109,8 @@ export class TraverseTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
-    const filters = toArray(input.filters);
-    const sort = toArray(input.sort);
+    const filters = coerceFilters(input.filters);
+    const sort = coerceSort(input.sort);
 
     return this.factory.capture(
       { tool: "traverse", input: { ...input, filters, sort } },

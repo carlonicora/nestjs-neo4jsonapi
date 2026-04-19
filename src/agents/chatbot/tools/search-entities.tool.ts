@@ -4,26 +4,17 @@ import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { CatalogField } from "../interfaces/graph.catalog.interface";
 import { ChatbotSearchService } from "../services/chatbot.search.service";
+import { coerceFilters, coerceSort } from "./traverse.tool";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
-const filterSchema = z.object({
-  field: z.string(),
-  op: FilterOpEnum,
-  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
-});
-const sortSchema = z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) });
-
-// Small models frequently send a single object where an array is expected.
-// Accept either form and normalise downstream.
-const toArray = <T>(v: T | T[] | undefined): T[] | undefined =>
-  v == null ? undefined : Array.isArray(v) ? v : [v];
-
+// Schemas accept `any` at the input boundary — see traverse.tool.ts for the
+// rationale (small models emit non-canonical shapes; we coerce in code).
 const inputSchema = z.object({
   type: z.string().describe("Entity type name."),
   text: z.string().optional().describe("Fuzzy match on the entity's configured text search fields."),
-  filters: z.union([z.array(filterSchema), filterSchema]).optional(),
-  sort: z.union([z.array(sortSchema), sortSchema]).optional(),
+  filters: z.any().optional(),
+  sort: z.any().optional(),
   limit: z.number().int().optional(),
 });
 
@@ -52,8 +43,8 @@ export class SearchEntitiesTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
-    const filters = toArray(input.filters) ?? [];
-    const sort = toArray(input.sort);
+    const filters = coerceFilters(input.filters);
+    const sort = coerceSort(input.sort);
 
     return this.factory.capture(
       { tool: "search_entities", input: { ...input, filters, sort } },
