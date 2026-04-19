@@ -13,53 +13,71 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).toMatch(/No accessible data/i);
   });
 
-  it("contains the four required stage headers", () => {
+  it("has the four required top-level sections", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toContain("## How to answer");
-    expect(out).toContain("Stage 1 — Classify");
-    expect(out).toContain("Stage 2 — Plan and execute tools");
-    expect(out).toContain("Stage 3 — Narrate");
-    expect(out).toContain("Stage 4 — Suggest");
+    expect(out).toContain("# Role");
+    expect(out).toContain("## Your data");
+    expect(out).toContain("## Tools");
+    expect(out).toContain("## Output");
   });
 
-  it("contains all six taxonomy type headers (T1–T6)", () => {
+  it("frames answering as graph traversal in the Role section", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toContain("## Question types");
-    expect(out).toContain("T1. Identity");
-    expect(out).toContain("T2. Activity / status");
-    expect(out).toContain("T3. Drill-down");
-    expect(out).toContain("T4. Listing / filter");
-    expect(out).toContain("T5. Analytical / comparative");
-    expect(out).toContain("T6. Ambiguous");
+    expect(out).toMatch(/by traversing this graph/i);
+    expect(out).toMatch(/following at least one edge/i);
   });
 
-  it("contains all answer-shape rule identifiers A1–A6", () => {
+  it("forbids invention in plain terms", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toContain("## Answer shape");
-    for (const id of ["A1", "A2", "A3", "A4", "A5", "A6"]) {
-      expect(out).toContain(id);
+    expect(out).toMatch(/do not invent/i);
+  });
+
+  it("documents all four tools with their entry names", () => {
+    const out = renderChatbotSystemPrompt("any");
+    for (const name of ["describe_entity", "search_entities", "read_entity", "traverse"]) {
+      expect(out).toContain(name);
     }
   });
 
-  it("contains all suggested-question rule identifiers S1–S5", () => {
+  it("describes the matchMode values returned by search_entities", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toContain("## Suggested questions");
-    for (const id of ["S1", "S2", "S3", "S4", "S5"]) {
-      expect(out).toContain(id);
+    for (const mode of ["exact", "fuzzy", "semantic", "none"]) {
+      expect(out).toContain(mode);
     }
   });
 
-  it("contains the Tool discipline appendix with preserved rules", () => {
+  it("instructs recovery on tool error instead of apology", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toContain("## Tool discipline");
-    expect(out).toMatch(/Literal-first/);
-    expect(out).toMatch(/Deduplicate/);
-    expect(out).toMatch(/matchMode/);
-    expect(out).toMatch(/read-only/i);
+    expect(out).toMatch(/recover within the same turn/i);
+    expect(out).toMatch(/do not apologise/i);
   });
 
-  it("advertises a 15-iteration budget in Stage 2", () => {
+  it("documents all four output fields", () => {
     const out = renderChatbotSystemPrompt("any");
-    expect(out).toMatch(/15 tool iterations/);
+    for (const field of ["answer", "references", "suggestedQuestions", "needsClarification"]) {
+      expect(out).toContain(field);
+    }
+  });
+
+  it("contains no leftover taxonomy or rule identifiers from the previous version", () => {
+    const out = renderChatbotSystemPrompt("any");
+    expect(out).not.toContain("## How to answer");
+    expect(out).not.toContain("Stage 1");
+    expect(out).not.toContain("## Question types");
+    expect(out).not.toContain("## Answer shape");
+    expect(out).not.toContain("## Suggested questions");
+    expect(out).not.toContain("## Tool discipline");
+    for (const id of ["T1.", "T2.", "T3.", "T4.", "T5.", "T6.", "A1.", "A2.", "A3.", "A4.", "A5.", "A6.", "S1.", "S2.", "S3.", "S4.", "S5."]) {
+      expect(out).not.toContain(id);
+    }
+  });
+
+  it("uses no shouting capitalisations", () => {
+    const out = renderChatbotSystemPrompt("any");
+    expect(out).not.toMatch(/\bMUST\b/);
+    expect(out).not.toMatch(/\bNEVER\b/);
+    expect(out).not.toMatch(/\bMANDATORY\b/);
+    expect(out).not.toMatch(/\bCRITICAL\b/);
+    expect(out).not.toMatch(/\bFORBIDDEN\b/);
   });
 });
