@@ -7,19 +7,23 @@ import { ChatbotSearchService } from "../services/chatbot.search.service";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
+const filterSchema = z.object({
+  field: z.string(),
+  op: FilterOpEnum,
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
+});
+const sortSchema = z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) });
+
+// Small models frequently send a single object where an array is expected.
+// Accept either form and normalise downstream.
+const toArray = <T>(v: T | T[] | undefined): T[] | undefined =>
+  v == null ? undefined : Array.isArray(v) ? v : [v];
+
 const inputSchema = z.object({
   type: z.string().describe("Entity type name."),
   text: z.string().optional().describe("Fuzzy match on the entity's configured text search fields."),
-  filters: z
-    .array(
-      z.object({
-        field: z.string(),
-        op: FilterOpEnum,
-        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
-      }),
-    )
-    .optional(),
-  sort: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })).optional(),
+  filters: z.union([z.array(filterSchema), filterSchema]).optional(),
+  sort: z.union([z.array(sortSchema), sortSchema]).optional(),
   limit: z.number().int().optional(),
 });
 
@@ -48,8 +52,11 @@ export class SearchEntitiesTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
+    const filters = toArray(input.filters) ?? [];
+    const sort = toArray(input.sort);
+
     return this.factory.capture(
-      { tool: "search_entities", input },
+      { tool: "search_entities", input: { ...input, filters, sort } },
       async () => {
         const described = recorder.some(
           (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
@@ -64,7 +71,6 @@ export class SearchEntitiesTool {
         if ("error" in entity) return entity;
 
         const byName = new Map<string, CatalogField>(entity.fields.map((f) => [f.name, f]));
-        const filters = input.filters ?? [];
         const validFieldNames = entity.fields.map((f) => f.name).join(", ");
         const relationshipNames = entity.relationships.map((r) => r.name).join(", ");
         for (const f of filters) {
@@ -85,7 +91,7 @@ export class SearchEntitiesTool {
           .filter((f) => f.sortable)
           .map((f) => f.name)
           .join(", ");
-        for (const s of input.sort ?? []) {
+        for (const s of sort ?? []) {
           const def = byName.get(s.field);
           if (!def || !def.sortable) {
             return {
@@ -103,7 +109,7 @@ export class SearchEntitiesTool {
         if (!input.text) {
           const records = await svc.findRecords({
             filters,
-            orderByFields: input.sort,
+            orderByFields: sort,
             limit,
           });
           return this.buildOutput(entity, records, "none", new Map<string, number>());

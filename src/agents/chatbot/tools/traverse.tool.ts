@@ -5,20 +5,24 @@ import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
+const filterSchema = z.object({
+  field: z.string(),
+  op: FilterOpEnum,
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
+});
+const sortSchema = z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) });
+
+// Small models frequently send a single object where an array is expected.
+// Accept either form and normalise to array downstream.
+const toArray = <T>(v: T | T[] | undefined): T[] | undefined =>
+  v == null ? undefined : Array.isArray(v) ? v : [v];
+
 const inputSchema = z.object({
   fromType: z.string(),
   fromId: z.string(),
   relationship: z.string().describe("Traversal name from the graph map."),
-  filters: z
-    .array(
-      z.object({
-        field: z.string(),
-        op: FilterOpEnum,
-        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.array(z.number())]).optional(),
-      }),
-    )
-    .optional(),
-  sort: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })).optional(),
+  filters: z.union([z.array(filterSchema), filterSchema]).optional(),
+  sort: z.union([z.array(sortSchema), sortSchema]).optional(),
   limit: z.number().int().optional(),
 });
 
@@ -44,8 +48,11 @@ export class TraverseTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
+    const filters = toArray(input.filters);
+    const sort = toArray(input.sort);
+
     return this.factory.capture(
-      { tool: "traverse", input },
+      { tool: "traverse", input: { ...input, filters, sort } },
       async () => {
         const sourceDescribed = recorder.some(
           (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.fromType,
@@ -76,7 +83,7 @@ export class TraverseTool {
           .filter((f) => f.sortable)
           .map((f) => f.name)
           .join(", ");
-        for (const f of input.filters ?? []) {
+        for (const f of filters ?? []) {
           const def = byName.get(f.field);
           if (!def) {
             return {
@@ -90,7 +97,7 @@ export class TraverseTool {
             };
           }
         }
-        for (const s of input.sort ?? []) {
+        for (const s of sort ?? []) {
           const def = byName.get(s.field);
           if (!def || !def.sortable) {
             return {
@@ -115,8 +122,8 @@ export class TraverseTool {
           cypherDirection: targetDirection,
           relatedLabel: source.labelName,
           relatedId: input.fromId,
-          filters: input.filters,
-          orderByFields: input.sort,
+          filters,
+          orderByFields: sort,
           limit,
         });
 
