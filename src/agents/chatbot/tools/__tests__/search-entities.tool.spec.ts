@@ -32,8 +32,10 @@ describe("SearchEntitiesTool", () => {
     },
   };
 
+  const mockSearch: any = { runCascadingSearch: vi.fn() };
+
   it("rejects filter on undescribed field with explicit error", async () => {
-    const tool = new SearchEntitiesTool(factory);
+    const tool = new SearchEntitiesTool(factory, mockSearch);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "secret", op: "eq", value: "x" }] },
       ctx,
@@ -43,7 +45,7 @@ describe("SearchEntitiesTool", () => {
   });
 
   it("rejects sort on undescribed field", async () => {
-    const tool = new SearchEntitiesTool(factory);
+    const tool = new SearchEntitiesTool(factory, mockSearch);
     const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, []);
     expect(out.error).toMatch(/ghost/);
   });
@@ -56,7 +58,7 @@ describe("SearchEntitiesTool", () => {
         fields: [{ name: "amount", type: "number", filterable: true, sortable: true }],
       }),
     };
-    const tool = new SearchEntitiesTool(factoryNum);
+    const tool = new SearchEntitiesTool(factoryNum, mockSearch);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "amount", op: "like", value: "x" }] },
       ctx,
@@ -65,24 +67,71 @@ describe("SearchEntitiesTool", () => {
     expect(out.error).toMatch(/like.*not valid/i);
   });
 
-  it("expands `text` to LIKE over textSearchFields as additional filters", async () => {
-    const svc = { findRecords: vi.fn(async () => [{ id: "a1", name: "Acme" }]) };
-    registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory);
-    const out: any = await tool.invoke({ type: "accounts", text: "acme" }, ctx, []);
-    expect(svc.findRecords).toHaveBeenCalledWith(
-      expect.objectContaining({
-        filters: expect.arrayContaining([{ field: "name", op: "like", value: "acme" }]),
-      }),
-    );
-    expect(out.items[0]).toMatchObject({ id: "a1", type: "accounts", summary: "Acme" });
-  });
-
   it("clamps limit to [1, 50]", async () => {
     const svc = { findRecords: vi.fn(async () => []) };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory);
+    const tool = new SearchEntitiesTool(factory, mockSearch);
     await tool.invoke({ type: "accounts", limit: 5000 }, ctx, []);
     expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
+  });
+
+  it("when text is provided, delegates to ChatbotSearchService and returns matchMode + per-item score", async () => {
+    const search: any = {
+      runCascadingSearch: vi.fn().mockResolvedValue({
+        matchMode: "fuzzy",
+        items: [
+          { id: "a1", score: 8.3 },
+          { id: "a2", score: 7.1 },
+        ],
+      }),
+    };
+
+    // findRecords mock returns hydrated records for the returned ids
+    const svc = {
+      findRecords: vi.fn().mockImplementation(async ({ filters }: any) => {
+        const ids = filters?.find((f: any) => f.field === "id")?.value ?? [];
+        return ids.map((id: string) => ({ id, name: `name-${id}`, status: "active" }));
+      }),
+    };
+
+    const factoryWithSearch: any = {
+      ...factory,
+      resolveService: () => svc,
+    };
+
+    const tool = new SearchEntitiesTool(factoryWithSearch, search);
+    const out: any = await tool.invoke({ type: "accounts", text: "Faby" }, ctx, []);
+
+    expect(search.runCascadingSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Faby", companyId: "c", limit: expect.any(Number) }),
+    );
+    expect(out.matchMode).toBe("fuzzy");
+    expect(out.items.map((i: any) => i.id)).toEqual(["a1", "a2"]);
+    expect(out.items.map((i: any) => i.score)).toEqual([8.3, 7.1]);
+  });
+
+  it("when text is provided but cascade returns none, tool returns matchMode='none' with empty items", async () => {
+    const search: any = {
+      runCascadingSearch: vi.fn().mockResolvedValue({ matchMode: "none", items: [] }),
+    };
+    const factoryWithSearch: any = { ...factory, resolveService: () => ({ findRecords: vi.fn() }) };
+
+    const tool = new SearchEntitiesTool(factoryWithSearch, search);
+    const out: any = await tool.invoke({ type: "accounts", text: "xyz" }, ctx, []);
+
+    expect(out).toEqual({ matchMode: "none", items: [] });
+  });
+
+  it("when text is NOT provided (filter-only), matchMode is 'none' and items have null scores", async () => {
+    const search: any = { runCascadingSearch: vi.fn() };
+    const svc = { findRecords: vi.fn().mockResolvedValue([{ id: "a1", name: "foo", status: "active" }]) };
+    const factoryWithSearch: any = { ...factory, resolveService: () => svc };
+
+    const tool = new SearchEntitiesTool(factoryWithSearch, search);
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, []);
+
+    expect(search.runCascadingSearch).not.toHaveBeenCalled();
+    expect(out.matchMode).toBe("none");
+    expect(out.items[0].score).toBeNull();
   });
 });

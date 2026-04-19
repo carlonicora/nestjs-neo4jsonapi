@@ -3,6 +3,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { CatalogField } from "../interfaces/graph.catalog.interface";
+import { ChatbotSearchService } from "../services/chatbot.search.service";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -19,12 +20,7 @@ const inputSchema = z.object({
     )
     .optional(),
   sort: z
-    .array(
-      z.object({
-        field: z.string(),
-        direction: z.enum(["asc", "desc"]),
-      }),
-    )
+    .array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }))
     .optional(),
   limit: z.number().int().optional(),
 });
@@ -39,7 +35,10 @@ const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
 
 @Injectable()
 export class SearchEntitiesTool {
-  constructor(private readonly factory: ToolFactory) {}
+  constructor(
+    private readonly factory: ToolFactory,
+    private readonly search: ChatbotSearchService,
+  ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
     return new DynamicStructuredTool({
@@ -64,9 +63,7 @@ export class SearchEntitiesTool {
           if (!def) return { error: `Field "${f.field}" is not available on ${entity.type}.` };
           const allowed = TYPE_TO_OP_ALLOWED[def.type] ?? new Set();
           if (!allowed.has(f.op)) {
-            return {
-              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}.`,
-            };
+            return { error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}.` };
           }
         }
         for (const s of input.sort ?? []) {
@@ -74,37 +71,64 @@ export class SearchEntitiesTool {
           if (!def || !def.sortable) return { error: `Field "${s.field}" is not available for sort.` };
         }
 
-        const textFilters: typeof filters = [];
-        if (input.text) {
-          if (!entity.textSearchFields?.length) {
-            return { error: `Text search is not configured for "${entity.type}".` };
-          }
-          for (const field of entity.textSearchFields) {
-            if (!byName.has(field)) continue;
-            textFilters.push({ field, op: "like", value: input.text });
-          }
-        }
-
         const svc = this.factory.resolveService(entity.type);
         if (!svc) return { error: `Service not available for "${entity.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+
+        // Filter-only path — no text cascade
+        if (!input.text) {
+          const records = await svc.findRecords({
+            filters,
+            orderByFields: input.sort,
+            limit,
+          });
+          return this.buildOutput(entity, records, "none", new Map<string, number>());
+        }
+
+        // Text path — cascading search
+        const cascade = await this.search.runCascadingSearch({
+          entity,
+          text: input.text,
+          companyId: ctx.companyId,
+          limit,
+        });
+
+        if (!cascade.items.length) {
+          return { matchMode: cascade.matchMode, items: [] };
+        }
+
+        const ids = cascade.items.map((i) => i.id);
         const records = await svc.findRecords({
-          filters: [...filters, ...textFilters],
+          filters: [...filters, { field: "id", op: "in", value: ids }],
           orderByFields: input.sort,
           limit,
         });
 
-        return {
-          items: records.map((r: any) => ({
-            id: r.id,
-            type: entity.type,
-            summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
-            fields: Object.fromEntries(entity.fields.map((f) => [f.name, r[f.name]])),
-          })),
-        };
+        const scoreById = new Map<string, number>();
+        for (const i of cascade.items) {
+          if (i.score != null) scoreById.set(i.id, i.score);
+        }
+
+        return this.buildOutput(entity, records, cascade.matchMode, scoreById);
       },
       recorder,
     );
+  }
+
+  private buildOutput(
+    entity: any,
+    records: any[],
+    matchMode: string,
+    scoreById: Map<string, number>,
+  ) {
+    const items = records.map((r) => ({
+      id: r.id,
+      type: entity.type,
+      summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
+      fields: Object.fromEntries(entity.fields.map((f: any) => [f.name, r[f.name]])),
+      score: scoreById.has(r.id) ? scoreById.get(r.id)! : null,
+    }));
+    return { matchMode, items };
   }
 }
