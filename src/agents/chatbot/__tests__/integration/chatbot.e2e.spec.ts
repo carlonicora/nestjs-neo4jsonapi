@@ -8,6 +8,7 @@ import { SearchEntitiesTool } from "../../tools/search-entities.tool";
 import { ReadEntityTool } from "../../tools/read-entity.tool";
 import { TraverseTool } from "../../tools/traverse.tool";
 import { LLMService } from "../../../../core/llm/services/llm.service";
+import { ChatbotSearchService } from "../../services/chatbot.search.service";
 
 function makeFakeServiceRegistry() {
   const services = new Map<string, any>();
@@ -16,6 +17,13 @@ function makeFakeServiceRegistry() {
     findRecords: vi.fn(async ({ filters }: any) => {
       const name = filters?.find((f: any) => f.field === "name")?.value ?? "";
       if (String(name).toLowerCase() === "acme") return [{ id: "acc-1", name: "Acme Corp" }];
+      // Also handle id-in filter (used by cascade search path)
+      const idFilter = filters?.find((f: any) => f.field === "id" && f.op === "in");
+      if (idFilter) {
+        const ids: string[] = idFilter.value ?? [];
+        if (ids.includes("acc-1")) return [{ id: "acc-1", name: "Acme Corp" }];
+        if (ids.includes("fc-1")) return [{ id: "fc-1", name: "Faby and Carlo" }];
+      }
       return [];
     }),
     findRecordById: vi.fn(async ({ id }: any) => (id === "acc-1" ? { id: "acc-1", name: "Acme Corp" } : null)),
@@ -105,13 +113,21 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
       }),
     };
 
+    // Provide a mock ChatbotSearchService that returns an "exact" hit for "acme"
+    const searchMock = {
+      runCascadingSearch: vi.fn().mockResolvedValue({
+        matchMode: "exact",
+        items: [{ id: "acc-1", score: 9.5 }],
+      }),
+    };
+
     const factory = new ToolFactory(catalog, serviceRegistry);
     chatbot = new ChatbotService(
       mockLLM as unknown as LLMService,
       catalog,
       factory,
       new DescribeEntityTool(factory),
-      new SearchEntitiesTool(factory),
+      new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
       new ReadEntityTool(factory),
       new TraverseTool(factory),
     );
@@ -138,5 +154,107 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
       messages: [{ role: "user", content: "anything" }],
     });
     expect(out.answer).toMatch(/no enabled modules/i);
+  });
+});
+
+describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", () => {
+  let chatbot: ChatbotService;
+  let searchMock: { runCascadingSearch: ReturnType<typeof vi.fn> };
+
+  beforeAll(() => {
+    const registry = new GraphDescriptorRegistry();
+    registry.register({ descriptor: accountDescriptor(), module: "accounts" });
+    registry.register({ descriptor: orderDescriptor(), module: "orders" });
+    const catalog = new GraphCatalogService(registry);
+    catalog.buildCatalog();
+
+    const serviceRegistry = {
+      get: (t: string) => {
+        if (t === "accounts") {
+          return {
+            model: { type: "accounts" },
+            findRecords: vi.fn(async ({ filters }: any) => {
+              const idFilter = filters?.find((f: any) => f.field === "id" && f.op === "in");
+              if (idFilter && (idFilter.value as string[]).includes("fc-1")) {
+                return [{ id: "fc-1", name: "Faby and Carlo" }];
+              }
+              return [];
+            }),
+            findRecordById: vi.fn(async () => null),
+          };
+        }
+        if (t === "orders") {
+          return {
+            model: { type: "orders" },
+            findRecords: vi.fn(async () => []),
+            findRelatedRecords: vi.fn(async () => []),
+          };
+        }
+        return undefined;
+      },
+      listTypes: () => ["accounts", "orders"],
+    } as any;
+
+    // The LLM issues a SINGLE search_entities call with the LITERAL phrase "Faby and Carlo"
+    // and immediately produces an answer — no clarification, no splitting the name.
+    const mockLLM = {
+      call: vi.fn(async ({ tools }: any) => {
+        const search = tools.find((t: any) => t.name === "search_entities");
+        const searchResult = JSON.parse(await search.func({ type: "accounts", text: "Faby and Carlo" }));
+        return {
+          answer: `Found account: ${searchResult.items[0]?.summary ?? "none"}.`,
+          references: [{ type: "accounts", id: "fc-1", reason: "matched account" }],
+          needsClarification: false,
+          suggestedQuestions: [],
+          tokenUsage: { input: 200, output: 50 },
+        };
+      }),
+    };
+
+    // The search service returns an exact FULLTEXT hit for the literal phrase
+    searchMock = {
+      runCascadingSearch: vi.fn().mockResolvedValue({
+        matchMode: "exact",
+        items: [{ id: "fc-1", score: 9.9 }],
+      }),
+    };
+
+    const factory = new ToolFactory(catalog, serviceRegistry);
+    chatbot = new ChatbotService(
+      mockLLM as unknown as LLMService,
+      catalog,
+      factory,
+      new DescribeEntityTool(factory),
+      new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
+      new ReadEntityTool(factory),
+      new TraverseTool(factory),
+    );
+  });
+
+  it("passes the literal phrase 'Faby and Carlo' as text to search_entities — no clarification", async () => {
+    const out = await chatbot.run({
+      companyId: "c1",
+      userId: "u1",
+      userModules: ["accounts", "orders"],
+      messages: [{ role: "user", content: "Show me the last order from Faby and Carlo" }],
+    });
+
+    // The LLM must have called search_entities with the literal phrase as text
+    expect(out.toolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: "search_entities",
+          input: expect.objectContaining({ type: "accounts", text: "Faby and Carlo" }),
+        }),
+      ]),
+    );
+
+    // No clarification should be needed — FULLTEXT hit was exact
+    expect(out.needsClarification).toBe(false);
+
+    // The cascading search service was invoked with the literal phrase
+    expect(searchMock.runCascadingSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Faby and Carlo" }),
+    );
   });
 });
