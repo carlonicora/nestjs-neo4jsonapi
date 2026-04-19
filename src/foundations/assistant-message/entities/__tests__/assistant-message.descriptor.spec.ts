@@ -2,12 +2,11 @@ import { describe, expect, it } from "vitest";
 import { AssistantMessageDescriptor } from "../assistant-message";
 
 describe("AssistantMessageDescriptor", () => {
-  it("declares required fields for role, content, position, createdAt", () => {
+  it("declares required fields for role, content, position", () => {
     const fields = AssistantMessageDescriptor.fields as Record<string, any>;
     expect(fields.role.required).toBe(true);
     expect(fields.content.required).toBe(true);
     expect(fields.position.required).toBe(true);
-    expect(fields.createdAt.type).toBe("datetime");
   });
 
   it("declares the assistant relationship as direction=in, HAS_MESSAGE, required, immutable", () => {

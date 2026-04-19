@@ -14,20 +14,21 @@ import { ChatbotService, ChatbotRunParams } from "../../../../agents/chatbot/ser
  */
 describe("Assistant lifecycle (integration, scripted agent)", () => {
   let service: AssistantService;
-  let storage: Map<string, any>;
+  let assistantStorage: Map<string, any>;
+  let messageStorage: Map<string, any>;
   let chatbotRunParams: ChatbotRunParams[];
 
   beforeAll(() => {
-    storage = new Map();
+    assistantStorage = new Map();
+    messageStorage = new Map();
     chatbotRunParams = [];
 
-    const repo = {
+    const assistantRepo = {
       create: vi.fn(async (params: any) => {
-        storage.set(params.id, {
+        assistantStorage.set(params.id, {
           id: params.id,
           type: "assistants",
           title: params.title,
-          messages: params.messages,
           company: { id: "c" },
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -35,24 +36,61 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
         });
       }),
       patch: vi.fn(async (params: any) => {
-        const existing = storage.get(params.id);
+        const existing = assistantStorage.get(params.id);
         if (!existing) throw new Error(`Not found: ${params.id}`);
-        storage.set(params.id, {
+        assistantStorage.set(params.id, {
           ...existing,
-          ...(params.messages !== undefined ? { messages: params.messages } : {}),
           ...(params.title !== undefined ? { title: params.title } : {}),
           updatedAt: new Date(),
         });
       }),
       delete: vi.fn(async (params: any) => {
-        storage.delete(params.id);
+        assistantStorage.delete(params.id);
+        for (const [id, m] of messageStorage) {
+          if (m.assistantId === params.id) messageStorage.delete(id);
+        }
       }),
       findById: vi.fn(async (params: any) => {
-        const entity = storage.get(params.id);
+        const entity = assistantStorage.get(params.id);
         if (!entity) throw new Error(`Not found: ${params.id}`);
         return entity;
       }),
-      find: vi.fn(async () => Array.from(storage.values())),
+      find: vi.fn(async () => Array.from(assistantStorage.values())),
+    } as any;
+
+    const assistantMessageRepo = {
+      linkReferences: vi.fn(async () => {}),
+      getNextPosition: vi.fn(async (params: any) => {
+        const existing = Array.from(messageStorage.values()).filter(
+          (m: any) => m.assistantId === params.assistantId,
+        );
+        return existing.length;
+      }),
+      findByRelated: vi.fn(async (params: any) => {
+        const all = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.id);
+        return all.sort((a: any, b: any) => b.position - a.position);
+      }),
+      findById: vi.fn(async (params: any) => {
+        const m = messageStorage.get(params.id);
+        if (!m) throw new Error(`Not found: ${params.id}`);
+        return m;
+      }),
+    } as any;
+
+    const assistantMessages = {
+      createFromDTO: vi.fn(async (dto: any) => {
+        const msg = {
+          id: dto.data.id,
+          type: "assistant-messages",
+          assistantId: dto.data.relationships?.assistant?.data?.id,
+          ...dto.data.attributes,
+          company: { id: "c" },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        messageStorage.set(dto.data.id, msg);
+        return { data: {} };
+      }),
     } as any;
 
     const userModules = { findModulesForRoles: vi.fn(async () => ["crm"]) } as any;
@@ -103,27 +141,42 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       has: () => true,
     } as any;
 
-    service = new AssistantService(jsonApi, repo, clsService, userModules, chatbot);
+    service = new AssistantService(
+      jsonApi,
+      assistantRepo,
+      clsService,
+      userModules,
+      chatbot,
+      assistantMessages,
+      assistantMessageRepo,
+    );
   });
 
-  it("creates an assistant thread and persists the first user+assistant pair", async () => {
-    const { assistant, toolCalls } = await service.createWithFirstMessage({
+  it("creates an assistant thread and persists the first user+assistant pair as child nodes", async () => {
+    const { assistant, userMessage, assistantMessage, toolCalls } = await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
       roles: ["role-1"],
       firstMessage: "Who is the top account?",
     });
     expect(assistant.id).toBeDefined();
-    expect(assistant.messages).toHaveLength(2);
-    expect(assistant.messages[0].role).toBe("user");
-    expect(assistant.messages[1].role).toBe("assistant");
-    expect(assistant.messages[1].references?.[0]).toMatchObject({ type: "accounts", id: "acc-1" });
+    expect(userMessage.role).toBe("user");
+    expect(assistantMessage.role).toBe("assistant");
     expect(assistant.title).toBe("Who is the top account?");
     expect(toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 10 }]);
+
+    // Two AssistantMessage nodes were written, linked to the Assistant.
+    const storedMessages = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === assistant.id);
+    expect(storedMessages).toHaveLength(2);
+    expect(storedMessages.find((m: any) => m.role === "user")?.position).toBe(0);
+    expect(storedMessages.find((m: any) => m.role === "assistant")?.position).toBe(1);
+    // references are stringified JSON on the assistant message node.
+    const refs = JSON.parse(storedMessages.find((m: any) => m.role === "assistant")!.references);
+    expect(refs).toEqual([{ type: "accounts", id: "acc-1", reason: "primary match" }]);
   });
 
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
-    const [firstAssistantId] = Array.from(storage.keys());
+    const [firstAssistantId] = Array.from(assistantStorage.keys());
     const result = await service.appendMessage({
       assistantId: firstAssistantId,
       companyId: "c",
@@ -139,8 +192,9 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(sys!.content).toContain("accounts/acc-1");
     expect(sys!.content).toContain("primary match");
 
-    // The assistant thread should now hold 4 messages (u1, a1, u2, a2).
-    expect(result.assistant.messages).toHaveLength(4);
+    // The thread now holds 4 child messages (u0, a0, u1, a1).
+    const storedMessages = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === firstAssistantId);
+    expect(storedMessages).toHaveLength(4);
     expect(result.toolCalls).toEqual([{ tool: "traverse", input: {}, durationMs: 5 }]);
     expect(result.userMessage.content).toBe("And its latest order?");
     expect(result.assistantMessage.content).toContain("ord-1");
@@ -154,23 +208,25 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
   });
 
   it("inherited findById() returns the assistant thread as a JSON:API document", async () => {
-    const [id] = Array.from(storage.keys());
+    const [id] = Array.from(assistantStorage.keys());
     const response = await service.findById({ id });
     expect((response as any).data).toMatchObject({ type: "assistants", id });
   });
 
   it("inherited patch() renames via patchFromDTO envelope", async () => {
-    const [id] = Array.from(storage.keys());
+    const [id] = Array.from(assistantStorage.keys());
     await service.patchFromDTO({
       data: { id, type: "assistants", attributes: { title: "Top account review" } },
     });
-    const stored = storage.get(id);
+    const stored = assistantStorage.get(id);
     expect(stored.title).toBe("Top account review");
   });
 
-  it("inherited delete() removes the assistant thread", async () => {
-    const [id] = Array.from(storage.keys());
+  it("inherited delete() removes the assistant thread (and cascades messages via the repo stub)", async () => {
+    const [id] = Array.from(assistantStorage.keys());
     await service.delete({ id });
-    expect(storage.has(id)).toBe(false);
+    expect(assistantStorage.has(id)).toBe(false);
+    const remaining = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === id);
+    expect(remaining).toHaveLength(0);
   });
 });

@@ -1,13 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantController } from "../assistant.controller";
 import { AssistantDescriptor } from "../../entities/assistant";
+import { AssistantMessageDescriptor } from "../../../assistant-message/entities/assistant-message";
 
 describe("AssistantController", () => {
   const makeAssistant = (overrides: Partial<any> = {}) => ({
     id: "asst-1",
     type: "assistants",
     title: "Hello",
-    messages: [],
+    company: { id: "c" },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  });
+
+  const makeMessage = (overrides: Partial<any> = {}) => ({
+    id: "m-1",
+    type: "assistant-messages",
+    role: "user",
+    content: "hi",
+    position: 0,
     company: { id: "c" },
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -17,33 +29,13 @@ describe("AssistantController", () => {
   const assistants = {
     createWithFirstMessage: vi.fn(async () => ({
       assistant: makeAssistant(),
+      userMessage: makeMessage({ id: "u1", role: "user", position: 0 }),
+      assistantMessage: makeMessage({ id: "a1", role: "assistant", position: 1 }),
       toolCalls: [{ tool: "search_entities", input: {}, durationMs: 3 }],
     })),
     appendMessage: vi.fn(async () => ({
-      assistant: makeAssistant({
-        messages: [
-          { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
-          {
-            id: "a1",
-            role: "assistant",
-            content: "hey",
-            createdAt: "2026-04-17T00:00:01Z",
-            references: [],
-            suggestedQuestions: [],
-            tokens: { input: 1, output: 1 },
-          },
-        ],
-      }),
-      userMessage: { id: "u1", role: "user", content: "hi", createdAt: "2026-04-17T00:00:00Z" },
-      assistantMessage: {
-        id: "a1",
-        role: "assistant",
-        content: "hey",
-        createdAt: "2026-04-17T00:00:01Z",
-        references: [],
-        suggestedQuestions: [],
-        tokens: { input: 1, output: 1 },
-      },
+      userMessage: makeMessage({ id: "u2", role: "user", position: 2, content: "continue" }),
+      assistantMessage: makeMessage({ id: "a2", role: "assistant", position: 3, content: "hey" }),
       toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }],
     })),
   };
@@ -88,11 +80,24 @@ describe("AssistantController", () => {
       expect(assistants.createWithFirstMessage).toHaveBeenCalledWith(expect.objectContaining({ title: "My Chat" }));
     });
 
-    it("builds the response via JsonApiService.buildSingle with AssistantDescriptor.model", async () => {
-      await ctl.create(envelope("hi") as any, REQ);
+    it("builds the Assistant response via JsonApiService.buildSingle and includes the two new messages", async () => {
+      const res: any = await ctl.create(envelope("hi") as any, REQ);
       expect(jsonApi.buildSingle).toHaveBeenCalledWith(
         AssistantDescriptor.model,
         expect.objectContaining({ id: "asst-1" }),
+      );
+      expect(jsonApi.buildList).toHaveBeenCalledWith(
+        AssistantMessageDescriptor.model,
+        expect.arrayContaining([
+          expect.objectContaining({ id: "u1" }),
+          expect.objectContaining({ id: "a1" }),
+        ]),
+      );
+      expect(res.included).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "u1" }),
+          expect.objectContaining({ id: "a1" }),
+        ]),
       );
     });
 
@@ -102,9 +107,9 @@ describe("AssistantController", () => {
     });
   });
 
-  describe("POST /assistants/:assistantId/messages (append)", () => {
+  describe("POST /assistants/:assistantId/assistant-messages (append)", () => {
     const envelope = (content: string) => ({
-      data: { type: "messages", attributes: { content } },
+      data: { type: "assistant-messages", attributes: { content } },
     });
 
     it("delegates to AssistantService.appendMessage with the assistant id and new message", async () => {
@@ -118,13 +123,16 @@ describe("AssistantController", () => {
       });
     });
 
-    it("returns the full updated Assistant via buildSingle with per-turn toolCalls in meta", async () => {
+    it("returns the two new messages via buildList with per-turn toolCalls in meta", async () => {
       const res: any = await ctl.append("asst-1", envelope("continue") as any, REQ);
-      expect(jsonApi.buildSingle).toHaveBeenCalledWith(
-        AssistantDescriptor.model,
-        expect.objectContaining({ id: "asst-1" }),
+      expect(jsonApi.buildList).toHaveBeenCalledWith(
+        AssistantMessageDescriptor.model,
+        expect.arrayContaining([
+          expect.objectContaining({ id: "u2" }),
+          expect.objectContaining({ id: "a2" }),
+        ]),
       );
-      expect(res.data).toMatchObject({ type: "assistants", id: "asst-1" });
+      expect(res.data).toHaveLength(2);
       expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }] });
     });
   });

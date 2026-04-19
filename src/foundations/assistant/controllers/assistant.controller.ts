@@ -24,6 +24,8 @@ import { AssistantPatchDto } from "../dtos/assistant-patch.dto";
 import { AssistantPostDto } from "../dtos/assistant-post.dto";
 import { AssistantDescriptor } from "../entities/assistant";
 import { assistantMeta } from "../entities/assistant.meta";
+import { AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
+import { assistantMessageMeta } from "../../assistant-message/entities/assistant-message.meta";
 import { AssistantService } from "../services/assistant.service";
 
 @UseGuards(JwtAuthGuard)
@@ -40,12 +42,10 @@ export class AssistantController {
   /**
    * POST /assistants — create a new assistant thread with a first user message.
    *
-   * Stays bespoke (not `crud.create`) because the agent turn must be computed
-   * synchronously and the resulting user+assistant pair persisted atomically
-   * with the new Assistant — there is no client-supplied payload that maps
-   * cleanly onto `createFromDTO` at the controller layer. Internally the
-   * service still routes through `createFromDTO` so `contextKey: "userId"`
-   * on the `owner` relationship attaches the `CREATED_BY` edge from CLS.
+   * Response shape: Assistant JSON:API document with `meta.toolCalls`. The
+   * first user + assistant messages are embedded in the `included` array as
+   * `assistant-messages` (pre-populated server-side so the client does not need
+   * a round-trip to render the initial thread).
    */
   @Post(assistantMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
@@ -53,7 +53,7 @@ export class AssistantController {
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${firstMessage.length}`,
     );
-    const { assistant, toolCalls } = await this.assistants.createWithFirstMessage({
+    const { assistant, userMessage, assistantMessage, toolCalls } = await this.assistants.createWithFirstMessage({
       companyId: req.user.companyId,
       userId: req.user.userId,
       roles: req.user.roles,
@@ -61,19 +61,25 @@ export class AssistantController {
       title: body.data.attributes.title,
     });
     const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
+    const included = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+      userMessage,
+      assistantMessage,
+    ])) as Record<string, any>;
+    document.included = [
+      ...(Array.isArray(document.included) ? document.included : []),
+      ...(Array.isArray(included.data) ? included.data : []),
+    ];
     document.meta = { ...(document.meta ?? {}), toolCalls };
     return document;
   }
 
   /**
-   * POST /assistants/:assistantId/messages — append a user message to an existing assistant thread.
-   *
-   * Returns the full updated Assistant via the descriptor-driven serialiser
-   * (the client can read the last two `messages[]` entries for the new user +
-   * assistant pair). Per-turn `toolCalls` are surfaced in the document's
-   * top-level `meta` for debug/inspection.
+   * POST /assistants/:assistantId/assistant-messages — append a user message to an existing
+   * assistant thread. Runs the agent turn synchronously and returns a JSON:API list
+   * document containing the two new messages (user + assistant). `toolCalls` is surfaced
+   * in the document's `meta`.
    */
-  @Post(`${assistantMeta.endpoint}/:assistantId/messages`)
+  @Post(`${assistantMeta.endpoint}/:assistantId/${assistantMessageMeta.endpoint}`)
   async append(
     @Param("assistantId") assistantId: string,
     @Body() body: AssistantAppendDto,
@@ -82,7 +88,7 @@ export class AssistantController {
     this.logger.log(
       `append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${body.data.attributes.content.length}`,
     );
-    const { assistant, toolCalls } = await this.assistants.appendMessage({
+    const { userMessage, assistantMessage, toolCalls } = await this.assistants.appendMessage({
       assistantId,
       companyId: req.user.companyId,
       userId: req.user.userId,
@@ -90,7 +96,10 @@ export class AssistantController {
       newMessage: body.data.attributes.content,
     });
 
-    const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
+    const document = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+      userMessage,
+      assistantMessage,
+    ])) as Record<string, any>;
     document.meta = { ...(document.meta ?? {}), toolCalls };
     return document;
   }

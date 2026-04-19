@@ -18,7 +18,6 @@ export type AssistantMessage = Entity & {
   role: AssistantMessageRole;
   content: string;
   position: number;
-  createdAt: string;
   suggestedQuestions?: string[];
   inputTokens?: number;
   outputTokens?: number;
@@ -36,7 +35,6 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
     role: { type: "string", required: true },
     content: { type: "string", required: true },
     position: { type: "number", required: true },
-    createdAt: { type: "datetime", required: true },
     suggestedQuestions: { type: "string[]" },
     inputTokens: { type: "number" },
     outputTokens: { type: "number" },

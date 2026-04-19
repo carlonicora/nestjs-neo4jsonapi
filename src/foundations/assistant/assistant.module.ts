@@ -1,16 +1,17 @@
 import { Module, OnModuleInit } from "@nestjs/common";
 import { ChatbotModule } from "../../agents/chatbot/chatbot.module";
 import { modelRegistry } from "../../common/registries/registry";
+import { AssistantMessageModule } from "../assistant-message/assistant-message.module";
 import { AssistantController } from "./controllers/assistant.controller";
 import { AssistantDescriptor } from "./entities/assistant";
 import { AssistantRepository } from "./repositories/assistant.repository";
 import { AssistantService } from "./services/assistant.service";
 
 @Module({
-  imports: [ChatbotModule],
+  imports: [ChatbotModule, AssistantMessageModule],
   controllers: [AssistantController],
   providers: [AssistantDescriptor.model.serialiser, AssistantRepository, AssistantService],
-  exports: [AssistantService],
+  exports: [AssistantService, AssistantMessageModule],
 })
 export class AssistantModule implements OnModuleInit {
   onModuleInit() {

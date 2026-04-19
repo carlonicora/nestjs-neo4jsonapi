@@ -9,7 +9,7 @@ export class AssistantAppendAttributesDto {
 }
 
 export class AssistantAppendDataDto {
-  @Equals("messages")
+  @Equals("assistant-messages")
   type!: string;
 
   @ValidateNested()

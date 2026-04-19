@@ -31,4 +31,22 @@ export class AssistantRepository extends AbstractRepository<Assistant, typeof As
             }
             WITH ${nodeName}`;
   }
+
+  /**
+   * Override delete to cascade through HAS_MESSAGE children so that
+   * `AssistantMessage` nodes (and their REFERENCES edges) are removed with
+   * the parent Assistant. DETACH DELETE drops every relationship incident to
+   * the deleted nodes — including outgoing REFERENCES edges — without
+   * affecting the referenced domain entities.
+   */
+  async delete(params: { id: string }): Promise<void> {
+    await this.neo4j.writeOne({
+      query: `
+        MATCH (a:Assistant {id: $id})
+        OPTIONAL MATCH (a)-[:HAS_MESSAGE]->(m:AssistantMessage)
+        DETACH DELETE a, m
+      `,
+      queryParams: { id: params.id },
+    });
+  }
 }
