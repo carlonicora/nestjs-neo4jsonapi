@@ -47,6 +47,15 @@ export class TraverseTool {
     return this.factory.capture(
       { tool: "traverse", input },
       async () => {
+        const sourceDescribed = recorder.some(
+          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.fromType,
+        );
+        if (!sourceDescribed) {
+          return {
+            error: `You must call describe_entity({ type: "${input.fromType}" }) before traversing from ${input.fromType}. The describe call returns the exact relationship names available on this type — needed to choose a valid relationship argument.`,
+          };
+        }
+
         const source = this.factory.resolveEntity(input.fromType, ctx);
         if ("error" in source) return source;
 
@@ -63,7 +72,10 @@ export class TraverseTool {
 
         const byName = new Map(target.fields.map((f) => [f.name, f]));
         const validFieldNames = target.fields.map((f) => f.name).join(", ");
-        const sortableFieldNames = target.fields.filter((f) => f.sortable).map((f) => f.name).join(", ");
+        const sortableFieldNames = target.fields
+          .filter((f) => f.sortable)
+          .map((f) => f.name)
+          .join(", ");
         for (const f of input.filters ?? []) {
           const def = byName.get(f.field);
           if (!def) {

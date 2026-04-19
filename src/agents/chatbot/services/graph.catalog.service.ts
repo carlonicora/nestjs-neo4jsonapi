@@ -137,7 +137,10 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     const entityBlocks = list.map((e) => {
       const fieldLines = e.fields.length
         ? e.fields
-            .map((f) => `    - ${f.name} (${f.type}${f.sortable ? ", sortable" : ""}${f.filterable ? ", filterable" : ""})`)
+            .map(
+              (f) =>
+                `    - ${f.name} (${f.type}${f.sortable ? ", sortable" : ""}${f.filterable ? ", filterable" : ""})`,
+            )
             .join("\n")
         : "    (no described fields)";
       return `- **${e.type}** — ${e.description}\n  fields:\n${fieldLines}`;

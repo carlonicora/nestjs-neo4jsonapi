@@ -36,13 +36,17 @@ describe("ReadEntityTool", () => {
 
   it("reads entity by id and returns described fields only", async () => {
     const tool = new ReadEntityTool(factory);
-    const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(out).toMatchObject({ id: "a1", type: "accounts", fields: { name: "Acme" } });
   });
 
   it("rejects include for undescribed relationship", async () => {
     const tool = new ReadEntityTool(factory);
-    const out: any = await tool.invoke({ type: "accounts", id: "a1", include: ["ghost"] }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts", id: "a1", include: ["ghost"] }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(out.error).toMatch(/ghost/);
   });
 });

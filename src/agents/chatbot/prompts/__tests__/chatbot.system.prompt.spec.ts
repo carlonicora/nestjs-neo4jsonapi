@@ -67,7 +67,25 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).not.toContain("## Answer shape");
     expect(out).not.toContain("## Suggested questions");
     expect(out).not.toContain("## Tool discipline");
-    for (const id of ["T1.", "T2.", "T3.", "T4.", "T5.", "T6.", "A1.", "A2.", "A3.", "A4.", "A5.", "A6.", "S1.", "S2.", "S3.", "S4.", "S5."]) {
+    for (const id of [
+      "T1.",
+      "T2.",
+      "T3.",
+      "T4.",
+      "T5.",
+      "T6.",
+      "A1.",
+      "A2.",
+      "A3.",
+      "A4.",
+      "A5.",
+      "A6.",
+      "S1.",
+      "S2.",
+      "S3.",
+      "S4.",
+      "S5.",
+    ]) {
       expect(out).not.toContain(id);
     }
   });

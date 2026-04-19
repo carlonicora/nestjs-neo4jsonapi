@@ -49,7 +49,12 @@ export class ToolFactory {
           result && typeof result === "object" && "error" in (result as any)
             ? String((result as any).error)
             : undefined;
-        recorder.push({ tool: record.tool, input: record.input, durationMs, ...(resultError ? { error: resultError } : {}) });
+        recorder.push({
+          tool: record.tool,
+          input: record.input,
+          durationMs,
+          ...(resultError ? { error: resultError } : {}),
+        });
         const hint =
           result && typeof result === "object" && "items" in (result as any) && Array.isArray((result as any).items)
             ? `items=${(result as any).items.length}`

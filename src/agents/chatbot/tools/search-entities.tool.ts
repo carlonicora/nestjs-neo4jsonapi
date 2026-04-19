@@ -51,6 +51,15 @@ export class SearchEntitiesTool {
     return this.factory.capture(
       { tool: "search_entities", input },
       async () => {
+        const described = recorder.some(
+          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
+        );
+        if (!described) {
+          return {
+            error: `You must call describe_entity({ type: "${input.type}" }) before searching ${input.type}. The describe call returns the exact field names, types, and relationships available — needed to construct correct filters and sort arguments.`,
+          };
+        }
+
         const entity = this.factory.resolveEntity(input.type, ctx);
         if ("error" in entity) return entity;
 
@@ -72,7 +81,10 @@ export class SearchEntitiesTool {
             };
           }
         }
-        const sortableFieldNames = entity.fields.filter((f) => f.sortable).map((f) => f.name).join(", ");
+        const sortableFieldNames = entity.fields
+          .filter((f) => f.sortable)
+          .map((f) => f.name)
+          .join(", ");
         for (const s of input.sort ?? []) {
           const def = byName.get(s.field);
           if (!def || !def.sortable) {

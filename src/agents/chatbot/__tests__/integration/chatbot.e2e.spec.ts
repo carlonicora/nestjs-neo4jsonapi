@@ -85,9 +85,12 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
     scriptedToolCalls = [];
     const mockLLM = {
       call: vi.fn(async ({ tools }: any) => {
-        // Simulate a 2-step tool-call: search for Acme, then traverse to last order.
+        // Simulate a 3-step tool-call: describe accounts (required), search for Acme, then traverse to last order.
+        const describe = tools.find((t: any) => t.name === "describe_entity");
         const search = tools.find((t: any) => t.name === "search_entities");
         const traverse = tools.find((t: any) => t.name === "traverse");
+        await describe.func({ type: "accounts" });
+        scriptedToolCalls.push({ name: "describe_entity", args: { type: "accounts" } });
         const searchResult = JSON.parse(await search.func({ type: "accounts", text: "acme" }));
         scriptedToolCalls.push({
           name: "search_entities",
@@ -143,7 +146,7 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
     expect(out.answer).toContain("Acme Corp");
     expect(out.answer).toContain("ord-1");
     expect(out.references).toEqual([{ type: "orders", id: "ord-1", reason: "latest order" }]);
-    expect(scriptedToolCalls.map((c) => c.name)).toEqual(["search_entities", "traverse"]);
+    expect(scriptedToolCalls.map((c) => c.name)).toEqual(["describe_entity", "search_entities", "traverse"]);
   });
 
   it("refuses cleanly when user has no modules", async () => {
@@ -199,7 +202,9 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
     // and immediately produces an answer — no clarification, no splitting the name.
     const mockLLM = {
       call: vi.fn(async ({ tools }: any) => {
+        const describe = tools.find((t: any) => t.name === "describe_entity");
         const search = tools.find((t: any) => t.name === "search_entities");
+        await describe.func({ type: "accounts" });
         const searchResult = JSON.parse(await search.func({ type: "accounts", text: "Faby and Carlo" }));
         return {
           answer: `Found account: ${searchResult.items[0]?.summary ?? "none"}.`,

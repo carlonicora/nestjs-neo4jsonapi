@@ -39,14 +39,16 @@ describe("SearchEntitiesTool", () => {
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "secret", op: "eq", value: "x" }] },
       ctx,
-      [],
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
     );
     expect(out.error).toMatch(/secret/);
   });
 
   it("rejects sort on undescribed field", async () => {
     const tool = new SearchEntitiesTool(factory, mockSearch);
-    const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(out.error).toMatch(/ghost/);
   });
 
@@ -62,7 +64,7 @@ describe("SearchEntitiesTool", () => {
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "amount", op: "like", value: "x" }] },
       ctx,
-      [],
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
     );
     expect(out.error).toMatch(/like.*not valid/i);
   });
@@ -71,7 +73,9 @@ describe("SearchEntitiesTool", () => {
     const svc = { findRecords: vi.fn(async () => []) };
     registryGet.mockReturnValue(svc);
     const tool = new SearchEntitiesTool(factory, mockSearch);
-    await tool.invoke({ type: "accounts", limit: 5000 }, ctx, []);
+    await tool.invoke({ type: "accounts", limit: 5000 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
   });
 
@@ -100,7 +104,9 @@ describe("SearchEntitiesTool", () => {
     };
 
     const tool = new SearchEntitiesTool(factoryWithSearch, search);
-    const out: any = await tool.invoke({ type: "accounts", text: "Faby" }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts", text: "Faby" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
 
     expect(search.runCascadingSearch).toHaveBeenCalledWith(
       expect.objectContaining({ text: "Faby", companyId: "c", limit: expect.any(Number) }),
@@ -117,7 +123,9 @@ describe("SearchEntitiesTool", () => {
     const factoryWithSearch: any = { ...factory, resolveService: () => ({ findRecords: vi.fn() }) };
 
     const tool = new SearchEntitiesTool(factoryWithSearch, search);
-    const out: any = await tool.invoke({ type: "accounts", text: "xyz" }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts", text: "xyz" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
 
     expect(out).toEqual({ matchMode: "none", items: [] });
   });
@@ -128,7 +136,9 @@ describe("SearchEntitiesTool", () => {
     const factoryWithSearch: any = { ...factory, resolveService: () => svc };
 
     const tool = new SearchEntitiesTool(factoryWithSearch, search);
-    const out: any = await tool.invoke({ type: "accounts" }, ctx, []);
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
 
     expect(search.runCascadingSearch).not.toHaveBeenCalled();
     expect(out.matchMode).toBe("none");

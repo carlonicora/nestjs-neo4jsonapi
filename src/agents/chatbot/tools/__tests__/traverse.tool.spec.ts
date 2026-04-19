@@ -62,7 +62,7 @@ describe("TraverseTool", () => {
         limit: 1,
       },
       ctx,
-      [],
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
     );
     expect(targetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -80,7 +80,9 @@ describe("TraverseTool", () => {
 
   it("rejects unknown relationship", async () => {
     const tool = new TraverseTool(factory);
-    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "ghost" }, ctx, []);
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "ghost" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(out.error).toMatch(/ghost/);
   });
 
@@ -94,7 +96,7 @@ describe("TraverseTool", () => {
         filters: [{ field: "ghost", op: "eq", value: "x" }],
       },
       ctx,
-      [],
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
     );
     expect(out.error).toMatch(/ghost/);
   });
@@ -135,7 +137,9 @@ describe("TraverseTool", () => {
       },
     };
     const tool = new TraverseTool(reverseFactory);
-    await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 1 }, ctx, []);
+    await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 1 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
     expect(reverseTargetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
       expect.objectContaining({
         cypherLabel: "FOR",
@@ -188,7 +192,9 @@ describe("TraverseTool", () => {
       },
     };
     const tool = new TraverseTool(f);
-    await tool.invoke({ fromType: "persons", fromId: "p1", relationship: "account", limit: 1 }, ctx, []);
+    await tool.invoke({ fromType: "persons", fromId: "p1", relationship: "account", limit: 1 }, ctx, [
+      { tool: "describe_entity", input: { type: "persons" }, durationMs: 0 },
+    ]);
     expect(accountSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
       expect.objectContaining({
         cypherLabel: "WORKS_FOR",

@@ -177,5 +177,4 @@ describe("ChatbotService", () => {
     expect(out.answer).toBe("Here's what I found.");
     expect(out.references).toHaveLength(1);
   });
-
 });

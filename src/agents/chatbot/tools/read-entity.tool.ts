@@ -26,6 +26,15 @@ export class ReadEntityTool {
     return this.factory.capture(
       { tool: "read_entity", input },
       async () => {
+        const described = recorder.some(
+          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
+        );
+        if (!described) {
+          return {
+            error: `You must call describe_entity({ type: "${input.type}" }) before reading a ${input.type} record. The describe call returns the exact field names and relationships available — needed to interpret the response and construct any include argument.`,
+          };
+        }
+
         const entity = this.factory.resolveEntity(input.type, ctx);
         if ("error" in entity) return entity;
 

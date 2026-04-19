@@ -139,9 +139,10 @@ Use the entity types listed in the data graph above. Do not respond with text �
     // already include the list of valid fields/relationships — the retry
     // just has to point the LLM back at them.
     const erroredCalls = recorder.filter((c) => c.error);
-    const answerSoundsApologetic = /^\s*(i am sorry|i'm sorry|i am unable|i cannot|please provide|could you (please )?specify)/i.test(
-      response.answer ?? "",
-    );
+    const answerSoundsApologetic =
+      /^\s*(i am sorry|i'm sorry|i am unable|i cannot|please provide|could you (please )?specify)/i.test(
+        response.answer ?? "",
+      );
     if (erroredCalls.length > 0 && answerSoundsApologetic) {
       this.logger.warn(
         `run: LLM bounced apology after tool error(s) — retrying with recovery prompt (${erroredCalls.length} errored calls)`,
