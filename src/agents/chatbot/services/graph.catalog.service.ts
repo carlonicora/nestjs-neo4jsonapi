@@ -198,13 +198,6 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     return out;
   }
 
-  getCatalogEntityByLabel(label: string): CatalogEntity | undefined {
-    for (const e of this.entities.values()) {
-      if (e.labelName === label) return e;
-    }
-    return undefined;
-  }
-
   hasType(type: string): boolean {
     return this.entities.has(type);
   }

@@ -109,9 +109,7 @@ describe("ChatbotService", () => {
       suggestedQuestions: [],
       tokenUsage: { input: 600, output: 70 },
     };
-    llmService.call
-      .mockImplementationOnce(async () => firstAttempt)
-      .mockImplementationOnce(async () => retry);
+    llmService.call.mockImplementationOnce(async () => firstAttempt).mockImplementationOnce(async () => retry);
 
     const out = await svc.run({
       companyId: "c1",
