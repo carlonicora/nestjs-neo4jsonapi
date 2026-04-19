@@ -15,7 +15,7 @@ describe("ChatbotSearchService — tier 1 substring", () => {
   it("returns matchMode='exact' with items when fulltext substring matches", async () => {
     const neo4j = {
       read: vi.fn().mockResolvedValue({
-        records: [{ get: (k: string) => ({ id: "a1", score: 12.3 } as any)[k] }],
+        records: [{ get: (k: string) => (({ id: "a1", score: 12.3 }) as any)[k] }],
       }),
     };
     const embedder = { vectoriseText: vi.fn() };
@@ -57,7 +57,7 @@ describe("ChatbotSearchService — tier 2 fuzzy", () => {
       read: vi
         .fn()
         .mockResolvedValueOnce({ records: [] }) // tier 1 empty
-        .mockResolvedValueOnce({ records: [{ get: (k: string) => ({ id: "a2", score: 4.4 } as any)[k] }] }), // tier 2 hits
+        .mockResolvedValueOnce({ records: [{ get: (k: string) => (({ id: "a2", score: 4.4 }) as any)[k] }] }), // tier 2 hits
     };
     const embedder = { vectoriseText: vi.fn() };
 
@@ -83,8 +83,8 @@ describe("ChatbotSearchService — tier 3 semantic", () => {
         .mockResolvedValueOnce({ records: [] })
         .mockResolvedValueOnce({
           records: [
-            { get: (k: string) => ({ id: "a3", score: 0.82 } as any)[k] },
-            { get: (k: string) => ({ id: "a4", score: 0.71 } as any)[k] },
+            { get: (k: string) => (({ id: "a3", score: 0.82 }) as any)[k] },
+            { get: (k: string) => (({ id: "a4", score: 0.71 }) as any)[k] },
           ],
         }),
     };

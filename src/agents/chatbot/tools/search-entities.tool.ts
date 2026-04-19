@@ -19,9 +19,7 @@ const inputSchema = z.object({
       }),
     )
     .optional(),
-  sort: z
-    .array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) }))
-    .optional(),
+  sort: z.array(z.object({ field: z.string(), direction: z.enum(["asc", "desc"]) })).optional(),
   limit: z.number().int().optional(),
 });
 
@@ -116,12 +114,7 @@ export class SearchEntitiesTool {
     );
   }
 
-  private buildOutput(
-    entity: any,
-    records: any[],
-    matchMode: string,
-    scoreById: Map<string, number>,
-  ) {
+  private buildOutput(entity: any, records: any[], matchMode: string, scoreById: Map<string, number>) {
     const items = records.map((r) => ({
       id: r.id,
       type: entity.type,
