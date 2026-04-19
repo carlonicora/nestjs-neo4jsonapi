@@ -134,7 +134,14 @@ export class GraphCatalogService implements OnApplicationBootstrap {
   }
 
   private renderModule(module: string, list: CatalogEntity[]): string {
-    const entityLines = list.map((e) => `- ${e.type} — ${e.description}`).join("\n");
+    const entityBlocks = list.map((e) => {
+      const fieldLines = e.fields.length
+        ? e.fields
+            .map((f) => `    - ${f.name} (${f.type}${f.sortable ? ", sortable" : ""}${f.filterable ? ", filterable" : ""})`)
+            .join("\n")
+        : "    (no described fields)";
+      return `- **${e.type}** — ${e.description}\n  fields:\n${fieldLines}`;
+    });
     const relLines: string[] = [];
     for (const e of list) {
       for (const r of e.relationships) {
@@ -149,7 +156,13 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         relLines.push(`(${e.type}) --> (${r.targetType})  [${names}]  — ${r.description}`);
       }
     }
-    return [`## Entities (${module})`, entityLines, "", `## Relationships (${module})`, relLines.join("\n")].join("\n");
+    return [
+      `## Entities (${module})`,
+      entityBlocks.join("\n"),
+      "",
+      `## Relationships (${module})`,
+      relLines.join("\n"),
+    ].join("\n");
   }
 
   getMapFor(userModules: string[]): string {
