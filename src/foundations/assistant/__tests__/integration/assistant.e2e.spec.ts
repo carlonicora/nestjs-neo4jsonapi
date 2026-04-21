@@ -61,9 +61,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const assistantMessageRepo = {
       linkReferences: vi.fn(async () => {}),
       getNextPosition: vi.fn(async (params: any) => {
-        const existing = Array.from(messageStorage.values()).filter(
-          (m: any) => m.assistantId === params.assistantId,
-        );
+        const existing = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.assistantId);
         return existing.length;
       }),
       findByRelated: vi.fn(async (params: any) => {

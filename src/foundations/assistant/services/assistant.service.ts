@@ -3,10 +3,7 @@ import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { ChatbotService } from "../../../agents/chatbot/services/chatbot.service";
 import { UserModulesRepository } from "../../../agents/chatbot/repositories/user-modules.repository";
-import {
-  ChatbotReference,
-  ChatbotToolCall,
-} from "../../../agents/chatbot/interfaces/chatbot.response.interface";
+import { ChatbotReference, ChatbotToolCall } from "../../../agents/chatbot/interfaces/chatbot.response.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { AssistantMessage, AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
@@ -251,10 +248,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    * Load the most recent N messages for an Assistant, ordered chronologically
    * (position ASC). Used to build the LLM prompt without pulling full history.
    */
-  private async loadRecentMessages(params: {
-    assistantId: string;
-    limit: number;
-  }): Promise<AssistantMessage[]> {
+  private async loadRecentMessages(params: { assistantId: string; limit: number }): Promise<AssistantMessage[]> {
     const all = await this.assistantMessageRepo.findByRelated({
       relationship: AssistantMessageDescriptor.relationshipKeys.assistant,
       id: params.assistantId,

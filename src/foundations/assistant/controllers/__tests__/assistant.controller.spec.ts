@@ -88,16 +88,10 @@ describe("AssistantController", () => {
       );
       expect(jsonApi.buildList).toHaveBeenCalledWith(
         AssistantMessageDescriptor.model,
-        expect.arrayContaining([
-          expect.objectContaining({ id: "u1" }),
-          expect.objectContaining({ id: "a1" }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ id: "u1" }), expect.objectContaining({ id: "a1" })]),
       );
       expect(res.included).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: "u1" }),
-          expect.objectContaining({ id: "a1" }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ id: "u1" }), expect.objectContaining({ id: "a1" })]),
       );
     });
 
@@ -127,10 +121,7 @@ describe("AssistantController", () => {
       const res: any = await ctl.append("asst-1", envelope("continue") as any, REQ);
       expect(jsonApi.buildList).toHaveBeenCalledWith(
         AssistantMessageDescriptor.model,
-        expect.arrayContaining([
-          expect.objectContaining({ id: "u2" }),
-          expect.objectContaining({ id: "a2" }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ id: "u2" }), expect.objectContaining({ id: "a2" })]),
       );
       expect(res.data).toHaveLength(2);
       expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }] });

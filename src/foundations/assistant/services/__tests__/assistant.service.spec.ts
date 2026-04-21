@@ -93,7 +93,17 @@ describe("AssistantService", () => {
       assistantMessages,
       assistantMessageRepo,
     );
-    return { service, chatbot, userModules, repo, jsonApi, assistantMessages, assistantMessageRepo, createdMessages, linkedRefs };
+    return {
+      service,
+      chatbot,
+      userModules,
+      repo,
+      jsonApi,
+      assistantMessages,
+      assistantMessageRepo,
+      createdMessages,
+      linkedRefs,
+    };
   };
 
   beforeEach(() => {

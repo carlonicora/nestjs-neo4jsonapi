@@ -1,14 +1,4 @@
-import {
-  Controller,
-  Delete,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Query,
-  Res,
-  UseGuards,
-} from "@nestjs/common";
+import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Query, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
@@ -48,19 +38,13 @@ export class AssistantMessageController {
   }
 
   @Get(`${assistantMessageMeta.endpoint}/:assistantMessageId`)
-  async findById(
-    @Res() reply: FastifyReply,
-    @Param("assistantMessageId") assistantMessageId: string,
-  ) {
+  async findById(@Res() reply: FastifyReply, @Param("assistantMessageId") assistantMessageId: string) {
     return this.crud.findById(reply, assistantMessageId);
   }
 
   @Delete(`${assistantMessageMeta.endpoint}/:assistantMessageId`)
   @HttpCode(HttpStatus.NO_CONTENT)
-  async delete(
-    @Res() reply: FastifyReply,
-    @Param("assistantMessageId") assistantMessageId: string,
-  ) {
+  async delete(@Res() reply: FastifyReply, @Param("assistantMessageId") assistantMessageId: string) {
     return this.crud.delete(reply, assistantMessageId);
   }
 }

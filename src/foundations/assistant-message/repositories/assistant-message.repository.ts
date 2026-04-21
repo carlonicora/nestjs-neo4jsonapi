@@ -61,10 +61,7 @@ export class AssistantMessageRepository extends AbstractRepository<
    *
    * Idempotent via MERGE.
    */
-  async linkReferences(params: {
-    messageId: string;
-    references: ChatbotReference[];
-  }): Promise<void> {
+  async linkReferences(params: { messageId: string; references: ChatbotReference[] }): Promise<void> {
     for (const ref of params.references) {
       const model = modelRegistry.getByType(ref.type);
       if (!model) {

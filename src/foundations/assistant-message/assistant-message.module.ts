@@ -7,11 +7,7 @@ import { AssistantMessageService } from "./services/assistant-message.service";
 
 @Module({
   controllers: [AssistantMessageController],
-  providers: [
-    AssistantMessageDescriptor.model.serialiser,
-    AssistantMessageRepository,
-    AssistantMessageService,
-  ],
+  providers: [AssistantMessageDescriptor.model.serialiser, AssistantMessageRepository, AssistantMessageService],
   exports: [AssistantMessageService, AssistantMessageRepository],
 })
 export class AssistantMessageModule implements OnModuleInit {
