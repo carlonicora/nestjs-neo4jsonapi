@@ -1,4 +1,5 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { z } from "zod";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "./graph.catalog.service";
@@ -41,6 +42,7 @@ export class ChatbotService {
     private readonly searchTool: SearchEntitiesTool,
     private readonly readTool: ReadEntityTool,
     private readonly traverseTool: TraverseTool,
+    @Optional() private readonly ws?: WebSocketService,
   ) {}
 
   async run(params: ChatbotRunParams): Promise<ChatbotResponseInterface> {
