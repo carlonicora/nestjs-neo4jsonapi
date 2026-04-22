@@ -37,7 +37,7 @@ Return these fields:
 
 - \`answer\` — a concise prose reply (2–4 sentences) built from the actual field values and traversal results. When you report on a record, use its real field values, not its type name.
 
-- \`references\` — every entity you named in the answer, as \`{ type, id, reason }\`. \`reason\` explains why this record is in the response (its role in the answer), not what it is.
+- \`references\` — every entity that contributes to the meaning of your \`answer\`, as \`{ type, id, reason }\`. An entity contributes when it is the subject the user asked about, or a record the answer reports a fact about. \`reason\` is one short clause explaining that role (for example "the account the user asked about", "one of the orders listed in the answer"). Do not include entities you retrieved, inspected, and discarded: a \`search_entities\` call that returned three candidates of which you only used one — the other two are not references; a \`traverse\` that walked an edge whose target you did not mention — not a reference. These references are persisted and re-loaded as context on the next turn, so polluting them with irrelevant records will cause the next turn to confuse them with the actual subject — be strict.
 
 - \`suggestedQuestions\` — 3 to 5 concrete next questions. Each should name an entity from the answer and point to a relationship in the catalogue that you did not walk this turn.
 

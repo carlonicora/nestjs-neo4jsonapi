@@ -98,4 +98,16 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).not.toMatch(/\bCRITICAL\b/);
     expect(out).not.toMatch(/\bFORBIDDEN\b/);
   });
+
+  it("references contract forbids including discarded search/traverse results", () => {
+    const out = renderChatbotSystemPrompt("any");
+    expect(out).toMatch(/contributes? to the meaning of your `?answer`?/i);
+    expect(out).toMatch(/do not include[^.]*entities you retrieved, inspected, and discarded/i);
+  });
+
+  it("references contract warns the LLM that references are re-loaded next turn", () => {
+    const out = renderChatbotSystemPrompt("any");
+    expect(out).toMatch(/re-loaded as context on the next turn/i);
+    expect(out).toMatch(/be strict/i);
+  });
 });
