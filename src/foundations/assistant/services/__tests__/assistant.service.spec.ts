@@ -85,6 +85,25 @@ describe("AssistantService", () => {
       has: () => true,
     } as any;
 
+    const graphCatalog = {
+      getEntityDetail: vi.fn((type: string) => ({
+        type,
+        module: "crm",
+        description: "",
+        fields: [],
+        relationships: [],
+        textSearchFields: ["name"],
+        nodeName: type,
+        labelName: type,
+      })),
+    } as any;
+
+    const entityServices = {
+      get: vi.fn((_type: string) => ({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `${id}-name` })),
+      })),
+    } as any;
+
     const service = new AssistantService(
       jsonApi,
       repo,
@@ -93,6 +112,8 @@ describe("AssistantService", () => {
       chatbot,
       assistantMessages,
       assistantMessageRepo,
+      graphCatalog,
+      entityServices,
     );
     return {
       service,
@@ -104,6 +125,8 @@ describe("AssistantService", () => {
       assistantMessageRepo,
       createdMessages,
       linkedRefs,
+      graphCatalog,
+      entityServices,
     };
   };
 

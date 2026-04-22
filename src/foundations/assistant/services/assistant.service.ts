@@ -2,8 +2,10 @@ import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { ChatbotService } from "../../../agents/chatbot/services/chatbot.service";
+import { GraphCatalogService } from "../../../agents/chatbot/services/graph.catalog.service";
 import { UserModulesRepository } from "../../../agents/chatbot/repositories/user-modules.repository";
 import { ChatbotReference, ChatbotToolCall } from "../../../agents/chatbot/interfaces/chatbot.response.interface";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { AssistantMessage, AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
@@ -63,6 +65,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     private readonly chatbot: ChatbotService,
     private readonly assistantMessages: AssistantMessageService,
     private readonly assistantMessageRepo: AssistantMessageRepository,
+    private readonly graphCatalog: GraphCatalogService,
+    private readonly entityServices: EntityServiceRegistry,
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
