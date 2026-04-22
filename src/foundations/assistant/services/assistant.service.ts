@@ -253,7 +253,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       relationship: AssistantMessageDescriptor.relationshipKeys.assistant,
       id: params.assistantId,
       cursor: { limit: params.limit },
-      orderBy: "-position",
+      orderBy: "position DESC",
     } as any);
     return (all as AssistantMessage[]).slice(0, params.limit).reverse();
   }
