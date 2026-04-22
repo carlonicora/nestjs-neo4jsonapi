@@ -395,8 +395,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
 
       return sections.join("\n");
     } catch (err) {
-      this.assistantLogger.warn(
+      this.assistantLogger.error(
         `buildHydrationMessage failed — proceeding without hydration: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.stack : undefined,
       );
       return null;
     }
@@ -417,7 +418,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       try {
         const record: any = await svc.findRecordById({ id: ref.id });
         if (!record) continue;
-        out.push({ type: ref.type, ...record });
+        out.push({ ...record, type: ref.type });
       } catch {
         // Deleted or RBAC-denied: drop silently.
         continue;
