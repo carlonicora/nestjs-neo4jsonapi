@@ -1,8 +1,9 @@
-import { vi } from "vitest";
+import { vi, describe, it, expect, beforeAll } from "vitest";
 import { ChatbotService } from "../../services/chatbot.service";
 import { GraphDescriptorRegistry } from "../../services/descriptor.source";
 import { GraphCatalogService } from "../../services/graph.catalog.service";
 import { ToolFactory } from "../../tools/tool.factory";
+import { ResolveEntityTool } from "../../tools/resolve-entity.tool";
 import { DescribeEntityTool } from "../../tools/describe-entity.tool";
 import { SearchEntitiesTool } from "../../tools/search-entities.tool";
 import { ReadEntityTool } from "../../tools/read-entity.tool";
@@ -15,9 +16,6 @@ function makeFakeServiceRegistry() {
   services.set("accounts", {
     model: { type: "accounts" },
     findRecords: vi.fn(async ({ filters }: any) => {
-      const name = filters?.find((f: any) => f.field === "name")?.value ?? "";
-      if (String(name).toLowerCase() === "acme") return [{ id: "acc-1", name: "Acme Corp" }];
-      // Also handle id-in filter (used by cascade search path)
       const idFilter = filters?.find((f: any) => f.field === "id" && f.op === "in");
       if (idFilter) {
         const ids: string[] = idFilter.value ?? [];
@@ -26,12 +24,25 @@ function makeFakeServiceRegistry() {
       }
       return [];
     }),
-    findRecordById: vi.fn(async ({ id }: any) => (id === "acc-1" ? { id: "acc-1", name: "Acme Corp" } : null)),
+    findRecordById: vi.fn(async ({ id }: any) =>
+      id === "acc-1"
+        ? { id: "acc-1", name: "Acme Corp" }
+        : id === "fc-1"
+          ? { id: "fc-1", name: "Faby and Carlo" }
+          : null,
+    ),
+    findRelatedRecordsByEdge: vi.fn(async () => []),
   });
   services.set("orders", {
     model: { type: "orders" },
     findRecords: vi.fn(async () => []),
+    findRecordById: vi.fn(async () => null),
     findRelatedRecordsByEdge: vi.fn(async () => [{ id: "ord-1", total: 1000, createdAt: "2026-04-01" }]),
+  });
+  services.set("persons", {
+    model: { type: "persons" },
+    findRecords: vi.fn(async () => []),
+    findRecordById: vi.fn(async () => null),
   });
   return {
     get: (t: string) => services.get(t),
@@ -70,7 +81,23 @@ function orderDescriptor() {
   };
 }
 
-describe("Chatbot end-to-end (mocked LLM)", () => {
+function personDescriptor() {
+  return {
+    model: { type: "persons", nodeName: "person", labelName: "Person" },
+    description: "An individual contact.",
+    fields: {
+      firstName: { type: "string", description: "First name." },
+      lastName: { type: "string", description: "Last name." },
+    },
+    relationships: {},
+    chat: {
+      summary: (d: any) => `${d.firstName ?? ""} ${d.lastName ?? ""}`.trim(),
+      textSearchFields: ["firstName", "lastName"],
+    },
+  };
+}
+
+describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse", () => {
   let chatbot: ChatbotService;
   let scriptedToolCalls: Array<{ name: string; args: any }>;
 
@@ -85,21 +112,21 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
     scriptedToolCalls = [];
     const mockLLM = {
       call: vi.fn(async ({ tools }: any) => {
-        // Simulate a 3-step tool-call: describe accounts (required), search for Acme, then traverse to last order.
+        const resolve = tools.find((t: any) => t.name === "resolve_entity");
         const describe = tools.find((t: any) => t.name === "describe_entity");
-        const search = tools.find((t: any) => t.name === "search_entities");
         const traverse = tools.find((t: any) => t.name === "traverse");
-        await describe.func({ type: "accounts" });
-        scriptedToolCalls.push({ name: "describe_entity", args: { type: "accounts" } });
-        const searchResult = JSON.parse(await search.func({ type: "accounts", text: "acme" }));
-        scriptedToolCalls.push({
-          name: "search_entities",
-          args: { type: "accounts", text: "acme" },
-        });
+
+        const resolveResult = JSON.parse(await resolve.func({ text: "Acme" }));
+        scriptedToolCalls.push({ name: "resolve_entity", args: { text: "Acme" } });
+        const topCandidate = resolveResult.items[0];
+
+        await describe.func({ type: topCandidate.type });
+        scriptedToolCalls.push({ name: "describe_entity", args: { type: topCandidate.type } });
+
         const traverseResult = JSON.parse(
           await traverse.func({
-            fromType: "accounts",
-            fromId: searchResult.items[0].id,
+            fromType: topCandidate.type,
+            fromId: topCandidate.id,
             relationship: "orders",
             sort: [{ field: "createdAt", direction: "desc" }],
             limit: 1,
@@ -107,7 +134,7 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
         );
         scriptedToolCalls.push({ name: "traverse", args: { relationship: "orders" } });
         return {
-          answer: `The last order from ${searchResult.items[0].summary} is #${traverseResult.items[0].id} for ${traverseResult.items[0].fields.total}.`,
+          answer: `The last order from ${topCandidate.summary} is #${traverseResult.items[0].id} for ${traverseResult.items[0].fields.total}.`,
           references: [{ type: "orders", id: traverseResult.items[0].id, reason: "latest order" }],
           needsClarification: false,
           suggestedQuestions: [],
@@ -116,12 +143,13 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
       }),
     };
 
-    // Provide a mock ChatbotSearchService that returns an "exact" hit for "acme"
-    const searchMock = {
-      runCascadingSearch: vi.fn().mockResolvedValue({
+    const searchMock: any = {
+      resolveEntity: vi.fn().mockResolvedValue({
         matchMode: "exact",
-        items: [{ id: "acc-1", score: 9.5 }],
+        items: [{ type: "accounts", id: "acc-1", summary: "Acme Corp", score: 9.5 }],
       }),
+      // Retained temporarily; Task 8 removes runCascadingSearch from the service.
+      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);
@@ -129,6 +157,7 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
       mockLLM as unknown as LLMService,
       catalog,
       factory,
+      new ResolveEntityTool(factory, searchMock as unknown as ChatbotSearchService),
       new DescribeEntityTool(factory),
       new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
       new ReadEntityTool(factory),
@@ -136,7 +165,7 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
     );
   });
 
-  it("answers 'last order from Acme' via search → traverse chain", async () => {
+  it("answers 'last order from Acme' via resolve → describe → traverse chain", async () => {
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
@@ -146,7 +175,11 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
     expect(out.answer).toContain("Acme Corp");
     expect(out.answer).toContain("ord-1");
     expect(out.references).toEqual([{ type: "orders", id: "ord-1", reason: "latest order" }]);
-    expect(scriptedToolCalls.map((c) => c.name)).toEqual(["describe_entity", "search_entities", "traverse"]);
+    expect(scriptedToolCalls.map((c) => c.name)).toEqual([
+      "resolve_entity",
+      "describe_entity",
+      "traverse",
+    ]);
   });
 
   it("refuses cleanly when user has no modules", async () => {
@@ -160,14 +193,14 @@ describe("Chatbot end-to-end (mocked LLM)", () => {
   });
 });
 
-describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", () => {
+describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby and Carlo)", () => {
   let chatbot: ChatbotService;
-  let searchMock: { runCascadingSearch: ReturnType<typeof vi.fn> };
 
   beforeAll(() => {
     const registry = new GraphDescriptorRegistry();
     registry.register({ descriptor: accountDescriptor(), module: "accounts" });
     registry.register({ descriptor: orderDescriptor(), module: "orders" });
+    registry.register({ descriptor: personDescriptor(), module: "persons" });
     const catalog = new GraphCatalogService(registry);
     catalog.buildCatalog();
 
@@ -176,39 +209,58 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
         if (t === "accounts") {
           return {
             model: { type: "accounts" },
-            findRecords: vi.fn(async ({ filters }: any) => {
-              const idFilter = filters?.find((f: any) => f.field === "id" && f.op === "in");
-              if (idFilter && (idFilter.value as string[]).includes("fc-1")) {
-                return [{ id: "fc-1", name: "Faby and Carlo" }];
-              }
-              return [];
-            }),
-            findRecordById: vi.fn(async () => null),
+            findRecords: vi.fn(async () => []),
+            findRecordById: vi.fn(async ({ id }: any) =>
+              id === "fc-1" ? { id: "fc-1", name: "Faby and Carlo" } : null,
+            ),
+            findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 79544, createdAt: "2026-03-25" }]),
           };
         }
         if (t === "orders") {
           return {
             model: { type: "orders" },
             findRecords: vi.fn(async () => []),
-            findRelatedRecordsByEdge: vi.fn(async () => []),
+            findRecordById: vi.fn(async () => null),
+            findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 79544, createdAt: "2026-03-25" }]),
+          };
+        }
+        if (t === "persons") {
+          return {
+            model: { type: "persons" },
+            findRecords: vi.fn(async () => []),
+            findRecordById: vi.fn(async () => null),
           };
         }
         return undefined;
       },
-      listTypes: () => ["accounts", "orders"],
+      listTypes: () => ["accounts", "orders", "persons"],
     } as any;
 
-    // The LLM issues a SINGLE search_entities call with the LITERAL phrase "Faby and Carlo"
-    // and immediately produces an answer — no clarification, no splitting the name.
     const mockLLM = {
       call: vi.fn(async ({ tools }: any) => {
+        const resolve = tools.find((t: any) => t.name === "resolve_entity");
         const describe = tools.find((t: any) => t.name === "describe_entity");
-        const search = tools.find((t: any) => t.name === "search_entities");
-        await describe.func({ type: "accounts" });
-        const searchResult = JSON.parse(await search.func({ type: "accounts", text: "Faby and Carlo" }));
+        const traverse = tools.find((t: any) => t.name === "traverse");
+
+        const resolveResult = JSON.parse(await resolve.func({ text: "Faby and Carlo" }));
+        const top = resolveResult.items[0];
+        await describe.func({ type: top.type });
+        const traverseResult = JSON.parse(
+          await traverse.func({
+            fromType: top.type,
+            fromId: top.id,
+            relationship: "orders",
+            sort: [{ field: "createdAt", direction: "desc" }],
+            limit: 1,
+          }),
+        );
+
         return {
-          answer: `Found account: ${searchResult.items[0]?.summary ?? "none"}.`,
-          references: [{ type: "accounts", id: "fc-1", reason: "matched account" }],
+          answer: `The last order from ${top.summary} is ORD ${traverseResult.items[0].id}.`,
+          references: [
+            { type: top.type, id: top.id, reason: "account the user asked about" },
+            { type: "orders", id: traverseResult.items[0].id, reason: "the last order" },
+          ],
           needsClarification: false,
           suggestedQuestions: [],
           tokenUsage: { input: 200, output: 50 },
@@ -216,12 +268,12 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
       }),
     };
 
-    // The search service returns an exact FULLTEXT hit for the literal phrase
-    searchMock = {
-      runCascadingSearch: vi.fn().mockResolvedValue({
+    const searchMock: any = {
+      resolveEntity: vi.fn().mockResolvedValue({
         matchMode: "exact",
-        items: [{ id: "fc-1", score: 9.9 }],
+        items: [{ type: "accounts", id: "fc-1", summary: "Faby and Carlo", score: 9.9 }],
       }),
+      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);
@@ -229,6 +281,7 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
       mockLLM as unknown as LLMService,
       catalog,
       factory,
+      new ResolveEntityTool(factory, searchMock as unknown as ChatbotSearchService),
       new DescribeEntityTool(factory),
       new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
       new ReadEntityTool(factory),
@@ -236,37 +289,41 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
     );
   });
 
-  it("passes the literal phrase 'Faby and Carlo' as text to search_entities — no clarification", async () => {
+  it("calls resolve_entity with the literal phrase and references the Account (not either Person)", async () => {
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["accounts", "orders"],
+      userModules: ["accounts", "orders", "persons"],
       messages: [{ role: "user", content: "Show me the last order from Faby and Carlo" }],
     });
 
-    // The LLM must have called search_entities with the literal phrase as text
+    // resolve_entity must have been invoked with the literal phrase
     expect(out.toolCalls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          tool: "search_entities",
-          input: expect.objectContaining({ type: "accounts", text: "Faby and Carlo" }),
+          tool: "resolve_entity",
+          input: expect.objectContaining({ text: "Faby and Carlo" }),
         }),
       ]),
     );
 
-    // No clarification should be needed — FULLTEXT hit was exact
-    expect(out.needsClarification).toBe(false);
+    // search_entities should never be called by name — and the schema no longer accepts `text` anyway.
+    const searchCalls = out.toolCalls.filter((c) => c.tool === "search_entities");
+    for (const c of searchCalls) {
+      expect((c.input as any).text).toBeUndefined();
+    }
 
-    // The cascading search service was invoked with the literal phrase
-    expect(searchMock.runCascadingSearch).toHaveBeenCalledWith(expect.objectContaining({ text: "Faby and Carlo" }));
+    // References anchor on the Account, not on Persons.
+    expect(out.references).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "accounts", id: "fc-1" })]),
+    );
+    expect(out.needsClarification).toBe(false);
   });
 });
 
 describe("Chatbot e2e regression — follow-up reuses resolved Account id via hydration", () => {
   let chatbot: ChatbotService;
-  let scriptedToolCalls: Array<{ name: string; args: any }>;
   let mockLLM: any;
-  let searchMock: { runCascadingSearch: ReturnType<typeof vi.fn> };
 
   beforeAll(() => {
     const registry = new GraphDescriptorRegistry();
@@ -303,16 +360,10 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
       listTypes: () => ["accounts", "orders"],
     } as any;
 
-    scriptedToolCalls = [];
-
     // Message-inspecting mock LLM.
-    // - If the incoming messages (systemPrompts or history) include a focus block
+    // - If incoming context (systemPrompts or history) includes a focus block
     //   mentioning accounts/fc-1, it takes the "traverse from known id" path.
-    // - Otherwise, it falls back to search_entities (the regressed behavior).
-    //
-    // Note: ChatbotService passes the app-level system prompt via `systemPrompts`,
-    // but conversation messages (including role:"system" hydration messages) are
-    // passed inside `history`. We inspect both.
+    // - Otherwise, it falls back to resolve_entity (the regressed behavior).
     mockLLM = {
       call: vi.fn(async ({ systemPrompts, history, tools }: any) => {
         const systemText = (systemPrompts ?? []).join("\n");
@@ -320,17 +371,14 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
         const allText = `${systemText}\n${historyText}`;
         const hasFocusAccount = allText.includes('"type": "accounts"') && allText.includes('"id": "fc-1"');
 
+        const resolve = tools.find((t: any) => t.name === "resolve_entity");
         const describe = tools.find((t: any) => t.name === "describe_entity");
         const traverse = tools.find((t: any) => t.name === "traverse");
-        const search = tools.find((t: any) => t.name === "search_entities");
-
-        await describe.func({ type: "accounts" });
-        scriptedToolCalls.push({ name: "describe_entity", args: { type: "accounts" } });
-        await describe.func({ type: "orders" });
-        scriptedToolCalls.push({ name: "describe_entity", args: { type: "orders" } });
 
         if (hasFocusAccount) {
-          // Correct path: use the known id directly.
+          // Correct path: skip resolve_entity entirely, use the known id.
+          await describe.func({ type: "accounts" });
+          await describe.func({ type: "orders" });
           const traverseResult = JSON.parse(
             await traverse.func({
               fromType: "accounts",
@@ -340,10 +388,6 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
               limit: 5,
             }),
           );
-          scriptedToolCalls.push({
-            name: "traverse",
-            args: { fromType: "accounts", fromId: "fc-1", relationship: "orders" },
-          });
           return {
             answer: `There are ${traverseResult.items.length} orders for Faby and Carlo.`,
             references: [
@@ -361,13 +405,9 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
         }
 
         // Regressed path — never reached if hydration is working.
-        await search.func({ type: "accounts", text: "Faby and Carlo" });
-        scriptedToolCalls.push({
-          name: "search_entities",
-          args: { type: "accounts", text: "Faby and Carlo" },
-        });
+        await resolve.func({ text: "Faby and Carlo" });
         return {
-          answer: "Fell back to search.",
+          answer: "Fell back to resolve.",
           references: [],
           needsClarification: false,
           suggestedQuestions: [],
@@ -376,11 +416,9 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
       }),
     };
 
-    searchMock = {
-      runCascadingSearch: vi.fn().mockResolvedValue({
-        matchMode: "none",
-        items: [],
-      }),
+    const searchMock: any = {
+      resolveEntity: vi.fn().mockResolvedValue({ matchMode: "none", items: [] }),
+      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);
@@ -388,6 +426,7 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
       mockLLM as unknown as LLMService,
       catalog,
       factory,
+      new ResolveEntityTool(factory, searchMock as unknown as ChatbotSearchService),
       new DescribeEntityTool(factory),
       new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
       new ReadEntityTool(factory),
@@ -395,14 +434,12 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
     );
   });
 
-  it("given a hydration block with the resolved Account, follow-up uses traverse and skips search", async () => {
-    // Simulate the hydration system message AssistantService.appendMessage would emit
-    // on turn 2, with the Account (fc-1) in the focus section.
+  it("given a hydration block with the resolved Account, follow-up uses traverse and skips resolve_entity", async () => {
     const hydrationSystemMessage = [
       "## Entities already in this conversation",
       "",
       "### Full records from the previous answer",
-      'These are the entities your previous answer was about. When the user\'s new question refers to any of them — by name or implicitly ("these", "them", "other orders", "their invoices") — use their id directly. Do not call search_entities for a name that matches one of these.',
+      'These are the entities your previous answer was about. When the user\'s new question refers to any of them — by name or implicitly ("these", "them", "other orders", "their invoices") — use their id directly. Do not call resolve_entity for a name that matches one of these.',
       "",
       JSON.stringify([{ id: "fc-1", name: "Faby and Carlo", type: "accounts" }], null, 2),
       "",
@@ -420,13 +457,9 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
       ],
     });
 
-    // Assertion 1: no search_entities call for the resolved name (or its halves)
-    const forbiddenSearches = result.toolCalls.filter(
-      (c) =>
-        c.tool === "search_entities" &&
-        ["faby and carlo", "faby", "carlo"].includes(String((c.input as any)?.text ?? "").toLowerCase()),
-    );
-    expect(forbiddenSearches).toEqual([]);
+    // Assertion 1: resolve_entity NOT called for the already-resolved name
+    const resolveCalls = result.toolCalls.filter((c) => c.tool === "resolve_entity");
+    expect(resolveCalls).toEqual([]);
 
     // Assertion 2: at least one traverse from the Account id from turn 1
     const traverseFromAccount = result.toolCalls.filter(
