@@ -315,10 +315,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    * the whole builder returns null so a single bad Neo4j hiccup does not
    * fail the chat turn.
    */
-  private async buildHydrationMessage(
-    messages: AssistantMessage[],
-    userModules: string[],
-  ): Promise<string | null> {
+  private async buildHydrationMessage(messages: AssistantMessage[], userModules: string[]): Promise<string | null> {
     if (messages.length === 0) return null;
     try {
       const pairs = await this.assistantMessageRepo.findReferencedTypeIdPairs({
@@ -355,9 +352,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       const BACKGROUND_CAP = 100;
       const focusCapped = focusRefs.slice(0, FOCUS_CAP);
       if (focusRefs.length > FOCUS_CAP) {
-        this.assistantLogger.warn(
-          `buildHydrationMessage: focus set capped at ${FOCUS_CAP} (had ${focusRefs.length})`,
-        );
+        this.assistantLogger.warn(`buildHydrationMessage: focus set capped at ${FOCUS_CAP} (had ${focusRefs.length})`);
       }
       const backgroundCapped = backgroundOnly.slice(0, BACKGROUND_CAP);
       if (backgroundOnly.length > BACKGROUND_CAP) {

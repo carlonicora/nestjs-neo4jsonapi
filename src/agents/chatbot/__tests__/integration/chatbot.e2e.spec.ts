@@ -316,12 +316,9 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
     mockLLM = {
       call: vi.fn(async ({ systemPrompts, history, tools }: any) => {
         const systemText = (systemPrompts ?? []).join("\n");
-        const historyText = (history ?? [])
-          .map((m: any) => String(m?.content ?? ""))
-          .join("\n");
+        const historyText = (history ?? []).map((m: any) => String(m?.content ?? "")).join("\n");
         const allText = `${systemText}\n${historyText}`;
-        const hasFocusAccount =
-          allText.includes('"type": "accounts"') && allText.includes('"id": "fc-1"');
+        const hasFocusAccount = allText.includes('"type": "accounts"') && allText.includes('"id": "fc-1"');
 
         const describe = tools.find((t: any) => t.name === "describe_entity");
         const traverse = tools.find((t: any) => t.name === "traverse");
@@ -405,13 +402,9 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
       "## Entities already in this conversation",
       "",
       "### Full records from the previous answer",
-      "These are the entities your previous answer was about. When the user's new question refers to any of them — by name or implicitly (\"these\", \"them\", \"other orders\", \"their invoices\") — use their id directly. Do not call search_entities for a name that matches one of these.",
+      'These are the entities your previous answer was about. When the user\'s new question refers to any of them — by name or implicitly ("these", "them", "other orders", "their invoices") — use their id directly. Do not call search_entities for a name that matches one of these.',
       "",
-      JSON.stringify(
-        [{ id: "fc-1", name: "Faby and Carlo", type: "accounts" }],
-        null,
-        2,
-      ),
+      JSON.stringify([{ id: "fc-1", name: "Faby and Carlo", type: "accounts" }], null, 2),
       "",
     ].join("\n");
 
@@ -431,9 +424,7 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
     const forbiddenSearches = result.toolCalls.filter(
       (c) =>
         c.tool === "search_entities" &&
-        ["faby and carlo", "faby", "carlo"].includes(
-          String((c.input as any)?.text ?? "").toLowerCase(),
-        ),
+        ["faby and carlo", "faby", "carlo"].includes(String((c.input as any)?.text ?? "").toLowerCase()),
     );
     expect(forbiddenSearches).toEqual([]);
 
