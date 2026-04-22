@@ -268,7 +268,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     priorMessages: AssistantMessage[];
     newUserMessage: { role: "user"; content: string };
   }): Promise<AgentTurnResult> {
-    const hydrationContent = this.buildHydrationMessage(params.priorMessages);
+    const hydrationContent = await this.buildHydrationMessage(params.priorMessages);
     const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
       role: m.role,
       content: m.content,
@@ -299,34 +299,29 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
-   * Build the reference-memory system message — a de-duplicated list of every
-   * entity referenced in prior turns. Parses the `references` JSON snapshot
-   * stored on each AssistantMessage node. Returns null if there is nothing to hydrate.
+   * Build a hydration system-message listing every (type/id) referenced by prior messages.
+   * Returns null when there is nothing to hydrate.
    */
-  private buildHydrationMessage(messages: AssistantMessage[]): string | null {
-    const seen = new Map<string, string>();
-    for (const msg of messages) {
-      for (const ref of this.parseRefs(msg.references)) {
-        const key = `${ref.type}/${ref.id}`;
-        if (!seen.has(key)) seen.set(key, ref.reason);
+  private async buildHydrationMessage(messages: AssistantMessage[]): Promise<string | null> {
+    if (messages.length === 0) return null;
+    const pairs = await this.assistantMessageRepo.findReferencedTypeIdPairs({
+      messageIds: messages.map((m) => m.id),
+    });
+    if (pairs.length === 0) return null;
+    const seen = new Set<string>();
+    const keys: string[] = [];
+    for (const p of pairs) {
+      const key = `${p.type}/${p.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        keys.push(key);
       }
     }
-    if (seen.size === 0) return null;
-    const lines = Array.from(seen.entries()).map(([key, reason]) => `- ${key}: ${reason}`);
-    return `The following entities have been referenced earlier in this conversation.\nYou can call read_entity(type, id) on any of them directly without re-searching:\n${lines.join("\n")}`;
-  }
-
-  private parseRefs(raw: unknown): ChatbotReference[] {
-    if (Array.isArray(raw)) return raw as ChatbotReference[];
-    if (typeof raw === "string" && raw.length > 0) {
-      try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? (parsed as ChatbotReference[]) : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
+    return (
+      "The following entities have been referenced earlier in this conversation.\n" +
+      "You can call read_entity(type, id) on any of them directly without re-searching:\n" +
+      keys.map((k) => `- ${k}`).join("\n")
+    );
   }
 
   /**
