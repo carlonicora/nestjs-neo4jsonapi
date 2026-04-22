@@ -110,4 +110,19 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).toMatch(/re-loaded as context on the next turn/i);
     expect(out).toMatch(/be strict/i);
   });
+
+  it("Tools section tells the LLM to prefer entities already in context over search_entities", () => {
+    const out = renderChatbotSystemPrompt("any");
+    expect(out).toMatch(/Entities already in this conversation/);
+    expect(out).toMatch(/treat that entity as resolved/i);
+    expect(out).toMatch(/Do not call `?search_entities`? for a name that is already resolved/i);
+  });
+
+  it("search_entities description reminds the LLM to consult hydration first", () => {
+    const out = renderChatbotSystemPrompt("any");
+    // The directive must appear inside or adjacent to the search_entities bullet,
+    // not merely somewhere in the prompt.
+    const searchBlock = out.substring(out.indexOf("search_entities"));
+    expect(searchBlock).toMatch(/confirm the phrase is not already resolved in the hydration block/i);
+  });
 });
