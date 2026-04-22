@@ -141,6 +141,25 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       has: () => true,
     } as any;
 
+    const graphCatalog = {
+      getEntityDetail: vi.fn((type: string) => ({
+        type,
+        module: "crm",
+        description: "",
+        fields: [],
+        relationships: [],
+        textSearchFields: ["name"],
+        nodeName: type,
+        labelName: type,
+      })),
+    } as any;
+
+    const entityServices = {
+      get: vi.fn((_type: string) => ({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `${id}-name` })),
+      })),
+    } as any;
+
     service = new AssistantService(
       jsonApi,
       assistantRepo,
@@ -149,6 +168,8 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       chatbot,
       assistantMessages,
       assistantMessageRepo,
+      graphCatalog,
+      entityServices,
     );
   });
 
@@ -174,8 +195,11 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
 
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
     const [firstAssistantId] = Array.from(assistantStorage.keys());
+    const prevAssistantMessage = Array.from(messageStorage.values()).find(
+      (m: any) => m.assistantId === firstAssistantId && m.role === "assistant",
+    ) as any;
     (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
-      { messageId: "any", type: "accounts", id: "acc-1" },
+      { messageId: prevAssistantMessage.id, type: "accounts", id: "acc-1" },
     ]);
     const result = await service.appendMessage({
       assistantId: firstAssistantId,
@@ -320,6 +344,25 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       has: () => true,
     } as any;
 
+    const graphCatalog = {
+      getEntityDetail: vi.fn((type: string) => ({
+        type,
+        module: "crm",
+        description: "",
+        fields: [],
+        relationships: [],
+        textSearchFields: ["name"],
+        nodeName: type,
+        labelName: type,
+      })),
+    } as any;
+
+    const entityServices = {
+      get: vi.fn((_type: string) => ({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `${id}-name` })),
+      })),
+    } as any;
+
     service = new AssistantService(
       jsonApi,
       assistantRepo,
@@ -328,6 +371,8 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       chatbot,
       assistantMessages,
       assistantMessageRepo,
+      graphCatalog,
+      entityServices,
     );
   });
 
