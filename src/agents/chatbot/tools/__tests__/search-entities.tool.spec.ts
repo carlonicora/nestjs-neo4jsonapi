@@ -1,3 +1,4 @@
+import { vi, describe, it, expect } from "vitest";
 import { SearchEntitiesTool } from "../search-entities.tool";
 
 describe("SearchEntitiesTool", () => {
@@ -32,10 +33,12 @@ describe("SearchEntitiesTool", () => {
     },
   };
 
-  const mockSearch: any = { runCascadingSearch: vi.fn() };
+  // Second argument is the search service; this tool no longer calls it,
+  // so a bare spy suffices.
+  const unusedSearch: any = {};
 
   it("rejects filter on undescribed field with explicit error", async () => {
-    const tool = new SearchEntitiesTool(factory, mockSearch);
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "secret", op: "eq", value: "x" }] },
       ctx,
@@ -45,7 +48,7 @@ describe("SearchEntitiesTool", () => {
   });
 
   it("rejects sort on undescribed field", async () => {
-    const tool = new SearchEntitiesTool(factory, mockSearch);
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
     const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -60,7 +63,7 @@ describe("SearchEntitiesTool", () => {
         fields: [{ name: "amount", type: "number", filterable: true, sortable: true }],
       }),
     };
-    const tool = new SearchEntitiesTool(factoryNum, mockSearch);
+    const tool = new SearchEntitiesTool(factoryNum, unusedSearch);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "amount", op: "like", value: "x" }] },
       ctx,
@@ -72,76 +75,37 @@ describe("SearchEntitiesTool", () => {
   it("clamps limit to [1, 50]", async () => {
     const svc = { findRecords: vi.fn(async () => []) };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory, mockSearch);
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
     await tool.invoke({ type: "accounts", limit: 5000 }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
     expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
   });
 
-  it("when text is provided, delegates to ChatbotSearchService and returns matchMode + per-item score", async () => {
-    const search: any = {
-      runCascadingSearch: vi.fn().mockResolvedValue({
-        matchMode: "fuzzy",
-        items: [
-          { id: "a1", score: 8.3 },
-          { id: "a2", score: 7.1 },
-        ],
-      }),
-    };
-
-    // findRecords mock returns hydrated records for the returned ids
-    const svc = {
-      findRecords: vi.fn().mockImplementation(async ({ filters }: any) => {
-        const ids = filters?.find((f: any) => f.field === "id")?.value ?? [];
-        return ids.map((id: string) => ({ id, name: `name-${id}`, status: "active" }));
-      }),
-    };
-
-    const factoryWithSearch: any = {
-      ...factory,
-      resolveService: () => svc,
-    };
-
-    const tool = new SearchEntitiesTool(factoryWithSearch, search);
-    const out: any = await tool.invoke({ type: "accounts", text: "Faby" }, ctx, [
-      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
-    ]);
-
-    expect(search.runCascadingSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "Faby", companyId: "c", limit: expect.any(Number) }),
-    );
-    expect(out.matchMode).toBe("fuzzy");
-    expect(out.items.map((i: any) => i.id)).toEqual(["a1", "a2"]);
-    expect(out.items.map((i: any) => i.score)).toEqual([8.3, 7.1]);
-  });
-
-  it("when text is provided but cascade returns none, tool returns matchMode='none' with empty items", async () => {
-    const search: any = {
-      runCascadingSearch: vi.fn().mockResolvedValue({ matchMode: "none", items: [] }),
-    };
-    const factoryWithSearch: any = { ...factory, resolveService: () => ({ findRecords: vi.fn() }) };
-
-    const tool = new SearchEntitiesTool(factoryWithSearch, search);
-    const out: any = await tool.invoke({ type: "accounts", text: "xyz" }, ctx, [
-      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
-    ]);
-
-    expect(out).toEqual({ matchMode: "none", items: [] });
-  });
-
-  it("when text is NOT provided (filter-only), matchMode is 'none' and items have null scores", async () => {
-    const search: any = { runCascadingSearch: vi.fn() };
+  it("returns matchMode='none' and per-item score=null for filter-only queries", async () => {
     const svc = { findRecords: vi.fn().mockResolvedValue([{ id: "a1", name: "foo", status: "active" }]) };
-    const factoryWithSearch: any = { ...factory, resolveService: () => svc };
-
-    const tool = new SearchEntitiesTool(factoryWithSearch, search);
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
     const out: any = await tool.invoke({ type: "accounts" }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
 
-    expect(search.runCascadingSearch).not.toHaveBeenCalled();
     expect(out.matchMode).toBe("none");
     expect(out.items[0].score).toBeNull();
+  });
+
+  it("Zod schema rejects a `text` property at the build() surface", () => {
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
+    const built: any = tool.build(ctx, []);
+    const parsed = built.schema.safeParse({ type: "accounts", text: "Faby" });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("tool description does not mention name search or matchMode cascade", () => {
+    const tool = new SearchEntitiesTool(factory, unusedSearch);
+    const built: any = tool.build(ctx, []);
+    expect(built.description).not.toMatch(/name/i);
+    expect(built.description).not.toMatch(/matchMode/);
+    expect(built.description).toMatch(/resolve_entity/);
   });
 });

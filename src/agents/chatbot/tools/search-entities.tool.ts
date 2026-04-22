@@ -7,17 +7,14 @@ import { ChatbotSearchService } from "../services/chatbot.search.service";
 import { buildToolFieldsOutput } from "../services/field-formatting";
 import { coerceFilters, coerceSort } from "./traverse.tool";
 
-const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
-
-// Schemas accept `any` at the input boundary — see traverse.tool.ts for the
-// rationale (small models emit non-canonical shapes; we coerce in code).
-const inputSchema = z.object({
-  type: z.string().describe("Entity type name."),
-  text: z.string().optional().describe("Fuzzy match on the entity's configured text search fields."),
-  filters: z.any().optional(),
-  sort: z.any().optional(),
-  limit: z.number().int().optional(),
-});
+const inputSchema = z
+  .object({
+    type: z.string().describe("Entity type name."),
+    filters: z.any().optional(),
+    sort: z.any().optional(),
+    limit: z.number().int().optional(),
+  })
+  .strict();
 
 const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
   string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
@@ -31,13 +28,16 @@ const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
 export class SearchEntitiesTool {
   constructor(
     private readonly factory: ToolFactory,
-    private readonly search: ChatbotSearchService,
+    // Injected for DI compatibility with ChatbotModule; no longer used at runtime
+    // now that name resolution lives in resolve_entity.
+    private readonly _search: ChatbotSearchService,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
     return new DynamicStructuredTool({
       name: "search_entities",
-      description: "Finds records of a given type, optionally filtered, sorted, and fuzzy-searched.",
+      description:
+        "Find records of a known type by filter and sort. Use this when you already have the type (from resolve_entity or because the user referred to a kind of record without identifying a specific one). To look up a specific record by its label, call resolve_entity first.",
       schema: inputSchema,
       func: async (input) => JSON.stringify(await this.invoke(input, ctx, recorder)),
     });
@@ -97,54 +97,26 @@ export class SearchEntitiesTool {
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
 
-        // Filter-only path — no text cascade
-        if (!input.text) {
-          const records = await svc.findRecords({
-            filters,
-            orderByFields: sort,
-            limit,
-          });
-          return this.buildOutput(entity, records, "none", new Map<string, number>());
-        }
-
-        // Text path — cascading search
-        const cascade = await this.search.runCascadingSearch({
-          entity,
-          text: input.text,
-          companyId: ctx.companyId,
-          limit,
-        });
-
-        if (!cascade.items.length) {
-          return { matchMode: cascade.matchMode, items: [] };
-        }
-
-        const ids = cascade.items.map((i) => i.id);
         const records = await svc.findRecords({
-          filters: [...filters, { field: "id", op: "in", value: ids }],
-          orderByFields: input.sort,
+          filters,
+          orderByFields: sort,
           limit,
         });
 
-        const scoreById = new Map<string, number>();
-        for (const i of cascade.items) {
-          if (i.score != null) scoreById.set(i.id, i.score);
-        }
-
-        return this.buildOutput(entity, records, cascade.matchMode, scoreById);
+        return this.buildOutput(entity, records);
       },
       recorder,
     );
   }
 
-  private buildOutput(entity: any, records: any[], matchMode: string, scoreById: Map<string, number>) {
+  private buildOutput(entity: any, records: any[]) {
     const items = records.map((r) => ({
       id: r.id,
       type: entity.type,
       summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
       fields: buildToolFieldsOutput(entity.fields, r),
-      score: scoreById.has(r.id) ? scoreById.get(r.id)! : null,
+      score: null,
     }));
-    return { matchMode, items };
+    return { matchMode: "none", items };
   }
 }
