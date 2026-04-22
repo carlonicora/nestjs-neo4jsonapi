@@ -86,4 +86,34 @@ export class AssistantMessageRepository extends AbstractRepository<
       });
     }
   }
+
+  /**
+   * For the given message IDs, return every (messageId, targetType, targetId) triple
+   * for the outgoing :REFERENCES edges. Label is mapped to JSON:API type via modelRegistry.
+   */
+  async findReferencedTypeIdPairs(params: {
+    messageIds: string[];
+  }): Promise<{ messageId: string; type: string; id: string }[]> {
+    if (params.messageIds.length === 0) return [];
+    const result = await this.neo4j.read(
+      `
+        MATCH (m:AssistantMessage)-[:REFERENCES]->(e)
+        WHERE m.id IN $messageIds
+        RETURN m.id AS messageId, labels(e)[0] AS label, e.id AS id
+      `,
+      { messageIds: params.messageIds },
+    );
+    const pairs: { messageId: string; type: string; id: string }[] = [];
+    for (const rec of result.records) {
+      const label = rec.get("label") as string;
+      const model = modelRegistry.getByLabelName(label);
+      if (!model) continue; // unknown label — skip silently
+      pairs.push({
+        messageId: rec.get("messageId") as string,
+        type: model.type,
+        id: rec.get("id") as string,
+      });
+    }
+    return pairs;
+  }
 }

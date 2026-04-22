@@ -118,3 +118,85 @@ describe("AssistantMessageRepository.linkReferences", () => {
     expect(writes).toHaveLength(0);
   });
 });
+
+describe("AssistantMessageRepository.findReferencedTypeIdPairs", () => {
+  let repo: AssistantMessageRepository;
+  let neo4j: any;
+
+  beforeEach(() => {
+    neo4j = {
+      initQuery: vi.fn(() => ({ query: "", queryParams: {} })),
+      readOne: vi.fn(),
+      read: vi.fn(),
+      writeOne: vi.fn(),
+    };
+    const cls = { get: vi.fn(() => "u-1") } as unknown as ClsService;
+    repo = new AssistantMessageRepository(neo4j, {} as any, cls);
+
+    // Seed modelRegistry so getByLabelName resolves. register() is idempotent by nodeName,
+    // so running across tests is safe.
+    modelRegistry.register({
+      nodeName: "account",
+      labelName: "Account",
+      type: "accounts",
+      entity: {} as any,
+      mapper: (() => ({})) as any,
+    } as any);
+    modelRegistry.register({
+      nodeName: "order",
+      labelName: "Order",
+      type: "orders",
+      entity: {} as any,
+      mapper: (() => ({})) as any,
+    } as any);
+  });
+
+  it("returns {messageId, type, id} per REFERENCES edge (resolving label → JSON:API type)", async () => {
+    neo4j.read.mockResolvedValue({
+      records: [
+        {
+          get: (k: string) =>
+            k === "messageId" ? "msg-1" : k === "label" ? "Account" : k === "id" ? "acc-1" : undefined,
+        },
+        {
+          get: (k: string) =>
+            k === "messageId" ? "msg-1" : k === "label" ? "Order" : k === "id" ? "ord-1" : undefined,
+        },
+      ],
+    });
+    const result = await repo.findReferencedTypeIdPairs({ messageIds: ["msg-1"] });
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { messageId: "msg-1", type: "accounts", id: "acc-1" },
+        { messageId: "msg-1", type: "orders", id: "ord-1" },
+      ]),
+    );
+    expect(neo4j.read).toHaveBeenCalledWith(
+      expect.stringContaining("MATCH (m:AssistantMessage)-[:REFERENCES]->(e)"),
+      expect.objectContaining({ messageIds: ["msg-1"] }),
+    );
+  });
+
+  it("returns [] when no messageIds are given (no query issued)", async () => {
+    const result = await repo.findReferencedTypeIdPairs({ messageIds: [] });
+    expect(result).toEqual([]);
+    expect(neo4j.read).not.toHaveBeenCalled();
+  });
+
+  it("silently skips records whose label isn't in the registry", async () => {
+    neo4j.read.mockResolvedValue({
+      records: [
+        {
+          get: (k: string) =>
+            k === "messageId" ? "msg-1" : k === "label" ? "Account" : k === "id" ? "acc-1" : undefined,
+        },
+        {
+          get: (k: string) =>
+            k === "messageId" ? "msg-1" : k === "label" ? "Unknown" : k === "id" ? "u-1" : undefined,
+        },
+      ],
+    });
+    const result = await repo.findReferencedTypeIdPairs({ messageIds: ["msg-1"] });
+    expect(result).toEqual([{ messageId: "msg-1", type: "accounts", id: "acc-1" }]);
+  });
+});
