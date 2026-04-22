@@ -148,8 +148,6 @@ describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse"
         matchMode: "exact",
         items: [{ type: "accounts", id: "acc-1", summary: "Acme Corp", score: 9.5 }],
       }),
-      // Retained temporarily; Task 8 removes runCascadingSearch from the service.
-      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);
@@ -273,7 +271,6 @@ describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby an
         matchMode: "exact",
         items: [{ type: "accounts", id: "fc-1", summary: "Faby and Carlo", score: 9.9 }],
       }),
-      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);
@@ -418,7 +415,6 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
 
     const searchMock: any = {
       resolveEntity: vi.fn().mockResolvedValue({ matchMode: "none", items: [] }),
-      runCascadingSearch: vi.fn(),
     };
 
     const factory = new ToolFactory(catalog, serviceRegistry);

@@ -16,16 +16,6 @@ const LUCENE_RESERVED_RE = /[+\-&|!(){}[\]^"~*?:\\/]/g;
 
 export type MatchMode = "exact" | "fuzzy" | "semantic" | "none";
 
-export interface SearchItem {
-  id: string;
-  score: number | null;
-}
-
-export interface SearchResult {
-  matchMode: MatchMode;
-  items: SearchItem[];
-}
-
 export interface RunSearchParams {
   entity: CatalogEntity;
   text: string;
@@ -68,17 +58,6 @@ export class ChatbotSearchService {
     private readonly indexNames: ChatbotIndexManager,
     private readonly catalog: GraphCatalogService,
   ) {}
-
-  async runCascadingSearch(params: RunSearchParams): Promise<SearchResult> {
-    const exact = await this.tierFulltext(params, "substring");
-    if (exact.items.length) return this.toPublic(exact);
-
-    const fuzzy = await this.tierFulltext(params, "fuzzy");
-    if (fuzzy.items.length) return this.toPublic(fuzzy);
-
-    const semantic = await this.tierSemantic(params);
-    return this.toPublic(semantic);
-  }
 
   async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
     const entities = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModules.includes(e.module));
@@ -152,13 +131,6 @@ export class ChatbotSearchService {
     const name = (properties as any).name;
     if (typeof name === "string" && name.length) return name;
     return id;
-  }
-
-  private toPublic(inner: { matchMode: MatchMode; items: InternalTierItem[] }): SearchResult {
-    return {
-      matchMode: inner.matchMode,
-      items: inner.items.map((i) => ({ id: i.id, score: i.score })),
-    };
   }
 
   private async tierFulltext(

@@ -42,7 +42,7 @@ export { SummariserService } from "./summariser/services/summariser.service";
 export { ChatbotModule } from "./chatbot/chatbot.module";
 export { ChatbotService } from "./chatbot/services/chatbot.service";
 export { ChatbotSearchService } from "./chatbot/services/chatbot.search.service";
-export type { MatchMode, SearchItem, SearchResult, RunSearchParams } from "./chatbot/services/chatbot.search.service";
+export type { MatchMode, RunSearchParams } from "./chatbot/services/chatbot.search.service";
 export {
   CHATBOT_EXACT_MAX_RESULTS,
   CHATBOT_FUZZY_MAX_RESULTS,
