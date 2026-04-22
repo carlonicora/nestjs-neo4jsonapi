@@ -173,11 +173,7 @@ describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse"
     expect(out.answer).toContain("Acme Corp");
     expect(out.answer).toContain("ord-1");
     expect(out.references).toEqual([{ type: "orders", id: "ord-1", reason: "latest order" }]);
-    expect(scriptedToolCalls.map((c) => c.name)).toEqual([
-      "resolve_entity",
-      "describe_entity",
-      "traverse",
-    ]);
+    expect(scriptedToolCalls.map((c) => c.name)).toEqual(["resolve_entity", "describe_entity", "traverse"]);
   });
 
   it("refuses cleanly when user has no modules", async () => {
@@ -311,9 +307,7 @@ describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby an
     }
 
     // References anchor on the Account, not on Persons.
-    expect(out.references).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "accounts", id: "fc-1" })]),
-    );
+    expect(out.references).toEqual(expect.arrayContaining([expect.objectContaining({ type: "accounts", id: "fc-1" })]));
     expect(out.needsClarification).toBe(false);
   });
 });
