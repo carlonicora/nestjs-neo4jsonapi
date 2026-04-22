@@ -133,7 +133,6 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           suggestedQuestions: turn.suggestedQuestions,
           inputTokens: turn.tokens.input,
           outputTokens: turn.tokens.output,
-          references: JSON.stringify(turn.references ?? []),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: assistantId } },
@@ -221,7 +220,6 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           suggestedQuestions: turn.suggestedQuestions,
           inputTokens: turn.tokens.input,
           outputTokens: turn.tokens.output,
-          references: JSON.stringify(turn.references ?? []),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
