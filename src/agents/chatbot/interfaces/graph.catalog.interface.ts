@@ -1,3 +1,5 @@
+import { FieldKind } from "../../../common/interfaces/entity.schema.interface";
+
 export interface CatalogField {
   name: string;
   /** Cypher scalar / array type string from the Descriptor. */
@@ -7,6 +9,12 @@ export interface CatalogField {
   filterable: boolean;
   /** Whether sort may reference this field. */
   sortable: boolean;
+  /**
+   * Semantic kind propagated from the descriptor. When present, the catalogue
+   * renderer emits an inline marker and the tool layer emits a companion
+   * formatted value alongside the raw scalar.
+   */
+  kind?: FieldKind;
 }
 
 export interface CatalogRelationship {

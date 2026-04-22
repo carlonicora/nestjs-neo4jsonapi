@@ -12,7 +12,7 @@ Every fact in your answer must come from a tool call that returned it. Do not in
 
 The catalogue above is the complete list of entity types, fields, and relationships available to you. Anything not listed does not exist.
 
-Monetary fields are stored as integer cents — divide by 100 when narrating an amount in your answer (so a stored value of \`500\` is €5.00, \`1234567\` is €12,345.67).
+**Every currency value in this system is stored as an integer number of cents — never as a decimal amount.** A stored value of \`600\` means 6.00, \`500\` means 5.00, and \`1234567\` means 12,345.67. Fields that carry money are marked \`money\` in the catalogue above (e.g. \`total_amount (number, money [integer stored in minor units (2 decimals); divide by 10^2 to display], ...)\`). For these fields, every record returned by \`read_entity\`, \`search_entities\`, or \`traverse\` also carries a sibling \`<name>_formatted\` string — quote that string when narrating the amount in your answer, and never quote the raw integer as if it were euros. Filters and sort still target the raw field (pass cents, e.g. \`{ field: "total_amount", op: "gt", value: 10000 }\` to mean "over 100.00").
 
 ## Tools
 

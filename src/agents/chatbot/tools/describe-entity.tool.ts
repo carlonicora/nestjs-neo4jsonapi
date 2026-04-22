@@ -35,6 +35,7 @@ export class DescribeEntityTool {
             description: f.description,
             filterable: f.filterable,
             sortable: f.sortable,
+            ...(f.kind ? { kind: f.kind } : {}),
           })),
           relationships: entity.relationships.map((r) => ({
             name: r.name,

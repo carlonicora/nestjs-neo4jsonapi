@@ -23,6 +23,14 @@ export type CypherType = CypherBaseType | CypherArrayType;
 export type FieldTransformFn = (data: any, services: Record<string, any>) => Promise<any> | any;
 
 /**
+ * Semantic kind of a scalar field, used by the chatbot layer to render unit
+ * markers in the graph catalogue and to format values for LLM narration.
+ * The discriminator shape leaves room for non-money kinds (percent, duration,
+ * etc.) without widening a plain string literal later.
+ */
+export type FieldKind = { type: "money"; minorUnits?: number };
+
+/**
  * Field definition for entity schema
  * Defines a single property with its type and constraints
  */
@@ -41,6 +49,13 @@ export interface FieldDef {
   excludeFromJsonApi?: boolean;
   /** Human-readable description. Required for the field to be visible to the chatbot. */
   description?: string;
+  /**
+   * Semantic kind for chatbot rendering. When set to `{ type: "money" }`,
+   * the field is stored as an integer in the currency's minor unit (cents by
+   * default). The catalogue annotates it and tool returns emit a companion
+   * `<name>_formatted` string so the LLM can narrate the human value safely.
+   */
+  kind?: FieldKind;
 }
 
 /**

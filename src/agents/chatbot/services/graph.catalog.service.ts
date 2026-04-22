@@ -1,8 +1,19 @@
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { CatalogEntity, CatalogField, CatalogRelationship } from "../interfaces/graph.catalog.interface";
+import { FieldKind } from "../../../common/interfaces/entity.schema.interface";
 
 const FILTERABLE_TYPES = new Set(["string", "number", "boolean", "date", "datetime"]);
 const SORTABLE_TYPES = new Set(["string", "number", "date", "datetime"]);
+
+function renderFieldKindMarker(kind: FieldKind | undefined): string {
+  if (!kind) return "";
+  if (kind.type === "money") {
+    const minor = kind.minorUnits ?? 2;
+    const factor = minor === 0 ? "1" : `10^${minor}`;
+    return `, money [integer stored in minor units (${minor} decimals); divide by ${factor} to display]`;
+  }
+  return "";
+}
 
 /**
  * Provided by the library bootstrap layer. Must return the full list of registered
@@ -14,7 +25,7 @@ export interface DescriptorSource {
     model: { type: string; nodeName: string; labelName: string };
     description?: string;
     module: string;
-    fields: Record<string, { type: string; description?: string }>;
+    fields: Record<string, { type: string; description?: string; kind?: FieldKind }>;
     relationships: Record<
       string,
       {
@@ -58,6 +69,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           description: def.description!,
           filterable: FILTERABLE_TYPES.has(def.type),
           sortable: SORTABLE_TYPES.has(def.type),
+          ...(def.kind ? { kind: def.kind } : {}),
         }));
 
       const relationships: CatalogRelationship[] = [];
@@ -137,10 +149,10 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     const entityBlocks = list.map((e) => {
       const fieldLines = e.fields.length
         ? e.fields
-            .map(
-              (f) =>
-                `    - ${f.name} (${f.type}${f.sortable ? ", sortable" : ""}${f.filterable ? ", filterable" : ""})`,
-            )
+            .map((f) => {
+              const kindMarker = renderFieldKindMarker(f.kind);
+              return `    - ${f.name} (${f.type}${kindMarker}${f.sortable ? ", sortable" : ""}${f.filterable ? ", filterable" : ""})`;
+            })
             .join("\n")
         : "    (no described fields)";
       return `- **${e.type}** — ${e.description}\n  fields:\n${fieldLines}`;

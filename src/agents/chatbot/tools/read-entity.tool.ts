@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
+import { buildToolFieldsOutput } from "../services/field-formatting";
 
 const inputSchema = z.object({
   type: z.string(),
@@ -86,7 +87,7 @@ export class ReadEntityTool {
         return {
           id: record.id,
           type: entity.type,
-          fields: Object.fromEntries(entity.fields.map((f) => [f.name, record[f.name]])),
+          fields: buildToolFieldsOutput(entity.fields, record),
           ...(input.include?.length ? { related } : {}),
         };
       },

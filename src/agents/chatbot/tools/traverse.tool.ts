@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
+import { buildToolFieldsOutput } from "../services/field-formatting";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -204,7 +205,7 @@ export class TraverseTool {
             id: r.id,
             type: target.type,
             summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
-            fields: Object.fromEntries(target.fields.map((f) => [f.name, r[f.name]])),
+            fields: buildToolFieldsOutput(target.fields, r),
           })),
         };
       },

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { CatalogField } from "../interfaces/graph.catalog.interface";
 import { ChatbotSearchService } from "../services/chatbot.search.service";
+import { buildToolFieldsOutput } from "../services/field-formatting";
 import { coerceFilters, coerceSort } from "./traverse.tool";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
@@ -141,7 +142,7 @@ export class SearchEntitiesTool {
       id: r.id,
       type: entity.type,
       summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
-      fields: Object.fromEntries(entity.fields.map((f: any) => [f.name, r[f.name]])),
+      fields: buildToolFieldsOutput(entity.fields, r),
       score: scoreById.has(r.id) ? scoreById.get(r.id)! : null,
     }));
     return { matchMode, items };
