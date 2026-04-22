@@ -391,29 +391,21 @@ describe("AssistantService", () => {
     it("hydration: older-turn references are rendered as Type/id - name stubs (background)", async () => {
       const priorMessages = [
         makePersistedMessage({ id: "a0", role: "assistant", content: "old", position: 1 }),
-        makePersistedMessage({ id: "u1", role: "user", content: "latest q", position: 2 }),
-        // No subsequent assistant message yet — so there is no "previous assistant"
-        // for this turn. All refs go to background.
+        makePersistedMessage({ id: "u1", role: "user", content: "follow-up q", position: 2 }),
+        makePersistedMessage({ id: "a1", role: "assistant", content: "newer", position: 3 }),
       ];
       const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
-        { messageId: "a0", type: "accounts", id: "acc-1" },
+        { messageId: "a0", type: "accounts", id: "acc-1" }, // older turn → background
+        { messageId: "a1", type: "orders", id: "ord-9" }, // most recent assistant → focus
       ]);
       (entityServices.get as any).mockReturnValue({
-        findRecordById: vi.fn(async () => ({ id: "acc-1", name: "Older Account" })),
+        findRecordById: vi.fn(async ({ id }: any) => {
+          if (id === "acc-1") return { id, name: "Older Account" };
+          if (id === "ord-9") return { id, name: "Recent Order" };
+          return null;
+        }),
       });
-      // Make the "previous assistant" detection find a0 — actually a0 IS the most
-      // recent assistant in this fixture, so acc-1 will land in FOCUS under the
-      // current implementation. Instead, construct a fixture where the most
-      // recent assistant has *different* refs.
-      priorMessages.push(
-        makePersistedMessage({ id: "a1", role: "assistant", content: "newer", position: 3 }),
-      );
-      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
-        { messageId: "a0", type: "accounts", id: "acc-1" }, // background
-        { messageId: "a1", type: "orders", id: "ord-9" }, // focus
-      ]);
-
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -424,8 +416,8 @@ describe("AssistantService", () => {
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
       expect(sys.content).toContain("Full records from the previous answer");
       expect(sys.content).toContain('"type": "orders"');
+      expect(sys.content).toContain('"id": "ord-9"');
       expect(sys.content).toContain("Other entities mentioned earlier");
-      // background stub format: "- accounts/acc-1 — \"<label>\""
       expect(sys.content).toMatch(/- accounts\/acc-1 — "Older Account"/);
     });
 
@@ -457,9 +449,7 @@ describe("AssistantService", () => {
     });
 
     it("hydration: entity whose findRecordById throws is dropped silently", async () => {
-      const priorMessages = [
-        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
-      ];
+      const priorMessages = [makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 })];
       const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
         { messageId: "a0", type: "accounts", id: "acc-deleted" },
@@ -484,9 +474,7 @@ describe("AssistantService", () => {
     });
 
     it("hydration: entity whose type is not in userModules is dropped", async () => {
-      const priorMessages = [
-        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
-      ];
+      const priorMessages = [makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 })];
       const { service, chatbot, assistantMessageRepo, graphCatalog } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
         { messageId: "a0", type: "accounts", id: "acc-1" },
@@ -503,7 +491,7 @@ describe("AssistantService", () => {
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
-      expect(sys.content).toContain("acc-1");
+      expect(sys.content).toContain('"id": "acc-1"');
       expect(sys.content).not.toContain("fb-1");
     });
 
@@ -521,6 +509,7 @@ describe("AssistantService", () => {
       (entityServices.get as any).mockReturnValue({
         findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `n-${id}` })),
       });
+      const warnSpy = vi.spyOn((service as any).assistantLogger, "warn").mockImplementation(() => {});
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -531,12 +520,11 @@ describe("AssistantService", () => {
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
       const matches = sys.content.match(/"id": "acc-\d+"/g) ?? [];
       expect(matches.length).toBe(25);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/focus set capped at 25/));
     });
 
     it("hydration: if findReferencedTypeIdPairs throws, chat turn proceeds with no system message", async () => {
-      const priorMessages = [
-        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
-      ];
+      const priorMessages = [makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 })];
       const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockRejectedValue(new Error("neo4j down"));
       await service.appendMessage({
