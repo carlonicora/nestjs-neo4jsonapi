@@ -25,6 +25,8 @@ export interface ChatbotRunParams {
   userId: string;
   userModules: string[];
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
+  /** Optional — populated on subsequent turns; undefined on the first send of a new thread. */
+  assistantId?: string;
 }
 
 @Injectable()
