@@ -371,7 +371,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       if (focusRecords.length > 0) {
         sections.push("### Full records from the previous answer");
         sections.push(
-          'These are the entities your previous answer was about. When the user\'s new question refers to any of them — by name or implicitly ("these", "them", "other orders", "their invoices") — use their id directly. Do not call search_entities for a name that matches one of these.',
+          'These are the entities your previous answer was about. When the user\'s new question refers to any of them — by name or implicitly ("these", "them", "other orders", "their invoices") — use their id directly. Do not call resolve_entity for a name that matches one of these.',
         );
         sections.push("");
         sections.push(JSON.stringify(focusRecords, null, 2));

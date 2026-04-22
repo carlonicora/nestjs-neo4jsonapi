@@ -397,6 +397,31 @@ describe("AssistantService", () => {
       expect(sys.content).not.toContain("Other entities mentioned earlier");
     });
 
+    it("hydration: focus directive points at resolve_entity, not search_entities", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "u0", role: "user", content: "first", position: 0 }),
+        makePersistedMessage({ id: "a0", role: "assistant", content: "answer", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+      ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: "Faby and Carlo" })),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "are there other orders?",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys).toBeDefined();
+      expect(sys.content).toMatch(/Do not call resolve_entity for a name/);
+      expect(sys.content).not.toMatch(/Do not call search_entities for a name/);
+    });
+
     it("hydration: older-turn references are rendered as Type/id - name stubs (background)", async () => {
       const priorMessages = [
         makePersistedMessage({ id: "a0", role: "assistant", content: "old", position: 1 }),
