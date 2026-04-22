@@ -388,6 +388,199 @@ describe("AssistantService", () => {
       expect(sys.content).not.toContain("Other entities mentioned earlier");
     });
 
+    it("hydration: older-turn references are rendered as Type/id - name stubs (background)", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "old", position: 1 }),
+        makePersistedMessage({ id: "u1", role: "user", content: "latest q", position: 2 }),
+        // No subsequent assistant message yet — so there is no "previous assistant"
+        // for this turn. All refs go to background.
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+      ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async () => ({ id: "acc-1", name: "Older Account" })),
+      });
+      // Make the "previous assistant" detection find a0 — actually a0 IS the most
+      // recent assistant in this fixture, so acc-1 will land in FOCUS under the
+      // current implementation. Instead, construct a fixture where the most
+      // recent assistant has *different* refs.
+      priorMessages.push(
+        makePersistedMessage({ id: "a1", role: "assistant", content: "newer", position: 3 }),
+      );
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" }, // background
+        { messageId: "a1", type: "orders", id: "ord-9" }, // focus
+      ]);
+
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "next",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys.content).toContain("Full records from the previous answer");
+      expect(sys.content).toContain('"type": "orders"');
+      expect(sys.content).toContain("Other entities mentioned earlier");
+      // background stub format: "- accounts/acc-1 — \"<label>\""
+      expect(sys.content).toMatch(/- accounts\/acc-1 — "Older Account"/);
+    });
+
+    it("hydration: entity in both previous and older turns is rendered as focus only", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "a", position: 1 }),
+        makePersistedMessage({ id: "a1", role: "assistant", content: "b", position: 3 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+        { messageId: "a1", type: "accounts", id: "acc-1" }, // same entity, most recent
+      ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: "Dup" })),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      // focus section contains the record once
+      expect((sys.content.match(/"id": "acc-1"/g) ?? []).length).toBe(1);
+      // no background section — the only reference is already focus
+      expect(sys.content).not.toContain("Other entities mentioned earlier");
+    });
+
+    it("hydration: entity whose findRecordById throws is dropped silently", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-deleted" },
+        { messageId: "a0", type: "accounts", id: "acc-ok" },
+      ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => {
+          if (id === "acc-deleted") throw new Error("not found");
+          return { id, name: "Present" };
+        }),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys.content).toContain('"id": "acc-ok"');
+      expect(sys.content).not.toContain("acc-deleted");
+    });
+
+    it("hydration: entity whose type is not in userModules is dropped", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, graphCatalog } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+        { messageId: "a0", type: "forbidden", id: "fb-1" },
+      ]);
+      (graphCatalog.getEntityDetail as any).mockImplementation((type: string) =>
+        type === "forbidden" ? null : { type, module: "crm", textSearchFields: ["name"] },
+      );
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys.content).toContain("acc-1");
+      expect(sys.content).not.toContain("fb-1");
+    });
+
+    it("hydration: focus set is capped at 25 records with a warning", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      const pairs = Array.from({ length: 30 }, (_, i) => ({
+        messageId: "a0",
+        type: "accounts",
+        id: `acc-${i}`,
+      }));
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue(pairs);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `n-${id}` })),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      const matches = sys.content.match(/"id": "acc-\d+"/g) ?? [];
+      expect(matches.length).toBe(25);
+    });
+
+    it("hydration: if findReferencedTypeIdPairs throws, chat turn proceeds with no system message", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockRejectedValue(new Error("neo4j down"));
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const passed = chatbot.run.mock.calls[0][0].messages;
+      expect(passed.every((m: any) => m.role !== "system")).toBe(true);
+    });
+
+    it("hydration: background stubs without textSearchFields render without a label", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "a", position: 1 }),
+        makePersistedMessage({ id: "a1", role: "assistant", content: "b", position: 3 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, graphCatalog, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "nolabel", id: "nl-1" }, // background
+        { messageId: "a1", type: "accounts", id: "acc-1" }, // focus
+      ]);
+      (graphCatalog.getEntityDetail as any).mockImplementation((type: string) => ({
+        type,
+        module: "crm",
+        textSearchFields: type === "nolabel" ? undefined : ["name"],
+      }));
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: "some name" })),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "q",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      // no quoted label for nolabel
+      expect(sys.content).toContain("- nolabel/nl-1");
+      expect(sys.content).not.toMatch(/- nolabel\/nl-1 — "/);
+    });
+
     it("buildHydrationMessage lists (type/id) pairs from prior message references", async () => {
       const priorMessages = [
         makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
