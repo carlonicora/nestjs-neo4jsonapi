@@ -146,9 +146,12 @@ describe("EntityFactory.createGraphList — polymorphic mapper selection", () =>
       ],
       discriminator: vi.fn((d: any) => {
         const labels: string[] = d.labels ?? [];
-        if (labels.includes("Order")) return { type: "orders", endpoint: "orders", nodeName: "order", labelName: "Order" };
-        if (labels.includes("Account")) return { type: "accounts", endpoint: "accounts", nodeName: "account", labelName: "Account" };
-        if (labels.includes("Person")) return { type: "persons", endpoint: "persons", nodeName: "person", labelName: "Person" };
+        if (labels.includes("Order"))
+          return { type: "orders", endpoint: "orders", nodeName: "order", labelName: "Order" };
+        if (labels.includes("Account"))
+          return { type: "accounts", endpoint: "accounts", nodeName: "account", labelName: "Account" };
+        if (labels.includes("Person"))
+          return { type: "persons", endpoint: "persons", nodeName: "person", labelName: "Person" };
         throw new Error("unknown label");
       }),
       // No discriminatorRelationship — multi-label mode

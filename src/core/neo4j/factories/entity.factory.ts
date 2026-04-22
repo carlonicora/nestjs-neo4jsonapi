@@ -153,12 +153,7 @@ export class EntityFactory {
     // using the actual node labels from the row. Falls back to the placeholder
     // model if the discriminator throws or the resolved model isn't registered.
     let effectiveModel: DataModelInterface<any> = params.model;
-    if (
-      isNode &&
-      params.polymorphic &&
-      !params.polymorphic.discriminatorRelationship &&
-      modelRegistry
-    ) {
+    if (isNode && params.polymorphic && !params.polymorphic.discriminatorRelationship && modelRegistry) {
       try {
         const resolved = params.polymorphic.discriminator({
           properties: data.properties ?? {},

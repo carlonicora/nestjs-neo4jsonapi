@@ -125,7 +125,12 @@ describe("AbstractRepository.buildReturnStatement — relationship shapes", () =
           polymorphic: {
             candidates: [
               { nodeName: "taxonomy", labelName: "Taxonomy", jsonapiType: "taxonomies", type: "taxonomies" } as any,
-              { nodeName: "leafTaxonomy", labelName: "Taxonomy", jsonapiType: "leaf-taxonomies", type: "leaf-taxonomies" } as any,
+              {
+                nodeName: "leafTaxonomy",
+                labelName: "Taxonomy",
+                jsonapiType: "leaf-taxonomies",
+                type: "leaf-taxonomies",
+              } as any,
             ],
             discriminator: (d) => (d.hasParent ? (d.properties as any) : (d.properties as any)),
             discriminatorRelationship: "SPECIALISES",
