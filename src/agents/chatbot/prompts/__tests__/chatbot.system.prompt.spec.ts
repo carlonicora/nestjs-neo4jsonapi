@@ -122,6 +122,7 @@ describe("renderChatbotSystemPrompt", () => {
   it("search_entities description points the LLM at resolve_entity for name lookup", () => {
     const out = renderChatbotSystemPrompt("any");
     const searchBlock = out.substring(out.indexOf("search_entities"));
+    expect(searchBlock).toMatch(/does not search by name/i);
     expect(searchBlock).toMatch(/resolve_entity/);
   });
 
