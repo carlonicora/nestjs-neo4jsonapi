@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { z } from "zod";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "./graph.catalog.service";
 import { ToolFactory, ToolCallRecord } from "../tools/tool.factory";
@@ -11,6 +12,7 @@ import { TraverseTool } from "../tools/traverse.tool";
 import { renderChatbotSystemPrompt } from "../prompts/chatbot.system.prompt";
 import { ChatbotResponseInterface } from "../interfaces/chatbot.response.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import { humanizeTool } from "./humanize-tool";
 
 const MAX_TOOL_ITERATIONS = 15;
 
@@ -76,13 +78,42 @@ export class ChatbotService {
 
     const systemPrompt = renderChatbotSystemPrompt(graphMap);
 
-    const tools = [
+    let tools = [
       this.describeTool.build(ctx, recorder),
       this.searchTool.build(ctx, recorder),
       this.readTool.build(ctx, recorder),
       this.traverseTool.build(ctx, recorder),
     ];
     this.logger.log(`run: bound tools=${JSON.stringify(tools.map((t: any) => t.name))}`);
+
+    if (this.ws) {
+      const ws = this.ws;
+      const userId = params.userId;
+      const assistantId = params.assistantId;
+      tools = tools.map(
+        (t: any) =>
+          new DynamicStructuredTool({
+            name: t.name,
+            description: t.description,
+            schema: t.schema,
+            func: async (input: Record<string, unknown>) => {
+              try {
+                await ws.sendMessageToUser(userId, "assistant:status", {
+                  assistantId,
+                  status: humanizeTool(t.name, input),
+                  at: new Date().toISOString(),
+                });
+              } catch (err) {
+                // Non-fatal — status updates are progress hints, not functional.
+                this.logger.warn(
+                  `assistant:status emit failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+              return t.func(input);
+            },
+          }),
+      );
+    }
 
     const history = params.messages.map((m) => ({
       role:
