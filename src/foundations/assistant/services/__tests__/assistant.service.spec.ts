@@ -250,10 +250,13 @@ describe("AssistantService", () => {
           position: 1,
         }),
       ];
-      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
         { messageId: "a0", type: "accounts", id: "acc-1" },
       ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: "Focus Account" })),
+      });
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -264,7 +267,9 @@ describe("AssistantService", () => {
       const passed = chatbot.run.mock.calls[0][0].messages;
       const sys = passed.find((m: any) => m.role === "system");
       expect(sys).toBeDefined();
-      expect(sys.content).toContain("accounts/acc-1");
+      // focus section renders a full JSON record tagged with type and id
+      expect(sys.content).toContain('"type": "accounts"');
+      expect(sys.content).toContain('"id": "acc-1"');
     });
 
     it("deduplicates references across multiple prior turns", async () => {
@@ -282,12 +287,15 @@ describe("AssistantService", () => {
           position: 1,
         }),
       ];
-      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
         { messageId: "a0", type: "accounts", id: "acc-1" },
         { messageId: "a1", type: "accounts", id: "acc-1" },
         { messageId: "a1", type: "orders", id: "ord-9" },
       ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `n-${id}` })),
+      });
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -296,8 +304,9 @@ describe("AssistantService", () => {
         newMessage: "more",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
-      expect((sys.content.match(/accounts\/acc-1/g) ?? []).length).toBe(1);
-      expect((sys.content.match(/orders\/ord-9/g) ?? []).length).toBe(1);
+      // each entity appears exactly once in the focus JSON block
+      expect((sys.content.match(/"id": "acc-1"/g) ?? []).length).toBe(1);
+      expect((sys.content.match(/"id": "ord-9"/g) ?? []).length).toBe(1);
     });
 
     it("trims history to at most MAX_MESSAGES_TO_LLM prior messages before the new user message", async () => {
@@ -496,9 +505,7 @@ describe("AssistantService", () => {
     });
 
     it("hydration: focus set is capped at 25 records with a warning", async () => {
-      const priorMessages = [
-        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
-      ];
+      const priorMessages = [makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 })];
       const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       const pairs = Array.from({ length: 30 }, (_, i) => ({
         messageId: "a0",
@@ -569,16 +576,19 @@ describe("AssistantService", () => {
       expect(sys.content).not.toMatch(/- nolabel\/nl-1 — "/);
     });
 
-    it("buildHydrationMessage lists (type/id) pairs from prior message references", async () => {
+    it("buildHydrationMessage splits references into focus (previous answer) and background (older)", async () => {
       const priorMessages = [
         makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
         makePersistedMessage({ id: "a1", role: "assistant", content: "y", position: 3 }),
       ];
-      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
       (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
         { messageId: "a0", type: "accounts", id: "acc-1" },
         { messageId: "a1", type: "orders", id: "ord-1" },
       ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: `n-${id}` })),
+      });
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -587,9 +597,11 @@ describe("AssistantService", () => {
         newMessage: "follow-up",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
-      expect(sys).toBeDefined();
-      expect(sys.content).toContain("- accounts/acc-1");
-      expect(sys.content).toContain("- orders/ord-1");
+      // ord-1 is focus → appears as a full JSON record
+      expect(sys.content).toContain('"type": "orders"');
+      expect(sys.content).toContain('"id": "ord-1"');
+      // acc-1 is background → appears as a bullet stub with label
+      expect(sys.content).toMatch(/- accounts\/acc-1 — "n-acc-1"/);
     });
   });
 });

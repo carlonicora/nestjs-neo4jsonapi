@@ -189,7 +189,8 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const secondCall = chatbotRunParams[1];
     const sys = secondCall.messages.find((m) => m.role === "system");
     expect(sys).toBeDefined();
-    expect(sys!.content).toContain("accounts/acc-1");
+    expect(sys!.content).toContain('"type": "accounts"');
+    expect(sys!.content).toContain('"id": "acc-1"');
 
     // The thread now holds 4 child messages (u0, a0, u1, a1).
     const storedMessages = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === firstAssistantId);
