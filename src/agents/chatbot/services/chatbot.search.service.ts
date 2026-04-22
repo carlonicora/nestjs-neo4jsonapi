@@ -31,6 +31,13 @@ export interface RunSearchParams {
   limit: number;
 }
 
+/** Internal shape returned by tier primitives; has everything resolveEntity needs. */
+interface InternalTierItem {
+  id: string;
+  score: number;
+  properties: Record<string, unknown>;
+}
+
 @Injectable()
 export class ChatbotSearchService {
   constructor(
@@ -41,15 +48,26 @@ export class ChatbotSearchService {
 
   async runCascadingSearch(params: RunSearchParams): Promise<SearchResult> {
     const exact = await this.tierFulltext(params, "substring");
-    if (exact.items.length) return exact;
+    if (exact.items.length) return this.toPublic(exact);
 
     const fuzzy = await this.tierFulltext(params, "fuzzy");
-    if (fuzzy.items.length) return fuzzy;
+    if (fuzzy.items.length) return this.toPublic(fuzzy);
 
-    return this.tierSemantic(params);
+    const semantic = await this.tierSemantic(params);
+    return this.toPublic(semantic);
   }
 
-  private async tierFulltext(params: RunSearchParams, mode: "substring" | "fuzzy"): Promise<SearchResult> {
+  private toPublic(inner: { matchMode: MatchMode; items: InternalTierItem[] }): SearchResult {
+    return {
+      matchMode: inner.matchMode,
+      items: inner.items.map((i) => ({ id: i.id, score: i.score })),
+    };
+  }
+
+  private async tierFulltext(
+    params: RunSearchParams,
+    mode: "substring" | "fuzzy",
+  ): Promise<{ matchMode: MatchMode; items: InternalTierItem[] }> {
     const indexName = this.indexNames.fulltextIndexName(params.entity.labelName);
     const escaped = params.text.replace(LUCENE_RESERVED_RE, "\\$&").toLowerCase();
     const term = mode === "substring" ? `*${escaped}*` : `${escaped}~`;
@@ -60,21 +78,24 @@ export class ChatbotSearchService {
       CALL db.index.fulltext.queryNodes($indexName, $term)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
-      RETURN node.id AS id, score
+      RETURN node.id AS id, properties(node) AS properties, score
       ORDER BY score DESC
       LIMIT toInteger($limit)
       `,
       { indexName, term, companyId: params.companyId, limit: Math.min(params.limit, max) },
     );
 
-    const items: SearchItem[] = (result as any).records.map((r: any) => ({
+    const items: InternalTierItem[] = (result as any).records.map((r: any) => ({
       id: r.get("id"),
       score: r.get("score"),
+      properties: r.get("properties") ?? {},
     }));
     return { matchMode: mode === "substring" ? "exact" : "fuzzy", items };
   }
 
-  private async tierSemantic(params: RunSearchParams): Promise<SearchResult> {
+  private async tierSemantic(
+    params: RunSearchParams,
+  ): Promise<{ matchMode: MatchMode; items: InternalTierItem[] }> {
     const indexName = this.indexNames.vectorIndexName(params.entity.labelName);
     const queryEmbedding = await this.embedder.vectoriseText({ text: params.text });
 
@@ -84,7 +105,7 @@ export class ChatbotSearchService {
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
         AND score >= $minScore
-      RETURN node.id AS id, score
+      RETURN node.id AS id, properties(node) AS properties, score
       ORDER BY score DESC
       LIMIT toInteger($limit)
       `,
@@ -98,9 +119,10 @@ export class ChatbotSearchService {
       },
     );
 
-    const items: SearchItem[] = (result as any).records.map((r: any) => ({
+    const items: InternalTierItem[] = (result as any).records.map((r: any) => ({
       id: r.get("id"),
       score: r.get("score"),
+      properties: r.get("properties") ?? {},
     }));
 
     return { matchMode: items.length ? "semantic" : "none", items };

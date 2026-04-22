@@ -15,7 +15,7 @@ describe("ChatbotSearchService — tier 1 substring", () => {
   it("returns matchMode='exact' with items when fulltext substring matches", async () => {
     const neo4j = {
       read: vi.fn().mockResolvedValue({
-        records: [{ get: (k: string) => (({ id: "a1", score: 12.3 }) as any)[k] }],
+        records: [{ get: (k: string) => (({ id: "a1", properties: { name: "Acme" }, score: 12.3 }) as any)[k] }],
       }),
     };
     const embedder = { vectoriseText: vi.fn() };
@@ -57,7 +57,9 @@ describe("ChatbotSearchService — tier 2 fuzzy", () => {
       read: vi
         .fn()
         .mockResolvedValueOnce({ records: [] }) // tier 1 empty
-        .mockResolvedValueOnce({ records: [{ get: (k: string) => (({ id: "a2", score: 4.4 }) as any)[k] }] }), // tier 2 hits
+        .mockResolvedValueOnce({
+          records: [{ get: (k: string) => (({ id: "a2", properties: { name: "Acme" }, score: 4.4 }) as any)[k] }],
+        }), // tier 2 hits
     };
     const embedder = { vectoriseText: vi.fn() };
 
@@ -83,8 +85,8 @@ describe("ChatbotSearchService — tier 3 semantic", () => {
         .mockResolvedValueOnce({ records: [] })
         .mockResolvedValueOnce({
           records: [
-            { get: (k: string) => (({ id: "a3", score: 0.82 }) as any)[k] },
-            { get: (k: string) => (({ id: "a4", score: 0.71 }) as any)[k] },
+            { get: (k: string) => (({ id: "a3", properties: { name: "Müller GmbH" }, score: 0.82 }) as any)[k] },
+            { get: (k: string) => (({ id: "a4", properties: { name: "Schmidt AG" }, score: 0.71 }) as any)[k] },
           ],
         }),
     };
@@ -126,5 +128,36 @@ describe("ChatbotSearchService — tier 3 semantic", () => {
 
     expect(out.matchMode).toBe("none");
     expect(out.items).toHaveLength(0);
+  });
+});
+
+describe("ChatbotSearchService — node-property projection for resolveEntity (Task 1)", () => {
+  it("tier 1 substring Cypher projects properties(node) alongside id and score", async () => {
+    const neo4j = {
+      read: vi.fn().mockResolvedValue({ records: [] }),
+    };
+    const embedder = { vectoriseText: vi.fn() };
+    const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any);
+    await svc.runCascadingSearch({ entity, text: "x", companyId: "co1", limit: 1 });
+
+    const cypher = neo4j.read.mock.calls[0][0] as string;
+    expect(cypher).toMatch(/properties\(node\)\s+AS\s+properties/);
+    expect(cypher).toMatch(/node\.id\s+AS\s+id/);
+  });
+
+  it("tier 3 semantic Cypher projects properties(node) alongside id and score", async () => {
+    const neo4j = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ records: [] }) // tier 1
+        .mockResolvedValueOnce({ records: [] }) // tier 2
+        .mockResolvedValueOnce({ records: [] }), // tier 3
+    };
+    const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
+    const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any);
+    await svc.runCascadingSearch({ entity, text: "x", companyId: "co1", limit: 1 });
+
+    const cypher = neo4j.read.mock.calls[2][0] as string;
+    expect(cypher).toMatch(/properties\(node\)\s+AS\s+properties/);
   });
 });
