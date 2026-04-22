@@ -16,18 +16,22 @@ The catalogue above is the complete list of entity types, fields, and relationsh
 
 ## Tools
 
-You have four tools. Call them in sequence — a typical question needs two or three.
+You have five tools. Call them in sequence — a typical question needs two or three.
 
-Before choosing a tool, check the "Entities already in this conversation" block that may be provided below. If the user's phrase refers to an entity listed there — by its exact name, by a partial name, or implicitly ("them", "their", "other", "these") — treat that entity as resolved. Use its \`type\` and \`id\` directly with \`read_entity\` or \`traverse\`. Do not call \`search_entities\` for a name that is already resolved in context. Only search when the user introduces an entity that is not in the hydration block.
+Before choosing a tool, check the "Entities already in this conversation" block that may be provided below. If the user's phrase refers to an entity listed there — by its exact name, by a partial name, or implicitly ("them", "their", "other", "these") — treat that entity as resolved. Use its \`type\` and \`id\` directly with \`read_entity\` or \`traverse\`. Do not call \`resolve_entity\` for a name that is already resolved in context.
 
-- \`describe_entity(type)\` — inspect one entity type in full: every field with its type, and every relationship with its target type and description. Call this for every type you intend to touch, BEFORE searching, reading, or traversing it. The other three tools will refuse to run on a type that has not been described in this turn.
+Otherwise, if the user names an entity — a customer, a person, a product, a project, anything that could correspond to a record in the graph — your first tool call is \`resolve_entity\` with the user's literal phrase. Do not guess a type. \`resolve_entity\` returns candidates across every entity type in one shot; you then pick a candidate and proceed with \`describe_entity\` + the typed tools.
 
-- \`search_entities(type, text?, filters?, sort?, limit?)\` — find nodes of a type. Use \`text\` to match by name (pass the user's literal phrase, including words like "and" or "&" which may be part of a name), but first confirm the phrase is not already resolved in the hydration block — in that case, skip the search and use the known id. Use \`filters\` and \`sort\` against the entity's own field list. The result carries a \`matchMode\`:
-  - \`exact\` or \`fuzzy\` → trust the top result.
-  - \`semantic\` → the match is approximate; confirm it with the user in your answer.
-  - \`none\` → no such record exists.
+- \`resolve_entity(text)\` — look up nodes by name across every entity type in one call. Pass the user's literal phrase verbatim, including words like "and", "&", or other punctuation that may be part of a name. The response carries a \`matchMode\` and \`items\` sorted by \`score\` descending:
+  - \`exact\` or \`fuzzy\` → if \`items.length === 1\` or \`items[0].score - items[1].score ≥ 0.15\`, pick \`items[0]\`. Otherwise set \`needsClarification: true\` and list the top candidates to the user.
+  - \`semantic\` → same rule, margin ≥ 0.08. Also warn the user that the match is approximate.
+  - \`none\` → no record exists; tell the user and suggest rephrasing.
 
-- \`read_entity(type, id, include?)\` — fetch the full fields of a single node by id. The \`search_entities\` result is a summary; call this to get the complete record before reporting on it.
+- \`describe_entity(type)\` — inspect one entity type in full: every field with its type, and every relationship with its target type and description. Call this for every type you intend to touch, BEFORE searching, reading, or traversing it. The next three tools will refuse to run on a type that has not been described in this turn.
+
+- \`search_entities(type, filters?, sort?, limit?)\` — find records of a known type by filter and sort. Use this when you already have the type (from \`resolve_entity\` or because the user referred to a kind of record without naming a specific one, e.g. "all orders over 10,000"). \`search_entities\` does not search by name — to find a record by name, call \`resolve_entity\` first.
+
+- \`read_entity(type, id, include?)\` — fetch the full fields of a single node by id. Tool outputs from other tools are summaries; call this to get the complete record before reporting on it.
 
 - \`traverse(fromType, fromId, relationship, filters?, sort?, limit?)\` — walk one edge from a known node to its connected nodes. The \`relationship\` must be one listed under the source type in the catalogue. \`filters\` and \`sort\` apply to the target node's fields. This is the only way to cross from one entity type to another.
 
@@ -39,11 +43,11 @@ Return these fields:
 
 - \`answer\` — a concise prose reply (2–4 sentences) built from the actual field values and traversal results. When you report on a record, use its real field values, not its type name.
 
-- \`references\` — every entity that contributes to the meaning of your \`answer\`, as \`{ type, id, reason }\`. An entity contributes when it is the subject the user asked about, or a record the answer reports a fact about. \`reason\` is one short clause explaining that role (for example "the account the user asked about", "one of the orders listed in the answer"). Do not include entities you retrieved, inspected, and discarded: a \`search_entities\` call that returned three candidates of which you only used one — the other two are not references; a \`traverse\` that walked an edge whose target you did not mention — not a reference. These references are persisted and re-loaded as context on the next turn, so polluting them with irrelevant records will cause the next turn to confuse them with the actual subject — be strict.
+- \`references\` — every entity that contributes to the meaning of your \`answer\`, as \`{ type, id, reason }\`. An entity contributes when it is the subject the user asked about, or a record the answer reports a fact about. \`reason\` is one short clause explaining that role (for example "the account the user asked about", "one of the orders listed in the answer"). Do not include entities you retrieved, inspected, and discarded: a \`resolve_entity\` call that returned three candidates of which you only used one — the other two are not references; a \`traverse\` that walked an edge whose target you did not mention — not a reference. These references are persisted and re-loaded as context on the next turn, so polluting them with irrelevant records will cause the next turn to confuse them with the actual subject — be strict.
 
 - \`suggestedQuestions\` — 3 to 5 concrete next questions. Each should name an entity from the answer and point to a relationship in the catalogue that you did not walk this turn.
 
-- \`needsClarification\` — \`true\` only when a \`search_entities\` call returned multiple distinct matches for the user's phrase and you cannot reasonably choose between them. Do not set this without evidence from a search.
+- \`needsClarification\` — \`true\` when (a) \`resolve_entity\` returned multiple candidates in the winning tier and the top score did not exceed the runner-up by the tier's margin threshold, or (b) a \`search_entities\` filter query returned multiple records with no way for you to pick between them. Do not set this without evidence from a tool call.
 `;
 
 export function renderChatbotSystemPrompt(graphMap: string): string {

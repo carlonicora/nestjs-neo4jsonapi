@@ -32,17 +32,18 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).toMatch(/do not invent/i);
   });
 
-  it("documents all four tools with their entry names", () => {
+  it("documents all five tools with their entry names", () => {
     const out = renderChatbotSystemPrompt("any");
-    for (const name of ["describe_entity", "search_entities", "read_entity", "traverse"]) {
+    for (const name of ["resolve_entity", "describe_entity", "search_entities", "read_entity", "traverse"]) {
       expect(out).toContain(name);
     }
   });
 
-  it("describes the matchMode values returned by search_entities", () => {
+  it("describes the matchMode values returned by resolve_entity", () => {
     const out = renderChatbotSystemPrompt("any");
+    const resolveBlock = out.substring(out.indexOf("resolve_entity"));
     for (const mode of ["exact", "fuzzy", "semantic", "none"]) {
-      expect(out).toContain(mode);
+      expect(resolveBlock).toContain(mode);
     }
   });
 
@@ -111,18 +112,39 @@ describe("renderChatbotSystemPrompt", () => {
     expect(out).toMatch(/be strict/i);
   });
 
-  it("Tools section tells the LLM to prefer entities already in context over search_entities", () => {
+  it("Tools section tells the LLM to prefer entities already in context over resolve_entity", () => {
     const out = renderChatbotSystemPrompt("any");
     expect(out).toMatch(/Entities already in this conversation/);
     expect(out).toMatch(/treat that entity as resolved/i);
-    expect(out).toMatch(/Do not call `?search_entities`? for a name that is already resolved/i);
+    expect(out).toMatch(/Do not call `?resolve_entity`? for a name that is already resolved/i);
   });
 
-  it("search_entities description reminds the LLM to consult hydration first", () => {
+  it("search_entities description points the LLM at resolve_entity for name lookup", () => {
     const out = renderChatbotSystemPrompt("any");
-    // The directive must appear inside or adjacent to the search_entities bullet,
-    // not merely somewhere in the prompt.
     const searchBlock = out.substring(out.indexOf("search_entities"));
-    expect(searchBlock).toMatch(/confirm the phrase is not already resolved in the hydration block/i);
+    expect(searchBlock).toMatch(/resolve_entity/);
+  });
+
+  it("Tools preamble makes resolve_entity the first step for user-named entities", () => {
+    const out = renderChatbotSystemPrompt("any");
+    const toolsIdx = out.indexOf("## Tools");
+    const firstListIdx = out.indexOf("- `", toolsIdx);
+    const preamble = out.substring(toolsIdx, firstListIdx);
+    expect(preamble).toMatch(/first tool call .* `?resolve_entity/i);
+    expect(preamble).toMatch(/do not guess a type/i);
+  });
+
+  it("resolve_entity entry gives explicit per-tier score-margin thresholds", () => {
+    const out = renderChatbotSystemPrompt("any");
+    const resolveBlock = out.substring(out.indexOf("resolve_entity"));
+    expect(resolveBlock).toMatch(/0\.15/);
+    expect(resolveBlock).toMatch(/0\.08/);
+  });
+
+  it("needsClarification contract covers resolve_entity tie within margin", () => {
+    const out = renderChatbotSystemPrompt("any");
+    const outputBlock = out.substring(out.indexOf("## Output"));
+    expect(outputBlock).toMatch(/resolve_entity/);
+    expect(outputBlock).toMatch(/margin/i);
   });
 });
