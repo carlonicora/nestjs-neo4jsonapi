@@ -18,6 +18,12 @@ describe("ChatbotService — assistant:status socket events", () => {
 
   // Tool stubs — each build() returns an object with name AND func so the llm stub can invoke them.
   const tools = {
+    resolveEntity: {
+      build: (_ctx: any, _recorder: any[]) => ({
+        name: "resolve_entity",
+        func: async (_input: any) => JSON.stringify({ matchMode: "none", items: [] }),
+      }),
+    },
     describeEntity: {
       build: (_ctx: any, _recorder: any[]) => ({
         name: "describe_entity",
@@ -73,6 +79,7 @@ describe("ChatbotService — assistant:status socket events", () => {
       llmService,
       graphCatalog,
       factory,
+      tools.resolveEntity as any,
       tools.describeEntity as any,
       tools.searchEntities as any,
       tools.readEntity as any,
@@ -109,11 +116,12 @@ describe("ChatbotService — assistant:status socket events", () => {
       call: vi.fn(async () => ({ ...llmResponse })),
     };
 
-    // Standard 7-arg construction — no ws.
+    // Standard 8-arg construction — no ws.
     const svc = new ChatbotService(
       llmService,
       graphCatalog,
       factory,
+      tools.resolveEntity as any,
       tools.describeEntity as any,
       tools.searchEntities as any,
       tools.readEntity as any,

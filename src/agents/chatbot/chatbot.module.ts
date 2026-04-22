@@ -8,6 +8,7 @@ import { GraphDescriptorRegistry } from "./services/descriptor.source";
 import { GraphCatalogService } from "./services/graph.catalog.service";
 import { DescribeEntityTool } from "./tools/describe-entity.tool";
 import { ReadEntityTool } from "./tools/read-entity.tool";
+import { ResolveEntityTool } from "./tools/resolve-entity.tool";
 import { SearchEntitiesTool } from "./tools/search-entities.tool";
 import { ToolFactory } from "./tools/tool.factory";
 import { TraverseTool } from "./tools/traverse.tool";
@@ -22,6 +23,7 @@ import { TraverseTool } from "./tools/traverse.tool";
       inject: [GraphDescriptorRegistry],
     },
     ToolFactory,
+    ResolveEntityTool,
     DescribeEntityTool,
     SearchEntitiesTool,
     ReadEntityTool,
@@ -41,6 +43,7 @@ import { TraverseTool } from "./tools/traverse.tool";
     GraphCatalogService,
     UserModulesRepository,
     ToolFactory,
+    ResolveEntityTool,
     DescribeEntityTool,
     SearchEntitiesTool,
     ReadEntityTool,

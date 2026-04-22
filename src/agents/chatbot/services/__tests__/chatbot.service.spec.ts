@@ -19,6 +19,12 @@ describe("ChatbotService", () => {
   // Tool.build is called by the service with (ctx, recorder), so we capture it there and tests can push to it.
   let capturedRecorder: any[] = [];
   const tools = {
+    resolveEntity: {
+      build: (_ctx: any, recorder: any[]) => {
+        capturedRecorder = recorder;
+        return { name: "resolve_entity" };
+      },
+    },
     describeEntity: {
       build: (_ctx: any, recorder: any[]) => {
         capturedRecorder = recorder;
@@ -48,6 +54,7 @@ describe("ChatbotService", () => {
     llmService,
     graphCatalog,
     factory,
+    tools.resolveEntity as any,
     tools.describeEntity as any,
     tools.searchEntities as any,
     tools.readEntity as any,
@@ -72,7 +79,13 @@ describe("ChatbotService", () => {
     expect(llmService.call).toHaveBeenCalledWith(
       expect.objectContaining({
         systemPrompts: expect.arrayContaining([expect.stringContaining("accounts")]),
-        tools: expect.arrayContaining([{ name: "describe_entity" }]),
+        tools: expect.arrayContaining([
+          { name: "resolve_entity" },
+          { name: "describe_entity" },
+          { name: "search_entities" },
+          { name: "read_entity" },
+          { name: "traverse" },
+        ]),
         maxToolIterations: 15,
         temperature: 0.1,
       }),
@@ -130,6 +143,7 @@ describe("ChatbotService", () => {
     const secondCallArgs = llmService.call.mock.calls[1][0];
     expect(secondCallArgs.systemPrompts).toHaveLength(2);
     expect(secondCallArgs.systemPrompts[1]).toMatch(/MUST call at least one tool/);
+    expect(secondCallArgs.systemPrompts[1]).toMatch(/resolve_entity\(\{\s*text:/);
   });
 
   it("does NOT retry if the first attempt called at least one tool", async () => {

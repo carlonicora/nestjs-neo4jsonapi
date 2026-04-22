@@ -5,6 +5,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "./graph.catalog.service";
 import { ToolFactory, ToolCallRecord } from "../tools/tool.factory";
+import { ResolveEntityTool } from "../tools/resolve-entity.tool";
 import { DescribeEntityTool } from "../tools/describe-entity.tool";
 import { SearchEntitiesTool } from "../tools/search-entities.tool";
 import { ReadEntityTool } from "../tools/read-entity.tool";
@@ -40,6 +41,7 @@ export class ChatbotService {
     private readonly llm: LLMService,
     private readonly graph: GraphCatalogService,
     private readonly factory: ToolFactory,
+    private readonly resolveTool: ResolveEntityTool,
     private readonly describeTool: DescribeEntityTool,
     private readonly searchTool: SearchEntitiesTool,
     private readonly readTool: ReadEntityTool,
@@ -79,6 +81,7 @@ export class ChatbotService {
     const systemPrompt = renderChatbotSystemPrompt(graphMap);
 
     let tools = [
+      this.resolveTool.build(ctx, recorder),
       this.describeTool.build(ctx, recorder),
       this.searchTool.build(ctx, recorder),
       this.readTool.build(ctx, recorder),
@@ -127,9 +130,9 @@ export class ChatbotService {
 
 You MUST call at least one tool BEFORE responding. For a question that names an entity (e.g., "Show me the last order from Acme"), the first tool call is always:
 
-    search_entities({ type: "<type from the data graph above>", text: "<the user's literal string>" })
+    resolve_entity({ text: "<the user's literal phrase>" })
 
-Use the entity types listed in the data graph above. Do not respond with text — call the tool now.`;
+Inspect the returned candidates, pick the right type, then call describe_entity and proceed with the typed tools. Do not respond with text — call the tool now.`;
 
     this.logger.log(
       `run: calling LLM (first attempt) with historyLength=${history.length} maxToolIterations=${MAX_TOOL_ITERATIONS}`,
