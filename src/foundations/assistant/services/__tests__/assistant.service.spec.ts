@@ -359,6 +359,35 @@ describe("AssistantService", () => {
       expect(result.toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 1 }]);
     });
 
+    it("hydration: previous assistant message references are rendered as full records (focus)", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "u0", role: "user", content: "first", position: 0 }),
+        makePersistedMessage({ id: "a0", role: "assistant", content: "answer", position: 1 }),
+      ];
+      const { service, chatbot, assistantMessageRepo, entityServices } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+      ]);
+      (entityServices.get as any).mockReturnValue({
+        findRecordById: vi.fn(async ({ id }: any) => ({ id, name: "Faby and Carlo" })),
+      });
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "are there other orders?",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys).toBeDefined();
+      expect(sys.content).toContain("Full records from the previous answer");
+      expect(sys.content).toContain('"type": "accounts"');
+      expect(sys.content).toContain('"id": "acc-1"');
+      expect(sys.content).toContain('"name": "Faby and Carlo"');
+      // no background section when no older refs exist
+      expect(sys.content).not.toContain("Other entities mentioned earlier");
+    });
+
     it("buildHydrationMessage lists (type/id) pairs from prior message references", async () => {
       const priorMessages = [
         makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
