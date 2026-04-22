@@ -8,6 +8,7 @@ import { GraphCatalogService } from "./graph.catalog.service";
 export const CHATBOT_EXACT_MAX_RESULTS = 10;
 export const CHATBOT_FUZZY_MAX_RESULTS = 10;
 export const CHATBOT_SEMANTIC_MAX_RESULTS = 5;
+export const CHATBOT_RESOLVE_MAX_RESULTS = 10;
 export const CHATBOT_SEMANTIC_MIN_SCORE = 0.6;
 const CHATBOT_VECTOR_OVERFETCH = 50;
 
@@ -101,7 +102,7 @@ export class ChatbotSearchService {
       const merged: RankedCandidate[] = buckets.flat();
       if (merged.length) {
         merged.sort((a, b) => b.score - a.score);
-        return { matchMode: label, items: merged.slice(0, 10) };
+        return { matchMode: label, items: merged.slice(0, CHATBOT_RESOLVE_MAX_RESULTS) };
       }
     }
 
@@ -118,7 +119,12 @@ export class ChatbotSearchService {
         entity,
         text: params.text,
         companyId: params.companyId,
-        limit: tier === "semantic" ? CHATBOT_SEMANTIC_MAX_RESULTS : CHATBOT_EXACT_MAX_RESULTS,
+        limit:
+          tier === "semantic"
+            ? CHATBOT_SEMANTIC_MAX_RESULTS
+            : tier === "fuzzy"
+              ? CHATBOT_FUZZY_MAX_RESULTS
+              : CHATBOT_EXACT_MAX_RESULTS,
       };
       const inner =
         tier === "semantic"
