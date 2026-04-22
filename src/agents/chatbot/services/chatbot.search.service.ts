@@ -1,8 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { EmbedderService } from "../../../core/llm/services/embedder.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { ChatbotIndexManager } from "./chatbot.index.manager";
+import { GraphCatalogService } from "./graph.catalog.service";
 
 export const CHATBOT_EXACT_MAX_RESULTS = 10;
 export const CHATBOT_FUZZY_MAX_RESULTS = 10;
@@ -31,6 +32,24 @@ export interface RunSearchParams {
   limit: number;
 }
 
+export interface RankedCandidate {
+  type: string;
+  id: string;
+  summary: string;
+  score: number;
+}
+
+export interface ResolveEntityParams {
+  text: string;
+  companyId: string;
+  userModules: string[];
+}
+
+export interface ResolveEntityResult {
+  matchMode: MatchMode;
+  items: RankedCandidate[];
+}
+
 /** Internal shape returned by tier primitives; has everything resolveEntity needs. */
 interface InternalTierItem {
   id: string;
@@ -40,10 +59,13 @@ interface InternalTierItem {
 
 @Injectable()
 export class ChatbotSearchService {
+  private readonly logger = new Logger(ChatbotSearchService.name);
+
   constructor(
     private readonly neo4j: Neo4jService,
     private readonly embedder: EmbedderService,
     private readonly indexNames: ChatbotIndexManager,
+    private readonly catalog: GraphCatalogService,
   ) {}
 
   async runCascadingSearch(params: RunSearchParams): Promise<SearchResult> {
@@ -55,6 +77,82 @@ export class ChatbotSearchService {
 
     const semantic = await this.tierSemantic(params);
     return this.toPublic(semantic);
+  }
+
+  async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
+    const entities = this.catalog
+      .getAllChatEnabledEntities()
+      .filter((e) => params.userModules.includes(e.module));
+
+    if (!entities.length) {
+      return { matchMode: "none", items: [] };
+    }
+
+    const tiers: Array<["substring" | "fuzzy" | "semantic", MatchMode]> = [
+      ["substring", "exact"],
+      ["fuzzy", "fuzzy"],
+      ["semantic", "semantic"],
+    ];
+
+    for (const [tier, label] of tiers) {
+      const buckets = await Promise.all(
+        entities.map((e) => this.runTierForEntitySafe(e, params, tier)),
+      );
+      const merged: RankedCandidate[] = buckets.flat();
+      if (merged.length) {
+        merged.sort((a, b) => b.score - a.score);
+        return { matchMode: label, items: merged.slice(0, 10) };
+      }
+    }
+
+    return { matchMode: "none", items: [] };
+  }
+
+  private async runTierForEntitySafe(
+    entity: CatalogEntity,
+    params: ResolveEntityParams,
+    tier: "substring" | "fuzzy" | "semantic",
+  ): Promise<RankedCandidate[]> {
+    try {
+      const runParams: RunSearchParams = {
+        entity,
+        text: params.text,
+        companyId: params.companyId,
+        limit: tier === "semantic" ? CHATBOT_SEMANTIC_MAX_RESULTS : CHATBOT_EXACT_MAX_RESULTS,
+      };
+      const inner =
+        tier === "semantic"
+          ? await this.tierSemantic(runParams)
+          : await this.tierFulltext(runParams, tier);
+      return inner.items.map((i) => ({
+        type: entity.type,
+        id: i.id,
+        summary: this.projectSummary(entity, i.properties, i.id),
+        score: i.score,
+      }));
+    } catch (err) {
+      this.logger.warn(
+        `resolveEntity: tier=${tier} type=${entity.type} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  private projectSummary(
+    entity: { summary?: (d: any) => string },
+    properties: Record<string, unknown>,
+    id: string,
+  ): string {
+    if (entity.summary) {
+      try {
+        return entity.summary(properties);
+      } catch {
+        /* fall through */
+      }
+    }
+    const name = (properties as any).name;
+    if (typeof name === "string" && name.length) return name;
+    return id;
   }
 
   private toPublic(inner: { matchMode: MatchMode; items: InternalTierItem[] }): SearchResult {
