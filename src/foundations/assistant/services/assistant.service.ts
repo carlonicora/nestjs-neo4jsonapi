@@ -118,6 +118,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userModules,
       priorMessages: [],
       newUserMessage: { role: "user", content: params.firstMessage },
+      assistantId,
     });
 
     // 4. Create the assistant message at position 1 with denormalised references JSON.
@@ -206,6 +207,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userModules,
       priorMessages,
       newUserMessage: { role: "user", content: params.newMessage },
+      assistantId: params.assistantId,
     });
 
     const assistantMessageId = turn.id;
@@ -267,6 +269,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     userModules: string[];
     priorMessages: AssistantMessage[];
     newUserMessage: { role: "user"; content: string };
+    assistantId?: string;
   }): Promise<AgentTurnResult> {
     const hydrationContent = await this.buildHydrationMessage(params.priorMessages);
     const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
@@ -284,6 +287,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userId: params.userId,
       userModules: params.userModules,
       messages,
+      assistantId: params.assistantId,
     });
 
     return {
