@@ -68,6 +68,7 @@ describe("AssistantService", () => {
       getNextPosition: vi.fn(async () => priorMessages.length),
       findByRelated: vi.fn(async () => [...priorMessages].reverse()),
       findById: vi.fn(async ({ id }: any) => makePersistedMessage({ id })),
+      findReferencedTypeIdPairs: vi.fn(async () => []),
     } as any;
 
     const jsonApi = {
@@ -184,10 +185,6 @@ describe("AssistantService", () => {
       expect(createdMessages[0].data.attributes.position).toBe(0);
       expect(createdMessages[1].data.attributes.role).toBe("assistant");
       expect(createdMessages[1].data.attributes.position).toBe(1);
-      // references stored as stringified JSON snapshot
-      expect(JSON.parse(createdMessages[1].data.attributes.references)).toEqual([
-        { type: "accounts", id: "acc-1", reason: "hit" },
-      ]);
     });
 
     it("materialises REFERENCES edges for the assistant turn via linkReferences", async () => {
@@ -228,10 +225,12 @@ describe("AssistantService", () => {
           role: "assistant",
           content: "answer",
           position: 1,
-          references: JSON.stringify([{ type: "accounts", id: "acc-1", reason: "prior mention" }]),
         }),
       ];
-      const { service, chatbot } = buildSut({ priorMessages });
+      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+      ]);
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -243,7 +242,6 @@ describe("AssistantService", () => {
       const sys = passed.find((m: any) => m.role === "system");
       expect(sys).toBeDefined();
       expect(sys.content).toContain("accounts/acc-1");
-      expect(sys.content).toContain("prior mention");
     });
 
     it("deduplicates references across multiple prior turns", async () => {
@@ -253,20 +251,20 @@ describe("AssistantService", () => {
           role: "assistant",
           content: "a",
           position: 0,
-          references: JSON.stringify([{ type: "accounts", id: "acc-1", reason: "first" }]),
         }),
         makePersistedMessage({
           id: "a1",
           role: "assistant",
           content: "b",
           position: 1,
-          references: JSON.stringify([
-            { type: "accounts", id: "acc-1", reason: "repeat" },
-            { type: "orders", id: "ord-9", reason: "new" },
-          ]),
         }),
       ];
-      const { service, chatbot } = buildSut({ priorMessages });
+      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+        { messageId: "a1", type: "accounts", id: "acc-1" },
+        { messageId: "a1", type: "orders", id: "ord-9" },
+      ]);
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
@@ -277,7 +275,6 @@ describe("AssistantService", () => {
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
       expect((sys.content.match(/accounts\/acc-1/g) ?? []).length).toBe(1);
       expect((sys.content.match(/orders\/ord-9/g) ?? []).length).toBe(1);
-      expect(sys.content).toContain("accounts/acc-1: first");
     });
 
     it("trims history to at most MAX_MESSAGES_TO_LLM prior messages before the new user message", async () => {
@@ -337,6 +334,29 @@ describe("AssistantService", () => {
       expect(result.userMessage.id).toBeDefined();
       expect(result.assistantMessage.id).toBeDefined();
       expect(result.toolCalls).toEqual([{ tool: "search_entities", input: {}, durationMs: 1 }]);
+    });
+
+    it("buildHydrationMessage lists (type/id) pairs from prior message references", async () => {
+      const priorMessages = [
+        makePersistedMessage({ id: "a0", role: "assistant", content: "x", position: 1 }),
+        makePersistedMessage({ id: "a1", role: "assistant", content: "y", position: 3 }),
+      ];
+      const { service, chatbot, assistantMessageRepo } = buildSut({ priorMessages });
+      (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+        { messageId: "a0", type: "accounts", id: "acc-1" },
+        { messageId: "a1", type: "orders", id: "ord-1" },
+      ]);
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        roles: ["r"],
+        newMessage: "follow-up",
+      });
+      const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
+      expect(sys).toBeDefined();
+      expect(sys.content).toContain("- accounts/acc-1");
+      expect(sys.content).toContain("- orders/ord-1");
     });
   });
 });

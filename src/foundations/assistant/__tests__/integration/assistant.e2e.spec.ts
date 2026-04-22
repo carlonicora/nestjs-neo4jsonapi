@@ -17,6 +17,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
   let assistantStorage: Map<string, any>;
   let messageStorage: Map<string, any>;
   let chatbotRunParams: ChatbotRunParams[];
+  let assistantMessageRepo: any;
 
   beforeAll(() => {
     assistantStorage = new Map();
@@ -58,7 +59,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       find: vi.fn(async () => Array.from(assistantStorage.values())),
     } as any;
 
-    const assistantMessageRepo = {
+    assistantMessageRepo = {
       linkReferences: vi.fn(async () => {}),
       getNextPosition: vi.fn(async (params: any) => {
         const existing = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.assistantId);
@@ -73,6 +74,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
         if (!m) throw new Error(`Not found: ${params.id}`);
         return m;
       }),
+      findReferencedTypeIdPairs: vi.fn(async () => []),
     } as any;
 
     const assistantMessages = {
@@ -168,13 +170,13 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(storedMessages).toHaveLength(2);
     expect(storedMessages.find((m: any) => m.role === "user")?.position).toBe(0);
     expect(storedMessages.find((m: any) => m.role === "assistant")?.position).toBe(1);
-    // references are stringified JSON on the assistant message node.
-    const refs = JSON.parse(storedMessages.find((m: any) => m.role === "assistant")!.references);
-    expect(refs).toEqual([{ type: "accounts", id: "acc-1", reason: "primary match" }]);
   });
 
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
     const [firstAssistantId] = Array.from(assistantStorage.keys());
+    (assistantMessageRepo.findReferencedTypeIdPairs as any).mockResolvedValue([
+      { messageId: "any", type: "accounts", id: "acc-1" },
+    ]);
     const result = await service.appendMessage({
       assistantId: firstAssistantId,
       companyId: "c",
@@ -188,7 +190,6 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const sys = secondCall.messages.find((m) => m.role === "system");
     expect(sys).toBeDefined();
     expect(sys!.content).toContain("accounts/acc-1");
-    expect(sys!.content).toContain("primary match");
 
     // The thread now holds 4 child messages (u0, a0, u1, a1).
     const storedMessages = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === firstAssistantId);
