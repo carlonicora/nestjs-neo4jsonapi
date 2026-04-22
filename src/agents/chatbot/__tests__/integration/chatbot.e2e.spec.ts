@@ -261,3 +261,189 @@ describe("Chatbot e2e regression — literal-phrase search (Faby and Carlo)", ()
     expect(searchMock.runCascadingSearch).toHaveBeenCalledWith(expect.objectContaining({ text: "Faby and Carlo" }));
   });
 });
+
+describe("Chatbot e2e regression — follow-up reuses resolved Account id via hydration", () => {
+  let chatbot: ChatbotService;
+  let scriptedToolCalls: Array<{ name: string; args: any }>;
+  let mockLLM: any;
+  let searchMock: { runCascadingSearch: ReturnType<typeof vi.fn> };
+
+  beforeAll(() => {
+    const registry = new GraphDescriptorRegistry();
+    registry.register({ descriptor: accountDescriptor(), module: "accounts" });
+    registry.register({ descriptor: orderDescriptor(), module: "orders" });
+    const catalog = new GraphCatalogService(registry);
+    catalog.buildCatalog();
+
+    const serviceRegistry = {
+      get: (t: string) => {
+        if (t === "accounts") {
+          return {
+            model: { type: "accounts" },
+            findRecords: vi.fn(async () => []),
+            findRecordById: vi.fn(async ({ id }: any) =>
+              id === "fc-1" ? { id: "fc-1", name: "Faby and Carlo" } : null,
+            ),
+            findRelatedRecordsByEdge: vi.fn(async () => []),
+          };
+        }
+        if (t === "orders") {
+          return {
+            model: { type: "orders" },
+            findRecords: vi.fn(async () => []),
+            findRecordById: vi.fn(async () => null),
+            findRelatedRecordsByEdge: vi.fn(async () => [
+              { id: "ord-7", total: 5000, createdAt: "2026-04-15" },
+              { id: "ord-8", total: 2500, createdAt: "2026-04-18" },
+            ]),
+          };
+        }
+        return undefined;
+      },
+      listTypes: () => ["accounts", "orders"],
+    } as any;
+
+    scriptedToolCalls = [];
+
+    // Message-inspecting mock LLM.
+    // - If the incoming messages (systemPrompts or history) include a focus block
+    //   mentioning accounts/fc-1, it takes the "traverse from known id" path.
+    // - Otherwise, it falls back to search_entities (the regressed behavior).
+    //
+    // Note: ChatbotService passes the app-level system prompt via `systemPrompts`,
+    // but conversation messages (including role:"system" hydration messages) are
+    // passed inside `history`. We inspect both.
+    mockLLM = {
+      call: vi.fn(async ({ systemPrompts, history, tools }: any) => {
+        const systemText = (systemPrompts ?? []).join("\n");
+        const historyText = (history ?? [])
+          .map((m: any) => String(m?.content ?? ""))
+          .join("\n");
+        const allText = `${systemText}\n${historyText}`;
+        const hasFocusAccount =
+          allText.includes('"type": "accounts"') && allText.includes('"id": "fc-1"');
+
+        const describe = tools.find((t: any) => t.name === "describe_entity");
+        const traverse = tools.find((t: any) => t.name === "traverse");
+        const search = tools.find((t: any) => t.name === "search_entities");
+
+        await describe.func({ type: "accounts" });
+        scriptedToolCalls.push({ name: "describe_entity", args: { type: "accounts" } });
+        await describe.func({ type: "orders" });
+        scriptedToolCalls.push({ name: "describe_entity", args: { type: "orders" } });
+
+        if (hasFocusAccount) {
+          // Correct path: use the known id directly.
+          const traverseResult = JSON.parse(
+            await traverse.func({
+              fromType: "accounts",
+              fromId: "fc-1",
+              relationship: "orders",
+              sort: [{ field: "createdAt", direction: "desc" }],
+              limit: 5,
+            }),
+          );
+          scriptedToolCalls.push({
+            name: "traverse",
+            args: { fromType: "accounts", fromId: "fc-1", relationship: "orders" },
+          });
+          return {
+            answer: `There are ${traverseResult.items.length} orders for Faby and Carlo.`,
+            references: [
+              { type: "accounts", id: "fc-1", reason: "the account the user asked about" },
+              ...traverseResult.items.map((it: any) => ({
+                type: "orders",
+                id: it.id,
+                reason: "one of the listed orders",
+              })),
+            ],
+            needsClarification: false,
+            suggestedQuestions: [],
+            tokenUsage: { input: 100, output: 50 },
+          };
+        }
+
+        // Regressed path — never reached if hydration is working.
+        await search.func({ type: "accounts", text: "Faby and Carlo" });
+        scriptedToolCalls.push({
+          name: "search_entities",
+          args: { type: "accounts", text: "Faby and Carlo" },
+        });
+        return {
+          answer: "Fell back to search.",
+          references: [],
+          needsClarification: false,
+          suggestedQuestions: [],
+          tokenUsage: { input: 100, output: 50 },
+        };
+      }),
+    };
+
+    searchMock = {
+      runCascadingSearch: vi.fn().mockResolvedValue({
+        matchMode: "none",
+        items: [],
+      }),
+    };
+
+    const factory = new ToolFactory(catalog, serviceRegistry);
+    chatbot = new ChatbotService(
+      mockLLM as unknown as LLMService,
+      catalog,
+      factory,
+      new DescribeEntityTool(factory),
+      new SearchEntitiesTool(factory, searchMock as unknown as ChatbotSearchService),
+      new ReadEntityTool(factory),
+      new TraverseTool(factory),
+    );
+  });
+
+  it("given a hydration block with the resolved Account, follow-up uses traverse and skips search", async () => {
+    // Simulate the hydration system message AssistantService.appendMessage would emit
+    // on turn 2, with the Account (fc-1) in the focus section.
+    const hydrationSystemMessage = [
+      "## Entities already in this conversation",
+      "",
+      "### Full records from the previous answer",
+      "These are the entities your previous answer was about. When the user's new question refers to any of them — by name or implicitly (\"these\", \"them\", \"other orders\", \"their invoices\") — use their id directly. Do not call search_entities for a name that matches one of these.",
+      "",
+      JSON.stringify(
+        [{ id: "fc-1", name: "Faby and Carlo", type: "accounts" }],
+        null,
+        2,
+      ),
+      "",
+    ].join("\n");
+
+    const result = await chatbot.run({
+      companyId: "c1",
+      userId: "u1",
+      userModules: ["accounts", "orders"],
+      messages: [
+        { role: "system", content: hydrationSystemMessage },
+        { role: "user", content: "What are the latest orders by Faby and Carlo?" },
+        { role: "assistant", content: "There are 2 orders for Faby and Carlo: ord-7 and ord-8." },
+        { role: "user", content: "Are there other orders for Faby and Carlo?" },
+      ],
+    });
+
+    // Assertion 1: no search_entities call for the resolved name (or its halves)
+    const forbiddenSearches = result.toolCalls.filter(
+      (c) =>
+        c.tool === "search_entities" &&
+        ["faby and carlo", "faby", "carlo"].includes(
+          String((c.input as any)?.text ?? "").toLowerCase(),
+        ),
+    );
+    expect(forbiddenSearches).toEqual([]);
+
+    // Assertion 2: at least one traverse from the Account id from turn 1
+    const traverseFromAccount = result.toolCalls.filter(
+      (c) => c.tool === "traverse" && (c.input as any)?.fromId === "fc-1",
+    );
+    expect(traverseFromAccount.length).toBeGreaterThan(0);
+
+    // Sanity: the answer mentions the account
+    expect(result.answer).toContain("Faby and Carlo");
+  });
+});
