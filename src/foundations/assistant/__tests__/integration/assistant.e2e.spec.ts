@@ -228,3 +228,150 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(remaining).toHaveLength(0);
   });
 });
+
+describe("Assistant lifecycle (integration, references shape)", () => {
+  let service: AssistantService;
+  let assistantMessages: any;
+  let assistantMessageRepo: any;
+  let nextChatbotResponse: any;
+
+  beforeAll(() => {
+    const assistantStorage = new Map();
+    const messageStorage = new Map();
+
+    const assistantRepo = {
+      create: vi.fn(async (params: any) => {
+        assistantStorage.set(params.id, {
+          id: params.id,
+          type: "assistants",
+          title: params.title,
+          company: { id: "c" },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          owner: { id: "u-1" },
+        });
+      }),
+      patch: vi.fn(async (params: any) => {
+        const existing = assistantStorage.get(params.id);
+        if (!existing) throw new Error(`Not found: ${params.id}`);
+        assistantStorage.set(params.id, { ...existing, updatedAt: new Date() });
+      }),
+      delete: vi.fn(async (params: any) => {
+        assistantStorage.delete(params.id);
+      }),
+      findById: vi.fn(async (params: any) => {
+        const entity = assistantStorage.get(params.id);
+        if (!entity) throw new Error(`Not found: ${params.id}`);
+        return entity;
+      }),
+      find: vi.fn(async () => Array.from(assistantStorage.values())),
+    } as any;
+
+    assistantMessageRepo = {
+      linkReferences: vi.fn(async () => {}),
+      getNextPosition: vi.fn(async (params: any) => {
+        const existing = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.assistantId);
+        return existing.length;
+      }),
+      findByRelated: vi.fn(async (params: any) => {
+        const all = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.id);
+        return all.sort((a: any, b: any) => b.position - a.position);
+      }),
+      findById: vi.fn(async (params: any) => {
+        const m = messageStorage.get(params.id);
+        if (!m) throw new Error(`Not found: ${params.id}`);
+        return m;
+      }),
+    } as any;
+
+    assistantMessages = {
+      createFromDTO: vi.fn(async (dto: any) => {
+        const msg = {
+          id: dto.data.id,
+          type: "assistant-messages",
+          assistantId: dto.data.relationships?.assistant?.data?.id,
+          ...dto.data.attributes,
+          company: { id: "c" },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        messageStorage.set(dto.data.id, msg);
+        return { data: {} };
+      }),
+    } as any;
+
+    const userModules = { findModulesForRoles: vi.fn(async () => ["crm"]) } as any;
+
+    const chatbot = { run: vi.fn(async () => nextChatbotResponse) } as unknown as ChatbotService;
+
+    const jsonApi = {
+      buildSingle: vi.fn(async (_model: any, record: any) => ({
+        data: { type: "assistants", id: record.id, attributes: record },
+      })),
+      buildList: vi.fn(async (_model: any, records: any[]) => ({
+        data: records.map((r) => ({ type: "assistants", id: r.id, attributes: r })),
+      })),
+    } as any;
+
+    const clsService = {
+      get: (key: string) => (key === "userId" ? "u-1" : key === "companyId" ? "c" : undefined),
+      has: () => true,
+    } as any;
+
+    service = new AssistantService(
+      jsonApi,
+      assistantRepo,
+      clsService,
+      userModules,
+      chatbot,
+      assistantMessages,
+      assistantMessageRepo,
+    );
+  });
+
+  it("does NOT set a `references` attribute on the persisted assistant message", async () => {
+    nextChatbotResponse = {
+      type: "assistant",
+      answer: "Acme is the customer.",
+      references: [{ type: "accounts", id: "acc-1", reason: "resolved" }],
+      needsClarification: false,
+      suggestedQuestions: [],
+      tokens: { input: 0, output: 0 },
+      toolCalls: [],
+    };
+    await service.createWithFirstMessage({
+      companyId: "c",
+      userId: "u-1",
+      roles: [],
+      firstMessage: "Who's the customer?",
+    });
+    const assistantCreateCall = (assistantMessages.createFromDTO as any).mock.calls.find(
+      ([dto]: any[]) => dto.data.attributes.role === "assistant",
+    );
+    expect(assistantCreateCall).toBeDefined();
+    expect(assistantCreateCall[0].data.attributes.references).toBeUndefined();
+  });
+
+  it("still calls linkReferences for each reference returned by the chatbot", async () => {
+    nextChatbotResponse = {
+      type: "assistant",
+      answer: "…",
+      references: [{ type: "accounts", id: "acc-1", reason: "x" }],
+      needsClarification: false,
+      suggestedQuestions: [],
+      tokens: { input: 0, output: 0 },
+      toolCalls: [],
+    };
+    await service.createWithFirstMessage({
+      companyId: "c",
+      userId: "u-1",
+      roles: [],
+      firstMessage: "q",
+    });
+    expect(assistantMessageRepo.linkReferences).toHaveBeenCalledWith(
+      expect.objectContaining({
+        references: [expect.objectContaining({ type: "accounts", id: "acc-1" })],
+      }),
+    );
+  });
+});
