@@ -243,12 +243,14 @@ export function defineEntity<T>() {
         singleChildrenRelationships.push({
           nodeName: rel.model.nodeName,
           relationshipName: name,
+          polymorphic: rel.polymorphic,
         });
       } else {
         childrenTokens.push(rel.model.nodeName);
         childrenRelationships.push({
           nodeName: rel.model.nodeName,
           relationshipName: name,
+          polymorphic: rel.polymorphic,
         });
       }
     }

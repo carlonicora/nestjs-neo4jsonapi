@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
+import { PolymorphicConfig } from "../../../common/interfaces/entity.schema.interface";
 import { modelRegistry } from "../../../common/registries/registry";
 import { TokenResolverService } from "../services/token-resolver.service";
 
@@ -127,6 +128,16 @@ export class EntityFactory {
     record: any;
     name: string;
     nodeMap: Map<string, any>;
+    /**
+     * When set, this relationship is polymorphic. For multi-label polymorphism
+     * (i.e. polymorphic WITHOUT `discriminatorRelationship`), the discriminator
+     * is invoked per row against the Neo4j node's labels to pick the correct
+     * target model — so Order/Account/Person rows get mapped with their own
+     * mappers, not the placeholder descriptor's. For phlow's taxonomy case
+     * (discriminatorRelationship set) the placeholder path is used unchanged
+     * because all candidates share a single Neo4j shape.
+     */
+    polymorphic?: PolymorphicConfig;
   }): ReturnType<T["mapper"]> | undefined {
     if (!params.record.has(params.name)) return undefined;
 
@@ -138,7 +149,30 @@ export class EntityFactory {
 
     if (!isNode && !isRelationship) return undefined;
 
-    const nodeType = params.model.nodeName;
+    // Multi-label polymorphic: resolve the target model via the discriminator
+    // using the actual node labels from the row. Falls back to the placeholder
+    // model if the discriminator throws or the resolved model isn't registered.
+    let effectiveModel: DataModelInterface<any> = params.model;
+    if (
+      isNode &&
+      params.polymorphic &&
+      !params.polymorphic.discriminatorRelationship &&
+      modelRegistry
+    ) {
+      try {
+        const resolved = params.polymorphic.discriminator({
+          properties: data.properties ?? {},
+          labels: data.labels ?? [],
+        });
+        const resolvedModel = modelRegistry.get(resolved.nodeName);
+        if (resolvedModel) effectiveModel = resolvedModel;
+      } catch {
+        // Keep effectiveModel = params.model. The downstream mapper will produce
+        // a shallow entity; better than crashing the whole query.
+      }
+    }
+
+    const nodeType = effectiveModel.nodeName;
     let nodeId: string | undefined;
     let mapKey: string | undefined;
 
@@ -160,7 +194,7 @@ export class EntityFactory {
         const hasParentKey = `${params.name}_hasParent`;
         const hasParentValue = params.record.has(hasParentKey) ? params.record.get(hasParentKey) : undefined;
 
-        entity = params.model.mapper({
+        entity = effectiveModel.mapper({
           data: {
             ...data.properties,
             labels: data.labels,
@@ -179,8 +213,8 @@ export class EntityFactory {
         if (params.record.has(discTargetKey)) {
           const parentNode = params.record.get(discTargetKey);
           if (parentNode && parentNode.properties) {
-            // Create parent entity using same model mapper
-            const parentEntity = params.model.mapper({
+            // Create parent entity using the resolved model's mapper
+            const parentEntity = effectiveModel.mapper({
               data: {
                 ...parentNode.properties,
                 labels: parentNode.labels,
@@ -194,7 +228,7 @@ export class EntityFactory {
           }
         }
       } else if (isRelationship) {
-        entity = params.model.mapper({
+        entity = effectiveModel.mapper({
           data: {
             id: nodeId,
             ...data.properties,
@@ -211,7 +245,7 @@ export class EntityFactory {
 
     if (!modelRegistry) return entity;
 
-    const model = params.model as any;
+    const model = effectiveModel as any;
 
     // Handle SINGLE relationships - prefer new relationship info if available
     if (model.singleChildrenRelationships && model.singleChildrenRelationships.length > 0) {
@@ -226,6 +260,7 @@ export class EntityFactory {
           record: params.record,
           name: childName,
           nodeMap: params.nodeMap,
+          polymorphic: relInfo.polymorphic,
         });
 
         if (childEntity) {
@@ -266,6 +301,7 @@ export class EntityFactory {
           record: params.record,
           name: childName,
           nodeMap: params.nodeMap,
+          polymorphic: relInfo.polymorphic,
         });
 
         if (childEntity) {

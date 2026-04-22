@@ -170,12 +170,29 @@ export abstract class AbstractRepository<
       const hasFields = rel.fields && rel.fields.length > 0;
       const relPattern = hasFields ? `[${relAlias}:${rel.relationship}]` : `[:${rel.relationship}]`;
 
+      // Multi-label polymorphic relationship: targets span several distinct Neo4j
+      // labels (e.g. AssistantMessage.references → Order | Account | Person).
+      // The descriptor's `rel.model` is a placeholder here; constraining on its
+      // label would make the MATCH unable to hit any real edge. Instead we drop
+      // the label, then filter via a WHERE that intersects labels(target) with
+      // the registered candidate labels. Phlow's `discriminatorRelationship`
+      // case stays on the existing single-label path.
+      const isMultiLabelPoly = !!(rel.polymorphic && !rel.polymorphic.discriminatorRelationship);
+      const labelConstraint = isMultiLabelPoly ? "" : `:${rel.model.labelName}`;
+
       if (rel.direction === "in") {
         // (related)-[:REL]->(this)
-        query += `${matchType} (${nodeName})<-${relPattern}-(${relatedNodeName}:${rel.model.labelName})\n`;
+        query += `${matchType} (${nodeName})<-${relPattern}-(${relatedNodeName}${labelConstraint})\n`;
       } else {
         // (this)-[:REL]->(related)
-        query += `${matchType} (${nodeName})-${relPattern}->(${relatedNodeName}:${rel.model.labelName})\n`;
+        query += `${matchType} (${nodeName})-${relPattern}->(${relatedNodeName}${labelConstraint})\n`;
+      }
+
+      // Multi-label polymorphic: filter the optional match's target to the
+      // registered candidate labels. `IS NULL OR ...` preserves the outer
+      // OPTIONAL MATCH semantics when no edge exists.
+      if (isMultiLabelPoly) {
+        query += `WHERE ${relatedNodeName} IS NULL OR any(l IN labels(${relatedNodeName}) WHERE l IN $polyLabels_${name})\n`;
       }
 
       // Add polymorphic discriminator existence check
@@ -256,6 +273,29 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * Returns the Cypher query parameters that `buildReturnStatement` references
+   * for multi-label polymorphic relationships. Each entry maps
+   * `polyLabels_<relationshipName>` → the list of Neo4j labels accepted as
+   * candidates for that relationship's polymorphic target.
+   *
+   * Call sites that issue a query using `buildReturnStatement()` must spread
+   * this into `query.queryParams`. Returns an empty object when no multi-label
+   * polymorphic relationships exist, making it a no-op for every descriptor
+   * that does not use this shape.
+   */
+  protected getPolyLabelParams(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    const rels = this.descriptor?.relationships ?? {};
+    for (const [name, rel] of Object.entries(rels)) {
+      const poly = (rel as RelationshipDef).polymorphic;
+      if (poly && !poly.discriminatorRelationship) {
+        out[`polyLabels_${name}`] = (poly.candidates ?? []).map((c) => c.labelName).filter((l): l is string => !!l);
+      }
+    }
+    return out;
+  }
+
+  /**
    * Validates if the user has access to the entity
    * Throws Forbidden exception if entity exists but user doesn't have access
    */
@@ -267,7 +307,12 @@ export abstract class AbstractRepository<
     if (params.response) return params.response;
 
     const existsQuery = this.neo4j.initQuery({ serialiser: this.descriptor.model });
-    existsQuery.queryParams = { companyId: null, currentUserId: null, searchValue: params.searchValue };
+    existsQuery.queryParams = {
+      companyId: null,
+      currentUserId: null,
+      searchValue: params.searchValue,
+      ...this.getPolyLabelParams(),
+    };
     existsQuery.query = `
       ${this.buildDefaultMatch({ searchField: params.searchField, blockCompanyAndUser: true })}
       ${this.buildReturnStatement()}
@@ -305,6 +350,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
+      ...this.getPolyLabelParams(),
     };
 
     const filterResult = buildFilterClauses({
@@ -360,6 +406,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       searchValue: params.id,
+      ...this.getPolyLabelParams(),
     };
 
     query.query += `
@@ -384,6 +431,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       ids: params.ids,
+      ...this.getPolyLabelParams(),
     };
 
     query.query += `
@@ -440,6 +488,7 @@ export abstract class AbstractRepository<
       ...query.queryParams,
       relatedIds,
       term: params.term,
+      ...this.getPolyLabelParams(),
     };
 
     const filterResult = buildFilterClauses({
@@ -541,6 +590,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       relatedIds,
+      ...this.getPolyLabelParams(),
     };
 
     const filterResult = buildFilterClauses({

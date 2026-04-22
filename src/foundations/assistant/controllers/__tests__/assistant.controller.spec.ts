@@ -99,6 +99,119 @@ describe("AssistantController", () => {
       const res: any = await ctl.create(envelope("hi") as any, REQ);
       expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 3 }] });
     });
+
+    it("dedupes included by (type,id) when buildSingle traversal and buildList both emit the same messages", async () => {
+      jsonApi.buildSingle.mockImplementationOnce(async (model: any, data: any) => ({
+        data: { type: model.type, id: data.id, attributes: { ...data } },
+        included: [
+          { type: "assistant-messages", id: "u1", attributes: { role: "user" } },
+          { type: "assistant-messages", id: "a1", attributes: { role: "assistant" } },
+        ],
+      }));
+      jsonApi.buildList.mockImplementationOnce(async (model: any, data: any[]) => ({
+        data: data.map((d) => ({
+          type: model.type,
+          id: d.id,
+          attributes: d,
+          relationships: { assistant: { data: { type: "assistants", id: "asst-1" } } },
+        })),
+      }));
+
+      const res: any = await ctl.create(envelope("hi") as any, REQ);
+      const keys = (res.included as any[]).map((r) => `${r.type}-${r.id}`);
+      expect(keys).toHaveLength(new Set(keys).size);
+      expect(keys).toEqual(expect.arrayContaining(["assistant-messages-u1", "assistant-messages-a1"]));
+    });
+
+    it("removes the primary assistant resource from included even if buildList echoed it back", async () => {
+      // buildList on the messages emits the Assistant as an inline resource
+      // because each message declares `relationships.assistant`. That copy is
+      // the same resource as `data`, so it must not appear in `included`.
+      jsonApi.buildSingle.mockImplementationOnce(async (model: any, data: any) => ({
+        data: { type: model.type, id: data.id, attributes: { ...data } },
+        included: [],
+      }));
+      jsonApi.buildList.mockImplementationOnce(async (model: any, data: any[]) => ({
+        data: data.map((d) => ({
+          type: model.type,
+          id: d.id,
+          attributes: d,
+          relationships: { assistant: { data: { type: "assistants", id: "asst-1" } } },
+        })),
+        included: [{ type: "assistants", id: "asst-1", attributes: { title: "echoed primary" } }],
+      }));
+
+      const res: any = await ctl.create(envelope("hi") as any, REQ);
+      const primaryInIncluded = (res.included as any[]).find((r) => r.type === "assistants" && r.id === "asst-1");
+      expect(primaryInIncluded).toBeUndefined();
+    });
+
+    it("merges buildList's nested included (polymorphic reference entities) into the response included", async () => {
+      // This exercises the scenario that matters end-to-end: AssistantMessage's
+      // polymorphic `references` relationship produces Order / Account / Person
+      // entries inside buildList's `.included`. They MUST survive into the
+      // final document's `included[]` — otherwise the client has bare {type,id}
+      // refs with no attributes to render.
+      jsonApi.buildSingle.mockImplementationOnce(async (model: any, data: any) => ({
+        data: { type: model.type, id: data.id, attributes: { ...data } },
+        included: [],
+      }));
+      jsonApi.buildList.mockImplementationOnce(async (model: any, data: any[]) => ({
+        data: data.map((d) => ({
+          type: model.type,
+          id: d.id,
+          attributes: d,
+          relationships: {
+            references: {
+              data:
+                d.id === "a1"
+                  ? [
+                      { type: "orders", id: "ord-1" },
+                      { type: "persons", id: "per-1" },
+                    ]
+                  : [],
+            },
+          },
+        })),
+        included: [
+          { type: "orders", id: "ord-1", attributes: { number: "ORD-2026-0001", total: 795.44 } },
+          { type: "persons", id: "per-1", attributes: { fullName: "Carlo Nicora" } },
+        ],
+      }));
+
+      const res: any = await ctl.create(envelope("show last order") as any, REQ);
+      const order = (res.included as any[]).find((r) => r.type === "orders" && r.id === "ord-1");
+      const person = (res.included as any[]).find((r) => r.type === "persons" && r.id === "per-1");
+      expect(order).toBeDefined();
+      expect(order.attributes.number).toBe("ORD-2026-0001");
+      expect(person).toBeDefined();
+      expect(person.attributes.fullName).toBe("Carlo Nicora");
+      // Dedup still works
+      const keys = (res.included as any[]).map((r) => `${r.type}-${r.id}`);
+      expect(keys).toHaveLength(new Set(keys).size);
+    });
+
+    it("strips relationships.assistant back-pointer to the primary assistant from included messages", async () => {
+      jsonApi.buildSingle.mockImplementationOnce(async (model: any, data: any) => ({
+        data: { type: model.type, id: data.id, attributes: { ...data } },
+        included: [],
+      }));
+      jsonApi.buildList.mockImplementationOnce(async (model: any, data: any[]) => ({
+        data: data.map((d) => ({
+          type: model.type,
+          id: d.id,
+          attributes: d,
+          relationships: { assistant: { data: { type: "assistants", id: "asst-1" } } },
+        })),
+      }));
+
+      const res: any = await ctl.create(envelope("hi") as any, REQ);
+      const messages = (res.included as any[]).filter((r) => r.type === "assistant-messages");
+      expect(messages.length).toBeGreaterThan(0);
+      for (const m of messages) {
+        expect(m.relationships?.assistant).toBeUndefined();
+      }
+    });
   });
 
   describe("POST /assistants/:assistantId/assistant-messages (append)", () => {

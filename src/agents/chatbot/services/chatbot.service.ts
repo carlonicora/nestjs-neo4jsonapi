@@ -105,9 +105,7 @@ export class ChatbotService {
                 });
               } catch (err) {
                 // Non-fatal — status updates are progress hints, not functional.
-                this.logger.warn(
-                  `assistant:status emit failed: ${err instanceof Error ? err.message : String(err)}`,
-                );
+                this.logger.warn(`assistant:status emit failed: ${err instanceof Error ? err.message : String(err)}`);
               }
               return t.func(input);
             },

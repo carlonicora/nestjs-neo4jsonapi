@@ -81,13 +81,15 @@ describe("ChatbotService — assistant:status socket events", () => {
     ) as ChatbotService;
 
     // Task 14 adds assistantId to ChatbotRunParams — cast until then.
-    await svc.run({
-      companyId: "c1",
-      userId: "u1",
-      userModules: ["crm"],
-      messages: [{ role: "user", content: "Find Acme" }],
-      assistantId: "a-123",
-    } as any /* Task 14 adds assistantId to ChatbotRunParams */);
+    await svc.run(
+      {
+        companyId: "c1",
+        userId: "u1",
+        userModules: ["crm"],
+        messages: [{ role: "user", content: "Find Acme" }],
+        assistantId: "a-123",
+      } as any /* Task 14 adds assistantId to ChatbotRunParams */,
+    );
 
     expect(ws.sendMessageToUser).toHaveBeenCalledWith(
       "u1",
