@@ -17,9 +17,7 @@ export class AssistantMessageModule implements OnModuleInit {
     modelRegistry.register(AssistantMessageDescriptor.model);
 
     const all = modelRegistry.getAllModels();
-    const candidates = all.filter(
-      (m) => m.type !== assistantMessageMeta.type && m.type !== assistantMeta.type,
-    );
+    const candidates = all.filter((m) => m.type !== assistantMessageMeta.type && m.type !== assistantMeta.type);
     AssistantMessageDescriptor.relationships.references.polymorphic!.candidates = candidates;
   }
 }

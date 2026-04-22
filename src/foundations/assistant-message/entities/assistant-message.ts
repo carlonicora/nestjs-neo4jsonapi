@@ -69,9 +69,7 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
             const model = modelRegistry.getByLabelName(label);
             if (model) return model;
           }
-          throw new Error(
-            `REFERENCES target has no registered model for labels: ${JSON.stringify(data.labels)}`,
-          );
+          throw new Error(`REFERENCES target has no registered model for labels: ${JSON.stringify(data.labels)}`);
         },
       },
     },
