@@ -81,9 +81,7 @@ export class ChatbotSearchService {
   }
 
   async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
-    const entities = this.catalog
-      .getAllChatEnabledEntities()
-      .filter((e) => params.userModules.includes(e.module));
+    const entities = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModules.includes(e.module));
 
     if (!entities.length) {
       return { matchMode: "none", items: [] };
@@ -96,9 +94,7 @@ export class ChatbotSearchService {
     ];
 
     for (const [tier, label] of tiers) {
-      const buckets = await Promise.all(
-        entities.map((e) => this.runTierForEntitySafe(e, params, tier)),
-      );
+      const buckets = await Promise.all(entities.map((e) => this.runTierForEntitySafe(e, params, tier)));
       const merged: RankedCandidate[] = buckets.flat();
       if (merged.length) {
         merged.sort((a, b) => b.score - a.score);
@@ -126,10 +122,7 @@ export class ChatbotSearchService {
               ? CHATBOT_FUZZY_MAX_RESULTS
               : CHATBOT_EXACT_MAX_RESULTS,
       };
-      const inner =
-        tier === "semantic"
-          ? await this.tierSemantic(runParams)
-          : await this.tierFulltext(runParams, tier);
+      const inner = tier === "semantic" ? await this.tierSemantic(runParams) : await this.tierFulltext(runParams, tier);
       return inner.items.map((i) => ({
         type: entity.type,
         id: i.id,
@@ -197,9 +190,7 @@ export class ChatbotSearchService {
     return { matchMode: mode === "substring" ? "exact" : "fuzzy", items };
   }
 
-  private async tierSemantic(
-    params: RunSearchParams,
-  ): Promise<{ matchMode: MatchMode; items: InternalTierItem[] }> {
+  private async tierSemantic(params: RunSearchParams): Promise<{ matchMode: MatchMode; items: InternalTierItem[] }> {
     const indexName = this.indexNames.vectorIndexName(params.entity.labelName);
     const queryEmbedding = await this.embedder.vectoriseText({ text: params.text });
 

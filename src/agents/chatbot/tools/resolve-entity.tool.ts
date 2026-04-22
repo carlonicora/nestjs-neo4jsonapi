@@ -25,11 +25,7 @@ export class ResolveEntityTool {
     });
   }
 
-  async invoke(
-    input: z.infer<typeof inputSchema>,
-    ctx: UserContext,
-    recorder: ToolCallRecord[],
-  ): Promise<unknown> {
+  async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
     return this.factory.capture(
       { tool: "resolve_entity", input },
       async () =>

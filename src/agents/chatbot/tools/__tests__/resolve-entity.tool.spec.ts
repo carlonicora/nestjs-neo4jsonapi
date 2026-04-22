@@ -1,11 +1,13 @@
 import { vi, describe, it, expect } from "vitest";
 import { ResolveEntityTool } from "../resolve-entity.tool";
 
-function mkFactory(capture = vi.fn(async (_r, fn, rec) => {
-  const v = await fn();
-  rec.push({ tool: "resolve_entity", input: _r.input, durationMs: 0 });
-  return v;
-})): any {
+function mkFactory(
+  capture = vi.fn(async (_r, fn, rec) => {
+    const v = await fn();
+    rec.push({ tool: "resolve_entity", input: _r.input, durationMs: 0 });
+    return v;
+  }),
+): any {
   return { capture };
 }
 

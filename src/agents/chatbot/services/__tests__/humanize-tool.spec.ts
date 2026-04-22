@@ -9,9 +9,7 @@ describe("humanizeTool", () => {
     expect(humanizeTool("search_entities", { type: "persons" })).toBe("Searching persons");
   });
   it("renders resolve_entity with the user's literal text", () => {
-    expect(humanizeTool("resolve_entity", { text: "Faby and Carlo" })).toBe(
-      'Resolving "Faby and Carlo"',
-    );
+    expect(humanizeTool("resolve_entity", { text: "Faby and Carlo" })).toBe('Resolving "Faby and Carlo"');
   });
   it("renders resolve_entity with no text as an empty-string resolve", () => {
     expect(humanizeTool("resolve_entity", {})).toBe('Resolving ""');

@@ -59,8 +59,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
           return {
             records: [
               {
-                get: (k: string) =>
-                  (({ id: "a1", properties: { name: "Faby and Carlo" }, score: 9.2 }) as any)[k],
+                get: (k: string) => (({ id: "a1", properties: { name: "Faby and Carlo" }, score: 9.2 }) as any)[k],
               },
             ],
           };
@@ -74,9 +73,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const out = await svc.resolveEntity({ text: "Faby and Carlo", companyId: "co1", userModules: ["crm"] });
 
     expect(out.matchMode).toBe("exact");
-    expect(out.items).toEqual([
-      { type: "accounts", id: "a1", summary: "Faby and Carlo", score: 9.2 },
-    ]);
+    expect(out.items).toEqual([{ type: "accounts", id: "a1", summary: "Faby and Carlo", score: 9.2 }]);
     expect(neo4j.read).toHaveBeenCalledTimes(2);
     expect(embedder.vectoriseText).not.toHaveBeenCalled();
   });
@@ -149,9 +146,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
         const isVector = cypher.includes("db.index.vector.queryNodes");
         if (isVector && params.indexName === "account_chat_embedding") {
           return {
-            records: [
-              { get: (k: string) => (({ id: "a3", properties: { name: "ACME" }, score: 0.82 }) as any)[k] },
-            ],
+            records: [{ get: (k: string) => (({ id: "a3", properties: { name: "ACME" }, score: 0.82 }) as any)[k] }],
           };
         }
         return { records: [] };
