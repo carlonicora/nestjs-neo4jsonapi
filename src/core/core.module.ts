@@ -1,7 +1,9 @@
 import { DynamicModule, Global, Module, Provider } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { DiscoveryModule } from "@nestjs/core";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
+import { EntityServiceRegistry } from "../common/registries/entity.service.registry";
 import { BaseConfigInterface, ConfigJwtInterface } from "../config/interfaces";
 
 // Import all core modules
@@ -40,6 +42,8 @@ import { WebsocketModule } from "./websocket/websocket.module";
  */
 function getCoreModules(queueIds: string[] = []) {
   return [
+    // Discovery module - required by EntityServiceRegistry to enumerate providers
+    DiscoveryModule,
     // JWT and Passport for authentication - uses ConfigService async
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -143,13 +147,13 @@ export class CoreModule {
    * Configure CoreModule with all core infrastructure modules
    */
   static forRoot(options?: CoreModuleOptions): DynamicModule {
-    const providers: Provider[] = [];
+    const providers: Provider[] = [EntityServiceRegistry];
 
     return {
       module: CoreModule,
       imports: getCoreModules(options?.queueIds ?? []),
       providers,
-      exports: [...getCoreModuleExports()],
+      exports: [...getCoreModuleExports(), EntityServiceRegistry],
       global: true,
     };
   }

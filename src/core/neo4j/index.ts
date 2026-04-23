@@ -16,5 +16,8 @@ export { updateRelationshipQuery } from "./queries/update.relationship";
 // Abstracts
 export * from "./abstracts";
 
+// Types (filter & sort criteria)
+export * from "./types";
+
 // Re-export ModelRegistry from common
 export { ModelRegistry, modelRegistry } from "../../common/registries/registry";

@@ -3,8 +3,11 @@ import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
+import { buildFilterClauses } from "../helpers/build-filter-clauses";
+import { buildOrderByClause } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
+import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
 
 /**
  * Abstract base repository for Neo4j entities
@@ -167,12 +170,29 @@ export abstract class AbstractRepository<
       const hasFields = rel.fields && rel.fields.length > 0;
       const relPattern = hasFields ? `[${relAlias}:${rel.relationship}]` : `[:${rel.relationship}]`;
 
+      // Multi-label polymorphic relationship: targets span several distinct Neo4j
+      // labels (e.g. AssistantMessage.references → Order | Account | Person).
+      // The descriptor's `rel.model` is a placeholder here; constraining on its
+      // label would make the MATCH unable to hit any real edge. Instead we drop
+      // the label, then filter via a WHERE that intersects labels(target) with
+      // the registered candidate labels. Phlow's `discriminatorRelationship`
+      // case stays on the existing single-label path.
+      const isMultiLabelPoly = !!(rel.polymorphic && !rel.polymorphic.discriminatorRelationship);
+      const labelConstraint = isMultiLabelPoly ? "" : `:${rel.model.labelName}`;
+
       if (rel.direction === "in") {
         // (related)-[:REL]->(this)
-        query += `${matchType} (${nodeName})<-${relPattern}-(${relatedNodeName}:${rel.model.labelName})\n`;
+        query += `${matchType} (${nodeName})<-${relPattern}-(${relatedNodeName}${labelConstraint})\n`;
       } else {
         // (this)-[:REL]->(related)
-        query += `${matchType} (${nodeName})-${relPattern}->(${relatedNodeName}:${rel.model.labelName})\n`;
+        query += `${matchType} (${nodeName})-${relPattern}->(${relatedNodeName}${labelConstraint})\n`;
+      }
+
+      // Multi-label polymorphic: filter the optional match's target to the
+      // registered candidate labels. `IS NULL OR ...` preserves the outer
+      // OPTIONAL MATCH semantics when no edge exists.
+      if (isMultiLabelPoly) {
+        query += `WHERE ${relatedNodeName} IS NULL OR any(l IN labels(${relatedNodeName}) WHERE l IN $polyLabels_${name})\n`;
       }
 
       // Add polymorphic discriminator existence check
@@ -253,6 +273,29 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * Returns the Cypher query parameters that `buildReturnStatement` references
+   * for multi-label polymorphic relationships. Each entry maps
+   * `polyLabels_<relationshipName>` → the list of Neo4j labels accepted as
+   * candidates for that relationship's polymorphic target.
+   *
+   * Call sites that issue a query using `buildReturnStatement()` must spread
+   * this into `query.queryParams`. Returns an empty object when no multi-label
+   * polymorphic relationships exist, making it a no-op for every descriptor
+   * that does not use this shape.
+   */
+  protected getPolyLabelParams(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    const rels = this.descriptor?.relationships ?? {};
+    for (const [name, rel] of Object.entries(rels)) {
+      const poly = (rel as RelationshipDef).polymorphic;
+      if (poly && !poly.discriminatorRelationship) {
+        out[`polyLabels_${name}`] = (poly.candidates ?? []).map((c) => c.labelName).filter((l): l is string => !!l);
+      }
+    }
+    return out;
+  }
+
+  /**
    * Validates if the user has access to the entity
    * Throws Forbidden exception if entity exists but user doesn't have access
    */
@@ -264,7 +307,12 @@ export abstract class AbstractRepository<
     if (params.response) return params.response;
 
     const existsQuery = this.neo4j.initQuery({ serialiser: this.descriptor.model });
-    existsQuery.queryParams = { companyId: null, currentUserId: null, searchValue: params.searchValue };
+    existsQuery.queryParams = {
+      companyId: null,
+      currentUserId: null,
+      searchValue: params.searchValue,
+      ...this.getPolyLabelParams(),
+    };
     existsQuery.query = `
       ${this.buildDefaultMatch({ searchField: params.searchField, blockCompanyAndUser: true })}
       ${this.buildReturnStatement()}
@@ -277,12 +325,19 @@ export abstract class AbstractRepository<
   }
 
   /**
-   * Find entities with optional search term, ordering, and pagination
+   * Find entities with optional search term, ordering, pagination, and structured filters.
+   *
+   * Backwards-compatible: callers that only pass { term, orderBy, cursor, fetchAll } continue to work.
+   * New callers may pass:
+   *   - filters: FilterCriterion[]    → appended to WHERE as AND-joined parameterised fragments
+   *   - orderByFields: SortCriterion[] → multi-key ORDER BY; overrides legacy orderBy string when present
    */
   async find(params: {
     fetchAll?: boolean;
     term?: string;
     orderBy?: string;
+    orderByFields?: SortCriterion[];
+    filters?: FilterCriterion[];
     cursor?: JsonApiCursorInterface;
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
@@ -295,24 +350,41 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
+      ...this.getPolyLabelParams(),
     };
 
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+
     if (params.term && this.descriptor.fulltextIndexName) {
-      // Use fulltext search if term is provided and index exists
+      const fulltextWhere = this.descriptor.isCompanyScoped
+        ? `WHERE (node)-[:BELONGS_TO]->(company)${filterResult.clause ? ` AND ${filterResult.clause}` : ""}`
+        : filterResult.clause
+          ? `WHERE ${filterResult.clause}`
+          : ``;
       query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
-      ${this.descriptor.isCompanyScoped ? `WHERE (node)-[:BELONGS_TO]->(company)` : ``}
+      ${fulltextWhere}
 
       WITH node as ${nodeName}, score
       ORDER BY score DESC
     `;
     } else {
-      // Use default query with ordering
       query.query += `
       ${this.buildDefaultMatch()}
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
 
-      ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}
+      ${orderByClause}
     `;
     }
 
@@ -334,6 +406,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       searchValue: params.id,
+      ...this.getPolyLabelParams(),
     };
 
     query.query += `
@@ -358,6 +431,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       ids: params.ids,
+      ...this.getPolyLabelParams(),
     };
 
     query.query += `
@@ -392,6 +466,8 @@ export abstract class AbstractRepository<
     orderBy?: string;
     fetchAll?: boolean;
     cursor?: JsonApiCursorInterface;
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
     const rel = this.descriptor.relationships[params.relationship];
@@ -412,7 +488,20 @@ export abstract class AbstractRepository<
       ...query.queryParams,
       relatedIds,
       term: params.term,
+      ...this.getPolyLabelParams(),
     };
+
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
 
     if (params.term && this.descriptor.fulltextIndexName) {
       // Use fulltext search with relationship filter
@@ -429,6 +518,7 @@ export abstract class AbstractRepository<
       }
 
       query.query += `WITH node as ${nodeName}, score
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
       ORDER BY score DESC
     `;
     } else {
@@ -448,10 +538,91 @@ export abstract class AbstractRepository<
 
       query.query += `
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
 
-      ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}
+      ${orderByClause}
     `;
     }
+
+    query.query += `
+      {CURSOR}
+
+      ${this.buildReturnStatement()}
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * Find entities connected to a related node by an arbitrary Cypher edge,
+   * without requiring the relationship to be declared in THIS descriptor.
+   *
+   * Necessary for the chatbot traverse/read-entity tools, which walk
+   * relationships using catalog-level metadata. When a relationship is
+   * declared only on the source side via `reverse: {}`, the target's own
+   * descriptor does not list it — so `findByRelated` (which keys off
+   * `this.descriptor.relationships`) fails. This method accepts the raw
+   * edge spec instead.
+   *
+   * Direction is from THIS node's perspective:
+   *   - "out": MATCH (this)-[:cypherLabel]->(related)
+   *   - "in":  MATCH (this)<-[:cypherLabel]-(related)
+   */
+  async findByRelatedEdge(params: {
+    cypherLabel: string;
+    cypherDirection: "out" | "in";
+    relatedLabel: string;
+    relatedId: string | string[];
+    cursor?: JsonApiCursorInterface;
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    fetchAll?: boolean;
+  }): Promise<T[]> {
+    const { nodeName } = this.descriptor.model;
+    const relatedIds = Array.isArray(params.relatedId) ? params.relatedId : [params.relatedId];
+
+    const query = this.neo4j.initQuery({
+      cursor: params.cursor,
+      serialiser: this.descriptor.model,
+      fetchAll: params.fetchAll,
+    });
+
+    query.queryParams = {
+      ...query.queryParams,
+      relatedIds,
+      ...this.getPolyLabelParams(),
+    };
+
+    const filterResult = buildFilterClauses({
+      nodeAlias: nodeName,
+      filters: params.filters ?? [],
+      paramPrefix: "filter",
+    });
+    query.queryParams = { ...query.queryParams, ...filterResult.params };
+
+    const orderByClause =
+      params.orderByFields && params.orderByFields.length
+        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        : `ORDER BY ${nodeName}.${this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+    `;
+
+    if (params.cypherDirection === "in") {
+      query.query += `MATCH (${nodeName})<-[:${params.cypherLabel}]-(related:${params.relatedLabel})
+        WHERE related.id IN $relatedIds\n`;
+    } else {
+      query.query += `MATCH (${nodeName})-[:${params.cypherLabel}]->(related:${params.relatedLabel})
+        WHERE related.id IN $relatedIds\n`;
+    }
+
+    query.query += `
+      ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
+
+      ${orderByClause}
+    `;
 
     query.query += `
       {CURSOR}

@@ -6,6 +6,7 @@ import { AuditService } from "../../../foundations/audit/services/audit.service"
 import { JsonApiDataInterface } from "../../jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
+import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
 import { AbstractRepository } from "./abstract.repository";
 
 /**
@@ -99,10 +100,91 @@ export abstract class AbstractService<
   }
 
   /**
+   * Find typed records directly (bypasses JSON:API serialisation).
+   * For internal callers that need raw objects — e.g. the chatbot tool layer.
+   */
+  async findRecords(params: {
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+    term?: string;
+    fetchAll?: boolean;
+  }): Promise<T[]> {
+    return this.repository.find({
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+      term: params.term,
+      fetchAll: params.fetchAll,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
+    });
+  }
+
+  /**
+   * Find typed records across a relationship. Delegates to repository.findByRelated.
+   */
+  async findRelatedRecords(params: {
+    relationship: keyof R & string;
+    id: string | string[];
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+    term?: string;
+  }): Promise<T[]> {
+    return this.repository.findByRelated({
+      relationship: params.relationship,
+      id: params.id,
+      term: params.term,
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
+    });
+  }
+
+  /**
+   * Find typed records connected to a related node via an arbitrary Cypher
+   * edge, when the relationship is not declared in this entity's descriptor
+   * (e.g., reverse-only relationships materialised on the catalog). Used by
+   * the chatbot traverse/read-entity tools. Direction is from THIS node's
+   * perspective.
+   */
+  async findRelatedRecordsByEdge(params: {
+    cypherLabel: string;
+    cypherDirection: "out" | "in";
+    relatedLabel: string;
+    relatedId: string | string[];
+    filters?: FilterCriterion[];
+    orderByFields?: SortCriterion[];
+    limit?: number;
+  }): Promise<T[]> {
+    return this.repository.findByRelatedEdge({
+      cypherLabel: params.cypherLabel,
+      cypherDirection: params.cypherDirection,
+      relatedLabel: params.relatedLabel,
+      relatedId: params.relatedId,
+      filters: params.filters,
+      orderByFields: params.orderByFields,
+      cursor: params.limit != null ? { take: params.limit } : undefined,
+    });
+  }
+
+  /**
    * Find entity by ID
    */
   async findById(params: { id: string }): Promise<JsonApiDataInterface> {
     return this.jsonApiService.buildSingle(this.model, await this.repository.findById({ id: params.id }));
+  }
+
+  /**
+   * Find a typed record by id (bypasses JSON:API serialisation).
+   * Used by internal agents that need raw objects.
+   * Returns null when not found — does NOT throw like the public findById() does.
+   */
+  async findRecordById(params: { id: string }): Promise<T | null> {
+    try {
+      return await this.repository.findById({ id: params.id });
+    } catch {
+      return null;
+    }
   }
 
   /**
