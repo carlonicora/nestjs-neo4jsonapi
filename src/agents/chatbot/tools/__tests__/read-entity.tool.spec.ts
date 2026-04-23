@@ -22,7 +22,11 @@ describe("ReadEntityTool", () => {
     ],
     summary: (d: any) => d.name,
   };
-  const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"] };
+  const ctx = {
+    companyId: "c",
+    userId: "u",
+    userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
+  };
   const svc = { findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })) };
   const factory: any = {
     resolveEntity: (t: string) => (t === "accounts" ? accounts : { error: "nope" }),

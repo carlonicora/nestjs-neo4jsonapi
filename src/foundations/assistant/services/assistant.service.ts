@@ -74,7 +74,6 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   async createWithFirstMessage(params: {
     companyId: string;
     userId: string;
-    roles: string[];
     firstMessage: string;
     title?: string;
   }): Promise<{
@@ -83,7 +82,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistantMessage: AssistantMessage;
     toolCalls: ChatbotToolCall[];
   }> {
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForRoles(params.roles);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
     const title = params.title?.trim() || this.autoTitle(params.firstMessage);
 
     const assistantId = randomUUID();
@@ -162,20 +161,14 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     return { assistant, userMessage, assistantMessage, toolCalls: turn.toolCalls };
   }
 
-  async appendMessage(params: {
-    assistantId: string;
-    companyId: string;
-    userId: string;
-    roles: string[];
-    newMessage: string;
-  }): Promise<{
+  async appendMessage(params: { assistantId: string; companyId: string; userId: string; newMessage: string }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
     toolCalls: ChatbotToolCall[];
   }> {
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForRoles(params.roles);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
 
     // Load prior messages for agent context.
     const priorMessages = await this.loadRecentMessages({

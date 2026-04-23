@@ -35,7 +35,11 @@ describe("TraverseTool", () => {
     labelName: "Order",
     summary: (d: any) => `#${d.id}`,
   };
-  const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"] };
+  const ctx = {
+    companyId: "c",
+    userId: "u",
+    userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
+  };
   const targetSvc = {
     findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
   };

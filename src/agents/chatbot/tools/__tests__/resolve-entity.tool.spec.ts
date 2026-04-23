@@ -12,7 +12,11 @@ function mkFactory(
 }
 
 describe("ResolveEntityTool", () => {
-  const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"] };
+  const ctx = {
+    companyId: "c",
+    userId: "u",
+    userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
+  };
 
   it("passes text, companyId, userModules through to ChatbotSearchService.resolveEntity", async () => {
     const search: any = {

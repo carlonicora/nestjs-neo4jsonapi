@@ -69,7 +69,6 @@ describe("AssistantController", () => {
       expect(assistants.createWithFirstMessage).toHaveBeenCalledWith({
         companyId: "c",
         userId: "u",
-        roles: ["role-1"],
         firstMessage: "hello there",
         title: undefined,
       });
@@ -225,7 +224,6 @@ describe("AssistantController", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["role-1"],
         newMessage: "continue",
       });
     });

@@ -103,7 +103,6 @@ export class AssistantController {
     const { assistant, userMessage, assistantMessage, toolCalls } = await this.assistants.createWithFirstMessage({
       companyId: req.user.companyId,
       userId: req.user.userId,
-      roles: req.user.roles,
       firstMessage,
       title: body.data.attributes.title,
     });
@@ -149,7 +148,6 @@ export class AssistantController {
       assistantId,
       companyId: req.user.companyId,
       userId: req.user.userId,
-      roles: req.user.roles,
       newMessage: body.data.attributes.content,
     });
 

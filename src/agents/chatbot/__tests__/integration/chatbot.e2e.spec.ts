@@ -286,7 +286,11 @@ describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby an
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333"],
+      userModuleIds: [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+      ],
       messages: [{ role: "user", content: "Show me the last order from Faby and Carlo" }],
     });
 

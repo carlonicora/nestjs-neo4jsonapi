@@ -55,7 +55,11 @@ describe("ChatbotSearchService — tier Cypher projection", () => {
     const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
 
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
-    await svc.resolveEntity({ text: "Faby & Carlo", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
+    await svc.resolveEntity({
+      text: "Faby & Carlo",
+      companyId: "co1",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
 
     const tier1Params = neo4j.read.mock.calls[0][1];
     expect(tier1Params.term).not.toMatch(/[^\\]&/);

@@ -93,7 +93,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       }),
     } as any;
 
-    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
+    const userModules = { findModuleIdsForUser: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     // Scripted chatbot — turn 1 returns a reference; turn 2 asserts hydration was passed.
     let turn = 0;
@@ -177,7 +177,6 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const { assistant, userMessage, assistantMessage, toolCalls } = await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
-      roles: ["role-1"],
       firstMessage: "Who is the top account?",
     });
     expect(assistant.id).toBeDefined();
@@ -205,7 +204,6 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       assistantId: firstAssistantId,
       companyId: "c",
       userId: "u-1",
-      roles: ["role-1"],
       newMessage: "And its latest order?",
     });
 
@@ -326,7 +324,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       }),
     } as any;
 
-    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
+    const userModules = { findModuleIdsForUser: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     const chatbot = { run: vi.fn(async () => nextChatbotResponse) } as unknown as ChatbotService;
 
@@ -389,7 +387,6 @@ describe("Assistant lifecycle (integration, references shape)", () => {
     await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
-      roles: [],
       firstMessage: "Who's the customer?",
     });
     const assistantCreateCall = (assistantMessages.createFromDTO as any).mock.calls.find(
@@ -412,7 +409,6 @@ describe("Assistant lifecycle (integration, references shape)", () => {
     await service.createWithFirstMessage({
       companyId: "c",
       userId: "u-1",
-      roles: [],
       firstMessage: "q",
     });
     expect(assistantMessageRepo.linkReferences).toHaveBeenCalledWith(

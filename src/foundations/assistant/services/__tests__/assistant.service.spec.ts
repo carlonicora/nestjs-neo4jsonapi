@@ -40,7 +40,7 @@ describe("AssistantService", () => {
       type: "assistant",
     };
     const chatbot = { run: vi.fn(async () => chatbotResponse) } as any;
-    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
+    const userModules = { findModuleIdsForUser: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     const createdMessages: any[] = [];
     const linkedRefs: any[] = [];
@@ -141,7 +141,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "Can you show me all accounts from last month?",
       });
       const dtoArg = spy.mock.calls[0][0];
@@ -157,7 +156,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: longMessage,
       });
       const dtoArg = spy.mock.calls[0][0];
@@ -173,7 +171,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "hi",
         title: "   My Custom Title   ",
       });
@@ -186,7 +183,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "hello",
       });
       const passedMessages = chatbot.run.mock.calls[0][0].messages;
@@ -199,7 +195,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "hi",
       });
       expect(assistantMessages.createFromDTO).toHaveBeenCalledTimes(2);
@@ -216,7 +211,6 @@ describe("AssistantService", () => {
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "hi",
       });
       expect(assistantMessageRepo.linkReferences).toHaveBeenCalledTimes(1);
@@ -229,7 +223,6 @@ describe("AssistantService", () => {
       const result = await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         firstMessage: "hi",
       });
       expect(result.assistant.id).toBeDefined();
@@ -261,7 +254,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "follow-up",
       });
       const passed = chatbot.run.mock.calls[0][0].messages;
@@ -300,7 +292,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "more",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -323,7 +314,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "latest",
       });
       const passed = chatbot.run.mock.calls[0][0].messages;
@@ -344,7 +334,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "hi",
       });
       expect(assistantMessages.createFromDTO).toHaveBeenCalledTimes(2);
@@ -360,7 +349,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "hi",
       });
       expect(result.userMessage.id).toBeDefined();
@@ -384,7 +372,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "are there other orders?",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -413,7 +400,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "are there other orders?",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -444,7 +430,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "next",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -472,7 +457,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -499,7 +483,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -515,13 +498,14 @@ describe("AssistantService", () => {
         { messageId: "a0", type: "forbidden", id: "fb-1" },
       ]);
       (graphCatalog.getEntityDetail as any).mockImplementation((type: string) =>
-        type === "forbidden" ? null : { type, moduleId: "11111111-1111-1111-1111-111111111111", textSearchFields: ["name"] },
+        type === "forbidden"
+          ? null
+          : { type, moduleId: "11111111-1111-1111-1111-111111111111", textSearchFields: ["name"] },
       );
       await service.appendMessage({
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -546,7 +530,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -563,7 +546,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const passed = chatbot.run.mock.calls[0][0].messages;
@@ -592,7 +574,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "q",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
@@ -618,7 +599,6 @@ describe("AssistantService", () => {
         assistantId: "asst-1",
         companyId: "c",
         userId: "u",
-        roles: ["r"],
         newMessage: "follow-up",
       });
       const sys = chatbot.run.mock.calls[0][0].messages.find((m: any) => m.role === "system");
