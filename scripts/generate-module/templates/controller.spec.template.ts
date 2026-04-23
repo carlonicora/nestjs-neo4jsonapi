@@ -205,7 +205,7 @@ describe("${names.pascalCase}Controller", () => {
     };
 
     const mockAuditService = {
-      createAuditEntry: vi.fn(),
+      logRead: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -286,7 +286,7 @@ describe("${names.pascalCase}Controller", () => {
 
       expect(${names.camelCase}Service.findById).toHaveBeenCalledWith({ id: TEST_IDS.${names.camelCase}Id });
       expect(mockReply.send).toHaveBeenCalledWith(MOCK_JSONAPI_RESPONSE);
-      expect(auditService.createAuditEntry).toHaveBeenCalled();
+      expect(auditService.logRead).toHaveBeenCalled();
     });
   });
 

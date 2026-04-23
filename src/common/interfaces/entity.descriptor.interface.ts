@@ -34,6 +34,7 @@ export type {
   EntityDescriptor,
   EntitySchemaInput,
   FieldDef,
+  FieldKind,
   RelationshipDef,
   VirtualFieldDef,
 } from "./entity.schema.interface";

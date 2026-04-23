@@ -23,6 +23,14 @@ export type CypherType = CypherBaseType | CypherArrayType;
 export type FieldTransformFn = (data: any, services: Record<string, any>) => Promise<any> | any;
 
 /**
+ * Semantic kind of a scalar field, used by the chatbot layer to render unit
+ * markers in the graph catalogue and to format values for LLM narration.
+ * The discriminator shape leaves room for non-money kinds (percent, duration,
+ * etc.) without widening a plain string literal later.
+ */
+export type FieldKind = { type: "money"; minorUnits?: number };
+
+/**
  * Field definition for entity schema
  * Defines a single property with its type and constraints
  */
@@ -39,6 +47,15 @@ export interface FieldDef {
   transform?: FieldTransformFn;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
+  /**
+   * Semantic kind for chatbot rendering. When set to `{ type: "money" }`,
+   * the field is stored as an integer in the currency's minor unit (cents by
+   * default). The catalogue annotates it and tool returns emit a companion
+   * `<name>_formatted` string so the LLM can narrate the human value safely.
+   */
+  kind?: FieldKind;
 }
 
 /**
@@ -61,6 +78,8 @@ export interface ComputedFieldDef<T = any> {
   meta?: boolean;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
 }
 
 /**
@@ -77,6 +96,8 @@ export interface VirtualFieldDef {
   meta?: boolean;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /** Human-readable description. Required for the field to be visible to the chatbot. */
+  description?: string;
 }
 
 /**
@@ -119,6 +140,13 @@ export interface RelationshipDef {
   polymorphic?: PolymorphicConfig;
   /** If true, relationship is set only on creation and skipped during PUT (default: false) */
   immutable?: boolean;
+  /** Human-readable description. Required for the relationship to be visible to the chatbot. */
+  description?: string;
+  /** Opts in reverse traversal from the target entity. Omit to keep one-way. */
+  reverse?: {
+    name: string;
+    description: string;
+  };
 }
 
 /**
@@ -193,6 +221,17 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
 
   /** Services to inject into auto-generated serialiser for field transformers */
   injectServices?: Type<any>[];
+
+  /** Entity purpose for the chatbot. Required for the entity to be visible to the LLM. */
+  description?: string;
+
+  /** Optional LLM-facing presentation hints. */
+  chat?: {
+    /** One-line summary renderer used in chatbot search/traverse results. */
+    summary?: (data: any) => string;
+    /** Described string fields used for the `text` parameter in `search_entities`. */
+    textSearchFields?: string[];
+  };
 }
 
 /**
@@ -254,4 +293,15 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
 
   /** Default ordering for queries */
   defaultOrderBy: string;
+
+  /** Entity purpose for the chatbot. Required for the entity to be visible to the LLM. */
+  description?: string;
+
+  /** Optional LLM-facing presentation hints. */
+  chat?: {
+    /** One-line summary renderer used in chatbot search/traverse results. */
+    summary?: (data: any) => string;
+    /** Described string fields used for the `text` parameter in `search_entities`. */
+    textSearchFields?: string[];
+  };
 }

@@ -488,6 +488,19 @@ export class LLMService {
         }
       }
 
+      // Nudge the model out of tool-use mode before asking for the final structured
+      // answer. Without this, some models (notably gpt-oss) emit another tool_calls
+      // response instead of producing the structured output, and parsing fails with
+      // "No content" / finish_reason=tool_calls. The nudge is only appended when the
+      // tool-calling loop ran at all.
+      if (params.tools && params.tools.length > 0 && conversationMessages.length > 0) {
+        conversationMessages.push(
+          new HumanMessage(
+            "You have gathered enough information from the tool calls above to answer the user's question. Produce your final answer now as the structured output the system expects. Do not request any further tool calls.",
+          ),
+        );
+      }
+
       // Get final structured response (unified path for both tool and non-tool flows)
       // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects
       const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;

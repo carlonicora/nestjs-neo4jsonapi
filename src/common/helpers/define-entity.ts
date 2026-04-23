@@ -192,6 +192,8 @@ export function defineEntity<T>() {
       serialiser: customSerialiser,
       injectServices = [],
       isCompanyScoped = true,
+      description,
+      chat,
     } = schema;
 
     // Extract field information
@@ -241,12 +243,14 @@ export function defineEntity<T>() {
         singleChildrenRelationships.push({
           nodeName: rel.model.nodeName,
           relationshipName: name,
+          polymorphic: rel.polymorphic,
         });
       } else {
         childrenTokens.push(rel.model.nodeName);
         childrenRelationships.push({
           nodeName: rel.model.nodeName,
           relationshipName: name,
+          polymorphic: rel.polymorphic,
         });
       }
     }
@@ -341,6 +345,9 @@ export function defineEntity<T>() {
 
       fulltextIndexName: stringFields.length > 0 ? fulltextIndexName : "",
       defaultOrderBy: "updatedAt DESC",
+
+      description,
+      chat,
     };
 
     // Auto-generate serialiser if not provided

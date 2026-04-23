@@ -1,3 +1,184 @@
+## [1.63.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.7...v1.63.0) (2026-04-23)
+
+### 🚀 Features
+
+* **assistant-message:** add AssistantMessageService (vanilla AbstractService) ([84cdb0c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/84cdb0cf8f51eca9ffa9d3ba684f0a5915eb2378))
+* **assistant-message:** add DataMeta ([78636b9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/78636b9f2edba59f1e31084218d598af9aad6e89))
+* **assistant-message:** add entity type + descriptor ([b392c17](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b392c1782d3fe826f7c35337138379c7a5fed136))
+* **assistant-message:** add reference DTOs ([d8da068](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d8da06889219f2af0ba92e370b3167d92295e405))
+* **assistant-message:** controller with nested list + single GET/DELETE ([ceeca7d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ceeca7d995ab74fd8583bc0832503a4e80185789))
+* **assistant-message:** findReferencedTypeIdPairs reads edges directly ([62ee685](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/62ee68579826217e4429bfecdddf7bea8d1365cb))
+* **assistant-message:** linkReferences materialises polymorphic REFERENCES edges ([79db9ac](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/79db9ac77b86f23877fafe4f8380f58c7d194cc2))
+* **assistant-message:** module + barrel ([b8e57a7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b8e57a7459ebb940dfb318e1cb33ea7d22f0bf13))
+* **assistant-message:** populate references polymorphic candidates from modelRegistry ([42f4013](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/42f401320000c57215331000dd5f4b350bf4ad4c))
+* **assistant-message:** repository with owner RBAC and getNextPosition ([767d7b6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/767d7b673e24d123e79e8c6571592b3a95c339fb))
+* **assistant:** pass assistantId to chatbot run for status scoping ([a2d4204](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a2d4204bd508c7772fc4af725b0af72f34de22a5))
+* **assistant:** polymorphic rel support + assistant controller + module tests ([180a838](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/180a838ce3cb42d4e600d31a31202908ea389949))
+* **assistant:** surface toolCalls in meta on create response ([bde47fb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/bde47fb6fe1c02d561a64120ebf595bfb8043a47))
+* **assistant:** two-tier hydration — focus full-load from previous assistant message ([99d8b44](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/99d8b44562c2218f261bcf0b0b96101e830bb1ad))
+* **chatbot/prompt:** add hydration directive preferring known entities over re-search ([f43808d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f43808d1babcb6b04c728b16b91aa252cc67618c))
+* **chatbot/prompt:** tighten references output contract ([b60e445](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b60e445e9a9ee8550cad80e13aa0a87283690038))
+* **chatbot:** add resolve_entity tool for cross-type name resolution ([5f00599](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5f00599ccd9ed5fb98176d896b16dc46ad4fcd02))
+* **chatbot:** assistant HTTP controller in library with module resolution ([365543e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/365543e5aeb3ee8a00e32a139f4a1817647e27a0))
+* **chatbot:** catalog interfaces ([0d49e9c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0d49e9c01ff2b372c04f0be560de5335fefa6414))
+* **chatbot:** ChatbotModule + public exports ([8fade80](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8fade809f9229c82971e914971e815276141de1d))
+* **chatbot:** ChatbotRunParams.assistantId (optional) for status scoping ([abea37b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/abea37b983605945069e2ee5db62d01a29a780de))
+* **chatbot:** ChatbotSearchService tier 1 — substring fulltext ([943de35](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/943de3584a2a7fd39734b6afa4b0854977f14d72))
+* **chatbot:** ChatbotSearchService tier 2 — Lucene fuzzy ([b13ed3e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b13ed3e9f612150055a549f7419c403925f1c444))
+* **chatbot:** ChatbotSearchService tier 2 — Lucene fuzzy ([2549223](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/25492234c254fc846f22a6026e76cd9cef993938))
+* **chatbot:** ChatbotSearchService tier 3 — semantic vector ([11c123f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/11c123f3b99a7e3709d21e0c399ea99038e5a741))
+* **chatbot:** ChatbotService entry point ([5bbe6a5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5bbe6a508d7d67241329661a9f1cf6ed304ce5ef))
+* **chatbot:** cross-type resolveEntity coordinator with tier-dominant fan-out ([8c6bf3e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8c6bf3ec168c0a1d22fc0361d574a287d3a9dac4))
+* **chatbot:** describe_entity required before search/read/traverse; cents note in prompt ([89ad386](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/89ad386d1b77c5b9965ad3aa67aa10d584dda123))
+* **chatbot:** describe_entity tool ([45bc779](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/45bc7796017697bf504c1eec9c62f6e010ac9ec8))
+* **chatbot:** drop text from search_entities; resolve_entity owns name search ([b4ee546](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b4ee5461a64dba2d523ea2b4df9ec01924603391))
+* **chatbot:** enforce tool-call discipline via one-shot retry when LLM returns no tools+no refs ([72afd29](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/72afd2967dd8dd15415b3555e63330eb9d0c4d6b))
+* **chatbot:** GraphCatalogService — boot-time build, reverse materialisation, per-session map ([2cf0909](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2cf09092aabb8a5a9e09f4c22da192b63b8ecf27))
+* **chatbot:** GraphDescriptorRegistry adapter for DescriptorSource ([0937343](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/09373432bdba0938619905e42ae400b91a60315f))
+* **chatbot:** humanizeTool — human-readable labels for tool calls ([ca29e9d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ca29e9dde3623bb4325fa25f5116a5651eb11a0a))
+* **chatbot:** include entity fields in the rendered graph map ([654ce3b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/654ce3b2dab6efacfd62ff7320abaf9952ae469f))
+* **chatbot:** inject optional WebSocketService ([9180a7f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9180a7f50d08d3a6ed09c664dff0d983144b9d22))
+* **chatbot:** NameEmbeddingService — synchronous name embedding helper ([7172a84](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7172a84591fc7945a485f2b274e340c919051400))
+* **chatbot:** per-label fulltext + vector index manager ([4364c3c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4364c3cb514fda95d87ac6b92f0e66ec1ba57469))
+* **chatbot:** persistent Conversation entity + 6-endpoint controller (CRUD + continue + rename) ([16b86c1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/16b86c1c7417be6d2de15345a716294959b243a9))
+* **chatbot:** raise tool-iteration ceiling to 15 for analytical turns ([3193ef0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3193ef02a6dfbddad60e99fc8ccd9bd41149c4d4))
+* **chatbot:** read_entity tool with include-depth-1 validation + AbstractService.findRecordById ([67db0da](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/67db0da1e165f2f681252b26d67dd4d2e1ca2295))
+* **chatbot:** register and export NameEmbeddingService from ChatbotModule ([43445a3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/43445a3db931e04990c16bba79ac5f20ce2729c3))
+* **chatbot:** response interface and system prompt template ([3b778e3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3b778e3c5fcceed10037dfc09126bd3329820bed))
+* **chatbot:** rewrite system prompt around four inquisitive stages ([1644841](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/16448412490e540a1a56c433ac974eaa9d9359e3))
+* **chatbot:** rewrite system prompt as minimal Markdown (Role/Data/Tools/Output) ([6a3a073](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6a3a073a951b43233d3a8adf9a6e2c83bfe4c4ea))
+* **chatbot:** search_entities cascades via ChatbotSearchService, returns matchMode + score ([048b3a9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/048b3a9483c617bbbc205741ec84110bb36243a3))
+* **chatbot:** search_entities tool with filter/sort validation and text search ([1b98706](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1b987064785af00cac1ed1ea4a45336c2bd1a5e3))
+* **chatbot:** surface monetary fields as cents to the LLM ([7dbeabc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7dbeabc3216ca7155c7310703de0f80196f20cf0))
+* **chatbot:** system prompt mandates resolve_entity-first for user-named entities ([b7ed015](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b7ed01553a817094424f0f947da793f5e24031f7))
+* **chatbot:** teach the LLM to interpret matchMode (exact/fuzzy/semantic/none) ([12e5d45](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/12e5d457f7b9aca6a1b50f34b87dc6ac9bf5fa69))
+* **chatbot:** ToolFactory with user-context resolution and tool-call telemetry ([efead2c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/efead2c16b0fab0eedb4eb0ad22ce7bf6f70c34c))
+* **chatbot:** traverse tool with target-field filter/sort validation ([1eba2f1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1eba2f1ab6a01ba14d839b1654157dc04b35c6ee))
+* **chatbot:** wire resolve_entity tool as first-bound tool in the agent ([0c4d5fc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0c4d5fc94bdfa6819d744d55f597c8ee690d4eac))
+* **chatbot:** wrap tools at ChatbotService.run for assistant:status emission ([c8e064c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c8e064cdf2e0a9296868c3ab185ece39f91cd383))
+* **foundations:** re-export assistant-message from foundations barrel ([98c4f9e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/98c4f9e9049c7f1631fb4067425a4bb8d4a17f7b))
+* **nestjs-neo4jsonapi:** add FilterCriterion and SortCriterion types ([f2998b6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f2998b6cc77aad091fad76d41d8aafc5167b9f18))
+* **nestjs-neo4jsonapi:** Descriptor extensions (description, chat, relationship.reverse) ([6a38813](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6a3881398c8ca0351e353dcda942f4b798a9c6f6))
+* **nestjs-neo4jsonapi:** EntityServiceRegistry discovers AbstractService providers by type ([12b940d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/12b940dce25b251e53dbbeb43a0cc00616f9013f))
+* **nestjs-neo4jsonapi:** filter DSL and multi-key sort on AbstractRepository.findByRelated ([0080365](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0080365ce710d8ec6f6acec86060ca73eb863ec6))
+* **nestjs-neo4jsonapi:** multi-key order-by clause builder ([baebfdb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/baebfdb570081510132fd6047e191efa2d95db14))
+* **nestjs-neo4jsonapi:** parameterised filter clause builder ([8e82f17](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8e82f17138daa03b650ec2f90d2c81644f712506))
+* **nestjs-neo4jsonapi:** structured filter DSL and multi-key sort on AbstractRepository.find ([7cd9d3c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7cd9d3cba1534c298300f49db8b7a2b41907d106))
+* **nestjs-neo4jsonapi:** typed-records variants findRecords / findRelatedRecords ([fdc9c5c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fdc9c5cd28375c3a6fe0f5270d09d9b1b78b294e))
+
+### 🐛 Bug Fixes
+
+* **assistant/e2e:** supply graphCatalog + entityServices mocks to integration fixture ([b7ba200](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b7ba20008b0245bfae040cc8ef5d4c5ce08afe68))
+* **assistant/hydration:** point hydration directive at resolve_entity, not search_entities ([8df4fcd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8df4fcd00d0be453a9397ba5429f8b74abead5f8))
+* **assistant:** make ref.type authoritative in focus records and surface hydration errors ([72d8398](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/72d8398de7d709ace6fa6f408959aee4747a52aa))
+* **assistant:** use Cypher DESC syntax in loadRecentMessages orderBy ([063bb13](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/063bb13872050cada36c51b7a656c08405425620))
+* **chatbot:** assistant controller + service respect architecture guardrails (CrudHandlers, meta constants, AbstractService, model-driven responses) ([7a2d2b6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7a2d2b68a23c5b0bd4c7550bd909956bb9100cab))
+* **chatbot:** assistant endpoint uses JSON:API envelope for request and buildSingle for response ([1d178ce](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1d178ceba16923b043e7fe24497af0d9fba1dcdb))
+* **chatbot:** build graph catalog in onApplicationBootstrap so feature-module registrations land first ([12972e2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/12972e23f6332924b7c248481b4186f8c7454b31))
+* **chatbot:** coerce ANY sort/filters shape — stop fighting LLM JSON whims ([cec7580](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cec75802d7b8040d567323c47e697986a6daa014))
+* **chatbot:** cover 'from' in T3 and block premature T6 classification ([8aa957a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8aa957accc733bbf7e4afcd5966dc57c1c8e6542))
+* **chatbot:** force mandatory T1 traverse and ban type-as-answer opener ([59778ad](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/59778ad3e025147b51d21ceeeed8cefb3c7671b6))
+* **chatbot:** forgive object-vs-array schema slip on filters/sort; nudge into answer mode ([4050f0a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4050f0aa15808b4a3e06e54e5e991721fac6dc8c))
+* **chatbot:** gate module access via featureModuleQuery, not role→module edges ([ce4e754](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ce4e754539f4d6fa4cbe483c1b65534de7bae4d0))
+* **chatbot:** graph-thinking for T3 drill-down + edge-based traversal ([92597b8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/92597b85847e2e2866364789584d2c41a7de2d0e))
+* **chatbot:** harden system prompt — literal-first search, dedup by id, answer 'tell me about' queries ([e09e1f1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e09e1f11c41de0fb6cad8609638862638a91af67))
+* **chatbot:** index manager fires on application bootstrap, not module init ([8a7e022](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8a7e0224febd53fe935e0a69fdefd474ae997f79))
+* **chatbot:** R0 completion-discipline rule — finish the request before responding ([4f34f0c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4f34f0cfe211fd44078f94809d397751f52aae2b))
+* **chatbot:** reverse-relationship traversal uses inverseKey from target descriptor, not cypher label ([7b3c5c5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7b3c5c51e3d34b256f6e66adee7d2c0d6f6cc44e))
+* **chatbot:** revert prompt patches + code-side enforcement ([7ac53b1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7ac53b1a5b10d2a45fa76142f8cc191b06cf6064))
+* **chatbot:** stop field invention and tool-error bouncing ([2688241](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2688241fcf9c36dbd5a4e8664ae50efba912a750))
+* **chatbot:** strengthen R0 to forbid 'would you like me to' deferrals ([f3fc374](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f3fc3747bbe194ad8ee110ab4c3e843ad2657355))
+* **chatbot:** T3 step 2 MANDATORY — block fabricated 'no records' answers ([0243b9f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0243b9ffa18db41472e3c60a8fe96559e57999db))
+* **chatbot:** tighten NormalisedFilter.value type to match FilterCriterion ([ef08d13](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ef08d13c11945c19f567540bdb4be4a9a50c36f4))
+* **chatbot:** wrap LIMIT and vector-queryNodes top-K with toInteger() — Neo4j rejects float literals ([0aacf27](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0aacf27b5f9e4d9f295a1a7341c2055043b9745b))
+* **nestjs-neo4jsonapi:** export filter types publicly and push limit to repository cursor ([8af51b6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8af51b6e161730c01aeb0c898d1e8e686447634d))
+* **nestjs-neo4jsonapi:** filter clauses must emit WHERE after WITH, not AND ([a6dda7d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a6dda7d56d361755c3d37dbc540cb939937111d0))
+
+### 💎 Styles
+
+* **assistant:** format via lint --fix ([8f07527](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8f07527d372c1940bc1badf66d4f02e0fb2933a3))
+* **assistant:** prettier carry-over from lint --fix ([4f2fe19](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4f2fe19b44948544644bc5340cdac8db8cd5a381))
+* **chatbot:** apply eslint --fix to Phase 4 files ([9f2cbf6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9f2cbf6dafff7af8f29d08f2c910bfafcb79d585))
+* **chatbot:** apply eslint --fix to Phase 6 files ([17e7cd3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/17e7cd32f2d1f169954cbf1fd3234c6840ad0976))
+* **chatbot:** apply linter formatting to e2e regression test ([1a0ae10](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1a0ae1029518190cf9991ff036ccd30644a1f1c1))
+* **chatbot:** apply linter formatting to search service spec, tool, and agents barrel ([a92b8bc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a92b8bcf0b55c5120ccf27fa234bebac7da8056e))
+* **chatbot:** prettier carry-over from lint --fix ([601db11](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/601db11d99239d14a0ab763c70e836427682a0f8))
+* prettier auto-format (carry-over from earlier lint hook) ([2aa256f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2aa256fa37ebbcc69ea43287090b1779293eae58))
+* prettier auto-format carry-over from pre-commit lint --fix ([56b3b86](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/56b3b866273fd0797175fde276b721e4bdf9b99c))
+
+### 📦 Code Refactoring
+
+* **assistant-message:** references becomes a polymorphic relationship; drop json attribute ([8497ef3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8497ef396a59dec3021e7bb849d4843f51dca4b8))
+* **assistant:** buildHydrationMessage traverses edges instead of parsing JSON ([23d0bd6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/23d0bd61d751613ee50c66d5a24a4c9df73f4494))
+* **assistant:** extract AssistantMessage into first-class child node ([0e3f910](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0e3f9109b5deee2c8aa622b7a5dd8778336d1f01))
+* **assistant:** inject GraphCatalogService and EntityServiceRegistry ([8d2a0ac](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8d2a0ac000fd0b9b7562be1645dba83337e6ba29))
+* **assistant:** relocate to foundations/assistant, rename Conversation→Assistant, fix CREATED_BY edge ([cf1e7ea](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cf1e7eaa810c4f5291b81c4fc8a285c92ad4f0e1))
+* **assistant:** stop writing references as a stringified attribute ([b061f7a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b061f7a54e9ebd24c8d140297f4fb603ee33486b))
+* **chatbot:** assistant endpoint and type pluralised to 'assistants' per JSON:API convention ([314480b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/314480b4368d193490f31e8a99f0c1931fe9f4b8))
+* **chatbot:** remove dead runCascadingSearch path ([9cf79e5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9cf79e59bdb26b02d3c59d1f373c2d54b92bf170))
+* **chatbot:** simplify assistant DTOs — drop redundant role, flatten messages on create ([7ae75a0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7ae75a033c166a2affe28723a3ba0e773c4bbd38))
+* **chatbot:** tier primitives project node properties for summary use ([1641c1d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1641c1d1590dbdc7018211077b3402b1b3442aaf))
+* **chatbot:** use stable module UUID instead of normalised name string ([49d9130](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/49d9130dacf39f3ef4cdfb8f2fe51ea174b8de72))
+
+### 🚨 Tests
+
+* **assistant-message:** integration spec for child-node lifecycle ([a2f09d0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a2f09d0ab3b21679e99929280a261f71567e170c))
+* **assistant:** failing specs — references polymorphic relationship + no stringified attribute ([1bd0d85](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1bd0d85a11fca80cdcd7e8636c68f9bb1505fa87))
+* **assistant:** hydration — background, mixed, caps, error paths ([c430404](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c43040474ca09bcb6fd9283e8f162fe6622d3ee8))
+* **assistant:** rewrite hydration-format tests for two-tier output ([7094192](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/709419232c7b9450907861b67a8f2a5c46f036a4))
+* **assistant:** tighten hydration test assertions and clarify background fixture ([acdc8ba](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/acdc8ba399637d522bcb93714cd404359885f57a))
+* **assistant:** update service + integration specs for edge-based references ([108c702](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/108c702ff135504e3790269a300b7d89b040ef37))
+* **chatbot/e2e:** regression — follow-up reuses resolved Account id via hydration ([b5aa913](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b5aa913720316ecd79052dc27b9eca8c77ea8176))
+* **chatbot/e2e:** rewrite to drive resolve_entity → describe → traverse chain ([7169da7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7169da7f412ba54869b13a919abddb8ed25f34a1))
+* **chatbot/e2e:** simplify expectation arrays in tests for clarity ([082f237](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/082f237dc8ec771f9659330e94853dee4205e38d))
+* **chatbot/prompt:** reinstate /does not search by name/i guard for search_entities ([4f3a643](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4f3a643c7f1c242f953eae0795f0597b7def39c8))
+* **chatbot:** add prompt-assembly tests for new inquisitive structure ([721efb0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/721efb005fb7451931787e24cd6a9edb587ff3c8))
+* **chatbot:** add T1-T6 taxonomy plumbing-regression tests ([644f2cc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/644f2ccb5b498234de40b4345e8f4f62ac960f82))
+* **chatbot:** assert on new minimal prompt structure ([4d6c5ba](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4d6c5ba1f77bb9942a79f37bf8a269dd673eb05a))
+* **chatbot:** drop T1-T6 taxonomy tests — prompt no longer has a taxonomy ([993fc3a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/993fc3a02b69a42252194e3d8bf006c7f4e23633))
+* **chatbot:** end-to-end integration with scripted LLM (search → traverse) ([c09ff27](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c09ff27872ea168f99db4ad0cdae9e6e31f2feeb))
+* **chatbot:** failing spec — emits assistant:status around tool calls ([cce8a0d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cce8a0d5b65c25903ed88bc3ef2ba3f99b460cc2))
+* **chatbot:** regression e2e — 'Faby and Carlo' literal-phrase search cascades to exact match ([4a46787](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4a4678778be36bf677fbf91a7f67410b8b537b56))
+
+### ♻️ Chores
+
+* **chatbot:** add diagnostic logging across assistant pipeline ([e96b52e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e96b52ec36b99b2b9986ff0b02271155a71bb6ec))
+* **chatbot:** remove NameEmbeddingService — embedding owned by per-entity repositories ([16c45e0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/16c45e0261384c5c9d155366f77cac1404c56bed))
+* **chatbot:** use FUZZY_MAX for fuzzy tier; name resolve cap constant ([2860d88](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2860d88d09c69b35db5f6b702124880858534b7e))
+* **nestjs-neo4jsonapi:** v2.0.0 — assistant-message extraction breaking change ([5a7a8f5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5a7a8f53e9a8fe371dfccded03dd663754f3d1a6))
+
+## [1.62.7](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.6...v1.62.7) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** remove debug flag from semantic-release command ([20522c6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/20522c6c3e2f4d03e83c322d41298b4e3f6bf63e))
+
+## [1.62.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.5...v1.62.6) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** upgrade Node.js version to 24 for improved compatibility ([b836f9e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b836f9e4098b7588a6d580ada44ff98f09b8efb1))
+
+## [1.62.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.4...v1.62.5) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** remove unnecessary registry-url from setup-node step ([fe7baa4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fe7baa497d3b8f7abfb8a3b1db5b96399ffdc8c5))
+
+## [1.62.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.3...v1.62.4) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **release:** enable debug logging for semantic-release ([941f6a1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/941f6a1cc1dd6c44afb457f1878537ced673627c))
+
+## [1.62.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.2...v1.62.3) (2026-04-14)
+
+### 🐛 Bug Fixes
+
+* **audit:** rename createAuditEntry to logRead in controller tests ([c754312](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c75431283df5617703c7563b143feb95c977d316))
+* **release:** update npm installation method for OIDC support ([75b9f25](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/75b9f25eb7be50c4a00701f0c3638c361583d847))
+* **release:** upgrade npm to version 11 for OIDC support ([c54668b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c54668bfe020672c304db93ae33fbc459ce07d7f))
+
 ## [1.62.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.1...v1.62.2) (2026-03-28)
 
 ### 🐛 Bug Fixes
