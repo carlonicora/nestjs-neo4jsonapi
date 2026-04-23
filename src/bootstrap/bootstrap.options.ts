@@ -1,6 +1,7 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { EntityDescriptor, RelationshipDef } from "../common/interfaces/entity.schema.interface";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
+import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
 
 /**
@@ -93,6 +94,13 @@ export interface BootstrapOptions {
    * ```
    */
   openApi?: OpenApiOptions;
+
+  /**
+   * Declarative RBAC matrix.
+   * When provided, the RbacReconciler reconciles Neo4j to match this matrix
+   * on application bootstrap. See docs for `defineRbac()`.
+   */
+  rbac?: RbacMatrix;
 }
 
 /**
