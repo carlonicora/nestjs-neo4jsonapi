@@ -38,7 +38,8 @@ export interface CatalogRelationship {
 
 export interface CatalogEntity {
   type: string;
-  module: string;
+  /** Stable module UUID — matches the `(Module) {id}` node in Neo4j. */
+  moduleId: string;
   description: string;
   fields: CatalogField[];
   relationships: CatalogRelationship[];

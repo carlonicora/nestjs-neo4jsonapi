@@ -40,7 +40,7 @@ describe("AssistantService", () => {
       type: "assistant",
     };
     const chatbot = { run: vi.fn(async () => chatbotResponse) } as any;
-    const userModules = { findModulesForRoles: vi.fn(async () => ["crm"]) } as any;
+    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     const createdMessages: any[] = [];
     const linkedRefs: any[] = [];
@@ -88,7 +88,7 @@ describe("AssistantService", () => {
     const graphCatalog = {
       getEntityDetail: vi.fn((type: string) => ({
         type,
-        module: "crm",
+        moduleId: "11111111-1111-1111-1111-111111111111",
         description: "",
         fields: [],
         relationships: [],
@@ -515,7 +515,7 @@ describe("AssistantService", () => {
         { messageId: "a0", type: "forbidden", id: "fb-1" },
       ]);
       (graphCatalog.getEntityDetail as any).mockImplementation((type: string) =>
-        type === "forbidden" ? null : { type, module: "crm", textSearchFields: ["name"] },
+        type === "forbidden" ? null : { type, moduleId: "11111111-1111-1111-1111-111111111111", textSearchFields: ["name"] },
       );
       await service.appendMessage({
         assistantId: "asst-1",
@@ -582,7 +582,7 @@ describe("AssistantService", () => {
       ]);
       (graphCatalog.getEntityDetail as any).mockImplementation((type: string) => ({
         type,
-        module: "crm",
+        moduleId: "11111111-1111-1111-1111-111111111111",
         textSearchFields: type === "nolabel" ? undefined : ["name"],
       }));
       (entityServices.get as any).mockReturnValue({

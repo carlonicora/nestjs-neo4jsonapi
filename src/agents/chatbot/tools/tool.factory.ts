@@ -6,7 +6,7 @@ import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 export interface UserContext {
   companyId: string;
   userId: string;
-  userModules: string[];
+  userModuleIds: string[];
 }
 
 export interface ToolCallRecord {
@@ -26,7 +26,7 @@ export class ToolFactory {
   ) {}
 
   resolveEntity(type: string, ctx: UserContext): CatalogEntity | { error: string } {
-    const detail = this.catalog.getEntityDetail(type, ctx.userModules);
+    const detail = this.catalog.getEntityDetail(type, ctx.userModuleIds);
     if (!detail) return { error: `Entity type "${type}" is not available.` };
     return detail;
   }

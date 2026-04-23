@@ -12,28 +12,27 @@ export class UserModulesRepository {
   constructor(private readonly neo4j: Neo4jService) {}
 
   /**
-   * Returns the distinct module names any of the given roles has a HAS_PERMISSIONS edge to.
-   * Names are lowercased and whitespace-stripped to match the module identifiers that feature
-   * modules register with `GraphDescriptorRegistry.register({ descriptor, module })`.
+   * Returns the distinct `(Module) {id}` UUIDs any of the given roles has a
+   * HAS_PERMISSIONS edge to. Matches the stable UUID rather than the name so
+   * the catalog doesn't couple to the host app's module naming conventions.
    */
-  async findModulesForRoles(roleIds: string[]): Promise<string[]> {
+  async findModuleIdsForRoles(roleIds: string[]): Promise<string[]> {
     if (!roleIds.length) {
-      this.logger.log(`findModulesForRoles: no roles — returning empty module list`);
+      this.logger.log(`findModuleIdsForRoles: no roles — returning empty module-id list`);
       return [];
     }
     const result = await this.neo4j.read(
       `MATCH (role:Role)-[:HAS_PERMISSIONS]->(m:Module)
        WHERE role.id IN $roleIds
-       RETURN DISTINCT m.name AS moduleName`,
+       RETURN DISTINCT m.id AS moduleId`,
       { roleIds },
     );
-    const rawNames: string[] = result.records
-      .map((r: any) => r.get("moduleName"))
+    const moduleIds: string[] = result.records
+      .map((r: any) => r.get("moduleId"))
       .filter((s: string | null) => typeof s === "string" && s.length > 0);
-    const normalised = rawNames.map((s) => s.toLowerCase().replace(/\s+/g, ""));
     this.logger.log(
-      `findModulesForRoles: roles=${roleIds.length}, modules raw=${JSON.stringify(rawNames)}, normalised=${JSON.stringify(normalised)}`,
+      `findModuleIdsForRoles: roles=${roleIds.length}, moduleIds=${JSON.stringify(moduleIds)}`,
     );
-    return normalised;
+    return moduleIds;
   }
 }

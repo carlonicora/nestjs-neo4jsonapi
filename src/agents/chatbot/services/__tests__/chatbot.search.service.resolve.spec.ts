@@ -1,10 +1,10 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { ChatbotSearchService } from "../chatbot.search.service";
 
-function makeEntity(type: string, labelName: string, module: string, summary?: (d: any) => string) {
+function makeEntity(type: string, labelName: string, moduleId: string, summary?: (d: any) => string) {
   return {
     type,
-    module,
+    moduleId,
     labelName,
     nodeName: labelName.toLowerCase(),
     textSearchFields: ["name"],
@@ -21,8 +21,8 @@ const indexNames = {
 };
 
 describe("ChatbotSearchService.resolveEntity", () => {
-  const account = makeEntity("accounts", "Account", "crm", (d) => d.name);
-  const person = makeEntity("persons", "Person", "crm", (d) => `${d.firstName} ${d.lastName}`);
+  const account = makeEntity("accounts", "Account", "11111111-1111-1111-1111-111111111111", (d) => d.name);
+  const person = makeEntity("persons", "Person", "11111111-1111-1111-1111-111111111111", (d) => `${d.firstName} ${d.lastName}`);
 
   let catalog: any;
   beforeEach(() => {
@@ -36,7 +36,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "anything", companyId: "co1", userModules: [] });
+    const out = await svc.resolveEntity({ text: "anything", companyId: "co1", userModuleIds: [] });
 
     expect(out).toEqual({ matchMode: "none", items: [] });
     expect(neo4j.read).not.toHaveBeenCalled();
@@ -48,7 +48,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
     expect(out).toEqual({ matchMode: "none", items: [] });
   });
 
@@ -70,7 +70,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "Faby and Carlo", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "Faby and Carlo", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.matchMode).toBe("exact");
     expect(out.items).toEqual([{ type: "accounts", id: "a1", summary: "Faby and Carlo", score: 9.2 }]);
@@ -104,7 +104,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "Carlo", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "Carlo", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.matchMode).toBe("exact");
     expect(out.items.map((i) => i.id)).toEqual(["p1", "a1"]);
@@ -132,7 +132,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "Faby", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "Faby", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.matchMode).toBe("fuzzy");
     expect(out.items).toHaveLength(1);
@@ -155,7 +155,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "the German guys", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "the German guys", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.matchMode).toBe("semantic");
     expect(out.items).toEqual([{ type: "accounts", id: "a3", summary: "ACME", score: 0.82 }]);
@@ -178,7 +178,7 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.items).toHaveLength(10);
     const scores = out.items.map((i) => i.score);
@@ -205,14 +205,14 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     expect(out.matchMode).toBe("exact");
     expect(out.items).toEqual([{ type: "persons", id: "p1", summary: "A B", score: 2.0 }]);
   });
 
   it("falls back to name/id when an entity has no summary function", async () => {
-    const entityWithoutSummary = makeEntity("widgets", "Widget", "crm");
+    const entityWithoutSummary = makeEntity("widgets", "Widget", "11111111-1111-1111-1111-111111111111");
     catalog.getAllChatEnabledEntities.mockReturnValue([entityWithoutSummary]);
     const neo4j: any = {
       read: vi.fn().mockImplementation(async (_c: string, params: any) => {
@@ -230,17 +230,17 @@ describe("ChatbotSearchService.resolveEntity", () => {
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "w", companyId: "co1", userModules: ["crm"] });
+    const out = await svc.resolveEntity({ text: "w", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
     expect(out.items[0].summary).toBe("Widget-A");
     expect(out.items[1].summary).toBe("w2");
   });
 
-  it("filters entities by userModules (never queries types outside user's modules)", async () => {
+  it("filters entities by userModuleIds (never queries types outside user's modules)", async () => {
     const neo4j = { read: vi.fn() };
     const embedder = { vectoriseText: vi.fn() };
     const svc = new ChatbotSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
 
-    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModules: ["orders"] });
+    const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["22222222-2222-2222-2222-222222222222"] });
 
     expect(out).toEqual({ matchMode: "none", items: [] });
     expect(neo4j.read).not.toHaveBeenCalled();

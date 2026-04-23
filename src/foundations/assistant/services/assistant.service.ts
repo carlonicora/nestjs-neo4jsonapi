@@ -61,7 +61,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     jsonApiService: JsonApiService,
     assistantRepository: AssistantRepository,
     clsService: ClsService,
-    private readonly userModulesRepository: UserModulesRepository,
+    private readonly userModuleIdsRepository: UserModulesRepository,
     private readonly chatbot: ChatbotService,
     private readonly assistantMessages: AssistantMessageService,
     private readonly assistantMessageRepo: AssistantMessageRepository,
@@ -83,7 +83,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistantMessage: AssistantMessage;
     toolCalls: ChatbotToolCall[];
   }> {
-    const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForRoles(params.roles);
     const title = params.title?.trim() || this.autoTitle(params.firstMessage);
 
     const assistantId = randomUUID();
@@ -119,7 +119,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     const turn = await this.runAgentTurn({
       companyId: params.companyId,
       userId: params.userId,
-      userModules,
+      userModuleIds,
       priorMessages: [],
       newUserMessage: { role: "user", content: params.firstMessage },
       assistantId,
@@ -175,7 +175,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }> {
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
-    const userModules = await this.userModulesRepository.findModulesForRoles(params.roles);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForRoles(params.roles);
 
     // Load prior messages for agent context.
     const priorMessages = await this.loadRecentMessages({
@@ -208,7 +208,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     const turn = await this.runAgentTurn({
       companyId: params.companyId,
       userId: params.userId,
-      userModules,
+      userModuleIds,
       priorMessages,
       newUserMessage: { role: "user", content: params.newMessage },
       assistantId: params.assistantId,
@@ -270,12 +270,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   private async runAgentTurn(params: {
     companyId: string;
     userId: string;
-    userModules: string[];
+    userModuleIds: string[];
     priorMessages: AssistantMessage[];
     newUserMessage: { role: "user"; content: string };
     assistantId?: string;
   }): Promise<AgentTurnResult> {
-    const hydrationContent = await this.buildHydrationMessage(params.priorMessages, params.userModules);
+    const hydrationContent = await this.buildHydrationMessage(params.priorMessages, params.userModuleIds);
     const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
       role: m.role,
       content: m.content,
@@ -289,7 +289,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     const response = await this.chatbot.run({
       companyId: params.companyId,
       userId: params.userId,
-      userModules: params.userModules,
+      userModuleIds: params.userModuleIds,
       messages,
       assistantId: params.assistantId,
     });
@@ -315,7 +315,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    * the whole builder returns null so a single bad Neo4j hiccup does not
    * fail the chat turn.
    */
-  private async buildHydrationMessage(messages: AssistantMessage[], userModules: string[]): Promise<string | null> {
+  private async buildHydrationMessage(messages: AssistantMessage[], userModuleIds: string[]): Promise<string | null> {
     if (messages.length === 0) return null;
     try {
       const pairs = await this.assistantMessageRepo.findReferencedTypeIdPairs({
@@ -362,8 +362,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       }
 
       // Load focus records (full) and background records (project to label).
-      const focusRecords = await this.loadFocusRecords(focusCapped, userModules);
-      const backgroundStubs = await this.loadBackgroundStubs(backgroundCapped, userModules);
+      const focusRecords = await this.loadFocusRecords(focusCapped, userModuleIds);
+      const backgroundStubs = await this.loadBackgroundStubs(backgroundCapped, userModuleIds);
 
       if (focusRecords.length === 0 && backgroundStubs.length === 0) return null;
 
@@ -400,13 +400,13 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
 
   private async loadFocusRecords(
     refs: { type: string; id: string }[],
-    userModules: string[],
+    userModuleIds: string[],
   ): Promise<Array<Record<string, unknown>>> {
     const out: Array<Record<string, unknown>> = [];
     for (const ref of refs) {
       // Per-type module gate. getEntityDetail returns null when the type is
-      // not accessible to the current userModules.
-      const detail = this.graphCatalog.getEntityDetail(ref.type, userModules);
+      // not accessible to the current userModuleIds.
+      const detail = this.graphCatalog.getEntityDetail(ref.type, userModuleIds);
       if (!detail) continue;
       const svc = this.entityServices.get(ref.type);
       if (!svc) continue;
@@ -424,11 +424,11 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
 
   private async loadBackgroundStubs(
     refs: { type: string; id: string }[],
-    userModules: string[],
+    userModuleIds: string[],
   ): Promise<Array<{ type: string; id: string; label?: string }>> {
     const out: Array<{ type: string; id: string; label?: string }> = [];
     for (const ref of refs) {
-      const detail = this.graphCatalog.getEntityDetail(ref.type, userModules);
+      const detail = this.graphCatalog.getEntityDetail(ref.type, userModuleIds);
       if (!detail) continue;
       const labelField = detail.textSearchFields?.[0];
       const svc = this.entityServices.get(ref.type);

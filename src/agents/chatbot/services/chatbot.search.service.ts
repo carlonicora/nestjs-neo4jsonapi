@@ -33,7 +33,7 @@ export interface RankedCandidate {
 export interface ResolveEntityParams {
   text: string;
   companyId: string;
-  userModules: string[];
+  userModuleIds: string[];
 }
 
 export interface ResolveEntityResult {
@@ -60,7 +60,7 @@ export class ChatbotSearchService {
   ) {}
 
   async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
-    const entities = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModules.includes(e.module));
+    const entities = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModuleIds.includes(e.moduleId));
 
     if (!entities.length) {
       return { matchMode: "none", items: [] };

@@ -72,7 +72,7 @@ describe("ChatbotService", () => {
     const out = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["crm"],
+      userModuleIds: ["crm"],
       messages: [{ role: "user", content: "What is the last order from Acme?" }],
     });
     expect(graphCatalog.getMapFor).toHaveBeenCalledWith(["crm"]);
@@ -96,11 +96,11 @@ describe("ChatbotService", () => {
     expect(out.tokens).toEqual({ input: 500, output: 100 });
   });
 
-  it("returns clean refusal when userModules is empty", async () => {
+  it("returns clean refusal when userModuleIds is empty", async () => {
     const out = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: [],
+      userModuleIds: [],
       messages: [{ role: "user", content: "anything" }],
     });
     expect(out.answer).toMatch(/no accessible data|no enabled modules/i);
@@ -127,7 +127,7 @@ describe("ChatbotService", () => {
     const out = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["crm"],
+      userModuleIds: ["crm"],
       messages: [{ role: "user", content: "Tell me about Acme." }],
     });
 
@@ -162,7 +162,7 @@ describe("ChatbotService", () => {
     const out = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["crm"],
+      userModuleIds: ["crm"],
       messages: [{ role: "user", content: "Find something." }],
     });
 
@@ -183,7 +183,7 @@ describe("ChatbotService", () => {
     const out = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["crm"],
+      userModuleIds: ["crm"],
       messages: [{ role: "user", content: "Tell me about that account." }],
     });
 

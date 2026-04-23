@@ -93,7 +93,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       }),
     } as any;
 
-    const userModules = { findModulesForRoles: vi.fn(async () => ["crm"]) } as any;
+    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     // Scripted chatbot — turn 1 returns a reference; turn 2 asserts hydration was passed.
     let turn = 0;
@@ -144,7 +144,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const graphCatalog = {
       getEntityDetail: vi.fn((type: string) => ({
         type,
-        module: "crm",
+        moduleId: "11111111-1111-1111-1111-111111111111",
         description: "",
         fields: [],
         relationships: [],
@@ -326,7 +326,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       }),
     } as any;
 
-    const userModules = { findModulesForRoles: vi.fn(async () => ["crm"]) } as any;
+    const userModules = { findModuleIdsForRoles: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
     const chatbot = { run: vi.fn(async () => nextChatbotResponse) } as unknown as ChatbotService;
 
@@ -347,7 +347,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
     const graphCatalog = {
       getEntityDetail: vi.fn((type: string) => ({
         type,
-        module: "crm",
+        moduleId: "11111111-1111-1111-1111-111111111111",
         description: "",
         fields: [],
         relationships: [],

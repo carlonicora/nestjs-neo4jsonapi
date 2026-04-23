@@ -32,7 +32,7 @@ export class ResolveEntityTool {
         this.search.resolveEntity({
           text: input.text,
           companyId: ctx.companyId,
-          userModules: ctx.userModules,
+          userModuleIds: ctx.userModuleIds,
         }),
       recorder,
     );

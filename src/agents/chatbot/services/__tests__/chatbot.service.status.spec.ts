@@ -92,7 +92,7 @@ describe("ChatbotService — assistant:status socket events", () => {
       {
         companyId: "c1",
         userId: "u1",
-        userModules: ["crm"],
+        userModuleIds: ["crm"],
         messages: [{ role: "user", content: "Find Acme" }],
         assistantId: "a-123",
       } as any /* Task 14 adds assistantId to ChatbotRunParams */,
@@ -132,7 +132,7 @@ describe("ChatbotService — assistant:status socket events", () => {
     const result = await svc.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["crm"],
+      userModuleIds: ["crm"],
       messages: [{ role: "user", content: "Find Acme" }],
     } as any);
 

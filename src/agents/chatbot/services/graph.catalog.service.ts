@@ -17,14 +17,14 @@ function renderFieldKindMarker(kind: FieldKind | undefined): string {
 
 /**
  * Provided by the library bootstrap layer. Must return the full list of registered
- * entity descriptors (including their `module` identifier, which is derived from the
- * feature-module registration path).
+ * entity descriptors (including their `moduleId` — the stable UUID of the `(Module)`
+ * node in Neo4j, supplied by the feature module at `graphRegistry.register()` time).
  */
 export interface DescriptorSource {
   loadAll(): Array<{
     model: { type: string; nodeName: string; labelName: string };
     description?: string;
-    module: string;
+    moduleId: string;
     fields: Record<string, { type: string; description?: string; kind?: FieldKind }>;
     relationships: Record<
       string,
@@ -45,7 +45,8 @@ export interface DescriptorSource {
 export class GraphCatalogService implements OnApplicationBootstrap {
   private readonly logger = new Logger(GraphCatalogService.name);
   private entities = new Map<string, CatalogEntity>();
-  private renderedByModule = new Map<string, string>();
+  /** Keyed by `moduleId` (UUID), value is the pre-rendered text fragment. */
+  private renderedByModuleId = new Map<string, string>();
 
   constructor(private readonly source: DescriptorSource) {}
 
@@ -55,7 +56,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
 
   buildCatalog(): void {
     this.entities.clear();
-    this.renderedByModule.clear();
+    this.renderedByModuleId.clear();
 
     const descriptors = this.source.loadAll().filter((d) => typeof d.description === "string" && d.description.length);
 
@@ -89,7 +90,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
 
       this.entities.set(d.model.type, {
         type: d.model.type,
-        module: d.module,
+        moduleId: d.moduleId,
         description: d.description!,
         fields,
         relationships,
@@ -130,22 +131,22 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       }
     }
 
-    // Pass 3: render per-module text fragments.
-    const byModule = new Map<string, CatalogEntity[]>();
+    // Pass 3: render per-moduleId text fragments.
+    const byModuleId = new Map<string, CatalogEntity[]>();
     for (const e of this.entities.values()) {
-      const list = byModule.get(e.module) ?? [];
+      const list = byModuleId.get(e.moduleId) ?? [];
       list.push(e);
-      byModule.set(e.module, list);
+      byModuleId.set(e.moduleId, list);
     }
-    for (const [module, list] of byModule.entries()) {
-      this.renderedByModule.set(module, this.renderModule(module, list));
+    for (const [moduleId, list] of byModuleId.entries()) {
+      this.renderedByModuleId.set(moduleId, this.renderModule(moduleId, list));
     }
     this.logger.log(
-      `Graph catalog built: ${this.entities.size} entities, ${byModule.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, module: e.module })))}`,
+      `Graph catalog built: ${this.entities.size} entities, ${byModuleId.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, moduleId: e.moduleId })))}`,
     );
   }
 
-  private renderModule(module: string, list: CatalogEntity[]): string {
+  private renderModule(moduleId: string, list: CatalogEntity[]): string {
     const entityBlocks = list.map((e) => {
       const fieldLines = e.fields.length
         ? e.fields
@@ -172,37 +173,37 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       }
     }
     return [
-      `## Entities (${module})`,
+      `## Entities (module=${moduleId})`,
       entityBlocks.join("\n"),
       "",
-      `## Relationships (${module})`,
+      `## Relationships (module=${moduleId})`,
       relLines.join("\n"),
     ].join("\n");
   }
 
-  getMapFor(userModules: string[]): string {
-    if (!userModules.length) {
-      this.logger.warn(`getMapFor: empty userModules`);
+  getMapFor(userModuleIds: string[]): string {
+    if (!userModuleIds.length) {
+      this.logger.warn(`getMapFor: empty userModuleIds`);
       return "";
     }
-    const accessible = new Set(userModules);
-    const registeredModules = new Set(Array.from(this.entities.values()).map((e) => e.module));
-    const matchedModules = userModules.filter((m) => this.renderedByModule.has(m));
-    const unmatchedUserModules = userModules.filter((m) => !this.renderedByModule.has(m));
+    const accessible = new Set(userModuleIds);
+    const registeredModuleIds = new Set(Array.from(this.entities.values()).map((e) => e.moduleId));
+    const matchedModuleIds = userModuleIds.filter((m) => this.renderedByModuleId.has(m));
+    const unmatchedUserModuleIds = userModuleIds.filter((m) => !this.renderedByModuleId.has(m));
     this.logger.log(
-      `getMapFor: userModules=${JSON.stringify(userModules)} registeredModules=${JSON.stringify(Array.from(registeredModules))} matched=${JSON.stringify(matchedModules)} unmatched=${JSON.stringify(unmatchedUserModules)}`,
+      `getMapFor: userModuleIds=${JSON.stringify(userModuleIds)} registeredModuleIds=${JSON.stringify(Array.from(registeredModuleIds))} matched=${JSON.stringify(matchedModuleIds)} unmatched=${JSON.stringify(unmatchedUserModuleIds)}`,
     );
     const sections: string[] = [];
-    for (const m of userModules) {
-      const fragment = this.renderedByModule.get(m);
+    for (const m of userModuleIds) {
+      const fragment = this.renderedByModuleId.get(m);
       if (!fragment) continue;
       sections.push(this.filterCrossModule(fragment, accessible));
     }
     return sections.join("\n\n");
   }
 
-  private filterCrossModule(fragment: string, accessible: Set<string>): string {
-    // Relationship lines: "(srcType) --> (targetType)  [..]". Drop if targetType module inaccessible.
+  private filterCrossModule(fragment: string, accessibleModuleIds: Set<string>): string {
+    // Relationship lines: "(srcType) --> (targetType)  [..]". Drop if targetType's moduleId is inaccessible.
     const lines = fragment.split("\n");
     const out: string[] = [];
     for (const line of lines) {
@@ -213,7 +214,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       }
       const targetType = match[1];
       const target = this.entities.get(targetType);
-      if (target && accessible.has(target.module)) out.push(line);
+      if (target && accessibleModuleIds.has(target.moduleId)) out.push(line);
     }
     return out.join("\n");
   }
@@ -230,10 +231,10 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     return this.entities.has(type);
   }
 
-  getEntityDetail(type: string, userModules: string[]): CatalogEntity | null {
+  getEntityDetail(type: string, userModuleIds: string[]): CatalogEntity | null {
     const e = this.entities.get(type);
     if (!e) return null;
-    if (!userModules.includes(e.module)) return null;
+    if (!userModuleIds.includes(e.moduleId)) return null;
     return e;
   }
 }

@@ -4,7 +4,7 @@ function descriptor(opts: Partial<any>): any {
   return {
     model: { type: opts.type, nodeName: opts.type, labelName: opts.type },
     description: opts.description,
-    module: opts.module,
+    moduleId: opts.moduleId,
     fields: opts.fields ?? {},
     relationships: opts.relationships ?? {},
     chat: opts.chat,
@@ -14,7 +14,7 @@ function descriptor(opts: Partial<any>): any {
 describe("GraphCatalogService", () => {
   const account = descriptor({
     type: "accounts",
-    module: "crm",
+    moduleId: "11111111-1111-1111-1111-111111111111",
     description: "A customer or supplier.",
     fields: {
       name: { type: "string", description: "Display name." },
@@ -34,7 +34,7 @@ describe("GraphCatalogService", () => {
 
   const order = descriptor({
     type: "orders",
-    module: "sales",
+    moduleId: "22222222-2222-2222-2222-222222222222",
     description: "A sales order.",
     fields: { total: { type: "number", description: "Total value in EUR." } },
     relationships: {},
@@ -42,7 +42,7 @@ describe("GraphCatalogService", () => {
 
   const undescribedWidget = descriptor({
     type: "widgets",
-    module: "crm",
+    moduleId: "11111111-1111-1111-1111-111111111111",
     // no description → invisible
     fields: { name: { type: "string", description: "Display name." } },
   });
@@ -59,7 +59,7 @@ describe("GraphCatalogService", () => {
   it("materialises reverse relationships on the target entity", () => {
     const svc = new GraphCatalogService({ loadAll } as any);
     svc.buildCatalog();
-    const orderDetail = svc.getEntityDetail("orders", ["crm", "sales"]);
+    const orderDetail = svc.getEntityDetail("orders", ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]);
     expect(orderDetail?.relationships.map((r) => r.name)).toContain("account");
     const reverse = orderDetail!.relationships.find((r) => r.name === "account");
     expect(reverse?.isReverse).toBe(true);
@@ -70,14 +70,14 @@ describe("GraphCatalogService", () => {
   it("drops fields that have no description", () => {
     const svc = new GraphCatalogService({ loadAll } as any);
     svc.buildCatalog();
-    const accountDetail = svc.getEntityDetail("accounts", ["crm", "sales"]);
+    const accountDetail = svc.getEntityDetail("accounts", ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]);
     expect(accountDetail?.fields.map((f) => f.name)).toEqual(["name"]);
   });
 
   it("getMapFor only includes entities in the user's modules", () => {
     const svc = new GraphCatalogService({ loadAll } as any);
     svc.buildCatalog();
-    const map = svc.getMapFor(["crm"]);
+    const map = svc.getMapFor(["11111111-1111-1111-1111-111111111111"]);
     expect(map).toContain("accounts");
     expect(map).not.toContain("orders"); // sales module not enabled
   });
@@ -85,7 +85,7 @@ describe("GraphCatalogService", () => {
   it("getMapFor drops relationship lines whose target is in an inaccessible module", () => {
     const svc = new GraphCatalogService({ loadAll } as any);
     svc.buildCatalog();
-    const map = svc.getMapFor(["crm"]);
+    const map = svc.getMapFor(["11111111-1111-1111-1111-111111111111"]);
     // The account.orders relationship target is 'orders' (sales module); line must be dropped.
     expect(map).not.toContain("account.orders");
   });
@@ -93,7 +93,7 @@ describe("GraphCatalogService", () => {
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
       type: "a",
-      module: "m",
+      moduleId: "33333333-3333-3333-3333-333333333333",
       description: "A",
       fields: {},
       relationships: {
@@ -109,7 +109,7 @@ describe("GraphCatalogService", () => {
     });
     const c = descriptor({
       type: "c",
-      module: "m",
+      moduleId: "33333333-3333-3333-3333-333333333333",
       description: "C",
       fields: {},
       relationships: {
@@ -123,7 +123,7 @@ describe("GraphCatalogService", () => {
         },
       },
     });
-    const b = descriptor({ type: "b", module: "m", description: "B", fields: {}, relationships: {} });
+    const b = descriptor({ type: "b", moduleId: "33333333-3333-3333-3333-333333333333", description: "B", fields: {}, relationships: {} });
     const svc = new GraphCatalogService({ loadAll: () => [a, b, c] } as any);
     expect(() => svc.buildCatalog()).toThrow(/reverse relationship name/i);
   });

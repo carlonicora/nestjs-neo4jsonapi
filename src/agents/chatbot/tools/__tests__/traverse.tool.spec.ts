@@ -3,7 +3,7 @@ import { TraverseTool } from "../traverse.tool";
 describe("TraverseTool", () => {
   const accounts: any = {
     type: "accounts",
-    module: "crm",
+    moduleId: "11111111-1111-1111-1111-111111111111",
     description: "A",
     fields: [{ name: "name", type: "string", filterable: true, sortable: true }],
     relationships: [
@@ -24,7 +24,7 @@ describe("TraverseTool", () => {
   };
   const orders: any = {
     type: "orders",
-    module: "sales",
+    moduleId: "22222222-2222-2222-2222-222222222222",
     description: "An order",
     fields: [
       { name: "total", type: "number", filterable: true, sortable: true },
@@ -35,7 +35,7 @@ describe("TraverseTool", () => {
     labelName: "Order",
     summary: (d: any) => `#${d.id}`,
   };
-  const ctx = { companyId: "c", userId: "u", userModules: ["crm", "sales"] };
+  const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"] };
   const targetSvc = {
     findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
   };
@@ -104,7 +104,7 @@ describe("TraverseTool", () => {
   it("walks a reverse catalog relationship via the edge spec (no inverseKey required)", async () => {
     const accountsWithReverse: any = {
       type: "accounts",
-      module: "crm",
+      moduleId: "11111111-1111-1111-1111-111111111111",
       description: "A",
       fields: [],
       relationships: [
@@ -155,7 +155,7 @@ describe("TraverseTool", () => {
     // The Account descriptor does not declare "account" — edge-based lookup is required.
     const personsEntity: any = {
       type: "persons",
-      module: "crm",
+      moduleId: "11111111-1111-1111-1111-111111111111",
       description: "A person",
       fields: [],
       relationships: [

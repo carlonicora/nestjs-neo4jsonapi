@@ -103,8 +103,8 @@ describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse"
 
   beforeAll(() => {
     const registry = new GraphDescriptorRegistry();
-    registry.register({ descriptor: accountDescriptor(), module: "accounts" });
-    registry.register({ descriptor: orderDescriptor(), module: "orders" });
+    registry.register({ descriptor: accountDescriptor(), moduleId: "11111111-1111-1111-1111-111111111111" });
+    registry.register({ descriptor: orderDescriptor(), moduleId: "22222222-2222-2222-2222-222222222222" });
     const catalog = new GraphCatalogService(registry);
     catalog.buildCatalog();
     const serviceRegistry = makeFakeServiceRegistry();
@@ -167,7 +167,7 @@ describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse"
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["accounts", "orders"],
+      userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
       messages: [{ role: "user", content: "What is the last order from Acme?" }],
     });
     expect(out.answer).toContain("Acme Corp");
@@ -180,7 +180,7 @@ describe("Chatbot end-to-end (mocked LLM) — resolve → describe → traverse"
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModules: [],
+      userModuleIds: [],
       messages: [{ role: "user", content: "anything" }],
     });
     expect(out.answer).toMatch(/no enabled modules/i);
@@ -192,9 +192,9 @@ describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby an
 
   beforeAll(() => {
     const registry = new GraphDescriptorRegistry();
-    registry.register({ descriptor: accountDescriptor(), module: "accounts" });
-    registry.register({ descriptor: orderDescriptor(), module: "orders" });
-    registry.register({ descriptor: personDescriptor(), module: "persons" });
+    registry.register({ descriptor: accountDescriptor(), moduleId: "11111111-1111-1111-1111-111111111111" });
+    registry.register({ descriptor: orderDescriptor(), moduleId: "22222222-2222-2222-2222-222222222222" });
+    registry.register({ descriptor: personDescriptor(), moduleId: "33333333-3333-3333-3333-333333333333" });
     const catalog = new GraphCatalogService(registry);
     catalog.buildCatalog();
 
@@ -286,7 +286,7 @@ describe("Chatbot e2e regression — literal-phrase resolves to Account (Faby an
     const out = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["accounts", "orders", "persons"],
+      userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "33333333-3333-3333-3333-333333333333"],
       messages: [{ role: "user", content: "Show me the last order from Faby and Carlo" }],
     });
 
@@ -318,8 +318,8 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
 
   beforeAll(() => {
     const registry = new GraphDescriptorRegistry();
-    registry.register({ descriptor: accountDescriptor(), module: "accounts" });
-    registry.register({ descriptor: orderDescriptor(), module: "orders" });
+    registry.register({ descriptor: accountDescriptor(), moduleId: "11111111-1111-1111-1111-111111111111" });
+    registry.register({ descriptor: orderDescriptor(), moduleId: "22222222-2222-2222-2222-222222222222" });
     const catalog = new GraphCatalogService(registry);
     catalog.buildCatalog();
 
@@ -438,7 +438,7 @@ describe("Chatbot e2e regression — follow-up reuses resolved Account id via hy
     const result = await chatbot.run({
       companyId: "c1",
       userId: "u1",
-      userModules: ["accounts", "orders"],
+      userModuleIds: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"],
       messages: [
         { role: "system", content: hydrationSystemMessage },
         { role: "user", content: "What are the latest orders by Faby and Carlo?" },

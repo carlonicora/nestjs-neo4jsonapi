@@ -27,7 +27,7 @@ const outputSchema = z.object({
 export interface ChatbotRunParams {
   companyId: string;
   userId: string;
-  userModules: string[];
+  userModuleIds: string[];
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>;
   /** Optional — populated on subsequent turns; undefined on the first send of a new thread. */
   assistantId?: string;
@@ -51,11 +51,11 @@ export class ChatbotService {
 
   async run(params: ChatbotRunParams): Promise<ChatbotResponseInterface> {
     this.logger.log(
-      `run: userId=${params.userId} companyId=${params.companyId} userModules=${JSON.stringify(params.userModules)} messageCount=${params.messages.length}`,
+      `run: userId=${params.userId} companyId=${params.companyId} userModuleIds=${JSON.stringify(params.userModuleIds)} messageCount=${params.messages.length}`,
     );
 
-    if (!params.userModules.length) {
-      this.logger.warn(`run: empty userModules — returning clean refusal without invoking LLM`);
+    if (!params.userModuleIds.length) {
+      this.logger.warn(`run: empty userModuleIds — returning clean refusal without invoking LLM`);
       return {
         type: AgentMessageType.Assistant,
         answer: "You have no enabled modules with described data — there is nothing I can query.",
@@ -70,11 +70,11 @@ export class ChatbotService {
     const ctx = {
       companyId: params.companyId,
       userId: params.userId,
-      userModules: params.userModules,
+      userModuleIds: params.userModuleIds,
     };
     const recorder: ToolCallRecord[] = [];
 
-    const graphMap = this.graph.getMapFor(params.userModules);
+    const graphMap = this.graph.getMapFor(params.userModuleIds);
     this.logger.log(`run: graph map length=${graphMap.length} chars`);
     this.logger.debug(`run: graph map contents:\n${graphMap}`);
 

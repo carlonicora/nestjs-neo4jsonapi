@@ -7,7 +7,7 @@ describe("SearchEntitiesTool", () => {
       type === "accounts"
         ? {
             type: "accounts",
-            module: "crm",
+            moduleId: "11111111-1111-1111-1111-111111111111",
             description: "A",
             fields: [
               { name: "name", type: "string", filterable: true, sortable: true },
@@ -22,7 +22,7 @@ describe("SearchEntitiesTool", () => {
         : null,
   };
   const registryGet = vi.fn();
-  const ctx = { companyId: "c", userId: "u", userModules: ["crm"] };
+  const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] };
   const factory: any = {
     resolveEntity: (t: string) => catalog.getEntityDetail(t) ?? { error: "nope" },
     resolveService: (t: string) => registryGet(t),
