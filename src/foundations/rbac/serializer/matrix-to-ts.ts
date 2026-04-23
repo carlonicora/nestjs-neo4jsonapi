@@ -57,9 +57,7 @@ function renderTokens(tokens: PermToken[]): string {
 
   // perm.full collapse
   const isFull =
-    valid.length === 4 &&
-    valid.every((t) => t.scope === true) &&
-    new Set(valid.map((t) => t.action)).size === 4;
+    valid.length === 4 && valid.every((t) => t.scope === true) && new Set(valid.map((t) => t.action)).size === 4;
   if (isFull) return "perm.full";
 
   if (valid.length === 0) return "[]";

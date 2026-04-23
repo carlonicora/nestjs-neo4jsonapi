@@ -75,8 +75,7 @@ describe("RbacReconcilerService", () => {
         if (query.includes("RETURN m.id AS id, m.permissions AS permissions")) {
           return {
             records: Array.from(db.modules).map((id) => ({
-              get: (key: string) =>
-                key === "id" ? id : db.moduleDefaults[id] ?? null,
+              get: (key: string) => (key === "id" ? id : (db.moduleDefaults[id] ?? null)),
             })),
           };
         }
@@ -86,42 +85,38 @@ describe("RbacReconcilerService", () => {
           return {
             records: db.edges.map((e) => ({
               get: (key: string) =>
-                ({
-                  roleId: e.roleId,
-                  moduleId: e.moduleId,
-                  permissions: e.permissions,
-                } as Record<string, string>)[key],
+                (
+                  ({
+                    roleId: e.roleId,
+                    moduleId: e.moduleId,
+                    permissions: e.permissions,
+                  }) as Record<string, string>
+                )[key],
             })),
           };
         }
 
         return { records: [] };
       }),
-      executeInTransaction: vi
-        .fn()
-        .mockImplementation(async (queries: Array<{ query: string; params: any }>) => {
-          for (const { query, params } of queries) {
-            if (query.includes("SET m.permissions")) {
-              db.moduleDefaults[params.moduleId] = params.permissions;
-            } else if (query.includes("MERGE (role)-[permissions:HAS_PERMISSIONS]")) {
-              const existing = db.edges.find(
-                (e) => e.roleId === params.roleId && e.moduleId === params.moduleId,
-              );
-              if (existing) existing.permissions = params.permissions;
-              else
-                db.edges.push({
-                  roleId: params.roleId,
-                  moduleId: params.moduleId,
-                  permissions: params.permissions,
-                });
-            } else if (query.includes("DELETE p")) {
-              db.edges = db.edges.filter(
-                (e) => !(e.roleId === params.roleId && e.moduleId === params.moduleId),
-              );
-            }
+      executeInTransaction: vi.fn().mockImplementation(async (queries: Array<{ query: string; params: any }>) => {
+        for (const { query, params } of queries) {
+          if (query.includes("SET m.permissions")) {
+            db.moduleDefaults[params.moduleId] = params.permissions;
+          } else if (query.includes("MERGE (role)-[permissions:HAS_PERMISSIONS]")) {
+            const existing = db.edges.find((e) => e.roleId === params.roleId && e.moduleId === params.moduleId);
+            if (existing) existing.permissions = params.permissions;
+            else
+              db.edges.push({
+                roleId: params.roleId,
+                moduleId: params.moduleId,
+                permissions: params.permissions,
+              });
+          } else if (query.includes("DELETE p")) {
+            db.edges = db.edges.filter((e) => !(e.roleId === params.roleId && e.moduleId === params.moduleId));
           }
-          return [];
-        }),
+        }
+        return [];
+      }),
     };
 
     return { db, service };
@@ -130,11 +125,7 @@ describe("RbacReconcilerService", () => {
   it("applies full matrix to empty DB, skipping Administrator edges", async () => {
     const { db, service } = makeNeo4j({});
     const logger = createMockLogger();
-    const reconciler = new RbacReconcilerService(
-      service as any,
-      matrix,
-      logger as any,
-    );
+    const reconciler = new RbacReconcilerService(service as any, matrix, logger as any);
 
     await reconciler.onApplicationBootstrap();
 
@@ -172,18 +163,12 @@ describe("RbacReconcilerService", () => {
       existingRoleIds: [ADMIN_ID, WM_ID, "role-uuid-old"],
     });
     const logger = createMockLogger();
-    const reconciler = new RbacReconcilerService(
-      service as any,
-      matrix,
-      logger as any,
-    );
+    const reconciler = new RbacReconcilerService(service as any, matrix, logger as any);
 
     await reconciler.onApplicationBootstrap();
 
     expect(db.edges.find((e) => e.roleId === "role-uuid-old")).toBeUndefined();
-    expect(
-      db.edges.find((e) => e.roleId === WM_ID && e.moduleId === MOD_PART),
-    ).toBeDefined();
+    expect(db.edges.find((e) => e.roleId === WM_ID && e.moduleId === MOD_PART)).toBeDefined();
   });
 
   it("is a no-op when DB matches matrix", async () => {
@@ -225,11 +210,7 @@ describe("RbacReconcilerService", () => {
       },
     });
     const logger = createMockLogger();
-    const reconciler = new RbacReconcilerService(
-      service as any,
-      matrix,
-      logger as any,
-    );
+    const reconciler = new RbacReconcilerService(service as any, matrix, logger as any);
 
     await reconciler.onApplicationBootstrap();
 
@@ -241,11 +222,7 @@ describe("RbacReconcilerService", () => {
       existingRoleIds: [ADMIN_ID], // Warehouse-Manager missing
     });
     const logger = createMockLogger();
-    const reconciler = new RbacReconcilerService(
-      service as any,
-      matrix,
-      logger as any,
-    );
+    const reconciler = new RbacReconcilerService(service as any, matrix, logger as any);
 
     await expect(reconciler.onApplicationBootstrap()).rejects.toThrow(/Role.*missing/);
   });
@@ -253,18 +230,12 @@ describe("RbacReconcilerService", () => {
   it("skips reconcile when no matrix is configured", async () => {
     const { service } = makeNeo4j({});
     const logger = createMockLogger();
-    const reconciler = new RbacReconcilerService(
-      service as any,
-      null,
-      logger as any,
-    );
+    const reconciler = new RbacReconcilerService(service as any, null, logger as any);
 
     await reconciler.onApplicationBootstrap();
 
     expect(service.read).not.toHaveBeenCalled();
     expect(service.executeInTransaction).not.toHaveBeenCalled();
-    expect(logger.log).toHaveBeenCalledWith(
-      expect.stringContaining("no matrix configured"),
-    );
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining("no matrix configured"));
   });
 });

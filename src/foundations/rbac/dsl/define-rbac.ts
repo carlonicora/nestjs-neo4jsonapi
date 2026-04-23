@@ -13,8 +13,8 @@ import type { RbacMatrix } from "./types";
  *     [ModuleId.Part]: { default: [perm.read], ... },
  *   });
  */
-export function defineRbac<
-  ModuleUserPaths extends Record<string, readonly string[]>,
->(matrix: RbacMatrix<ModuleUserPaths>): RbacMatrix<ModuleUserPaths> {
+export function defineRbac<ModuleUserPaths extends Record<string, readonly string[]>>(
+  matrix: RbacMatrix<ModuleUserPaths>,
+): RbacMatrix<ModuleUserPaths> {
   return matrix;
 }

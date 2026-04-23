@@ -76,7 +76,8 @@ interface RbacMatrixPutBody {
 export class RbacDevController {
   constructor(
     @Optional() @Inject(RBAC_MATRIX_TOKEN) private readonly matrix: RbacMatrix | null,
-    @Optional() @Inject(MODULE_USER_PATHS_TOKEN)
+    @Optional()
+    @Inject(MODULE_USER_PATHS_TOKEN)
     private readonly moduleUserPaths: Record<string, readonly string[]> | null,
   ) {}
 

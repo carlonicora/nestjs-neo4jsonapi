@@ -8,12 +8,7 @@ export type { ModuleRelationshipPaths } from "./entities/module-paths.entity";
 // RBAC DSL — re-export explicitly to avoid `Action` collision with
 // `common/enums/action.ts` at the library root.
 export { perm, defineRbac, toPermissionsJson } from "./dsl";
-export {
-  resolveForRole,
-  resolveDefault,
-  iterateDeclaredEdges,
-  iterateDeclaredModules,
-} from "./dsl";
+export { resolveForRole, resolveDefault, iterateDeclaredEdges, iterateDeclaredModules } from "./dsl";
 export { ACTION_ORDER } from "./dsl";
 export type { PermToken, ModuleBlock, RbacMatrix, ResolvedPermissions } from "./dsl";
 // Note: the DSL's `Action` string-literal union is intentionally not re-exported

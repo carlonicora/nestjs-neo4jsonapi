@@ -4,12 +4,7 @@ import { AppLoggingService } from "../../../core/logging/services/logging.servic
 import { SystemRoles } from "../../../common/constants/system.roles";
 import { RBAC_MATRIX_TOKEN } from "../rbac.tokens";
 import type { RbacMatrix } from "../dsl/types";
-import {
-  iterateDeclaredEdges,
-  iterateDeclaredModules,
-  resolveDefault,
-  resolveForRole,
-} from "../dsl/resolver";
+import { iterateDeclaredEdges, iterateDeclaredModules, resolveDefault, resolveForRole } from "../dsl/resolver";
 
 const ADMINISTRATOR_ID: string = SystemRoles.Administrator;
 
@@ -93,19 +88,13 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
 
   private async findMissing(label: "Role" | "Module", ids: string[]): Promise<string[]> {
     if (ids.length === 0) return [];
-    const result = await this.neo4j.read(
-      `MATCH (n:${label}) WHERE n.id IN $ids RETURN n.id AS id`,
-      { ids },
-    );
+    const result = await this.neo4j.read(`MATCH (n:${label}) WHERE n.id IN $ids RETURN n.id AS id`, { ids });
     const found = new Set<string>(result.records.map((r: any) => r.get("id") as string));
     return ids.filter((id) => !found.has(id));
   }
 
   private async readActualState(): Promise<ActualState> {
-    const modulesResult = await this.neo4j.read(
-      `MATCH (m:Module) RETURN m.id AS id, m.permissions AS permissions`,
-      {},
-    );
+    const modulesResult = await this.neo4j.read(`MATCH (m:Module) RETURN m.id AS id, m.permissions AS permissions`, {});
     const edgesResult = await this.neo4j.read(
       `MATCH (r:Role)-[p:HAS_PERMISSIONS]->(m:Module) RETURN r.id AS roleId, m.id AS moduleId, p.permissions AS permissions`,
       {},
@@ -213,8 +202,7 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
       }
       // deleteEdge
       return {
-        query:
-          `MATCH (role:Role {id: $roleId})-[p:HAS_PERMISSIONS]->(module:Module {id: $moduleId}) DELETE p`,
+        query: `MATCH (role:Role {id: $roleId})-[p:HAS_PERMISSIONS]->(module:Module {id: $moduleId}) DELETE p`,
         params: op.params,
       };
     });

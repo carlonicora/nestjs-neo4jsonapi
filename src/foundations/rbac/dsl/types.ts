@@ -38,11 +38,10 @@ export type ModuleBlock<PathSet extends string = string> = {
  *      runtime.
  * Action names remain strictly typed.
  */
-export type RbacMatrix<
-  ModuleUserPaths extends Record<string, readonly string[]> = Record<string, readonly string[]>,
-> = {
-  [M in keyof ModuleUserPaths]?: ModuleBlock<string>;
-};
+export type RbacMatrix<ModuleUserPaths extends Record<string, readonly string[]> = Record<string, readonly string[]>> =
+  {
+    [M in keyof ModuleUserPaths]?: ModuleBlock<string>;
+  };
 
 /**
  * Effective permissions for a single role on a single module, after union of

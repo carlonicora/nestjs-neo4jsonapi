@@ -6,11 +6,7 @@ import { toPermissionsJson } from "./to-permissions-json";
  * Union of module defaults and role-specific tokens, serialised.
  * Returns undefined if the role or module is not declared.
  */
-export function resolveForRole(
-  matrix: RbacMatrix,
-  roleId: string,
-  moduleId: string,
-): string | undefined {
+export function resolveForRole(matrix: RbacMatrix, roleId: string, moduleId: string): string | undefined {
   const block = matrix[moduleId];
   if (!block) return undefined;
   const roleTokens = block[roleId];
@@ -31,9 +27,7 @@ export function resolveDefault(matrix: RbacMatrix, moduleId: string): string | u
 /**
  * Yield every (role, module) pair declared in the matrix.
  */
-export function* iterateDeclaredEdges(
-  matrix: RbacMatrix,
-): Iterable<{ roleId: string; moduleId: string }> {
+export function* iterateDeclaredEdges(matrix: RbacMatrix): Iterable<{ roleId: string; moduleId: string }> {
   for (const [moduleId, block] of Object.entries(matrix)) {
     if (!block) continue;
     for (const key of Object.keys(block)) {
