@@ -1,3 +1,15 @@
+## [1.64.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.63.0...v1.64.0) (2026-04-25)
+
+### 🚀 Features
+
+* **rbac:** declarative RBAC DSL, reconciler, and dev endpoints ([b28a9ad](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b28a9ad0cb327414dfa87613aa0fcbea3326afc6))
+* **rbac:** expose dumpRbacMatrix() + bootstrap docs ([fd1d356](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fd1d356676c79018776491175a7a28092dd1c562))
+
+### 💎 Styles
+
+* **rbac:** prettier reformat ([aff9dce](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/aff9dcebd9664e7d7375d1895b7d129a5e7f3ec2))
+* **rbac:** prettier reformat dumpRbacMatrix ([8e7a134](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8e7a134eddb2975b4dc566e5ad8798928b25cbc8))
+
 ## [1.63.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.62.7...v1.63.0) (2026-04-23)
 
 ### 🚀 Features
