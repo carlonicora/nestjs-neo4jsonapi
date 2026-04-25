@@ -127,9 +127,7 @@ export interface DumpRbacMatrixResult {
 export async function dumpRbacMatrix(opts: DumpRbacMatrixOptions): Promise<DumpRbacMatrixResult> {
   const session = opts.driver.session(opts.database ? { database: opts.database } : undefined);
   try {
-    const modulesResult = await session.run(
-      `MATCH (m:Module) RETURN m.id AS id, m.permissions AS permissions`,
-    );
+    const modulesResult = await session.run(`MATCH (m:Module) RETURN m.id AS id, m.permissions AS permissions`);
     const edgesResult = await session.run(
       `MATCH (r:Role)-[p:HAS_PERMISSIONS]->(m:Module) RETURN r.id AS roleId, m.id AS moduleId, p.permissions AS permissions`,
     );
@@ -148,10 +146,7 @@ export async function dumpRbacMatrix(opts: DumpRbacMatrixOptions): Promise<DumpR
       const moduleId = rec.get("moduleId");
       const permissions: string | null = rec.get("permissions");
       if (!matrix[moduleId]) matrix[moduleId] = { default: [] };
-      matrix[moduleId]![roleId] = deltaFromDefault(
-        deserialize(permissions),
-        matrix[moduleId]!.default,
-      );
+      matrix[moduleId]![roleId] = deltaFromDefault(deserialize(permissions), matrix[moduleId]!.default);
     }
 
     // Administrator gets perm.full on every declared module — matches the
@@ -170,9 +165,7 @@ export async function dumpRbacMatrix(opts: DumpRbacMatrixOptions): Promise<DumpR
       moduleNames: opts.moduleNames,
     });
 
-    const outPath = path.isAbsolute(opts.outputPath)
-      ? opts.outputPath
-      : path.resolve(process.cwd(), opts.outputPath);
+    const outPath = path.isAbsolute(opts.outputPath) ? opts.outputPath : path.resolve(process.cwd(), opts.outputPath);
 
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, source);
@@ -197,7 +190,5 @@ function deserialize(raw: string | null): PermToken[] {
 function deltaFromDefault(effective: PermToken[], defaults: PermToken[]): PermToken[] {
   // Naive shallow comparison — sufficient because tokens are flat
   // {action, scope} records.
-  return effective.filter(
-    (e) => !defaults.some((d) => d.action === e.action && d.scope === e.scope),
-  );
+  return effective.filter((e) => !defaults.some((d) => d.action === e.action && d.scope === e.scope));
 }
