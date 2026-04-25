@@ -11,6 +11,12 @@ export { perm, defineRbac, toPermissionsJson } from "./dsl";
 export { resolveForRole, resolveDefault, iterateDeclaredEdges, iterateDeclaredModules } from "./dsl";
 export { ACTION_ORDER } from "./dsl";
 export type { PermToken, ModuleBlock, RbacMatrix, ResolvedPermissions } from "./dsl";
+
+// Developer-only one-shot tool to read the current DB state and emit a
+// declarative `permissions.ts` source file. CLI use only — see the JSDoc
+// on `dumpRbacMatrix` for the canonical script template.
+export { dumpRbacMatrix } from "./dump";
+export type { DumpRbacMatrixOptions, DumpRbacMatrixResult } from "./dump";
 // Note: the DSL's `Action` string-literal union is intentionally not re-exported
 // from the library root; `common/enums/action.ts` already exports an `Action`
 // enum with the same string values. Deep consumers can import it via
