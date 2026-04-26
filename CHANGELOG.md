@@ -1,3 +1,9 @@
+## [1.65.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.65.0...v1.65.1) (2026-04-26)
+
+### 🐛 Bug Fixes
+
+* update prompts and service tests for clarity and functionality ([2f8b23a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2f8b23ad56884c7ff7601d17f0aeabd8a394c03e))
+
 ## [1.65.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.64.0...v1.65.0) (2026-04-26)
 
 ### 🚀 Features
