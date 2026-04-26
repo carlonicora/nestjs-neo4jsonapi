@@ -14,6 +14,8 @@ export interface UnifiedTrace {
     status: GraphNodeOutput["status"];
     errorMessage?: string;
     tokens: { input: number; output: number };
+    /** Per tool-call summary of bridge fanouts (tool name, source/entity type, total records inlined). */
+    materialisedBridges?: { tool: string; type: string; count: number }[];
   };
   contextualiser?: {
     hops: number;

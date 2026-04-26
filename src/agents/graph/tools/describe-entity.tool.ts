@@ -43,6 +43,7 @@ export class DescribeEntityTool {
             cardinality: r.cardinality,
             description: r.description,
           })),
+          ...(entity.bridge ? { bridge: { materialiseTo: [...entity.bridge.materialiseTo] } } : {}),
         };
       },
       recorder,

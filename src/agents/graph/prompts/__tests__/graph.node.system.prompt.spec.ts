@@ -185,6 +185,41 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(outputBlock).toMatch(/markdown bullet list|enumeration/i);
   });
 
+  it("teaches the LLM about bridge entities", () => {
+    const out = renderGraphNodeSystemPrompt("- demo — anything");
+    expect(out).toContain("bridge → ");
+    expect(out).toContain("__materialised");
+    expect(out).toMatch(/module access/i);
+  });
+
+  it("instructs the LLM to use ids from previous-turn nested records directly", () => {
+    const out = renderGraphNodeSystemPrompt("- demo — anything");
+    expect(out).toMatch(/nested relationships also carry/i);
+    expect(out).toMatch(/those ids are addressable/i);
+    expect(out).toMatch(/do not call `?resolve_entity`? for a record whose id you already have/i);
+  });
+
+  it("forbids the LLM from asking the user a clarifying question", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).toMatch(/Never ask the user a clarifying question/i);
+    expect(out).toMatch(/After `?resolve_entity`? returns at least one usable candidate/i);
+  });
+
+  it("instructs the LLM to follow the recommendation field from resolve_entity when present", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    const resolveBlock = out.substring(out.indexOf("resolve_entity"));
+    expect(resolveBlock).toMatch(/optional `?recommendation`?/i);
+    expect(resolveBlock).toMatch(/If the response carries `?recommendation`?, follow it/i);
+  });
+
+  it("treats a literal-summary match as the answer without further disambiguation", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    const resolveBlock = out.substring(out.indexOf("resolve_entity"));
+    expect(resolveBlock).toMatch(/equals the user's literal phrase/i);
+    expect(resolveBlock).toMatch(/never split the phrase into multiple `?resolve_entity`? calls/i);
+    expect(resolveBlock).toMatch(/Do not refuse the user when at least one usable candidate exists/i);
+  });
+
   it("does not contain predecessor's dead-end patches", () => {
     const out = renderGraphNodeSystemPrompt("any");
     expect(out).not.toContain("Important — `fields`");

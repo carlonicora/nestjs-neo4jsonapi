@@ -39,7 +39,7 @@ describe("ReadEntityTool", () => {
   };
 
   it("reads entity by id and returns described fields only", async () => {
-    const tool = new ReadEntityTool(factory);
+    const tool = new ReadEntityTool(factory, {} as any, {} as any);
     const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -47,10 +47,76 @@ describe("ReadEntityTool", () => {
   });
 
   it("rejects include for undescribed relationship", async () => {
-    const tool = new ReadEntityTool(factory);
+    const tool = new ReadEntityTool(factory, {} as any, {} as any);
     const out: any = await tool.invoke({ type: "accounts", id: "a1", include: ["ghost"] }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
     expect(out.error).toMatch(/ghost/);
+  });
+
+  it("materialises a bridge entity into a flat payload with __materialised", async () => {
+    const moduleId = "11111111-1111-1111-1111-111111111111";
+    const items = {
+      type: "items",
+      moduleId,
+      description: "An item.",
+      fields: [{ name: "name", type: "string", description: "n", filterable: true, sortable: true }],
+      relationships: [],
+      nodeName: "item",
+      labelName: "Item",
+    };
+    const bomEntries = {
+      type: "bom-entries",
+      moduleId,
+      description: "Junction record.",
+      fields: [{ name: "position", type: "number", description: "row", filterable: true, sortable: true }],
+      relationships: [
+        {
+          name: "item",
+          sourceType: "bom-entries",
+          targetType: "items",
+          cardinality: "one",
+          description: "x",
+          cypherDirection: "out",
+          cypherLabel: "FOR_ITEM",
+          isReverse: false,
+        },
+      ],
+      nodeName: "bomEntry",
+      labelName: "BomEntry",
+      bridge: { materialiseTo: ["item"] },
+      summary: (d: any) => `row #${d.position ?? "?"}`,
+    };
+
+    const bridgeFactory: any = {
+      resolveEntity: (t: string) => (t === "bom-entries" ? bomEntries : { error: "nope" }),
+      resolveService: () => ({ findRecordById: vi.fn(async () => ({ id: "be-1", position: 1 })) }),
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+    const bridgeCatalog: any = {
+      getEntityDetail: (t: string, _m: string[]) => (t === "items" ? items : null),
+    };
+    const bridgeRegistry: any = {
+      get: (t: string) =>
+        t === "items"
+          ? { findRelatedRecordsByEdge: vi.fn(async () => [{ id: "it-1", name: "InstallationTypeA" }]) }
+          : undefined,
+    };
+
+    const tool = new ReadEntityTool(bridgeFactory, bridgeCatalog, bridgeRegistry);
+    const out: any = await tool.invoke({ type: "bom-entries", id: "be-1" }, { ...ctx, userModuleIds: [moduleId] }, [
+      { tool: "describe_entity", input: { type: "bom-entries" }, durationMs: 0 },
+    ]);
+
+    expect(out.id).toBe("be-1");
+    expect(out.type).toBe("bom-entries");
+    expect(out.summary).toBe("row #1");
+    expect(out.fields).toEqual({ position: 1 });
+    expect(out.item).toMatchObject({ id: "it-1", type: "items" });
+    expect(out.__materialised).toEqual(["item"]);
   });
 });

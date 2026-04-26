@@ -38,6 +38,7 @@ export interface DescriptorSource {
       }
     >;
     chat?: { summary?: (d: any) => string; textSearchFields?: string[] };
+    bridge?: { materialiseTo: string[] };
   }>;
 }
 
@@ -98,6 +99,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         textSearchFields: d.chat?.textSearchFields,
         nodeName: d.model.nodeName,
         labelName: d.model.labelName,
+        ...(d.bridge ? { bridge: { materialiseTo: [...d.bridge.materialiseTo] } } : {}),
       });
     }
 
@@ -141,8 +143,38 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     for (const [moduleId, list] of byModuleId.entries()) {
       this.renderedByModuleId.set(moduleId, this.renderModule(moduleId, list));
     }
+    // Pass 4: validate bridges against the resolved catalog (cross-type checks).
+    // Soft validation: a missing relationship name is a misconfiguration we should
+    // surface loudly (throw), but a missing TARGET type just means the target
+    // descriptor lacks a top-level description and was filtered out. Drop that
+    // name from materialiseTo with a warn, so boot proceeds and the bridge still
+    // fanouts to the relationships whose targets ARE in the catalog.
+    for (const e of this.entities.values()) {
+      if (!e.bridge) continue;
+      const reachable: string[] = [];
+      for (const relName of e.bridge.materialiseTo) {
+        const rel = e.relationships.find((r) => r.name === relName);
+        if (!rel) {
+          throw new Error(
+            `Bridge "${e.type}" lists materialiseTo "${relName}", but no such relationship exists on it.`,
+          );
+        }
+        const target = this.entities.get(rel.targetType);
+        if (!target) {
+          this.logger.warn(
+            `Bridge "${e.type}" materialises to "${relName}" → "${rel.targetType}", ` +
+              `but that target type is missing from the catalog (likely a missing description on the target descriptor). ` +
+              `Dropping "${relName}" from materialiseTo at runtime.`,
+          );
+          continue;
+        }
+        reachable.push(relName);
+      }
+      e.bridge = { materialiseTo: reachable };
+    }
+
     this.logger.log(
-      `Graph catalog built: ${this.entities.size} entities, ${byModuleId.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, moduleId: e.moduleId })))}`,
+      `Graph catalog built: ${this.entities.size} entities, ${byModuleId.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, moduleId: e.moduleId, isBridge: !!e.bridge })))}`,
     );
   }
 
@@ -232,9 +264,24 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     const lines: string[] = [];
     for (const e of this.entities.values()) {
       if (!accessible.has(e.moduleId)) continue;
-      lines.push(`- ${e.type} — ${e.description}`);
+      const marker = e.bridge ? ` (bridge → ${e.bridge.materialiseTo.join(", ")})` : "";
+      lines.push(`- ${e.type} — ${e.description}${marker}`);
     }
     return lines.join("\n");
+  }
+
+  /**
+   * Returns the accessible entity-type names for a user's modules. Used by the
+   * tool layer to compute "Did you mean" suggestions for unknown types.
+   */
+  getAccessibleTypes(userModuleIds: string[]): string[] {
+    if (!userModuleIds.length) return [];
+    const accessible = new Set(userModuleIds);
+    const out: string[] = [];
+    for (const e of this.entities.values()) {
+      if (accessible.has(e.moduleId)) out.push(e.type);
+    }
+    return out;
   }
 
   getAllChatEnabledEntities(): CatalogEntity[] {

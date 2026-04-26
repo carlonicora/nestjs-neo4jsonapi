@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { DescriptorSource } from "./graph.catalog.service";
 
 interface RegisteredEntry {
@@ -8,7 +8,9 @@ interface RegisteredEntry {
 
 @Injectable()
 export class GraphDescriptorRegistry implements DescriptorSource {
+  private readonly logger = new Logger(GraphDescriptorRegistry.name);
   private readonly entries: RegisteredEntry[] = [];
+  private logged = false;
 
   /**
    * Register a feature-module's descriptor with the chatbot graph catalog.
@@ -23,13 +25,29 @@ export class GraphDescriptorRegistry implements DescriptorSource {
   }
 
   loadAll(): any[] {
-    return this.entries.map((e) => ({
+    const out = this.entries.map((e) => ({
       model: e.descriptor.model,
       description: e.descriptor.description,
       moduleId: e.moduleId,
       fields: e.descriptor.fields ?? {},
       relationships: e.descriptor.relationships ?? {},
       chat: e.descriptor.chat,
+      bridge: e.descriptor.bridge,
     }));
+    if (!this.logged) {
+      this.logged = true;
+      this.logger.log(
+        `loadAll: ${out.length} descriptors: ` +
+          JSON.stringify(
+            out.map((d) => ({
+              type: d.model.type,
+              moduleId: d.moduleId,
+              hasDescription: !!d.description,
+              hasBridge: !!d.bridge,
+            })),
+          ),
+      );
+    }
+    return out;
   }
 }

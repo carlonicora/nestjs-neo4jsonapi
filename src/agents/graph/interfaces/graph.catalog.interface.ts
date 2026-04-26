@@ -49,4 +49,6 @@ export interface CatalogEntity {
   nodeName: string;
   /** Neo4j label name for tool-layer query construction. */
   labelName: string;
+  /** When set, the tool layer auto-materialises these relationships one hop on every read. */
+  bridge?: { materialiseTo: string[] };
 }

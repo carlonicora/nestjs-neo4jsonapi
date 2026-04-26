@@ -297,12 +297,25 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
   }
 
   private traceFromOutput(out: GraphNodeOutput) {
+    const materialisedBridges: { tool: string; type: string; count: number }[] = [];
+    for (const c of out.toolCalls) {
+      if (!c.materialised?.length) continue;
+      const total = c.materialised.reduce((acc, m) => acc + m.count, 0);
+      const inputType =
+        typeof (c.input as any).type === "string"
+          ? ((c.input as any).type as string)
+          : typeof (c.input as any).fromType === "string"
+            ? ((c.input as any).fromType as string)
+            : "?";
+      materialisedBridges.push({ tool: c.tool, type: inputType, count: total });
+    }
     return {
       toolCalls: out.toolCalls,
       entitiesDiscovered: out.entities.length,
       status: out.status,
       errorMessage: out.errorMessage,
       tokens: out.tokens,
+      ...(materialisedBridges.length ? { materialisedBridges } : {}),
     };
   }
 

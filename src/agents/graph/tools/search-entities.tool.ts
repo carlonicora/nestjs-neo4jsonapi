@@ -2,9 +2,12 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
-import { CatalogField } from "../interfaces/graph.catalog.interface";
+import { CatalogEntity, CatalogField } from "../interfaces/graph.catalog.interface";
 import { GraphSearchService } from "../services/graph.search.service";
+import { GraphCatalogService } from "../services/graph.catalog.service";
 import { buildToolFieldsOutput } from "../services/field-formatting";
+import { materialiseBridge } from "../services/materialise-bridge";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { coerceFilters, coerceSort } from "./traverse.tool";
 
 const inputSchema = z
@@ -31,6 +34,8 @@ export class SearchEntitiesTool {
     // Injected for DI compatibility with GraphModule; no longer used at runtime
     // now that name resolution lives in resolve_entity.
     private readonly _search: GraphSearchService,
+    private readonly catalog: GraphCatalogService,
+    private readonly registry: EntityServiceRegistry,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -46,8 +51,9 @@ export class SearchEntitiesTool {
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
     const filters = coerceFilters(input.filters);
     const sort = coerceSort(input.sort);
+    const localMaterialised: Array<{ relName: string; count: number }> = [];
 
-    return this.factory.capture(
+    const result = await this.factory.capture(
       { tool: "search_entities", input: { ...input, filters, sort } },
       async () => {
         const described = recorder.some(
@@ -103,20 +109,46 @@ export class SearchEntitiesTool {
           limit,
         });
 
-        return this.buildOutput(entity, records);
+        return await this.buildOutput(entity, records, ctx, localMaterialised);
       },
       recorder,
     );
+
+    if (localMaterialised.length && recorder.length) {
+      recorder[recorder.length - 1].materialised = localMaterialised;
+    }
+    return result;
   }
 
-  private buildOutput(entity: any, records: any[]) {
-    const items = records.map((r) => ({
+  private async buildOutput(
+    entity: CatalogEntity,
+    records: any[],
+    ctx: UserContext,
+    localMaterialised: Array<{ relName: string; count: number }>,
+  ) {
+    const baseItems = records.map((r) => ({
       id: r.id,
       type: entity.type,
       summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
       fields: buildToolFieldsOutput(entity.fields, r),
-      score: null,
+      score: null as number | null,
     }));
+
+    if (!entity.bridge) return { matchMode: "none", items: baseItems };
+
+    // Bridge fanout: each item is materialised. The `score` field is preserved
+    // on the envelope so the search_entities response shape doesn't drift.
+    const items = await Promise.all(
+      baseItems.map(({ score, ...item }) =>
+        materialiseBridge({
+          bridge: entity,
+          record: { id: item.id, fields: item.fields },
+          ctx,
+          deps: { catalog: this.catalog, registry: this.registry },
+          onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
+        }).then((m) => ({ ...m, score })),
+      ),
+    );
     return { matchMode: "none", items };
   }
 }

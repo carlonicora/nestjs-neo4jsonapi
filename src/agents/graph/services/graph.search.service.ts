@@ -39,6 +39,47 @@ export interface ResolveEntityParams {
 export interface ResolveEntityResult {
   matchMode: MatchMode;
   items: RankedCandidate[];
+  /**
+   * When the merged candidate list satisfies a deterministic disambiguation
+   * rule (literal-summary match, or score-margin dominance), surface a short
+   * actionable hint here. The graph node prompt instructs the LLM to follow
+   * this when present, since LLMs apply rules in the tool result more
+   * reliably than rules they have to re-derive from the system prompt.
+   */
+  recommendation?: string;
+}
+
+/**
+ * Decide whether the merged candidate list satisfies a deterministic
+ * disambiguation rule worth surfacing to the LLM. Returns the recommendation
+ * text or `undefined` when the candidates are genuinely ambiguous.
+ *
+ * Two rules, in priority order:
+ *   1. Literal-summary match: items[0].summary equals the user's literal
+ *      phrase (case-insensitive). Holds even with a smaller margin because
+ *      the name match is unambiguous on its own.
+ *   2. Score-margin dominance: items[0] beats items[1] by ≥ 0.15 on
+ *      exact/fuzzy tiers, ≥ 0.08 on semantic.
+ */
+export function buildResolveRecommendation(
+  items: RankedCandidate[],
+  userText: string,
+  matchMode: MatchMode,
+): string | undefined {
+  if (items.length === 0) return undefined;
+  const top = items[0];
+  const next = items[1];
+  const margin = next ? top.score - next.score : Number.POSITIVE_INFINITY;
+  const literalMatch = top.summary.trim().toLowerCase() === userText.trim().toLowerCase();
+  const dominantMargin = margin >= (matchMode === "semantic" ? 0.08 : 0.15);
+
+  if (literalMatch && (items.length === 1 || dominantMargin)) {
+    return `Use items[0] (id=${top.id}, type=${top.type}): its summary equals the user's literal phrase and dominates by score margin. Do not ask the user to disambiguate.`;
+  }
+  if (dominantMargin) {
+    return `Use items[0] (id=${top.id}, type=${top.type}): it dominates the next candidate by the documented score margin (${margin.toFixed(2)}).`;
+  }
+  return undefined;
 }
 
 /** Internal shape returned by tier primitives; has everything resolveEntity needs. */
@@ -104,7 +145,9 @@ export class GraphSearchService {
       const merged: RankedCandidate[] = buckets.flat();
       if (merged.length) {
         merged.sort((a, b) => b.score - a.score);
-        return { matchMode: label, items: merged.slice(0, GRAPH_RESOLVE_MAX_RESULTS) };
+        const items = merged.slice(0, GRAPH_RESOLVE_MAX_RESULTS);
+        const recommendation = buildResolveRecommendation(items, params.text, label);
+        return recommendation ? { matchMode: label, items, recommendation } : { matchMode: label, items };
       }
     }
 
@@ -129,6 +172,20 @@ export class GraphSearchService {
               : GRAPH_EXACT_MAX_RESULTS,
       };
       const inner = tier === "semantic" ? await this.tierSemantic(runParams) : await this.tierFulltext(runParams, tier);
+
+      // Per-tier diagnostic so a future dump can distinguish "fulltext index
+      // missing" from "lucene parse failure" from "genuine zero hits". Today
+      // these were silently merged into a single matchMode=none response.
+      const indexName =
+        tier === "semantic"
+          ? this.indexNames.vectorIndexName(entity.labelName)
+          : this.indexNames.fulltextIndexName(entity.labelName);
+      const existing = await this.getExistingIndexes();
+      const indexExists = existing.size === 0 || existing.has(indexName);
+      this.logger.debug(
+        `resolve_entity tier=${tier} type=${entity.type} indexExists=${indexExists} items=${inner.items.length}`,
+      );
+
       return inner.items.map((i) => ({
         type: entity.type,
         id: i.id,

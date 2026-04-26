@@ -427,6 +427,19 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       const focusRecords = await this.loadFocusRecords(focusCapped, userModuleIds);
       const backgroundStubs = await this.loadBackgroundStubs(backgroundCapped, userModuleIds);
 
+      // Diagnostic trace: in the dump it lets us see exactly which entities were
+      // handed to the LLM as focus context (and whether any were bridges, since
+      // bridge ids in focus are addressable directly without resolve_entity).
+      const focusTrace = focusRecords.map((r: any) => ({
+        type: r.type,
+        id: r.id,
+        isBridge: !!this.graphCatalog.getEntityDetail(r.type, userModuleIds)?.bridge,
+      }));
+      const backgroundTrace = backgroundStubs.map((s) => ({ type: s.type, id: s.id }));
+      this.assistantLogger.log(
+        `hydration: focus=${JSON.stringify(focusTrace)} background=${JSON.stringify(backgroundTrace)}`,
+      );
+
       if (focusRecords.length === 0 && backgroundStubs.length === 0) return null;
 
       const sections: string[] = ["## Entities already in this conversation", ""];
@@ -475,13 +488,59 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       try {
         const record: any = await svc.findRecordById({ id: ref.id });
         if (!record) continue;
-        out.push({ ...record, type: ref.type });
+        out.push({ ...this.stripFocusRecord(record), type: ref.type });
       } catch {
         // Deleted or RBAC-denied: drop silently.
         continue;
       }
     }
     return out;
+  }
+
+  /**
+   * Strip a focus record's nested relationship objects down to {id, type, summary}
+   * stubs. The hydration design rule (see bridge-entities spec) is that the focus
+   * block carries the entity's own scalar fields plus id-stubs for relationships —
+   * NOT a full one-hop expansion that includes the related node's own collections
+   * (which are mapper-initialised to `[]` and look like authoritative empty data
+   * to the LLM, causing it to skip the traverse and answer "empty" wrongly).
+   */
+  private stripFocusRecord(record: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (value === null || value === undefined) {
+        result[key] = value;
+        continue;
+      }
+      if (Array.isArray(value)) {
+        result[key] = value.map((v) => this.stubRelatedRecord(v));
+        continue;
+      }
+      if (typeof value === "object" && this.looksLikeRelatedRecord(value)) {
+        result[key] = this.stubRelatedRecord(value);
+        continue;
+      }
+      result[key] = value;
+    }
+    return result;
+  }
+
+  private looksLikeRelatedRecord(v: unknown): boolean {
+    if (!v || typeof v !== "object") return false;
+    const obj = v as Record<string, unknown>;
+    return typeof obj.id === "string";
+  }
+
+  private stubRelatedRecord(v: unknown): unknown {
+    if (!this.looksLikeRelatedRecord(v)) return v;
+    const obj = v as Record<string, unknown>;
+    const summarySource = obj.name ?? obj.number ?? obj.title ?? obj.id;
+    const summary = typeof summarySource === "string" ? summarySource : String(summarySource ?? "");
+    return {
+      id: obj.id,
+      type: obj.type ?? null,
+      summary,
+    };
   }
 
   private async loadBackgroundStubs(

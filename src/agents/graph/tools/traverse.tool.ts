@@ -3,6 +3,9 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { buildToolFieldsOutput } from "../services/field-formatting";
+import { materialiseBridge } from "../services/materialise-bridge";
+import { GraphCatalogService } from "../services/graph.catalog.service";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -109,7 +112,11 @@ const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
 
 @Injectable()
 export class TraverseTool {
-  constructor(private readonly factory: ToolFactory) {}
+  constructor(
+    private readonly factory: ToolFactory,
+    private readonly catalog: GraphCatalogService,
+    private readonly registry: EntityServiceRegistry,
+  ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
     return new DynamicStructuredTool({
@@ -123,8 +130,9 @@ export class TraverseTool {
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
     const filters = coerceFilters(input.filters);
     const sort = coerceSort(input.sort);
+    const localMaterialised: Array<{ relName: string; count: number }> = [];
 
-    return this.factory.capture(
+    const result = await this.factory.capture(
       { tool: "traverse", input: { ...input, filters, sort } },
       async () => {
         const sourceDescribed = recorder.some(
@@ -200,16 +208,37 @@ export class TraverseTool {
           limit,
         });
 
-        return {
-          items: records.map((r) => ({
-            id: r.id,
-            type: target.type,
-            summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
-            fields: buildToolFieldsOutput(target.fields, r),
-          })),
-        };
+        const baseItems = records.map((r) => ({
+          id: r.id,
+          type: target.type,
+          summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
+          fields: buildToolFieldsOutput(target.fields, r),
+        }));
+
+        if (!target.bridge) {
+          return { items: baseItems };
+        }
+
+        // Bridge fanout: each item gets its `materialiseTo` relationships inlined.
+        const items = await Promise.all(
+          baseItems.map((item) =>
+            materialiseBridge({
+              bridge: target,
+              record: { id: item.id, fields: item.fields },
+              ctx,
+              deps: { catalog: this.catalog, registry: this.registry },
+              onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
+            }),
+          ),
+        );
+        return { items };
       },
       recorder,
     );
+
+    if (localMaterialised.length && recorder.length) {
+      recorder[recorder.length - 1].materialised = localMaterialised;
+    }
+    return result;
   }
 }

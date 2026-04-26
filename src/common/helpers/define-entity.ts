@@ -194,7 +194,27 @@ export function defineEntity<T>() {
       isCompanyScoped = true,
       description,
       chat,
+      bridge,
     } = schema;
+
+    if (bridge) {
+      if (!Array.isArray(bridge.materialiseTo) || bridge.materialiseTo.length === 0) {
+        throw new Error(`defineEntity(${type}): bridge.materialiseTo must be a non-empty string[].`);
+      }
+      if (!description || description.length === 0) {
+        throw new Error(
+          `defineEntity(${type}): a bridge entity requires a top-level "description"; without it the type is invisible to the catalog and the bridge has no effect.`,
+        );
+      }
+      const relKeys = new Set(Object.keys(relationships ?? {}));
+      for (const name of bridge.materialiseTo) {
+        if (!relKeys.has(name)) {
+          throw new Error(
+            `defineEntity(${type}): bridge.materialiseTo references "${name}", which is not a relationship on this descriptor. Known relationships: [${Array.from(relKeys).join(", ") || "none"}].`,
+          );
+        }
+      }
+    }
 
     // Extract field information
     const fieldEntries = Object.entries(fields) as [string, FieldDef][];
@@ -348,6 +368,7 @@ export function defineEntity<T>() {
 
       description,
       chat,
+      bridge,
     };
 
     // Auto-generate serialiser if not provided

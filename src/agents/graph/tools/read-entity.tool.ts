@@ -3,6 +3,9 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { buildToolFieldsOutput } from "../services/field-formatting";
+import { materialiseBridge } from "../services/materialise-bridge";
+import { GraphCatalogService } from "../services/graph.catalog.service";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 
 const inputSchema = z.object({
   type: z.string(),
@@ -12,7 +15,11 @@ const inputSchema = z.object({
 
 @Injectable()
 export class ReadEntityTool {
-  constructor(private readonly factory: ToolFactory) {}
+  constructor(
+    private readonly factory: ToolFactory,
+    private readonly catalog: GraphCatalogService,
+    private readonly registry: EntityServiceRegistry,
+  ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
     return new DynamicStructuredTool({
@@ -24,7 +31,8 @@ export class ReadEntityTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
-    return this.factory.capture(
+    const localMaterialised: Array<{ relName: string; count: number }> = [];
+    const result = await this.factory.capture(
       { tool: "read_entity", input },
       async () => {
         const described = recorder.some(
@@ -84,14 +92,37 @@ export class ReadEntityTool {
           }
         }
 
+        const baseFields = buildToolFieldsOutput(entity.fields, record);
+
+        // Bridge fanout: if this entity is a bridge, replace the bare payload with
+        // the materialised one. The existing `include` block (if any) stacks on top
+        // as a sibling `related` map — it carries summary refs, while the bridge
+        // fanout fills full records at the top level. They do not collide.
+        if (entity.bridge) {
+          const materialised = await materialiseBridge({
+            bridge: entity,
+            record: { id: record.id, fields: baseFields },
+            ctx,
+            deps: { catalog: this.catalog, registry: this.registry },
+            onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
+          });
+          return input.include?.length ? { ...materialised, related } : materialised;
+        }
+
         return {
           id: record.id,
           type: entity.type,
-          fields: buildToolFieldsOutput(entity.fields, record),
+          fields: baseFields,
           ...(input.include?.length ? { related } : {}),
         };
       },
       recorder,
     );
+
+    // Attach materialised summary to the recorder entry that capture() just pushed.
+    if (localMaterialised.length && recorder.length) {
+      recorder[recorder.length - 1].materialised = localMaterialised;
+    }
+    return result;
   }
 }

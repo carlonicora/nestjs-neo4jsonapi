@@ -14,6 +14,33 @@ export interface ToolCallRecord {
   input: Record<string, unknown>;
   durationMs: number;
   error?: string;
+  /** When set, the tool result included one or more bridge fanouts. */
+  materialised?: Array<{ relName: string; count: number }>;
+}
+
+function normaliseTypeName(input: string): string {
+  // Strip a trailing "es" or "s" so "boms" / "bom" / "bomes" all collapse to "bom".
+  return input.replace(/(es|s)$/i, "").toLowerCase();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const prev: number[] = new Array(n + 1);
+  const curr: number[] = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= n; j++) prev[j] = curr[j];
+  }
+  return prev[n];
 }
 
 @Injectable()
@@ -25,10 +52,41 @@ export class ToolFactory {
     private readonly registry: EntityServiceRegistry,
   ) {}
 
-  resolveEntity(type: string, ctx: UserContext): CatalogEntity | { error: string } {
+  resolveEntity(type: string, ctx: UserContext): CatalogEntity | { error: string; suggestion?: string } {
     const detail = this.catalog.getEntityDetail(type, ctx.userModuleIds);
-    if (!detail) return { error: `Entity type "${type}" is not available.` };
-    return detail;
+    if (detail) return detail;
+
+    const accessible = this.catalog.getAccessibleTypes(ctx.userModuleIds);
+    const suggestion = this.findClosest(type, accessible);
+
+    if (suggestion) {
+      this.logger.log(`tool.factory: unknownType="${type}" suggested="${suggestion}"`);
+      return {
+        error: `Entity type "${type}" is not available. Did you mean "${suggestion}"?`,
+        suggestion,
+      };
+    }
+
+    this.logger.log(
+      `tool.factory: unknownType="${type}" no suggestion. accessibleTypes=${JSON.stringify(accessible)}`,
+    );
+
+    return {
+      error: accessible.length
+        ? `Entity type "${type}" is not available. Available types include: ${accessible.slice(0, 5).join(", ")}.`
+        : `Entity type "${type}" is not available.`,
+    };
+  }
+
+  private findClosest(input: string, candidates: string[]): string | null {
+    if (!candidates.length) return null;
+    const normInput = normaliseTypeName(input);
+    let best: { type: string; distance: number } | null = null;
+    for (const c of candidates) {
+      const d = levenshtein(normInput, normaliseTypeName(c));
+      if (best === null || d < best.distance) best = { type: c, distance: d };
+    }
+    return best && best.distance <= 2 ? best.type : null;
   }
 
   resolveService(type: string) {

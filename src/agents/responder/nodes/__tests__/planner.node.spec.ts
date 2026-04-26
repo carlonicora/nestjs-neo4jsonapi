@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { Test } from "@nestjs/testing";
-import { PlannerNodeService } from "../planner.node.service";
+import { PlannerNodeService, PLANNER_SYSTEM_PROMPT } from "../planner.node.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
 
@@ -103,5 +103,17 @@ describe("PlannerNodeService", () => {
     const promptBlob = JSON.stringify(callArgs);
     expect(promptBlob).toContain("projects");
     expect(promptBlob).toContain("abc-123");
+  });
+
+  describe("PLANNER_SYSTEM_PROMPT", () => {
+    it("forbids paraphrasing proper-noun-looking spans in refinedQuestion", () => {
+      expect(PLANNER_SYSTEM_PROMPT).toMatch(/proper-noun-looking span/i);
+      expect(PLANNER_SYSTEM_PROMPT).toMatch(/verbatim/i);
+      expect(PLANNER_SYSTEM_PROMPT).toMatch(/Do not change "and" to "or"/i);
+    });
+
+    it("explains why paraphrasing breaks the lookup", () => {
+      expect(PLANNER_SYSTEM_PROMPT).toMatch(/uses `?refinedQuestion`? as the user's literal phrase/i);
+    });
   });
 });

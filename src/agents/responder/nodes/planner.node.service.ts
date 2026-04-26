@@ -19,7 +19,7 @@ const PlannerInputSchema = z.object({
   contentScope: z.object({ contentType: z.string(), contentId: z.string() }).nullable(),
 });
 
-const PLANNER_SYSTEM_PROMPT = `
+export const PLANNER_SYSTEM_PROMPT = `
 You decide which retrieval branches a unified assistant should run for a single user turn.
 
 You have three branches to choose from (subset, not exclusive):
@@ -31,6 +31,8 @@ Decide based on the user's question, prior chat history, the available entity ca
 You MUST select at least one branch. Prefer multiple branches in parallel when the question could plausibly draw on more than one.
 
 Refine the question into a single canonical form that all chosen branches can use.
+
+When you produce \`refinedQuestion\`, preserve every proper-noun-looking span in the user's question verbatim. Do not change "and" to "or" (or vice versa) inside what could be a name; do not collapse, expand, split, or pluralise names. The graph branch uses \`refinedQuestion\` as the user's literal phrase to look up records — paraphrasing breaks the lookup. If you must restructure the question, do so around the names, not over them.
 
 Return STRICTLY: { runGraph, runContextualiser, runDrift, reasoning, refinedQuestion }.
 `;

@@ -146,6 +146,65 @@ describe("GraphCatalogService", () => {
     });
   });
 
+  describe("bridge support", () => {
+    const moduleId = "00000000-0000-0000-0000-000000000001";
+
+    function makeSource(extra: Partial<{ withInvalidBridgeTarget: boolean }> = {}) {
+      return {
+        loadAll() {
+          const items = {
+            model: { type: "items", nodeName: "item", labelName: "Item" },
+            description: "An item.",
+            moduleId,
+            fields: { name: { type: "string", description: "Name." } },
+            relationships: {},
+          };
+          const bomEntries = {
+            model: { type: "bom-entries", nodeName: "bomEntry", labelName: "BomEntry" },
+            description: "Junction record.",
+            moduleId,
+            fields: { position: { type: "number", description: "Row order." } },
+            relationships: {
+              item: {
+                model: {
+                  type: extra.withInvalidBridgeTarget ? "missing" : "items",
+                  nodeName: "item",
+                  labelName: "Item",
+                },
+                direction: "out" as const,
+                relationship: "FOR_ITEM",
+                cardinality: "one" as const,
+                description: "Item this entry refers to.",
+              },
+            },
+            bridge: { materialiseTo: ["item"] },
+          };
+          return [items, bomEntries];
+        },
+      } as any;
+    }
+
+    it("carries bridge onto the CatalogEntity", () => {
+      const svc = new GraphCatalogService(makeSource());
+      svc.buildCatalog();
+      const entry = (svc as any).entities.get("bom-entries");
+      expect(entry.bridge).toEqual({ materialiseTo: ["item"] });
+    });
+
+    it("renders the (bridge → …) marker in getTypeIndexFor", () => {
+      const svc = new GraphCatalogService(makeSource());
+      svc.buildCatalog();
+      const text = svc.getTypeIndexFor([moduleId]);
+      expect(text).toMatch(/- bom-entries — Junction record\. \(bridge → item\)/);
+      expect(text).toMatch(/- items — An item\.$/m);
+    });
+
+    it("throws when a bridge target type is missing from the catalog", () => {
+      const svc = new GraphCatalogService(makeSource({ withInvalidBridgeTarget: true }));
+      expect(() => svc.buildCatalog()).toThrow(/missing from the catalog/);
+    });
+  });
+
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
       type: "a",
