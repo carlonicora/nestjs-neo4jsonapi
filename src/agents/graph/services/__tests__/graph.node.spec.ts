@@ -247,7 +247,10 @@ describe("GraphNodeService", () => {
         tokenUsage: { input: 10, output: 5 },
       })
       .mockImplementationOnce(async () => {
+        // Retry response: model now actually loads data via read_entity, so the
+        // data-loading retry guard is satisfied and no further call is made.
         capturedRecorder.push({ tool: "resolve_entity", input: { text: "Acme" }, durationMs: 1 });
+        capturedRecorder.push({ tool: "read_entity", input: { type: "accounts", id: "acc-1" }, durationMs: 2 });
         return {
           answer: "Acme is an account.",
           entities: [{ type: "accounts", id: "acc-1", reason: "matched" }],
@@ -297,11 +300,21 @@ describe("GraphNodeService", () => {
           tokenUsage: { input: 50, output: 20 },
         };
       })
-      .mockResolvedValueOnce({
-        answer: "Found one open order, ORD-2026-0001.",
-        entities: [{ type: "orders", id: "o-1", reason: "open order on the account" }],
-        stop: true,
-        tokenUsage: { input: 80, output: 30 },
+      .mockImplementationOnce(async () => {
+        // Retry response: model corrected the filter and successfully searched.
+        // Pushing a successful data-loading tool record keeps the data-loading
+        // retry guard satisfied so no further call is made.
+        capturedRecorder.push({
+          tool: "search_entities",
+          input: { type: "orders", filters: [{ field: "status", op: "eq", value: "open" }] },
+          durationMs: 5,
+        });
+        return {
+          answer: "Found one open order, ORD-2026-0001.",
+          entities: [{ type: "orders", id: "o-1", reason: "open order on the account" }],
+          stop: true,
+          tokenUsage: { input: 80, output: 30 },
+        };
       });
 
     const out = await service.execute({
@@ -322,6 +335,60 @@ describe("GraphNodeService", () => {
     expect(secondCallArgs.systemPrompts[1]).toContain("search_entities");
     expect(secondCallArgs.systemPrompts[1]).toContain("unknown field 'bogus'");
     expect(out.graphContext?.answer).toBe("Found one open order, ORD-2026-0001.");
+  });
+
+  it("data-loading retry fires when no data tool was called even if the response returned an entity", async () => {
+    let capturedRecorder: any[] = [];
+    (resolveTool.build as unknown as Mock).mockImplementation((_ctx, recorder) => {
+      capturedRecorder = recorder;
+      return fakeTool("resolve_entity");
+    });
+
+    (llm.call as unknown as Mock)
+      .mockImplementationOnce(async () => {
+        // Model called resolve_entity (NOT a data-loading tool), then echoed
+        // the candidate back as an "entity" — exactly the failure mode where
+        // entitiesReturnedBefore > 0 used to short-circuit the retry guard.
+        capturedRecorder.push({ tool: "resolve_entity", input: { text: "Faby and Carlo" }, durationMs: 1 });
+        return {
+          answer:
+            "I cannot fulfill this request. The system returned 'Faby and Carlo' as an account, but I need to know if you are looking for work orders assigned to a person, or if 'Faby and Carlo' is the name of an account. Please clarify.",
+          entities: [
+            {
+              type: "accounts",
+              id: "acc-1",
+              reason: "candidate from resolve_entity",
+              fields: { name: "Faby and Carlo" },
+            },
+          ],
+          stop: true,
+          tokenUsage: { input: 50, output: 20 },
+        };
+      })
+      .mockResolvedValueOnce({
+        answer: "Two open work orders found for Faby and Carlo.",
+        entities: [{ type: "work-orders", id: "wo-1", reason: "open work order", fields: { number: "WO-2026-0001" } }],
+        stop: true,
+        tokenUsage: { input: 90, output: 40 },
+      });
+
+    const out = await service.execute({
+      state: {
+        companyId: "co-1",
+        userId: "user-1",
+        userModuleIds: ["mod-1"],
+        rawQuestion: "Show me all open work orders for Faby and Carlo.",
+        question: "Show all open work orders assigned to Faby or Carlo.",
+        chatHistory: [],
+      } as any,
+    });
+
+    expect((llm.call as unknown as Mock).mock.calls.length).toBe(2);
+    const secondCallArgs = (llm.call as unknown as Mock).mock.calls[1][0];
+    expect(secondCallArgs.systemPrompts.length).toBe(2);
+    expect(secondCallArgs.systemPrompts[1]).toMatch(/never successfully loaded data/i);
+    expect(secondCallArgs.systemPrompts[1]).toMatch(/read_entity|search_entities|traverse/);
+    expect(out.graphContext?.answer).toBe("Two open work orders found for Faby and Carlo.");
   });
 
   it("honesty rewrite: still zero tool calls after retry → answer replaced with explicit failure, no third LLM call", async () => {

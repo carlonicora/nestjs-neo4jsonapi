@@ -197,10 +197,9 @@ If the error lists valid fields or relationships, pick one of those and retry no
       // Detected structurally — no regex on answer text.
       const dataLoadingTools = new Set(["read_entity", "search_entities", "traverse"]);
       const dataToolCallsBefore = recorder.filter((c) => dataLoadingTools.has(c.tool) && !c.error).length;
-      const entitiesReturnedBefore = Array.isArray(response.entities) ? response.entities.length : 0;
-      if (recorder.length > 0 && dataToolCallsBefore === 0 && entitiesReturnedBefore === 0) {
+      if (recorder.length > 0 && dataToolCallsBefore === 0) {
         const triedTools = Array.from(new Set(recorder.map((c) => c.tool))).join(", ");
-        const dataLoadingRetry = `Your previous attempt called ${triedTools} but never successfully loaded data with read_entity, search_entities, or traverse, and returned no entities. The user asked a data question; you must answer it.
+        const dataLoadingRetry = `Your previous attempt called ${triedTools} but never successfully loaded data with read_entity, search_entities, or traverse. The user asked a data question; you must answer it.
 
 Steps to take now:
   1. Re-read your previous resolve_entity results. Pick the most plausible candidate by name match — an item whose name equals the user's literal phrase is the right pick.
@@ -211,7 +210,7 @@ Steps to take now:
 
 Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         this.logger.warn(
-          `graph node: ${recorder.length} tool call(s), 0 successful data loads, 0 entities — retrying with data-loading instruction`,
+          `graph node: ${recorder.length} tool call(s), 0 successful data loads — retrying with data-loading instruction`,
         );
         response = await this.llm.call({
           systemPrompts: [systemPrompt, dataLoadingRetry],
