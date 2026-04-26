@@ -67,9 +67,7 @@ export class ToolFactory {
       };
     }
 
-    this.logger.log(
-      `tool.factory: unknownType="${type}" no suggestion. accessibleTypes=${JSON.stringify(accessible)}`,
-    );
+    this.logger.log(`tool.factory: unknownType="${type}" no suggestion. accessibleTypes=${JSON.stringify(accessible)}`);
 
     return {
       error: accessible.length

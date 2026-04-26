@@ -294,7 +294,14 @@ describe("buildResolveRecommendation", () => {
     rows.map(([summary, score], i) => ({ type: "accounts", id: `id-${i}`, summary, score }));
 
   it("recommends items[0] when its summary equals the user phrase and dominates by margin", () => {
-    const out = buildResolveRecommendation(items([["Faby and Carlo", 2.29], ["Carlo MBP", 1.0]]), "Faby and Carlo", "exact");
+    const out = buildResolveRecommendation(
+      items([
+        ["Faby and Carlo", 2.29],
+        ["Carlo MBP", 1.0],
+      ]),
+      "Faby and Carlo",
+      "exact",
+    );
     expect(out).toMatch(/items\[0\]/);
     expect(out).toMatch(/literal phrase/);
     expect(out).toMatch(/Do not ask the user/);
@@ -306,19 +313,36 @@ describe("buildResolveRecommendation", () => {
   });
 
   it("recommends items[0] on score-margin dominance even without a literal-summary match", () => {
-    const out = buildResolveRecommendation(items([["Acme Holdings", 2.0], ["Other Co", 1.0]]), "acme", "fuzzy");
+    const out = buildResolveRecommendation(
+      items([
+        ["Acme Holdings", 2.0],
+        ["Other Co", 1.0],
+      ]),
+      "acme",
+      "fuzzy",
+    );
     expect(out).toMatch(/dominates the next candidate/);
     expect(out).toMatch(/1\.00/); // margin formatted
   });
 
   it("returns undefined when neither rule fires (ambiguous candidates)", () => {
-    const out = buildResolveRecommendation(items([["Carlo MBP", 1.0], ["Carlo Nicora", 1.0]]), "Carlo", "exact");
+    const out = buildResolveRecommendation(
+      items([
+        ["Carlo MBP", 1.0],
+        ["Carlo Nicora", 1.0],
+      ]),
+      "Carlo",
+      "exact",
+    );
     expect(out).toBeUndefined();
   });
 
   it("uses the looser semantic margin (0.08) when matchMode is semantic", () => {
     // Margin = 0.10 — below 0.15 (exact/fuzzy threshold) but above 0.08 (semantic threshold).
-    const tight = items([["X", 1.0], ["Y", 0.9]]);
+    const tight = items([
+      ["X", 1.0],
+      ["Y", 0.9],
+    ]);
     expect(buildResolveRecommendation(tight, "anything", "fuzzy")).toBeUndefined();
     expect(buildResolveRecommendation(tight, "anything", "semantic")).toMatch(/dominates/);
   });
@@ -328,7 +352,14 @@ describe("buildResolveRecommendation", () => {
   });
 
   it("is case-insensitive when comparing literal summaries to the user phrase", () => {
-    const out = buildResolveRecommendation(items([["FABY AND CARLO", 2.29], ["x", 1]]), "faby and carlo", "exact");
+    const out = buildResolveRecommendation(
+      items([
+        ["FABY AND CARLO", 2.29],
+        ["x", 1],
+      ]),
+      "faby and carlo",
+      "exact",
+    );
     expect(out).toMatch(/literal phrase/);
   });
 });
