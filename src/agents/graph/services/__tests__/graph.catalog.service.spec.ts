@@ -199,9 +199,11 @@ describe("GraphCatalogService", () => {
       expect(text).toMatch(/- items — An item\.$/m);
     });
 
-    it("throws when a bridge target type is missing from the catalog", () => {
+    it("drops the materialiseTo entry when a bridge target type is missing from the catalog", () => {
       const svc = new GraphCatalogService(makeSource({ withInvalidBridgeTarget: true }));
-      expect(() => svc.buildCatalog()).toThrow(/missing from the catalog/);
+      expect(() => svc.buildCatalog()).not.toThrow();
+      const entry = (svc as any).entities.get("bom-entries");
+      expect(entry.bridge).toEqual({ materialiseTo: [] });
     });
   });
 

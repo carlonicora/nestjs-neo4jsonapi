@@ -120,6 +120,7 @@ describe("AssistantService", () => {
     const clsService = {
       get: (key: string) => (key === "userId" ? "u" : key === "companyId" ? "c" : undefined),
       has: () => true,
+      set: vi.fn(),
     } as any;
 
     const graphCatalog = {

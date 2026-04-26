@@ -125,8 +125,8 @@ describe("renderGraphNodeSystemPrompt", () => {
   it("Tools section instructs describe-first + error recovery (do not stop on first error)", () => {
     const out = renderGraphNodeSystemPrompt("any");
     const toolsBlock = out.substring(out.indexOf("## Tools"), out.indexOf("## Output"));
-    expect(toolsBlock).toMatch(/before calling `?read_entity`?, `?search_entities`?, or `?traverse`?/i);
-    expect(toolsBlock).toMatch(/the error response includes the type's schema/i);
+    expect(toolsBlock).toMatch(/before searching, reading, or traversing/i);
+    expect(toolsBlock).toMatch(/lists valid fields or relationships/i);
     expect(toolsBlock).toMatch(/never stop on the first error/i);
   });
 
@@ -178,10 +178,10 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(resolveBlock).toMatch(/0\.08/);
   });
 
-  it("Output section instructs the LLM to write a complete prose answer for the user's question", () => {
+  it("Output section instructs the LLM to write a concise prose answer for the user's question", () => {
     const out = renderGraphNodeSystemPrompt("any");
     const outputBlock = out.substring(out.indexOf("## Output"));
-    expect(outputBlock).toMatch(/`?answer`?[^]*complete[^]*prose reply/i);
+    expect(outputBlock).toMatch(/`?answer`?[^]*concise[^]*prose reply/i);
     expect(outputBlock).toMatch(/markdown bullet list|enumeration/i);
   });
 

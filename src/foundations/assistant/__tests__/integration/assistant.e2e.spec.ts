@@ -196,6 +196,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     const clsService = {
       get: (key: string) => (key === "userId" ? "u-1" : key === "companyId" ? "c" : undefined),
       has: () => true,
+      set: vi.fn(),
     } as any;
 
     const graphCatalog = {
@@ -436,6 +437,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
     const clsService = {
       get: (key: string) => (key === "userId" ? "u-1" : key === "companyId" ? "c" : undefined),
       has: () => true,
+      set: vi.fn(),
     } as any;
 
     const graphCatalog = {
