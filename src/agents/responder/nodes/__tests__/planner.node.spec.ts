@@ -6,13 +6,15 @@ import { GraphCatalogService } from "../../../graph/services/graph.catalog.servi
 
 describe("PlannerNodeService", () => {
   const llm = { call: vi.fn() } as unknown as LLMService;
-  const catalog = { getMapFor: vi.fn().mockReturnValue("ENTITY CATALOG TEXT") } as unknown as GraphCatalogService;
+  const catalog = {
+    getTypeIndexFor: vi.fn().mockReturnValue("- accounts — A customer."),
+  } as unknown as GraphCatalogService;
 
   let service: PlannerNodeService;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    (catalog.getMapFor as unknown as Mock).mockReturnValue("ENTITY CATALOG TEXT");
+    (catalog.getTypeIndexFor as unknown as Mock).mockReturnValue("- accounts — A customer.");
     const moduleRef = await Test.createTestingModule({
       providers: [
         PlannerNodeService,

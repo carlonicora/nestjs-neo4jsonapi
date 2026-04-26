@@ -219,6 +219,24 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     return out.join("\n");
   }
 
+  /**
+   * Returns a flat type index for the given user modules: one line per accessible
+   * entity, in the form `- <type> — <description>`. No fields, no relationships.
+   *
+   * Used as the lightweight planner catalog and as the slim graph-node prompt body
+   * (the LLM fetches per-type schema on demand via `describe_entity`).
+   */
+  getTypeIndexFor(userModuleIds: string[]): string {
+    if (!userModuleIds.length) return "";
+    const accessible = new Set(userModuleIds);
+    const lines: string[] = [];
+    for (const e of this.entities.values()) {
+      if (!accessible.has(e.moduleId)) continue;
+      lines.push(`- ${e.type} — ${e.description}`);
+    }
+    return lines.join("\n");
+  }
+
   getAllChatEnabledEntities(): CatalogEntity[] {
     const out: CatalogEntity[] = [];
     for (const e of this.entities.values()) {

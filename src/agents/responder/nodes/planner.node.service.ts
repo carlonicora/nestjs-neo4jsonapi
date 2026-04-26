@@ -46,7 +46,7 @@ export class PlannerNodeService {
 
   async execute(params: { state: ResponderContextState }): Promise<Partial<ResponderContextState>> {
     const state = params.state;
-    const catalogText = this.catalog.getMapFor(state.userModuleIds ?? []);
+    const catalogText = this.catalog.getTypeIndexFor(state.userModuleIds ?? []);
     const history = (state.chatHistory ?? []).map((m) => ({ role: String(m.type), content: m.content }));
     const contentScope =
       state.contentId && state.contentType ? { contentType: state.contentType, contentId: state.contentId } : null;

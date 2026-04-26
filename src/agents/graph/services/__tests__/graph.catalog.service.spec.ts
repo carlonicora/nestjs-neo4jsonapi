@@ -96,6 +96,56 @@ describe("GraphCatalogService", () => {
     expect(map).not.toContain("account.orders");
   });
 
+  describe("getTypeIndexFor", () => {
+    it("returns one line per accessible entity in the form `- type — description`", () => {
+      const svc = new GraphCatalogService({ loadAll } as any);
+      svc.buildCatalog();
+      const index = svc.getTypeIndexFor([
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+      ]);
+      const lines = index.split("\n").filter(Boolean);
+      expect(lines).toContain("- accounts — A customer or supplier.");
+      expect(lines).toContain("- orders — A sales order.");
+    });
+
+    it("filters by userModuleIds (entities in inaccessible modules are dropped)", () => {
+      const svc = new GraphCatalogService({ loadAll } as any);
+      svc.buildCatalog();
+      const index = svc.getTypeIndexFor(["11111111-1111-1111-1111-111111111111"]);
+      expect(index).toContain("accounts");
+      expect(index).not.toContain("orders");
+    });
+
+    it("excludes fields and relationship descriptions (the index is types-only)", () => {
+      const svc = new GraphCatalogService({ loadAll } as any);
+      svc.buildCatalog();
+      const index = svc.getTypeIndexFor([
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+      ]);
+      // Field names from the descriptors must not appear.
+      expect(index).not.toContain("name");
+      expect(index).not.toContain("total");
+      // Relationship lines from getMapFor must not appear.
+      expect(index).not.toContain("-->");
+      expect(index).not.toContain("PLACED");
+    });
+
+    it("returns an empty string when userModuleIds is empty", () => {
+      const svc = new GraphCatalogService({ loadAll } as any);
+      svc.buildCatalog();
+      expect(svc.getTypeIndexFor([])).toBe("");
+    });
+
+    it("ignores entities without a description (same filter as buildCatalog)", () => {
+      const svc = new GraphCatalogService({ loadAll } as any);
+      svc.buildCatalog();
+      const index = svc.getTypeIndexFor(["11111111-1111-1111-1111-111111111111"]);
+      expect(index).not.toContain("widgets");
+    });
+  });
+
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
       type: "a",
