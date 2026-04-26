@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { ChatbotModule } from "./chatbot/chatbot.module";
+import { GraphModule } from "./graph/graph.module";
 import { CommunityDetectorModule } from "./community.detector/community.detector.module";
 import { CommunitySummariserModule } from "./community.summariser/community.summariser.module";
 import { ContextualiserModule } from "./contextualiser/contextualiser.module";
@@ -15,7 +15,7 @@ import { SummariserModule } from "./summariser/summariser.module";
  */
 @Module({
   imports: [
-    ChatbotModule,
+    GraphModule,
     CommunityDetectorModule,
     CommunitySummariserModule,
     ContextualiserModule,
@@ -25,7 +25,7 @@ import { SummariserModule } from "./summariser/summariser.module";
     SummariserModule,
   ],
   exports: [
-    ChatbotModule,
+    GraphModule,
     CommunityDetectorModule,
     CommunitySummariserModule,
     ContextualiserModule,

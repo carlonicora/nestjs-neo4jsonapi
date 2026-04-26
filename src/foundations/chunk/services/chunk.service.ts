@@ -16,8 +16,7 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { AtomicFactService } from "../../atomicfact/services/atomicfact.service";
-import { Chunk } from "../../chunk/entities/chunk.entity";
-import { ChunkModel } from "../../chunk/entities/chunk.model";
+import { Chunk, ChunkDescriptor } from "../../chunk/entities/chunk.entity";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
 import { KeyConceptRepository } from "../../keyconcept/repositories/keyconcept.repository";
 import { KeyConceptService } from "../../keyconcept/services/keyconcept.service";
@@ -140,7 +139,7 @@ export class ChunkService {
       chunkId: params.chunkId,
     });
 
-    return this.builder.buildSingle(ChunkModel, chunk);
+    return this.builder.buildSingle(ChunkDescriptor.model, chunk);
   }
 
   async createChunks(params: { id: string; nodeType: string; data: Document[] }): Promise<Chunk[]> {

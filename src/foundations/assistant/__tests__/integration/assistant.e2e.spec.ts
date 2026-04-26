@@ -1,12 +1,25 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantService } from "../../services/assistant.service";
-import { ChatbotService, ChatbotRunParams } from "../../../../agents/chatbot/services/chatbot.service";
+import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
+
+const EMPTY_CONTEXT_RESPONSE = {
+  type: AgentMessageType.Assistant,
+  rationalPlan: "",
+  annotations: "",
+  notebook: [],
+  processedElements: { chunks: [], keyConcepts: [], atomicFacts: [] },
+  sources: [],
+  requests: [],
+  tokens: { input: 0, output: 0 },
+};
+
+type ResponderRunParams = any;
 
 /**
  * Scripted-LLM integration: exercises the full AssistantService lifecycle
- * (create → append) against in-memory repo + in-memory chatbot stubs. Asserts
- * the key behavioural contract: a 2nd turn gets a reference-memory system
- * message derived from the 1st turn's references.
+ * (create → append) against in-memory repo + in-memory responder stubs.
+ * Asserts the key behavioural contract: a 2nd turn gets a reference-memory
+ * system message derived from the 1st turn's references.
  *
  * Standard CRUD (find / findById / patch / delete) is provided by
  * AbstractService and exercised through the framework's test suite — this
@@ -16,13 +29,13 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
   let service: AssistantService;
   let assistantStorage: Map<string, any>;
   let messageStorage: Map<string, any>;
-  let chatbotRunParams: ChatbotRunParams[];
+  let responderRunParams: ResponderRunParams[];
   let assistantMessageRepo: any;
 
   beforeAll(() => {
     assistantStorage = new Map();
     messageStorage = new Map();
-    chatbotRunParams = [];
+    responderRunParams = [];
 
     const assistantRepo = {
       create: vi.fn(async (params: any) => {
@@ -61,6 +74,8 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
 
     assistantMessageRepo = {
       linkReferences: vi.fn(async () => {}),
+      linkCitations: vi.fn(async () => {}),
+      setTrace: vi.fn(async () => {}),
       getNextPosition: vi.fn(async (params: any) => {
         const existing = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.assistantId);
         return existing.length;
@@ -95,37 +110,79 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
 
     const userModules = { findModuleIdsForUser: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
-    // Scripted chatbot — turn 1 returns a reference; turn 2 asserts hydration was passed.
+    // Scripted responder — turn 1 returns a reference; turn 2 asserts hydration was passed.
     let turn = 0;
-    const chatbot = {
-      run: vi.fn(async (params: ChatbotRunParams) => {
-        chatbotRunParams.push({
+    const responder = {
+      run: vi.fn(async (params: ResponderRunParams) => {
+        responderRunParams.push({
           ...params,
-          messages: params.messages.map((m) => ({ ...m })),
+          messages: params.messages.map((m: any) => ({ ...m })),
         });
         turn += 1;
         if (turn === 1) {
           return {
-            type: "assistant",
-            answer: "Acme is the top account.",
-            references: [{ type: "accounts", id: "acc-1", reason: "primary match" }],
-            needsClarification: false,
-            suggestedQuestions: [],
-            tokens: { input: 100, output: 50 },
-            toolCalls: [{ tool: "search_entities", input: {}, durationMs: 10 }],
+            type: AgentMessageType.Assistant,
+            context: EMPTY_CONTEXT_RESPONSE,
+            graphContext: {
+              entities: [{ type: "accounts", id: "acc-1", reason: "primary match", foundAtHop: 0 }],
+              toolCalls: [{ tool: "search_entities", input: {}, durationMs: 10 }],
+              tokens: { input: 100, output: 50 },
+              status: "success",
+            },
+            answer: {
+              title: "Top account",
+              analysis: "",
+              answer: "Acme is the top account.",
+              questions: [],
+              hasAnswer: true,
+            },
+            sources: [{ chunkId: "chunk-1", relevance: 80, reason: "" }],
+            references: [{ type: "accounts", id: "acc-1", relevance: 95, reason: "primary match" }],
+            ontologies: [],
+            trace: {
+              planner: {
+                reasoning: "",
+                branchPlan: { runGraph: true, runContextualiser: false, runDrift: false },
+                tokens: { input: 5, output: 5 },
+              },
+              answer: { branchesUsed: ["graph"], tokens: { input: 100, output: 50 } },
+              totalTokens: { input: 105, output: 55 },
+            },
+            tokens: { input: 105, output: 55 },
           };
         }
         return {
-          type: "assistant",
-          answer: "Its latest order is #ord-1 for 1000.",
-          references: [{ type: "orders", id: "ord-1", reason: "latest order" }],
-          needsClarification: false,
-          suggestedQuestions: [],
-          tokens: { input: 120, output: 60 },
-          toolCalls: [{ tool: "traverse", input: {}, durationMs: 5 }],
+          type: AgentMessageType.Assistant,
+          context: EMPTY_CONTEXT_RESPONSE,
+          graphContext: {
+            entities: [{ type: "orders", id: "ord-1", reason: "latest order", foundAtHop: 0 }],
+            toolCalls: [{ tool: "traverse", input: {}, durationMs: 5 }],
+            tokens: { input: 120, output: 60 },
+            status: "success",
+          },
+          answer: {
+            title: "Latest order",
+            analysis: "",
+            answer: "Its latest order is #ord-1 for 1000.",
+            questions: [],
+            hasAnswer: true,
+          },
+          sources: [],
+          references: [{ type: "orders", id: "ord-1", relevance: 92, reason: "latest order" }],
+          ontologies: [],
+          trace: {
+            planner: {
+              reasoning: "",
+              branchPlan: { runGraph: true, runContextualiser: false, runDrift: false },
+              tokens: { input: 5, output: 5 },
+            },
+            answer: { branchesUsed: ["graph"], tokens: { input: 120, output: 60 } },
+            totalTokens: { input: 125, output: 65 },
+          },
+          tokens: { input: 125, output: 65 },
         };
       }),
-    } as unknown as ChatbotService;
+    };
 
     const jsonApi = {
       buildSingle: vi.fn(async (_model: any, record: any) => ({
@@ -165,7 +222,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       assistantRepo,
       clsService,
       userModules,
-      chatbot,
+      responder as any,
       assistantMessages,
       assistantMessageRepo,
       graphCatalog,
@@ -192,6 +249,19 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(storedMessages.find((m: any) => m.role === "assistant")?.position).toBe(1);
   });
 
+  it("persists per-turn citations and the unified trace via the new repo methods", async () => {
+    expect(assistantMessageRepo.linkCitations).toHaveBeenCalled();
+    const lastCitationCall = (assistantMessageRepo.linkCitations as any).mock.calls.at(-1)![0];
+    expect(lastCitationCall.citations).toEqual([{ chunkId: "chunk-1", relevance: 80, reason: "" }]);
+    expect(lastCitationCall.messageId).toBeDefined();
+
+    expect(assistantMessageRepo.setTrace).toHaveBeenCalled();
+    const lastTraceCall = (assistantMessageRepo.setTrace as any).mock.calls.at(-1)![0];
+    expect(typeof lastTraceCall.trace).toBe("string");
+    const parsed = JSON.parse(lastTraceCall.trace);
+    expect(parsed.totalTokens).toEqual({ input: 105, output: 55 });
+  });
+
   it("append re-uses prior references as a reference-memory hint to the agent", async () => {
     const [firstAssistantId] = Array.from(assistantStorage.keys());
     const prevAssistantMessage = Array.from(messageStorage.values()).find(
@@ -207,9 +277,9 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       newMessage: "And its latest order?",
     });
 
-    // The 2nd chatbot.run call must have received a system message referencing acc-1.
-    const secondCall = chatbotRunParams[1];
-    const sys = secondCall.messages.find((m) => m.role === "system");
+    // The 2nd responder.run call must have received a system message referencing acc-1.
+    const secondCall = responderRunParams[1];
+    const sys = secondCall.messages.find((m: any) => m.type === AgentMessageType.System);
     expect(sys).toBeDefined();
     expect(sys!.content).toContain('"type": "accounts"');
     expect(sys!.content).toContain('"id": "acc-1"');
@@ -220,6 +290,29 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(result.toolCalls).toEqual([{ tool: "traverse", input: {}, durationMs: 5 }]);
     expect(result.userMessage.content).toBe("And its latest order?");
     expect(result.assistantMessage.content).toContain("ord-1");
+  });
+
+  it("turn 2 with empty sources still calls setTrace but skips linkCitations", async () => {
+    // Turn 2's responder mock returned sources: [] — linkCitations should NOT have
+    // been called for that assistant message id, but setTrace was.
+    const [firstAssistantId] = Array.from(assistantStorage.keys());
+    const turn2AssistantMsg = Array.from(messageStorage.values())
+      .filter((m: any) => m.assistantId === firstAssistantId && m.role === "assistant")
+      .sort((a: any, b: any) => a.position - b.position)
+      .at(-1) as any;
+    expect(turn2AssistantMsg).toBeDefined();
+
+    const citationCallsForTurn2 = (assistantMessageRepo.linkCitations as any).mock.calls.filter(
+      ([arg]: any[]) => arg.messageId === turn2AssistantMsg.id,
+    );
+    expect(citationCallsForTurn2).toHaveLength(0);
+
+    const traceCallsForTurn2 = (assistantMessageRepo.setTrace as any).mock.calls.filter(
+      ([arg]: any[]) => arg.messageId === turn2AssistantMsg.id,
+    );
+    expect(traceCallsForTurn2).toHaveLength(1);
+    const parsed = JSON.parse(traceCallsForTurn2[0][0].trace);
+    expect(parsed.totalTokens).toEqual({ input: 125, output: 65 });
   });
 
   it("inherited find() returns the user's assistant threads via JsonApiService.buildList", async () => {
@@ -257,7 +350,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
   let service: AssistantService;
   let assistantMessages: any;
   let assistantMessageRepo: any;
-  let nextChatbotResponse: any;
+  let nextResponderResponse: any;
 
   beforeAll(() => {
     const assistantStorage = new Map();
@@ -293,6 +386,8 @@ describe("Assistant lifecycle (integration, references shape)", () => {
 
     assistantMessageRepo = {
       linkReferences: vi.fn(async () => {}),
+      linkCitations: vi.fn(async () => {}),
+      setTrace: vi.fn(async () => {}),
       getNextPosition: vi.fn(async (params: any) => {
         const existing = Array.from(messageStorage.values()).filter((m: any) => m.assistantId === params.assistantId);
         return existing.length;
@@ -306,6 +401,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
         if (!m) throw new Error(`Not found: ${params.id}`);
         return m;
       }),
+      findReferencedTypeIdPairs: vi.fn(async () => []),
     } as any;
 
     assistantMessages = {
@@ -326,7 +422,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
 
     const userModules = { findModuleIdsForUser: vi.fn(async () => ["11111111-1111-1111-1111-111111111111"]) } as any;
 
-    const chatbot = { run: vi.fn(async () => nextChatbotResponse) } as unknown as ChatbotService;
+    const responder = { run: vi.fn(async () => nextResponderResponse) };
 
     const jsonApi = {
       buildSingle: vi.fn(async (_model: any, record: any) => ({
@@ -366,7 +462,7 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       assistantRepo,
       clsService,
       userModules,
-      chatbot,
+      responder as any,
       assistantMessages,
       assistantMessageRepo,
       graphCatalog,
@@ -375,14 +471,29 @@ describe("Assistant lifecycle (integration, references shape)", () => {
   });
 
   it("does NOT set a `references` attribute on the persisted assistant message", async () => {
-    nextChatbotResponse = {
-      type: "assistant",
-      answer: "Acme is the customer.",
-      references: [{ type: "accounts", id: "acc-1", reason: "resolved" }],
-      needsClarification: false,
-      suggestedQuestions: [],
+    nextResponderResponse = {
+      type: AgentMessageType.Assistant,
+      context: EMPTY_CONTEXT_RESPONSE,
+      graphContext: {
+        entities: [],
+        toolCalls: [],
+        tokens: { input: 0, output: 0 },
+        status: "success",
+      },
+      answer: { title: "", analysis: "", answer: "Acme is the customer.", questions: [], hasAnswer: true },
+      sources: [],
+      references: [{ type: "accounts", id: "acc-1", relevance: 90, reason: "resolved" }],
+      ontologies: [],
+      trace: {
+        planner: {
+          reasoning: "",
+          branchPlan: { runGraph: true, runContextualiser: false, runDrift: false },
+          tokens: { input: 0, output: 0 },
+        },
+        answer: { branchesUsed: ["graph"], tokens: { input: 0, output: 0 } },
+        totalTokens: { input: 0, output: 0 },
+      },
       tokens: { input: 0, output: 0 },
-      toolCalls: [],
     };
     await service.createWithFirstMessage({
       companyId: "c",
@@ -396,15 +507,30 @@ describe("Assistant lifecycle (integration, references shape)", () => {
     expect(assistantCreateCall[0].data.attributes.references).toBeUndefined();
   });
 
-  it("still calls linkReferences for each reference returned by the chatbot", async () => {
-    nextChatbotResponse = {
-      type: "assistant",
-      answer: "…",
-      references: [{ type: "accounts", id: "acc-1", reason: "x" }],
-      needsClarification: false,
-      suggestedQuestions: [],
+  it("still calls linkReferences for each reference returned by the responder", async () => {
+    nextResponderResponse = {
+      type: AgentMessageType.Assistant,
+      context: EMPTY_CONTEXT_RESPONSE,
+      graphContext: {
+        entities: [],
+        toolCalls: [],
+        tokens: { input: 0, output: 0 },
+        status: "success",
+      },
+      answer: { title: "", analysis: "", answer: "…", questions: [], hasAnswer: true },
+      sources: [],
+      references: [{ type: "accounts", id: "acc-1", relevance: 80, reason: "x" }],
+      ontologies: [],
+      trace: {
+        planner: {
+          reasoning: "",
+          branchPlan: { runGraph: true, runContextualiser: false, runDrift: false },
+          tokens: { input: 0, output: 0 },
+        },
+        answer: { branchesUsed: ["graph"], tokens: { input: 0, output: 0 } },
+        totalTokens: { input: 0, output: 0 },
+      },
       tokens: { input: 0, output: 0 },
-      toolCalls: [],
     };
     await service.createWithFirstMessage({
       companyId: "c",

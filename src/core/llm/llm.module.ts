@@ -1,10 +1,11 @@
 import { Global, Module } from "@nestjs/common";
 import { EmbedderService } from "./services/embedder.service";
+import { LLMCallDumper } from "./services/llm-call-dumper.service";
 import { LLMService } from "./services/llm.service";
 import { ModelService } from "./services/model.service";
 import { VisionLLMService } from "./services/vision.llm.service";
 
-const LLM_SERVICES = [LLMService, ModelService, EmbedderService, VisionLLMService];
+const LLM_SERVICES = [LLMService, ModelService, EmbedderService, VisionLLMService, LLMCallDumper];
 
 /**
  * LLM Module
@@ -18,6 +19,7 @@ const LLM_SERVICES = [LLMService, ModelService, EmbedderService, VisionLLMServic
  * - Vision/image analysis
  * - Model selection and configuration
  * - Token usage tracking
+ * - Optional per-call JSON dumps for debugging (gated by ASSISTANT_DUMP_LLM_CALLS)
  */
 @Global()
 @Module({

@@ -1,22 +1,15 @@
 import { Entity, defineEntity } from "../../../common";
+import { PolymorphicDiscriminatorData } from "../../../common/interfaces/entity.schema.interface";
+import { modelRegistry } from "../../../common/registries/registry";
 import type { Company } from "../../company/entities/company";
 import type { Assistant } from "../../assistant/entities/assistant";
 import { assistantMeta } from "../../assistant/entities/assistant.meta";
-import { PolymorphicDiscriminatorData } from "../../../common/interfaces/entity.schema.interface";
-import { modelRegistry } from "../../../common/registries/registry";
+import type { Chunk } from "../../chunk/entities/chunk.entity";
+import { chunkMeta } from "../../chunk/entities/chunk.meta";
 import { assistantMessageMeta } from "./assistant-message.meta";
 
 export type AssistantMessageRole = "user" | "assistant" | "system";
 
-/**
- * AssistantMessage — one turn in an Assistant conversation.
- *
- * Child of Assistant via (Assistant)-[:HAS_MESSAGE]->(AssistantMessage).
- * References from a message to referenced domain entities are edges
- * (AssistantMessage)-[:REFERENCES]->(target), surfaced as a polymorphic
- * JSON:API relationship. The edge also carries reason/createdAt internally,
- * but these are NOT exposed in JSON:API.
- */
 export type AssistantMessage = Entity & {
   role: AssistantMessageRole;
   content: string;
@@ -24,16 +17,16 @@ export type AssistantMessage = Entity & {
   suggestedQuestions?: string[];
   inputTokens?: number;
   outputTokens?: number;
+  trace?: string;
   company: Company;
   assistant: Assistant;
   references?: unknown[];
+  citations?: Chunk[];
 };
 
 export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
   ...assistantMessageMeta,
-
   isCompanyScoped: true,
-
   fields: {
     role: { type: "string", required: true },
     content: { type: "string", required: true },
@@ -41,8 +34,8 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
     suggestedQuestions: { type: "string[]" },
     inputTokens: { type: "number" },
     outputTokens: { type: "number" },
+    trace: { type: "string" },
   },
-
   relationships: {
     assistant: {
       model: assistantMeta,
@@ -54,15 +47,16 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
       immutable: true,
     },
     references: {
-      // `model` is a placeholder — the polymorphic discriminator picks the real one at serialise time.
-      // We pass the current entity's meta so the field's typing lines up; the factory ignores it.
       model: assistantMessageMeta,
       direction: "out",
       relationship: "REFERENCES",
       cardinality: "many",
       dtoKey: "references",
+      fields: [
+        { name: "relevance", type: "number", required: false },
+        { name: "reason", type: "string", required: false },
+      ],
       polymorphic: {
-        // candidates populated at module init; see Task 5.
         candidates: [],
         discriminator: (data: PolymorphicDiscriminatorData) => {
           for (const label of data.labels) {
@@ -72,6 +66,18 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
           throw new Error(`REFERENCES target has no registered model for labels: ${JSON.stringify(data.labels)}`);
         },
       },
+    },
+    citations: {
+      model: chunkMeta,
+      direction: "out",
+      relationship: "CITES",
+      cardinality: "many",
+      required: false,
+      dtoKey: "citations",
+      fields: [
+        { name: "relevance", type: "number", required: true },
+        { name: "reason", type: "string", required: false },
+      ],
     },
   },
 });

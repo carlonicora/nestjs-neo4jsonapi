@@ -5,6 +5,7 @@ import * as z from "zod";
 import { LLMService } from "../llm.service";
 import { ModelService } from "../model.service";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
+import { LLMCallDumper } from "../llm-call-dumper.service";
 
 // Mock LangChain modules
 vi.mock("@langchain/core/messages", () => {
@@ -76,6 +77,26 @@ describe("LLMService", () => {
   let mockLLM: any;
   let mockStructuredLLM: any;
 
+  const startSessionMock = vi.fn();
+  const closeMock = vi.fn();
+  const recordInputsMock = vi.fn();
+  const startIterationMock = vi.fn();
+  const recordResponseMock = vi.fn();
+  const recordToolResultMock = vi.fn();
+
+  const mockSession = {
+    isEnabled: false,
+    recordInputs: recordInputsMock,
+    startIteration: startIterationMock,
+    recordResponse: recordResponseMock,
+    recordToolResult: recordToolResultMock,
+    close: closeMock,
+  };
+
+  const mockDumper = {
+    startSession: startSessionMock,
+  };
+
   const TEST_AI_CONFIG = {
     ai: {
       provider: "openrouter",
@@ -87,6 +108,7 @@ describe("LLMService", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    startSessionMock.mockReturnValue(mockSession);
 
     // Create mock structured LLM that returns parsed output
     mockStructuredLLM = {
@@ -136,6 +158,10 @@ describe("LLMService", () => {
         LLMService,
         { provide: ModelService, useValue: mockModelService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: LLMCallDumper,
+          useValue: mockDumper,
+        },
       ],
     }).compile();
 
@@ -383,6 +409,119 @@ describe("LLMService", () => {
           systemPrompts: ["You are a helpful assistant"],
         }),
       ).rejects.toThrow("LLM service error: LLM error");
+    });
+
+    it("opens a dump session and closes it on success", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: { usage_metadata: { input_tokens: 10, output_tokens: 5 } },
+      });
+
+      await service.call({
+        systemPrompts: ["s"],
+        inputParams: { q: "x" },
+        outputSchema,
+      });
+
+      expect(startSessionMock).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledTimes(1);
+      expect(closeMock.mock.calls[0][0].finalStatus).toBe("success");
+    });
+
+    it("records inputs once and one iteration per tool-loop pass", async () => {
+      const aiMessageWithToolCall = {
+        _getType: () => "ai",
+        content: "",
+        tool_calls: [{ id: "c1", name: "resolve_entity", args: { text: "x" } }],
+        usage_metadata: { input_tokens: 100, output_tokens: 10 },
+      };
+      const aiMessageNoToolCalls = {
+        _getType: () => "ai",
+        content: "",
+        tool_calls: [],
+        usage_metadata: { input_tokens: 50, output_tokens: 5 },
+      };
+      const mockTool: any = {
+        name: "resolve_entity",
+        description: "d",
+        schema: {},
+        func: vi.fn().mockResolvedValue("tool-output"),
+      };
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValueOnce(aiMessageWithToolCall).mockResolvedValueOnce(aiMessageNoToolCalls),
+      });
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: { usage_metadata: { input_tokens: 25, output_tokens: 3 } },
+      });
+
+      await service.call({
+        systemPrompts: ["sys"],
+        inputParams: { q: "x" },
+        outputSchema,
+        tools: [mockTool],
+      });
+
+      expect(recordInputsMock).toHaveBeenCalledTimes(1);
+      // tool-loop iter 0, tool-loop iter 1, final-structured = 3 startIteration calls
+      expect(startIterationMock).toHaveBeenCalledTimes(3);
+      expect(startIterationMock.mock.calls[0][0]).toBe("tool-loop");
+      expect(startIterationMock.mock.calls[1][0]).toBe("tool-loop");
+      expect(startIterationMock.mock.calls[2][0]).toBe("final-structured");
+      expect(recordToolResultMock).toHaveBeenCalledWith("c1", "resolve_entity", expect.any(String));
+    });
+
+    it("closes the dump session with finalStatus=error when call() throws", async () => {
+      mockStructuredLLM.invoke.mockRejectedValueOnce(new Error("kaboom"));
+
+      await expect(
+        service.call({
+          systemPrompts: ["s"],
+          inputParams: { q: "x" },
+          outputSchema,
+        }),
+      ).rejects.toThrow();
+
+      expect(startSessionMock).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledTimes(1);
+      expect(closeMock.mock.calls[0][0].finalStatus).toBe("error");
+      expect(closeMock.mock.calls[0][0].errorMessage).toMatch(/kaboom/);
+    });
+
+    it("records the tool_calls parse fallback when the structured response is null but tool_calls.args is valid", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          content: "",
+          usage_metadata: { input_tokens: 25, output_tokens: 3 },
+          response_metadata: { finish_reason: "stop" },
+          tool_calls: [{ args: { response: "ok" } }],
+        },
+      });
+
+      await service.call({
+        systemPrompts: ["s"],
+        inputParams: { q: "x" },
+        outputSchema,
+      });
+
+      expect(closeMock.mock.calls[0][0].parseFallbacks).toEqual(["tool_calls"]);
+    });
+
+    it("records a warning when totalTokens > 8000", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: { usage_metadata: { input_tokens: 9000, output_tokens: 100 } },
+      });
+
+      await service.call({
+        systemPrompts: ["s"],
+        inputParams: { q: "x" },
+        outputSchema,
+      });
+
+      const warnings = closeMock.mock.calls[0][0].warnings ?? [];
+      expect(warnings.some((w: string) => /High token usage/.test(w))).toBe(true);
     });
   });
 

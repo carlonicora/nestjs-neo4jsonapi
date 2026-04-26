@@ -4,7 +4,7 @@ import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repos
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { modelRegistry } from "../../../common/registries/registry";
-import type { ChatbotReference } from "../../../agents/chatbot/interfaces/chatbot.response.interface";
+import type { EntityReference } from "../../../agents/responder/interfaces/entity.reference.interface";
 import { AssistantMessage, AssistantMessageDescriptor } from "../entities/assistant-message";
 
 /**
@@ -55,13 +55,13 @@ export class AssistantMessageRepository extends AbstractRepository<
   }
 
   /**
-   * Materialise one (:AssistantMessage)-[:REFERENCES { reason, createdAt }]->(target)
+   * Materialise one (:AssistantMessage)-[:REFERENCES { reason, relevance, createdAt }]->(target)
    * edge per reference. JSON:API type → Neo4j label is resolved through the
    * pre-seeded modelRegistry. Unknown types are logged and skipped.
    *
-   * Idempotent via MERGE.
+   * Idempotent via MERGE. `relevance` is optional; when absent it is stored as null.
    */
-  async linkReferences(params: { messageId: string; references: ChatbotReference[] }): Promise<void> {
+  async linkReferences(params: { messageId: string; references: EntityReference[] }): Promise<void> {
     for (const ref of params.references) {
       const model = modelRegistry.getByType(ref.type);
       if (!model) {
@@ -76,15 +76,60 @@ export class AssistantMessageRepository extends AbstractRepository<
           MATCH (m:AssistantMessage {id: $messageId})
           MATCH (e:${label} {id: $refId})
           MERGE (m)-[r:REFERENCES]->(e)
-          SET r.reason = $reason, r.createdAt = coalesce(r.createdAt, datetime())
+          SET r.reason = $reason,
+              r.relevance = $relevance,
+              r.createdAt = coalesce(r.createdAt, datetime())
         `,
         queryParams: {
           messageId: params.messageId,
           refId: ref.id,
           reason: ref.reason,
+          relevance: ref.relevance ?? null,
         },
       });
     }
+  }
+
+  /**
+   * Materialise one (:AssistantMessage)-[:CITES { relevance, reason, createdAt }]->(:Chunk)
+   * edge per citation. The chunk node is matched by id (no registry lookup —
+   * Chunk is a fixed label).
+   *
+   * Idempotent via MERGE. `reason` is optional; when absent it is stored as null.
+   */
+  async linkCitations(params: {
+    messageId: string;
+    citations: Array<{ chunkId: string; relevance: number; reason?: string }>;
+  }): Promise<void> {
+    for (const cit of params.citations) {
+      await this.neo4j.writeOne({
+        query: `
+          MATCH (m:AssistantMessage {id: $messageId})
+          MATCH (ch:Chunk {id: $chunkId})
+          MERGE (m)-[c:CITES]->(ch)
+          SET c.relevance = $relevance,
+              c.reason    = $reason,
+              c.createdAt = coalesce(c.createdAt, datetime())
+        `,
+        queryParams: {
+          messageId: params.messageId,
+          chunkId: cit.chunkId,
+          relevance: cit.relevance,
+          reason: cit.reason ?? null,
+        },
+      });
+    }
+  }
+
+  /**
+   * Persist the assistant's reasoning trace as a string property on the message
+   * node. Overwrites any prior value.
+   */
+  async setTrace(params: { messageId: string; trace: string }): Promise<void> {
+    await this.neo4j.writeOne({
+      query: `MATCH (m:AssistantMessage {id: $messageId}) SET m.trace = $trace`,
+      queryParams: { messageId: params.messageId, trace: params.trace },
+    });
   }
 
   /**

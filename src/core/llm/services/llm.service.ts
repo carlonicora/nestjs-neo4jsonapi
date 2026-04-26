@@ -13,6 +13,7 @@ import {
   formatFieldWithDescription,
   sanitizeSchemaForGemini,
 } from "../../llm/utils/schema.utils";
+import { LLMCallDumper, DumpSession, DumpSessionStartParams } from "./llm-call-dumper.service";
 
 /**
  * Raw LLM response structure with usage metadata
@@ -82,6 +83,7 @@ export class LLMService {
   constructor(
     private readonly modelService: ModelService,
     private readonly config: ConfigService<BaseConfigInterface>,
+    private readonly dumper: LLMCallDumper,
   ) {
     this._sessionTokens = {
       input: 0,
@@ -365,290 +367,393 @@ export class LLMService {
    * ```
    */
   async call<T>(params: LLMCallParams<T>): Promise<T & { tokenUsage: { input: number; output: number } }> {
+    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+    const session: DumpSession = this.dumper.startSession({
+      metadata: params.metadata as DumpSessionStartParams["metadata"],
+      model: aiConfig.model,
+      provider: aiConfig.provider,
+      temperature: params.temperature,
+    });
+    let totalInput = 0;
+    let totalOutput = 0;
+    const parseFallbacks: Array<"tool_calls" | "lenient" | "raw"> = [];
+    const warnings: string[] = [];
     try {
-      // Optional: Validate input parameters against schema
-      if (params.inputSchema && params.validateInput) {
-        try {
-          params.inputParams = params.inputSchema.parse(params.inputParams);
-        } catch (validationError) {
-          console.error("[LLMService] Input validation failed:", validationError);
-          throw new Error(
-            `Invalid input parameters: ${validationError instanceof Error ? validationError.message : "Unknown validation error"}`,
-          );
-        }
-      }
-
-      // Create messages with modern MessagesPlaceholder pattern (with schema-guided instructions)
-      const { template, historyMessages } = this._createMessages({
-        systemPrompts: params.systemPrompts,
-        instructions: params.instructions,
-        inputParams: params.inputParams,
-        inputSchema: params.inputSchema,
-        history: params.history,
-        maxHistoryMessages: params.maxHistoryMessages,
+      const result = await this._invokeOriginal<T>(
+        params,
+        session,
+        (i, o) => {
+          totalInput += i;
+          totalOutput += o;
+        },
+        (kind) => parseFallbacks.push(kind),
+        (w) => warnings.push(w),
+      );
+      session.close({
+        finalStatus: "success",
+        totalTokens: { input: totalInput, output: totalOutput },
+        warnings,
+        parseFallbacks,
       });
-
-      const prompt = ChatPromptTemplate.fromMessages(template);
-
-      // Get base model
-      const baseModel = this.modelService.getLLM({
-        temperature: params.temperature,
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+      session.close({
+        finalStatus: "error",
+        errorMessage: message,
+        errorStack: stack,
+        totalTokens: { input: totalInput, output: totalOutput },
+        warnings,
+        parseFallbacks,
       });
+      console.error("[LLMService] Error calling LLM:", error);
+      throw new Error(`LLM service error: ${message}`);
+    }
+  }
 
-      // Build config options for the invocation
-      const configOptions: Record<string, any> = {};
-      if (params.maxTokens) configOptions.maxTokens = params.maxTokens;
-      if (params.stopSequences) configOptions.stop = params.stopSequences;
-      if (params.metadata) configOptions.metadata = params.metadata;
-      if (params.timeout) configOptions.timeout = params.timeout;
-
-      // Track token usage across tool iterations
-      let totalInputTokens = 0;
-      let totalOutputTokens = 0;
-
-      // Build initial messages for the conversation
-      const conversationMessages: BaseMessage[] = await prompt.formatMessages({
-        ...params.inputParams,
-        chat_history: historyMessages,
-      });
-
-      // If tools are provided, handle tool calling loop
-      if (params.tools && params.tools.length > 0) {
-        const maxIterations = params.maxToolIterations ?? 5;
-
-        // Build tool map for execution
-        const toolMap = new Map<string, DynamicStructuredTool>();
-        for (const tool of params.tools) {
-          toolMap.set(tool.name, tool);
-        }
-
-        // Bind tools to model
-        const modelWithTools = baseModel.bindTools(params.tools);
-
-        // Tool calling loop
-        for (let iteration = 0; iteration < maxIterations; iteration++) {
-          // Call model with tools
-          const toolResponse =
-            Object.keys(configOptions).length > 0
-              ? await modelWithTools.invoke(conversationMessages, configOptions)
-              : await modelWithTools.invoke(conversationMessages);
-
-          // Track token usage
-          const responseUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
-          if (responseUsage) {
-            totalInputTokens += responseUsage.input_tokens ?? 0;
-            totalOutputTokens += responseUsage.output_tokens ?? 0;
-          }
-
-          // Check for tool calls
-          const toolCalls = (toolResponse as AIMessage).tool_calls ?? [];
-
-          if (toolCalls.length === 0) {
-            // No more tool calls - break to get final structured response
-            break;
-          }
-
-          // Add AI message with tool calls to conversation
-          conversationMessages.push(toolResponse);
-
-          // Execute each tool call
-          for (const toolCall of toolCalls) {
-            const tool = toolMap.get(toolCall.name);
-
-            if (!tool) {
-              console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
-              conversationMessages.push(
-                new ToolMessage({
-                  content: `Tool "${toolCall.name}" not found`,
-                  tool_call_id: toolCall.id ?? "",
-                }),
-              );
-              continue;
-            }
-
-            try {
-              const result = await tool.invoke(toolCall.args);
-              const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-              conversationMessages.push(
-                new ToolMessage({
-                  content: resultStr,
-                  tool_call_id: toolCall.id ?? "",
-                }),
-              );
-            } catch (error) {
-              console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
-              conversationMessages.push(
-                new ToolMessage({
-                  content: `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
-                  tool_call_id: toolCall.id ?? "",
-                }),
-              );
-            }
-          }
-        }
-      }
-
-      // Nudge the model out of tool-use mode before asking for the final structured
-      // answer. Without this, some models (notably gpt-oss) emit another tool_calls
-      // response instead of producing the structured output, and parsing fails with
-      // "No content" / finish_reason=tool_calls. The nudge is only appended when the
-      // tool-calling loop ran at all.
-      if (params.tools && params.tools.length > 0 && conversationMessages.length > 0) {
-        conversationMessages.push(
-          new HumanMessage(
-            "You have gathered enough information from the tool calls above to answer the user's question. Produce your final answer now as the structured output the system expects. Do not request any further tool calls.",
-          ),
+  private async _invokeOriginal<T>(
+    params: LLMCallParams<T>,
+    session: DumpSession,
+    addTokens: (input: number, output: number) => void,
+    addParseFallback: (kind: "tool_calls" | "lenient" | "raw") => void,
+    addWarning: (msg: string) => void,
+  ): Promise<T & { tokenUsage: { input: number; output: number } }> {
+    // Optional: Validate input parameters against schema
+    if (params.inputSchema && params.validateInput) {
+      try {
+        params.inputParams = params.inputSchema.parse(params.inputParams);
+      } catch (validationError) {
+        console.error("[LLMService] Input validation failed:", validationError);
+        throw new Error(
+          `Invalid input parameters: ${validationError instanceof Error ? validationError.message : "Unknown validation error"}`,
         );
       }
+    }
 
-      // Get final structured response (unified path for both tool and non-tool flows)
-      // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects
-      const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
-      // Check if model is Gemini (handles both "gemini-..." and "google/gemini-..." formats)
-      const modelLower = aiConfig.model.toLowerCase();
-      const isGeminiModel = modelLower.startsWith("gemini") || modelLower.includes("/gemini");
-      const needsGeminiSanitization = aiConfig.provider === "requesty" && isGeminiModel;
+    // Create messages with modern MessagesPlaceholder pattern (with schema-guided instructions)
+    const { template, historyMessages } = this._createMessages({
+      systemPrompts: params.systemPrompts,
+      instructions: params.instructions,
+      inputParams: params.inputParams,
+      inputSchema: params.inputSchema,
+      history: params.history,
+      maxHistoryMessages: params.maxHistoryMessages,
+    });
 
-      let structuredLlm;
-      if (needsGeminiSanitization) {
-        // Convert Zod to JSON Schema and remove Gemini-incompatible properties
-        const jsonSchema = convertZodToJsonSchema(params.outputSchema);
-        const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
-        structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
-          includeRaw: true,
-        });
-      } else {
-        // All other providers: use Zod schema directly
-        structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
-          includeRaw: true,
-        });
+    const prompt = ChatPromptTemplate.fromMessages(template);
+
+    // Get base model
+    const baseModel = this.modelService.getLLM({
+      temperature: params.temperature,
+    });
+
+    // Build config options for the invocation
+    const configOptions: Record<string, any> = {};
+    if (params.maxTokens) configOptions.maxTokens = params.maxTokens;
+    if (params.stopSequences) configOptions.stop = params.stopSequences;
+    if (params.metadata) configOptions.metadata = params.metadata;
+    if (params.timeout) configOptions.timeout = params.timeout;
+
+    // Track token usage across tool iterations
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+
+    // Build initial messages for the conversation
+    const conversationMessages: BaseMessage[] = await prompt.formatMessages({
+      ...params.inputParams,
+      chat_history: historyMessages,
+    });
+
+    session.recordInputs({
+      systemPrompts: params.systemPrompts,
+      instructions:
+        params.instructions ?? this._generateSchemaGuidedInstructions(params.inputParams, params.inputSchema),
+      inputParams: params.inputParams,
+      history: (params.history ?? []).map((h) => ({ role: String(h.role), content: h.content })),
+      tools: (params.tools ?? []).map((t) => ({
+        name: t.name,
+        description: t.description,
+        schema: (t as any).schema,
+      })),
+      outputSchemaName: (params.outputSchema as any)?.constructor?.name ?? "outputSchema",
+    });
+
+    // If tools are provided, handle tool calling loop
+    if (params.tools && params.tools.length > 0) {
+      const maxIterations = params.maxToolIterations ?? 5;
+
+      // Build tool map for execution
+      const toolMap = new Map<string, DynamicStructuredTool>();
+      for (const tool of params.tools) {
+        toolMap.set(tool.name, tool);
       }
 
-      const response = (await structuredLlm.invoke(
-        conversationMessages,
-        Object.keys(configOptions).length > 0 ? configOptions : undefined,
-      )) as unknown as StructuredOutputResponse<T>;
+      // Bind tools to model
+      const modelWithTools = baseModel.bindTools(params.tools);
 
-      // Extract token usage with type guard (includes tool iteration tokens)
-      const raw = isValidRaw(response.raw) ? response.raw : undefined;
-      const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
-      const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
+      // Tool calling loop
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        session.startIteration("tool-loop", conversationMessages);
+        // Call model with tools
+        const toolResponse =
+          Object.keys(configOptions).length > 0
+            ? await modelWithTools.invoke(conversationMessages, configOptions)
+            : await modelWithTools.invoke(conversationMessages);
 
-      // Update session tracking
-      this._sessionTokens.input += input;
-      this._sessionTokens.output += output;
-      this._sessionTokens.total += input + output;
-      this._sessionTokens.callCount += 1;
-
-      // Warn if high token usage
-      const totalTokens = input + output;
-      if (totalTokens > 8000) {
-        console.warn(`[LLMService] High token usage detected: ${totalTokens} tokens in this call`);
-      }
-
-      // Enhanced error handling with detailed diagnostics
-      if (!response.parsed) {
-        const rawContent = raw?.content || "No content";
-        const finishReason = raw?.response_metadata?.finish_reason;
-
-        console.error("[LLMService] Parsing failed:", {
-          rawContentPreview: rawContent.substring(0, 500),
-          finishReason,
-          schemaName: params.outputSchema.constructor.name,
+        session.recordResponse({
+          content: typeof (toolResponse as any).content === "string" ? (toolResponse as any).content : "",
+          toolCalls: ((toolResponse as AIMessage).tool_calls ?? []).map((c) => ({
+            id: c.id ?? "",
+            name: c.name,
+            args: c.args,
+          })),
+          tokenUsage: {
+            input: (toolResponse as unknown as LLMRawResponse).usage_metadata?.input_tokens ?? 0,
+            output: (toolResponse as unknown as LLMRawResponse).usage_metadata?.output_tokens ?? 0,
+          },
+          finishReason: (toolResponse as unknown as LLMRawResponse).response_metadata?.finish_reason,
         });
 
-        // Attempt fallback parsing from tool_calls first (Azure/OpenAI function calling puts structured data here)
-        const rawAnyFallback = raw as any;
-        const toolCallArgs = rawAnyFallback?.tool_calls?.[0]?.args;
-        if (toolCallArgs && typeof toolCallArgs === "object") {
-          try {
-            console.warn("[LLMService] Attempting fallback parsing from tool_calls args");
-            const validated = params.outputSchema.parse(toolCallArgs);
-
-            console.warn("[LLMService] Fallback tool_calls parsing succeeded");
-
-            return {
-              ...(validated as T),
-              tokenUsage: { input, output },
-            };
-          } catch (_toolCallFallbackError) {
-            // Lenient fallback: filter out malformed array entries from tool_calls args
-            // This handles cases where the model returns mostly valid data with a few corrupt entries
-            try {
-              console.warn("[LLMService] Attempting lenient tool_calls parsing (filtering invalid array entries)");
-              const cleanedArgs = { ...toolCallArgs };
-              const shape = (params.outputSchema as any)?.shape;
-
-              if (shape) {
-                for (const [key, fieldSchema] of Object.entries(shape)) {
-                  if (Array.isArray(cleanedArgs[key])) {
-                    // In Zod v4, ZodArray exposes .element as the element schema with .safeParse()
-                    // Unwrap optional/default/nullable wrappers first if present
-                    let schema = fieldSchema as any;
-                    while (schema?.unwrap && !schema?.element) {
-                      schema = schema.unwrap();
-                    }
-                    const elementSchema = schema?.element;
-
-                    if (elementSchema && typeof elementSchema.safeParse === "function") {
-                      const original = cleanedArgs[key];
-                      cleanedArgs[key] = original.filter((entry: any) => elementSchema.safeParse(entry).success);
-                      if (cleanedArgs[key].length < original.length) {
-                        console.warn(
-                          `[LLMService] Filtered ${original.length - cleanedArgs[key].length}/${original.length} invalid entries from "${key}"`,
-                        );
-                      }
-                    }
-                  }
-                }
-              }
-
-              const validated = params.outputSchema.parse(cleanedArgs);
-              console.warn("[LLMService] Lenient tool_calls parsing succeeded");
-
-              return {
-                ...(validated as T),
-                tokenUsage: { input, output },
-              };
-            } catch {
-              // Fall through to raw content parsing
-            }
-          }
+        // Track token usage
+        const responseUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
+        if (responseUsage) {
+          totalInputTokens += responseUsage.input_tokens ?? 0;
+          totalOutputTokens += responseUsage.output_tokens ?? 0;
         }
 
-        // Attempt fallback parsing from raw content
+        // Check for tool calls
+        const toolCalls = (toolResponse as AIMessage).tool_calls ?? [];
+
+        if (toolCalls.length === 0) {
+          // No more tool calls - break to get final structured response
+          break;
+        }
+
+        // Add AI message with tool calls to conversation
+        conversationMessages.push(toolResponse);
+
+        // Execute each tool call
+        for (const toolCall of toolCalls) {
+          const tool = toolMap.get(toolCall.name);
+
+          if (!tool) {
+            console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
+            conversationMessages.push(
+              new ToolMessage({
+                content: `Tool "${toolCall.name}" not found`,
+                tool_call_id: toolCall.id ?? "",
+              }),
+            );
+            session.recordToolResult(toolCall.id ?? "", toolCall.name, `Tool "${toolCall.name}" not found`);
+            continue;
+          }
+
+          try {
+            const result = await tool.invoke(toolCall.args);
+            const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+            conversationMessages.push(
+              new ToolMessage({
+                content: resultStr,
+                tool_call_id: toolCall.id ?? "",
+              }),
+            );
+            session.recordToolResult(toolCall.id ?? "", toolCall.name, resultStr);
+          } catch (error) {
+            console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
+            conversationMessages.push(
+              new ToolMessage({
+                content: `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
+                tool_call_id: toolCall.id ?? "",
+              }),
+            );
+            session.recordToolResult(
+              toolCall.id ?? "",
+              toolCall.name,
+              `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
+            );
+          }
+        }
+      }
+    }
+
+    // Nudge the model out of tool-use mode before asking for the final structured
+    // answer. Without this, some models (notably gpt-oss) emit another tool_calls
+    // response instead of producing the structured output, and parsing fails with
+    // "No content" / finish_reason=tool_calls. The nudge is only appended when the
+    // tool-calling loop ran at all.
+    if (params.tools && params.tools.length > 0 && conversationMessages.length > 0) {
+      conversationMessages.push(
+        new HumanMessage(
+          "You have gathered enough information from the tool calls above to answer the user's question. Produce your final answer now as the structured output the system expects. Do not request any further tool calls.",
+        ),
+      );
+    }
+
+    // Get final structured response (unified path for both tool and non-tool flows)
+    // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects
+    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+    // Check if model is Gemini (handles both "gemini-..." and "google/gemini-..." formats)
+    const modelLower = aiConfig.model.toLowerCase();
+    const isGeminiModel = modelLower.startsWith("gemini") || modelLower.includes("/gemini");
+    const needsGeminiSanitization = aiConfig.provider === "requesty" && isGeminiModel;
+
+    let structuredLlm;
+    if (needsGeminiSanitization) {
+      // Convert Zod to JSON Schema and remove Gemini-incompatible properties
+      const jsonSchema = convertZodToJsonSchema(params.outputSchema);
+      const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
+      structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
+        includeRaw: true,
+      });
+    } else {
+      // All other providers: use Zod schema directly
+      structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
+        includeRaw: true,
+      });
+    }
+
+    session.startIteration("final-structured", conversationMessages);
+
+    const response = (await structuredLlm.invoke(
+      conversationMessages,
+      Object.keys(configOptions).length > 0 ? configOptions : undefined,
+    )) as unknown as StructuredOutputResponse<T>;
+
+    // Extract token usage with type guard (includes tool iteration tokens)
+    const raw = isValidRaw(response.raw) ? response.raw : undefined;
+
+    session.recordResponse({
+      content: typeof raw?.content === "string" ? raw.content : "",
+      tokenUsage: {
+        input: raw?.usage_metadata?.input_tokens ?? 0,
+        output: raw?.usage_metadata?.output_tokens ?? 0,
+      },
+      finishReason: raw?.response_metadata?.finish_reason,
+    });
+    const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
+    const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
+
+    // Update session tracking
+    this._sessionTokens.input += input;
+    this._sessionTokens.output += output;
+    this._sessionTokens.total += input + output;
+    this._sessionTokens.callCount += 1;
+
+    // Warn if high token usage
+    const totalTokens = input + output;
+    if (totalTokens > 8000) {
+      const msg = `High token usage detected: ${totalTokens} tokens in this call`;
+      console.warn(`[LLMService] ${msg}`);
+      addWarning(msg);
+    }
+
+    // Enhanced error handling with detailed diagnostics
+    if (!response.parsed) {
+      const rawContent = raw?.content || "No content";
+      const finishReason = raw?.response_metadata?.finish_reason;
+
+      console.error("[LLMService] Parsing failed:", {
+        rawContentPreview: rawContent.substring(0, 500),
+        finishReason,
+        schemaName: params.outputSchema.constructor.name,
+      });
+
+      // Attempt fallback parsing from tool_calls first (Azure/OpenAI function calling puts structured data here)
+      const rawAnyFallback = raw as any;
+      const toolCallArgs = rawAnyFallback?.tool_calls?.[0]?.args;
+      if (toolCallArgs && typeof toolCallArgs === "object") {
+        addParseFallback("tool_calls");
         try {
-          console.warn("[LLMService] Attempting fallback JSON parsing");
-          const manualParse = JSON.parse(rawContent);
-          const validated = params.outputSchema.parse(manualParse);
+          console.warn("[LLMService] Attempting fallback parsing from tool_calls args");
+          const validated = params.outputSchema.parse(toolCallArgs);
 
-          console.warn("[LLMService] Fallback parsing succeeded");
+          console.warn("[LLMService] Fallback tool_calls parsing succeeded");
 
+          addTokens(input, output);
           return {
             ...(validated as T),
             tokenUsage: { input, output },
           };
-        } catch (fallbackError) {
-          throw new Error(
-            `LLM failed to return structured output. ` +
-              `Finish reason: ${finishReason}. ` +
-              `Raw content preview: ${rawContent.substring(0, 200)}...` +
-              `Fallback parsing error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
-          );
+        } catch (_toolCallFallbackError) {
+          // Lenient fallback: filter out malformed array entries from tool_calls args
+          // This handles cases where the model returns mostly valid data with a few corrupt entries
+          addParseFallback("lenient");
+          try {
+            console.warn("[LLMService] Attempting lenient tool_calls parsing (filtering invalid array entries)");
+            const cleanedArgs = { ...toolCallArgs };
+            const shape = (params.outputSchema as any)?.shape;
+
+            if (shape) {
+              for (const [key, fieldSchema] of Object.entries(shape)) {
+                if (Array.isArray(cleanedArgs[key])) {
+                  // In Zod v4, ZodArray exposes .element as the element schema with .safeParse()
+                  // Unwrap optional/default/nullable wrappers first if present
+                  let schema = fieldSchema as any;
+                  while (schema?.unwrap && !schema?.element) {
+                    schema = schema.unwrap();
+                  }
+                  const elementSchema = schema?.element;
+
+                  if (elementSchema && typeof elementSchema.safeParse === "function") {
+                    const original = cleanedArgs[key];
+                    cleanedArgs[key] = original.filter((entry: any) => elementSchema.safeParse(entry).success);
+                    if (cleanedArgs[key].length < original.length) {
+                      console.warn(
+                        `[LLMService] Filtered ${original.length - cleanedArgs[key].length}/${original.length} invalid entries from "${key}"`,
+                      );
+                    }
+                  }
+                }
+              }
+            }
+
+            const validated = params.outputSchema.parse(cleanedArgs);
+            console.warn("[LLMService] Lenient tool_calls parsing succeeded");
+
+            addTokens(input, output);
+            return {
+              ...(validated as T),
+              tokenUsage: { input, output },
+            };
+          } catch {
+            // Fall through to raw content parsing
+          }
         }
       }
 
-      return {
-        ...(response.parsed as T),
-        tokenUsage: {
-          input,
-          output,
-        },
-      };
-    } catch (error) {
-      console.error("[LLMService] Error calling LLM:", error);
-      throw new Error(`LLM service error: ${error instanceof Error ? error.message : "Unknown error"}`);
+      // Attempt fallback parsing from raw content
+      addParseFallback("raw");
+      try {
+        console.warn("[LLMService] Attempting fallback JSON parsing");
+        const manualParse = JSON.parse(rawContent);
+        const validated = params.outputSchema.parse(manualParse);
+
+        console.warn("[LLMService] Fallback parsing succeeded");
+
+        addTokens(input, output);
+        return {
+          ...(validated as T),
+          tokenUsage: { input, output },
+        };
+      } catch (fallbackError) {
+        throw new Error(
+          `LLM failed to return structured output. ` +
+            `Finish reason: ${finishReason}. ` +
+            `Raw content preview: ${rawContent.substring(0, 200)}...` +
+            `Fallback parsing error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+        );
+      }
     }
+
+    addTokens(input, output);
+    return {
+      ...(response.parsed as T),
+      tokenUsage: {
+        input,
+        output,
+      },
+    };
   }
 
   /**
