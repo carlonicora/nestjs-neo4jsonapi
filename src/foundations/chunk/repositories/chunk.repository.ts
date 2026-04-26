@@ -7,8 +7,7 @@ import { EmbedderService } from "../../../core";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
-import { Chunk } from "../../chunk/entities/chunk.entity";
-import { ChunkModel } from "../../chunk/entities/chunk.model";
+import { Chunk, ChunkDescriptor } from "../../chunk/entities/chunk.entity";
 
 @Injectable()
 export class ChunkRepository implements OnModuleInit {
@@ -40,7 +39,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findPotentialChunks(params: { question: string; dataLimits: DataLimits }): Promise<Chunk[]> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
 
@@ -73,7 +72,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findSubsequentChunkId(params: { chunkId: string }): Promise<Chunk> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -89,7 +88,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findPreviousChunkId(params: { chunkId: string }): Promise<Chunk> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -105,7 +104,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findChunkById(params: { chunkId: string }): Promise<Chunk> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -121,7 +120,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findChunks(params: { id: string; nodeType: string }): Promise<Chunk[]> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -212,7 +211,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async getChunksInProgress(params: { id: string; nodeType: string }): Promise<Chunk[]> {
-    const query = this.neo4j.initQuery({ serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -289,7 +288,7 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findChunkByContentIdAndType(params: { id: string; type: string }): Promise<Chunk[]> {
-    const query = this.neo4j.initQuery({ fetchAll: true, serialiser: ChunkModel });
+    const query = this.neo4j.initQuery({ fetchAll: true, serialiser: ChunkDescriptor.model });
 
     query.queryParams = {
       id: params.id,

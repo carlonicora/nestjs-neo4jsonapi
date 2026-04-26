@@ -41,3 +41,66 @@ describe("defineEntity — description and reverse extensions", () => {
     });
   });
 });
+
+describe("defineEntity — bridge declaration", () => {
+  const baseSchema = {
+    type: "bom-entries",
+    endpoint: "bom-entries",
+    nodeName: "bomEntry",
+    labelName: "BomEntry",
+    description: "Junction record between a BoM and items/parts.",
+    fields: { position: { type: "number", description: "Row order." } },
+    relationships: {
+      bom: {
+        model: { type: "boms", endpoint: "boms", nodeName: "bom", labelName: "BoM" },
+        direction: "in" as const,
+        relationship: "HAS_BOM_ENTRY",
+        cardinality: "one" as const,
+        description: "Parent BoM.",
+      },
+      item: {
+        model: { type: "items", endpoint: "items", nodeName: "item", labelName: "Item" },
+        direction: "out" as const,
+        relationship: "FOR_ITEM",
+        cardinality: "one" as const,
+        description: "Item this entry refers to.",
+      },
+    },
+  };
+
+  it("accepts bridge.materialiseTo when keys match relationships", () => {
+    const d = defineEntity<{ position?: number }>()({
+      ...baseSchema,
+      bridge: { materialiseTo: ["item"] },
+    } as any);
+    expect((d as any).bridge).toEqual({ materialiseTo: ["item"] });
+  });
+
+  it("throws when bridge.materialiseTo references an unknown relationship", () => {
+    expect(() =>
+      defineEntity<{ position?: number }>()({
+        ...baseSchema,
+        bridge: { materialiseTo: ["doesNotExist"] },
+      } as any),
+    ).toThrow(/materialiseTo references "doesNotExist"/);
+  });
+
+  it("throws when bridge is set but description is missing", () => {
+    const { description: _drop, ...withoutDescription } = baseSchema;
+    expect(() =>
+      defineEntity<{ position?: number }>()({
+        ...withoutDescription,
+        bridge: { materialiseTo: ["item"] },
+      } as any),
+    ).toThrow(/requires a top-level "description"/);
+  });
+
+  it("throws when bridge.materialiseTo is empty", () => {
+    expect(() =>
+      defineEntity<{ position?: number }>()({
+        ...baseSchema,
+        bridge: { materialiseTo: [] },
+      } as any),
+    ).toThrow(/non-empty string\[\]/);
+  });
+});

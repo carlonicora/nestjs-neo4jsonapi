@@ -38,22 +38,15 @@ export { ResponderResponseInterface } from "./responder/interfaces/responder.res
 export { SummariserModule } from "./summariser/summariser.module";
 export { SummariserService } from "./summariser/services/summariser.service";
 
-// Chatbot
-export { ChatbotModule } from "./chatbot/chatbot.module";
-export { ChatbotService } from "./chatbot/services/chatbot.service";
-export { ChatbotSearchService } from "./chatbot/services/chatbot.search.service";
-export type { MatchMode, RunSearchParams } from "./chatbot/services/chatbot.search.service";
+// Graph (was Chatbot — renamed in Task 2.1; symbols rewired in Phases 5-8)
+export { GraphModule } from "./graph/graph.module";
+export { GraphSearchService } from "./graph/services/graph.search.service";
+export type { MatchMode, RunSearchParams } from "./graph/services/graph.search.service";
 export {
-  CHATBOT_EXACT_MAX_RESULTS,
-  CHATBOT_FUZZY_MAX_RESULTS,
-  CHATBOT_SEMANTIC_MAX_RESULTS,
-  CHATBOT_SEMANTIC_MIN_SCORE,
-} from "./chatbot/services/chatbot.search.service";
-export { GraphDescriptorRegistry } from "./chatbot/services/descriptor.source";
-export type {
-  ChatbotResponseInterface,
-  ChatbotReference,
-  ChatbotToolCall,
-} from "./chatbot/interfaces/chatbot.response.interface";
-export type { ChatbotRunParams } from "./chatbot/services/chatbot.service";
-export { UserModulesRepository } from "./chatbot/repositories/user-modules.repository";
+  GRAPH_EXACT_MAX_RESULTS,
+  GRAPH_FUZZY_MAX_RESULTS,
+  GRAPH_SEMANTIC_MAX_RESULTS,
+  GRAPH_SEMANTIC_MIN_SCORE,
+} from "./graph/services/graph.search.service";
+export { GraphDescriptorRegistry } from "./graph/services/descriptor.source";
+export { UserModulesRepository } from "./graph/repositories/user-modules.repository";

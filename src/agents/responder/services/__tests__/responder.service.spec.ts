@@ -1,541 +1,361 @@
-import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
-import { Test, TestingModule } from "@nestjs/testing";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
+import { Test } from "@nestjs/testing";
 import { ResponderService } from "../responder.service";
 import { ResponderContextFactoryService } from "../../factories/responder.context.factory";
+import { ContextualiserContextFactoryService } from "../../../contextualiser/factories/contextualiser.context.factory";
 import { ContextualiserService } from "../../../contextualiser/services/contextualiser.service";
 import { DriftSearchService } from "../../../drift/services/drift.search.service";
 import { ResponderAnswerNodeService } from "../../nodes/responder.answer.node.service";
-import { ResponderContextState } from "../../contexts/responder.context";
+import { PlannerNodeService } from "../../nodes/planner.node.service";
+import { GraphNodeService } from "../../nodes/graph.node.service";
+import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 
-describe("ResponderService", () => {
-  let service: ResponderService;
-  let contextFactoryService: MockedObject<ResponderContextFactoryService>;
-  let contextualiserService: MockedObject<ContextualiserService>;
-  let driftSearchService: MockedObject<DriftSearchService>;
-  let answerNode: MockedObject<ResponderAnswerNodeService>;
+const TEST_IDS = {
+  companyId: "550e8400-e29b-41d4-a716-446655440000",
+  userId: "660e8400-e29b-41d4-a716-446655440001",
+  contentId: "770e8400-e29b-41d4-a716-446655440002",
+};
 
-  const TEST_IDS = {
-    companyId: "550e8400-e29b-41d4-a716-446655440000",
-    contentId: "660e8400-e29b-41d4-a716-446655440001",
+const MOCK_MESSAGES = [{ type: AgentMessageType.User, content: "What is the latest order for Acme?" }];
+const MOCK_DATA_LIMITS = {
+  chunks: { total: 100, perContent: 50 },
+  communities: { total: 50, perLevel: 10 },
+} as any;
+
+function plannerOutput(
+  overrides: Partial<{ runGraph: boolean; runContextualiser: boolean; runDrift: boolean; reasoning: string }> = {},
+) {
+  const branchPlan = {
+    runGraph: true,
+    runContextualiser: true,
+    runDrift: false,
+    reasoning: "default",
+    ...overrides,
   };
-
-  const MOCK_MESSAGES = [{ role: "user" as const, content: "What is the main topic?" }];
-
-  const MOCK_DATA_LIMITS = {
-    chunks: { total: 100, perContent: 50 },
-    communities: { total: 50, perLevel: 10 },
+  return {
+    branchPlan,
+    question: "What is the latest order for Acme?",
+    plannerError: null,
+    trace: {
+      planner: { reasoning: branchPlan.reasoning, branchPlan, tokens: { input: 10, output: 5 } },
+      totalTokens: { input: 10, output: 5 },
+    } as any,
   };
+}
 
-  const createMockContextFactoryService = () => ({
-    create: vi.fn(),
-    createAnswer: vi.fn(),
-  });
+function graphSuccessReturn() {
+  return {
+    graphContext: {
+      entities: [],
+      toolCalls: [],
+      tokens: { input: 0, output: 0 },
+      status: "success" as const,
+    },
+    graphError: null,
+    trace: {
+      graph: {
+        toolCalls: [],
+        entitiesDiscovered: 0,
+        status: "success" as const,
+        tokens: { input: 0, output: 0 },
+      },
+    } as any,
+  };
+}
 
-  const createMockContextualiserService = () => ({
-    run: vi.fn(),
-  });
+function graphFailedReturn(message = "tool fault") {
+  return {
+    graphContext: {
+      entities: [],
+      toolCalls: [],
+      tokens: { input: 0, output: 0 },
+      status: "failed" as const,
+      errorMessage: message,
+    },
+    graphError: message,
+    trace: {
+      graph: {
+        toolCalls: [],
+        entitiesDiscovered: 0,
+        status: "failed" as const,
+        errorMessage: message,
+        tokens: { input: 0, output: 0 },
+      },
+    } as any,
+  };
+}
 
-  const createMockDriftSearchService = () => ({
-    search: vi.fn(),
-    quickSearch: vi.fn(),
-  });
-
-  const createMockAnswerNode = () => ({
-    execute: vi.fn(),
-  });
-
-  const createInitialState = (overrides?: Partial<ResponderContextState>): ResponderContextState => ({
+function contextualiserSuccessReturn() {
+  return {
     companyId: TEST_IDS.companyId,
     contentId: TEST_IDS.contentId,
     contentType: "Document",
-    dataLimits: MOCK_DATA_LIMITS,
-    useDrift: false,
-    context: null,
-    driftContext: null,
-    response: "",
-    tokens: { input: 0, output: 0 },
-    ...overrides,
-  });
-
-  const createContextualiserResponse = () => ({
-    chunks: [{ id: "chunk1", content: "Some content" }],
-    atomicFacts: [{ content: "Fact 1", keyConcepts: ["concept1"] }],
-    communities: [],
+    hops: 2,
+    previousAnalysis: "",
+    previousAnswer: "",
+    limits: MOCK_DATA_LIMITS,
+    prompts: { initial: "", answer: "" },
+    chatHistory: [],
+    question: "What is the latest order for Acme?",
+    rationalPlan: "",
+    annotations: "",
+    notebook: [],
+    chunkLevel: 0,
+    queuedChunks: [],
+    queuedKeyConcepts: [],
+    processedChunks: ["c1"],
+    processedKeyConcepts: [],
+    processedAtomicFacts: [],
+    processedNeighbours: [],
+    neighbouringAlreadyExplored: false,
+    sources: [],
+    ontology: [],
+    requests: [],
+    nextStep: "answer",
+    status: [],
     tokens: { input: 50, output: 25 },
-  });
+  } as any;
+}
 
-  const createDriftSearchResponse = () => ({
-    answer: "DRIFT answer",
-    matchedCommunities: [{ id: "comm1", name: "Community 1" }],
+function driftSuccessReturn() {
+  return {
+    answer: "",
+    matchedCommunities: [],
     followUpAnswers: [],
-    initialAnswer: "Initial answer",
-    confidence: 0.85,
-    hydeEmbedding: [0.1, 0.2],
-  });
+    initialAnswer: "",
+    confidence: 80,
+    hydeEmbedding: [],
+    tokens: { input: 30, output: 15 },
+  } as any;
+}
 
-  const createAnswerNodeResponse = (state: ResponderContextState): Partial<ResponderContextState> => ({
-    response: "Final response based on context",
-    tokens: { input: state.tokens.input + 100, output: state.tokens.output + 50 },
-  });
+function answerNodeMock() {
+  return {
+    execute: vi.fn().mockImplementation(async ({ state }) => {
+      // Mirror real answer node: mutate-and-return state, accumulate tokens, set finalAnswer/trace.
+      state.sources = [];
+      state.references = [];
+      state.ontologies = [];
+      state.tokens = {
+        input: (state.tokens?.input ?? 0) + 100,
+        output: (state.tokens?.output ?? 0) + 50,
+      };
+      state.finalAnswer = {
+        title: "T",
+        analysis: "A",
+        answer: "ANS",
+        questions: [],
+        hasAnswer: true,
+      };
+      state.trace = {
+        ...state.trace,
+        answer: { branchesUsed: [], tokens: { input: 100, output: 50 } },
+        totalTokens: state.tokens,
+      };
+      return state;
+    }),
+  };
+}
+
+describe("ResponderService — unified workflow", () => {
+  let service: ResponderService;
+  let plannerNode: { execute: Mock };
+  let graphNode: { execute: Mock };
+  let contextualiserService: { run: Mock };
+  let driftSearchService: { search: Mock };
+  let answerNode: { execute: Mock };
 
   beforeEach(async () => {
-    vi.clearAllMocks();
+    plannerNode = { execute: vi.fn() };
+    graphNode = { execute: vi.fn().mockResolvedValue(graphSuccessReturn()) };
+    contextualiserService = { run: vi.fn().mockResolvedValue(contextualiserSuccessReturn()) };
+    driftSearchService = { search: vi.fn().mockResolvedValue(driftSuccessReturn()) };
+    answerNode = answerNodeMock();
 
-    const mockContextFactoryService = createMockContextFactoryService();
-    const mockContextualiserService = createMockContextualiserService();
-    const mockDriftSearchService = createMockDriftSearchService();
-    const mockAnswerNode = createMockAnswerNode();
-
-    const module: TestingModule = await Test.createTestingModule({
+    const moduleRef = await Test.createTestingModule({
       providers: [
         ResponderService,
-        { provide: ResponderContextFactoryService, useValue: mockContextFactoryService },
-        { provide: ContextualiserService, useValue: mockContextualiserService },
-        { provide: DriftSearchService, useValue: mockDriftSearchService },
-        { provide: ResponderAnswerNodeService, useValue: mockAnswerNode },
+        ResponderContextFactoryService,
+        ContextualiserContextFactoryService,
+        { provide: ContextualiserService, useValue: contextualiserService },
+        { provide: DriftSearchService, useValue: driftSearchService },
+        { provide: ResponderAnswerNodeService, useValue: answerNode },
+        { provide: PlannerNodeService, useValue: plannerNode },
+        { provide: GraphNodeService, useValue: graphNode },
       ],
     }).compile();
 
-    service = module.get<ResponderService>(ResponderService);
-    contextFactoryService = module.get(ResponderContextFactoryService) as MockedObject<ResponderContextFactoryService>;
-    contextualiserService = module.get(ContextualiserService) as MockedObject<ContextualiserService>;
-    driftSearchService = module.get(DriftSearchService) as MockedObject<DriftSearchService>;
-    answerNode = module.get(ResponderAnswerNodeService) as MockedObject<ResponderAnswerNodeService>;
+    service = moduleRef.get(ResponderService);
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
+  const baseRunArgs = () => ({
+    companyId: TEST_IDS.companyId,
+    userId: TEST_IDS.userId,
+    userModuleIds: ["crm"],
+    dataLimits: MOCK_DATA_LIMITS,
+    messages: MOCK_MESSAGES,
   });
 
-  describe("constructor", () => {
-    it("should create the service", () => {
-      expect(service).toBeDefined();
-    });
+  it("runs all three branches when planner picks runGraph + runContextualiser + runDrift", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: true }));
+
+    const result = await service.run(baseRunArgs());
+
+    expect(plannerNode.execute).toHaveBeenCalledTimes(1);
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+    expect(driftSearchService.search).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+
+    expect(result).toBeDefined();
+    expect(result.graphContext).toBeDefined();
+    expect(result.driftContext).toBeDefined();
+    expect(result.context).toBeDefined();
+    expect(result.answer).toEqual(
+      expect.objectContaining({ title: "T", analysis: "A", answer: "ANS", hasAnswer: true }),
+    );
+    expect(Array.isArray(result.references)).toBe(true);
+    expect(Array.isArray(result.sources)).toBe(true);
   });
 
-  describe("run", () => {
-    it("should execute workflow without DRIFT when useDrift is false", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: false });
-      const contextualiserResponse = createContextualiserResponse();
+  it("graph-only: planner runGraph=true skips contextualiser and drift", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: false, runDrift: false }));
 
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(contextualiserResponse);
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Final response",
-        tokens: { input: 150, output: 75 },
-      });
+    await service.run(baseRunArgs());
 
-      // Act
-      const result = await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-      });
-
-      // Assert
-      expect(contextualiserService.run).toHaveBeenCalled();
-      expect(driftSearchService.search).not.toHaveBeenCalled();
-      expect(answerNode.execute).toHaveBeenCalled();
-      expect(result).toBeDefined();
-    });
-
-    it("should execute workflow with DRIFT when useDrift is true", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      const contextualiserResponse = createContextualiserResponse();
-      const driftResponse = createDriftSearchResponse();
-
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(contextualiserResponse);
-      driftSearchService.search.mockResolvedValue(driftResponse);
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Final response with DRIFT",
-        tokens: { input: 200, output: 100 },
-      });
-
-      // Act
-      const result = await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        useDrift: true,
-      });
-
-      // Assert
-      expect(contextualiserService.run).toHaveBeenCalled();
-      expect(driftSearchService.search).toHaveBeenCalled();
-      expect(answerNode.execute).toHaveBeenCalled();
-      expect(result).toBeDefined();
-    });
-
-    it("should pass correct parameters to contextualiser", async () => {
-      // Arrange
-      const initialState = createInitialState();
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 150, output: 75 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        question: "What is this about?",
-      });
-
-      // Assert
-      expect(contextualiserService.run).toHaveBeenCalledWith(
-        expect.objectContaining({
-          companyId: TEST_IDS.companyId,
-          contentId: TEST_IDS.contentId,
-          contentType: "Document",
-          dataLimits: MOCK_DATA_LIMITS,
-          messages: MOCK_MESSAGES,
-          question: "What is this about?",
-        }),
-      );
-    });
-
-    it("should pass question to DRIFT search when provided", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        useDrift: true,
-        question: "What is the main topic?",
-      });
-
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          question: "What is the main topic?",
-        }),
-      );
-    });
-
-    it("should use last message content when question is not provided", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      const messages = [
-        { role: "assistant" as const, content: "Hello" },
-        { role: "user" as const, content: "Tell me about the document" },
-      ];
-
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages,
-        useDrift: true,
-      });
-
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          question: "Tell me about the document",
-        }),
-      );
-    });
-
-    it("should parse JSON question content if it's a stringified message", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      const jsonQuestion = JSON.stringify({ content: "Extracted question", role: "user" });
-
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        useDrift: true,
-        question: jsonQuestion,
-      });
-
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          question: "Extracted question",
-        }),
-      );
-    });
-
-    it("should pass DRIFT config when provided", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      const driftConfig = { primerTopK: 10, followUpDepth: 3 };
-
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        useDrift: true,
-        driftConfig,
-      });
-
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: driftConfig,
-        }),
-      );
-    });
-
-    it("should create initial state via factory service", async () => {
-      // Arrange
-      const initialState = createInitialState();
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 150, output: 75 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-      });
-
-      // Assert
-      expect(contextFactoryService.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          companyId: TEST_IDS.companyId,
-          contentId: TEST_IDS.contentId,
-          contentType: "Document",
-          dataLimits: MOCK_DATA_LIMITS,
-          useDrift: false,
-        }),
-      );
-    });
-
-    it("should create answer via factory service", async () => {
-      // Arrange
-      const initialState = createInitialState();
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Final response",
-        tokens: { input: 150, output: 75 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-      });
-
-      // Assert
-      expect(contextFactoryService.createAnswer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          state: expect.any(Object),
-        }),
-      );
-    });
-
-    it("should throw error when workflow fails", async () => {
-      // Arrange
-      const initialState = createInitialState();
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockRejectedValue(new Error("Contextualiser failed"));
-
-      // Act & Assert
-      await expect(
-        service.run({
-          companyId: TEST_IDS.companyId,
-          contentId: TEST_IDS.contentId,
-          contentType: "Document",
-          dataLimits: MOCK_DATA_LIMITS,
-          messages: MOCK_MESSAGES,
-        }),
-      ).rejects.toThrow("Contextualiser failed");
-    });
-
-    it("should default useDrift to false when not provided", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: false });
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 150, output: 75 },
-      });
-
-      // Act
-      await service.run({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-      });
-
-      // Assert
-      expect(contextFactoryService.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          useDrift: false,
-        }),
-      );
-    });
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).not.toHaveBeenCalled();
+    expect(driftSearchService.search).not.toHaveBeenCalled();
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
   });
 
-  describe("runWithDrift", () => {
-    it("should call run with useDrift set to true", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response with DRIFT",
-        tokens: { input: 200, output: 100 },
-      });
+  it("contextualiser-only: planner runContextualiser=true skips graph and drift", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: false, runContextualiser: true, runDrift: false }));
 
-      // Act
-      const result = await service.runWithDrift({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-      });
-
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalled();
-      expect(result).toBeDefined();
+    await service.run({
+      ...baseRunArgs(),
+      contentId: TEST_IDS.contentId,
+      contentType: "Document",
     });
 
-    it("should pass driftConfig to run", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
-      const driftConfig = { primerTopK: 15, followUpDepth: 2 };
+    expect(graphNode.execute).not.toHaveBeenCalled();
+    expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+    expect(driftSearchService.search).not.toHaveBeenCalled();
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+  });
 
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
+  it("drift-only: planner runDrift=true skips graph and contextualiser", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: false, runContextualiser: false, runDrift: true }));
 
-      // Act
-      await service.runWithDrift({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        driftConfig,
-      });
+    await service.run(baseRunArgs());
 
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: driftConfig,
-        }),
-      );
+    expect(graphNode.execute).not.toHaveBeenCalled();
+    expect(contextualiserService.run).not.toHaveBeenCalled();
+    expect(driftSearchService.search).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("graph + drift: both run, contextualiser does not", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: false, runDrift: true }));
+
+    await service.run(baseRunArgs());
+
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).not.toHaveBeenCalled();
+    expect(driftSearchService.search).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("planner picks no branches: edge fallback routes straight to answer", async () => {
+    plannerNode.execute.mockResolvedValue(
+      plannerOutput({ runGraph: false, runContextualiser: false, runDrift: false }),
+    );
+
+    const result = await service.run(baseRunArgs());
+
+    expect(graphNode.execute).not.toHaveBeenCalled();
+    expect(contextualiserService.run).not.toHaveBeenCalled();
+    expect(driftSearchService.search).not.toHaveBeenCalled();
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    expect(result.answer).toBeDefined();
+  });
+
+  it("planner LLM error fallback runs graph + contextualiser, not drift", async () => {
+    const fallbackPlan = {
+      runGraph: true,
+      runContextualiser: true,
+      runDrift: false,
+      reasoning: "planner_fallback",
+    };
+    plannerNode.execute.mockResolvedValue({
+      branchPlan: fallbackPlan,
+      question: "What is the latest order for Acme?",
+      plannerError: "LLM 500",
+      trace: {
+        planner: {
+          reasoning: "planner_fallback",
+          branchPlan: fallbackPlan,
+          tokens: { input: 0, output: 0 },
+        },
+        totalTokens: { input: 0, output: 0 },
+      } as any,
     });
 
-    it("should pass question to run", async () => {
-      // Arrange
-      const initialState = createInitialState({ useDrift: true });
+    await service.run(baseRunArgs());
 
-      contextFactoryService.create.mockReturnValue(initialState);
-      contextualiserService.run.mockResolvedValue(createContextualiserResponse());
-      driftSearchService.search.mockResolvedValue(createDriftSearchResponse());
-      answerNode.execute.mockImplementation(async ({ state }) => createAnswerNodeResponse(state));
-      contextFactoryService.createAnswer.mockReturnValue({
-        response: "Response",
-        tokens: { input: 200, output: 100 },
-      });
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+    expect(driftSearchService.search).not.toHaveBeenCalled();
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+  });
 
-      // Act
-      await service.runWithDrift({
-        companyId: TEST_IDS.companyId,
-        contentId: TEST_IDS.contentId,
-        contentType: "Document",
-        dataLimits: MOCK_DATA_LIMITS,
-        messages: MOCK_MESSAGES,
-        question: "Specific question",
-      });
+  it("graph branch failure in isolation: response built, answer node still runs", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: false }));
+    graphNode.execute.mockResolvedValue(graphFailedReturn("tool fault"));
 
-      // Assert
-      expect(driftSearchService.search).toHaveBeenCalledWith(
-        expect.objectContaining({
-          question: "Specific question",
-        }),
-      );
-    });
+    const result = await service.run(baseRunArgs());
+
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    expect(result).toBeDefined();
+    expect(result.answer).toBeDefined();
+    expect((result.trace as any)?.graph?.status).toBe("failed");
+  });
+
+  it("contextualiser branch failure in isolation: response built, answer node still runs", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: false }));
+    contextualiserService.run.mockRejectedValue(new Error("contextualiser exploded"));
+
+    const result = await service.run(baseRunArgs());
+
+    expect(graphNode.execute).toHaveBeenCalledTimes(1);
+    expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    expect(result).toBeDefined();
+    expect(result.answer).toBeDefined();
+    expect((result.trace as any)?.contextualiser?.status).toBe("failed");
+  });
+
+  it("drift branch failure in isolation: response built, answer node still runs", async () => {
+    plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: false, runContextualiser: false, runDrift: true }));
+    driftSearchService.search.mockRejectedValue(new Error("drift exploded"));
+
+    const result = await service.run(baseRunArgs());
+
+    expect(driftSearchService.search).toHaveBeenCalledTimes(1);
+    expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    expect(result).toBeDefined();
+    expect(result.answer).toBeDefined();
+    expect((result.trace as any)?.drift?.status).toBe("failed");
+  });
+
+  it("answer LLM error re-throws", async () => {
+    plannerNode.execute.mockResolvedValue(
+      plannerOutput({ runGraph: false, runContextualiser: false, runDrift: false }),
+    );
+    answerNode.execute.mockRejectedValue(new Error("answer LLM down"));
+
+    await expect(service.run(baseRunArgs())).rejects.toThrow(/answer LLM down/);
   });
 });

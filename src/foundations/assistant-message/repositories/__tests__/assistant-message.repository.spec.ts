@@ -117,6 +117,142 @@ describe("AssistantMessageRepository.linkReferences", () => {
     await repo.linkReferences({ messageId: "m-1", references: [] });
     expect(writes).toHaveLength(0);
   });
+
+  it("writes r.relevance on the edge alongside r.reason", async () => {
+    await repo.linkReferences({
+      messageId: "m-1",
+      references: [{ type: "accounts", id: "acc-1", reason: "strong match", relevance: 91 }],
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].query).toContain("r.relevance = $relevance");
+    expect(writes[0].query).toContain("r.reason = $reason");
+    expect(writes[0].query).toContain("r.createdAt = coalesce(r.createdAt, datetime())");
+    expect(writes[0].queryParams).toMatchObject({
+      messageId: "m-1",
+      refId: "acc-1",
+      reason: "strong match",
+      relevance: 91,
+    });
+  });
+
+  it("passes relevance: null when the reference has no relevance", async () => {
+    await repo.linkReferences({
+      messageId: "m-1",
+      references: [{ type: "accounts", id: "acc-1", reason: "no score" }],
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].queryParams).toMatchObject({
+      messageId: "m-1",
+      refId: "acc-1",
+      reason: "no score",
+      relevance: null,
+    });
+  });
+});
+
+describe("AssistantMessageRepository.linkCitations", () => {
+  let repo: AssistantMessageRepository;
+  let neo4j: any;
+  let writes: Array<{ query: string; queryParams: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    writes = [];
+    neo4j = {
+      initQuery: vi.fn(() => ({ query: "", queryParams: {} })),
+      readOne: vi.fn(),
+      read: vi.fn(),
+      writeOne: vi.fn(async (q: any) => {
+        writes.push(q);
+        return null;
+      }),
+    };
+    const cls = { get: vi.fn(() => "u-1") } as unknown as ClsService;
+    const security = {} as any;
+    repo = new AssistantMessageRepository(neo4j, security, cls);
+  });
+
+  it("issues one MERGE per citation with relevance and reason on the edge", async () => {
+    await repo.linkCitations({
+      messageId: "m-1",
+      citations: [{ chunkId: "ch-1", relevance: 88, reason: "best paragraph" }],
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].query).toContain("MATCH (ch:Chunk {id: $chunkId})");
+    expect(writes[0].query).toContain("MERGE (m)-[c:CITES]->(ch)");
+    expect(writes[0].query).toContain("c.relevance = $relevance");
+    expect(writes[0].query).toContain("c.reason");
+    expect(writes[0].query).toContain("c.createdAt = coalesce(c.createdAt, datetime())");
+    expect(writes[0].queryParams).toEqual({
+      messageId: "m-1",
+      chunkId: "ch-1",
+      relevance: 88,
+      reason: "best paragraph",
+    });
+  });
+
+  it("passes reason: null when the citation has no reason", async () => {
+    await repo.linkCitations({
+      messageId: "m-1",
+      citations: [{ chunkId: "ch-1", relevance: 70 }],
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].queryParams).toEqual({
+      messageId: "m-1",
+      chunkId: "ch-1",
+      relevance: 70,
+      reason: null,
+    });
+  });
+
+  it("no-ops on an empty citations array", async () => {
+    await repo.linkCitations({ messageId: "m-1", citations: [] });
+    expect(writes).toHaveLength(0);
+  });
+
+  it("issues one writeOne per citation when multiple are passed", async () => {
+    await repo.linkCitations({
+      messageId: "m-1",
+      citations: [
+        { chunkId: "ch-1", relevance: 88, reason: "first" },
+        { chunkId: "ch-2", relevance: 42 },
+      ],
+    });
+    expect(writes).toHaveLength(2);
+    expect(writes[0].queryParams).toMatchObject({ chunkId: "ch-1", relevance: 88, reason: "first" });
+    expect(writes[1].queryParams).toMatchObject({ chunkId: "ch-2", relevance: 42, reason: null });
+  });
+});
+
+describe("AssistantMessageRepository.setTrace", () => {
+  let repo: AssistantMessageRepository;
+  let neo4j: any;
+  let writes: Array<{ query: string; queryParams: Record<string, unknown> }>;
+
+  beforeEach(() => {
+    writes = [];
+    neo4j = {
+      initQuery: vi.fn(() => ({ query: "", queryParams: {} })),
+      readOne: vi.fn(),
+      read: vi.fn(),
+      writeOne: vi.fn(async (q: any) => {
+        writes.push(q);
+        return null;
+      }),
+    };
+    const cls = { get: vi.fn(() => "u-1") } as unknown as ClsService;
+    const security = {} as any;
+    repo = new AssistantMessageRepository(neo4j, security, cls);
+  });
+
+  it("issues a single writeOne setting m.trace verbatim from the params", async () => {
+    await repo.setTrace({ messageId: "m-1", trace: "step1\nstep2\nstep3" });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].query).toBe("MATCH (m:AssistantMessage {id: $messageId}) SET m.trace = $trace");
+    expect(writes[0].queryParams).toEqual({
+      messageId: "m-1",
+      trace: "step1\nstep2\nstep3",
+    });
+  });
 });
 
 describe("AssistantMessageRepository.findReferencedTypeIdPairs", () => {

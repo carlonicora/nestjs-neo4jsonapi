@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { ContextualiserContextFactoryService } from "../../contextualiser/factories/contextualiser.context.factory";
-import { ResponderContextState } from "../../responder/contexts/responder.context";
-import { ResponderResponseInterface } from "../../responder/interfaces/responder.response.interface";
+import { ResponderContextState } from "../contexts/responder.context";
+import { ResponderResponseInterface } from "../interfaces/responder.response.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { DataLimits } from "../../../common/types/data.limits";
 
@@ -11,36 +11,54 @@ export class ResponderContextFactoryService {
 
   create(params: {
     companyId: string;
-    contentId: string;
-    contentType: string;
+    contentId?: string;
+    contentType?: string;
     dataLimits: DataLimits;
-    useDrift?: boolean;
   }): ResponderContextState {
-    const response: ResponderContextState = {
+    return {
       companyId: params.companyId,
       contentId: params.contentId,
       contentType: params.contentType,
       dataLimits: params.dataLimits,
-      useDrift: params.useDrift ?? false,
       driftContext: undefined,
       context: undefined,
       tokens: undefined,
       finalAnswer: undefined,
       sources: undefined,
       ontologies: undefined,
-    };
-
-    return response;
+    } as ResponderContextState;
   }
 
   createAnswer(params: { state: ResponderContextState }): ResponderResponseInterface {
+    const s = params.state;
     return {
       type: AgentMessageType.Assistant,
-      context: this.contextualiserContextFactoryService.createAnswer({ state: params.state.context }),
-      tokens: params.state.tokens,
-      answer: params.state.finalAnswer,
-      sources: params.state.sources,
-      ontologies: params.state.ontologies,
+      context: s.context
+        ? this.contextualiserContextFactoryService.createAnswer({ state: s.context })
+        : {
+            type: AgentMessageType.Assistant,
+            rationalPlan: "",
+            annotations: "",
+            notebook: [],
+            processedElements: { chunks: [], keyConcepts: [], atomicFacts: [] },
+            sources: [],
+            requests: [],
+            tokens: { input: 0, output: 0 },
+          },
+      graphContext: s.graphContext,
+      driftContext: s.driftContext,
+      answer: s.finalAnswer ?? {
+        title: "",
+        analysis: "",
+        answer: "",
+        questions: [],
+        hasAnswer: false,
+      },
+      sources: s.sources ?? [],
+      references: s.references ?? [],
+      ontologies: s.ontologies ?? [],
+      trace: s.trace,
+      tokens: s.tokens ?? { input: 0, output: 0 },
     };
   }
 }

@@ -232,6 +232,18 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
   };
+
+  /**
+   * Marks this entity as a bridge (junction) node. When a tool returns a record
+   * of this type, the listed relationships are auto-fetched one hop and inlined
+   * into the response, with a `__materialised` array listing what was filled.
+   * Each name MUST be a key of `relationships` on this descriptor. The bridge
+   * also requires a top-level `description`, otherwise it would be invisible
+   * to the catalog.
+   */
+  bridge?: {
+    materialiseTo: string[];
+  };
 }
 
 /**
@@ -303,5 +315,10 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     summary?: (data: any) => string;
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
+  };
+
+  /** See EntitySchemaInput.bridge. */
+  bridge?: {
+    materialiseTo: string[];
   };
 }

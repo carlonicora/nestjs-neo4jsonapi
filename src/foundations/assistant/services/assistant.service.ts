@@ -1,10 +1,14 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { ChatbotService } from "../../../agents/chatbot/services/chatbot.service";
-import { GraphCatalogService } from "../../../agents/chatbot/services/graph.catalog.service";
-import { UserModulesRepository } from "../../../agents/chatbot/repositories/user-modules.repository";
-import { ChatbotReference, ChatbotToolCall } from "../../../agents/chatbot/interfaces/chatbot.response.interface";
+import { ResponderService } from "../../../agents/responder/services/responder.service";
+import { GraphCatalogService } from "../../../agents/graph/services/graph.catalog.service";
+import { UserModulesRepository } from "../../../agents/graph/repositories/user-modules.repository";
+import { EntityReference } from "../../../agents/responder/interfaces/entity.reference.interface";
+import type { ToolCallRecord } from "../../../agents/graph/tools/tool.factory";
+import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.trace.interface";
+import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
@@ -31,16 +35,18 @@ interface AgentTurnResult {
   role: "assistant";
   content: string;
   createdAt: string;
-  references: ChatbotReference[];
+  references: EntityReference[];
+  sources: { chunkId: string; relevance: number; reason: string }[];
   suggestedQuestions: string[];
   tokens: { input: number; output: number };
-  toolCalls: ChatbotToolCall[];
+  toolCalls: ToolCallRecord[];
+  trace: UnifiedTrace;
 }
 
 /**
  * AssistantService
  *
- * Wraps the stateless ChatbotService.run() in a stateful lifecycle. Extends
+ * Wraps the stateless ResponderService.run() in a stateful lifecycle. Extends
  * AbstractService so standard CRUD (find / findById / patch / delete) is
  * inherited and wired through the framework's JSON:API pipeline — only the
  * agent-turn methods below are bespoke:
@@ -62,7 +68,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistantRepository: AssistantRepository,
     clsService: ClsService,
     private readonly userModuleIdsRepository: UserModulesRepository,
-    private readonly chatbot: ChatbotService,
+    private readonly responder: ResponderService,
     private readonly assistantMessages: AssistantMessageService,
     private readonly assistantMessageRepo: AssistantMessageRepository,
     private readonly graphCatalog: GraphCatalogService,
@@ -80,7 +86,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistant: Assistant;
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
-    toolCalls: ChatbotToolCall[];
+    toolCalls: ToolCallRecord[];
   }> {
     const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
     const title = params.title?.trim() || this.autoTitle(params.firstMessage);
@@ -151,6 +157,16 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         references: turn.references,
       });
     }
+    if (turn.sources.length) {
+      await this.assistantMessageRepo.linkCitations({
+        messageId: assistantMessageId,
+        citations: turn.sources.map((s) => ({ chunkId: s.chunkId, relevance: s.relevance, reason: s.reason })),
+      });
+    }
+    await this.assistantMessageRepo.setTrace({
+      messageId: assistantMessageId,
+      trace: JSON.stringify(turn.trace),
+    });
     const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
 
     this.assistantLogger.log(
@@ -164,7 +180,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   async appendMessage(params: { assistantId: string; companyId: string; userId: string; newMessage: string }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
-    toolCalls: ChatbotToolCall[];
+    toolCalls: ToolCallRecord[];
   }> {
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
@@ -232,6 +248,16 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         references: turn.references,
       });
     }
+    if (turn.sources.length) {
+      await this.assistantMessageRepo.linkCitations({
+        messageId: assistantMessageId,
+        citations: turn.sources.map((s) => ({ chunkId: s.chunkId, relevance: s.relevance, reason: s.reason })),
+      });
+    }
+    await this.assistantMessageRepo.setTrace({
+      messageId: assistantMessageId,
+      trace: JSON.stringify(turn.trace),
+    });
     const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
 
     this.assistantLogger.log(
@@ -258,7 +284,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   /**
    * Runs a single agent turn. Builds a message list of:
    *   [ optional reference-memory system message, ...prior messages, new user message ]
-   * and invokes the stateless chatbot. Returns the assistant reply metadata.
+   * and invokes the unified responder. Returns the assistant reply metadata.
    */
   private async runAgentTurn(params: {
     companyId: string;
@@ -268,35 +294,78 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     newUserMessage: { role: "user"; content: string };
     assistantId?: string;
   }): Promise<AgentTurnResult> {
+    // Anchor every LLMService.call() in this turn to the same assistant/turn
+    // pair so the dumper can group dumps under
+    // .llm-dumps/<date>/<assistantId>/<turn-time>/.
+    if (params.assistantId) {
+      const now = new Date();
+      this.clsService.set("assistantTurnContext", {
+        assistantId: params.assistantId,
+        turnStartedAt: now.toISOString().slice(0, 19).replace(/[T:]/g, "-"),
+      });
+    }
+
     const hydrationContent = await this.buildHydrationMessage(params.priorMessages, params.userModuleIds);
+
     const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
-      role: m.role,
+      type: this.roleToType(m.role),
       content: m.content,
     }));
-    const messages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
-      ...(hydrationContent ? [{ role: "system" as const, content: hydrationContent }] : []),
+
+    const messages: MessageInterface[] = [
+      ...(hydrationContent ? [{ type: AgentMessageType.System, content: hydrationContent }] : []),
       ...trimmed,
-      { role: params.newUserMessage.role, content: params.newUserMessage.content },
+      { type: AgentMessageType.User, content: params.newUserMessage.content },
     ];
 
-    const response = await this.chatbot.run({
+    // Resolve content scope from the assistant's BOUND_TO relationship if loaded.
+    let contentId: string | undefined;
+    let contentType: string | undefined;
+    if (params.assistantId) {
+      try {
+        const assistant = await this.repository.findById({ id: params.assistantId });
+        const c = (assistant as any).content;
+        contentId = c?.id;
+        contentType = c?.type;
+      } catch {
+        // If load fails, proceed without content scope.
+      }
+    }
+
+    const response = await this.responder.run({
       companyId: params.companyId,
       userId: params.userId,
       userModuleIds: params.userModuleIds,
+      contentId,
+      contentType,
+      dataLimits: {},
       messages,
-      assistantId: params.assistantId,
+      question: params.newUserMessage.content,
     });
 
     return {
       id: randomUUID(),
       role: "assistant",
-      content: response.answer,
+      content: response.answer.answer,
       createdAt: new Date().toISOString(),
       references: response.references ?? [],
-      suggestedQuestions: response.suggestedQuestions ?? [],
+      sources: response.sources ?? [],
+      suggestedQuestions: response.answer?.questions ?? [],
       tokens: response.tokens ?? { input: 0, output: 0 },
-      toolCalls: response.toolCalls ?? [],
+      toolCalls: response.graphContext?.toolCalls ?? [],
+      trace: response.trace,
     };
+  }
+
+  private roleToType(role: "user" | "assistant" | "system"): AgentMessageType {
+    switch (role) {
+      case "user":
+        return AgentMessageType.User;
+      case "assistant":
+        return AgentMessageType.Assistant;
+      case "system":
+        return AgentMessageType.System;
+    }
   }
 
   /**
@@ -358,6 +427,19 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       const focusRecords = await this.loadFocusRecords(focusCapped, userModuleIds);
       const backgroundStubs = await this.loadBackgroundStubs(backgroundCapped, userModuleIds);
 
+      // Diagnostic trace: in the dump it lets us see exactly which entities were
+      // handed to the LLM as focus context (and whether any were bridges, since
+      // bridge ids in focus are addressable directly without resolve_entity).
+      const focusTrace = focusRecords.map((r: any) => ({
+        type: r.type,
+        id: r.id,
+        isBridge: !!this.graphCatalog.getEntityDetail(r.type, userModuleIds)?.bridge,
+      }));
+      const backgroundTrace = backgroundStubs.map((s) => ({ type: s.type, id: s.id }));
+      this.assistantLogger.log(
+        `hydration: focus=${JSON.stringify(focusTrace)} background=${JSON.stringify(backgroundTrace)}`,
+      );
+
       if (focusRecords.length === 0 && backgroundStubs.length === 0) return null;
 
       const sections: string[] = ["## Entities already in this conversation", ""];
@@ -406,13 +488,59 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       try {
         const record: any = await svc.findRecordById({ id: ref.id });
         if (!record) continue;
-        out.push({ ...record, type: ref.type });
+        out.push({ ...this.stripFocusRecord(record), type: ref.type });
       } catch {
         // Deleted or RBAC-denied: drop silently.
         continue;
       }
     }
     return out;
+  }
+
+  /**
+   * Strip a focus record's nested relationship objects down to {id, type, summary}
+   * stubs. The hydration design rule (see bridge-entities spec) is that the focus
+   * block carries the entity's own scalar fields plus id-stubs for relationships —
+   * NOT a full one-hop expansion that includes the related node's own collections
+   * (which are mapper-initialised to `[]` and look like authoritative empty data
+   * to the LLM, causing it to skip the traverse and answer "empty" wrongly).
+   */
+  private stripFocusRecord(record: Record<string, unknown>): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (value === null || value === undefined) {
+        result[key] = value;
+        continue;
+      }
+      if (Array.isArray(value)) {
+        result[key] = value.map((v) => this.stubRelatedRecord(v));
+        continue;
+      }
+      if (typeof value === "object" && this.looksLikeRelatedRecord(value)) {
+        result[key] = this.stubRelatedRecord(value);
+        continue;
+      }
+      result[key] = value;
+    }
+    return result;
+  }
+
+  private looksLikeRelatedRecord(v: unknown): boolean {
+    if (!v || typeof v !== "object") return false;
+    const obj = v as Record<string, unknown>;
+    return typeof obj.id === "string";
+  }
+
+  private stubRelatedRecord(v: unknown): unknown {
+    if (!this.looksLikeRelatedRecord(v)) return v;
+    const obj = v as Record<string, unknown>;
+    const summarySource = obj.name ?? obj.number ?? obj.title ?? obj.id;
+    const summary = typeof summarySource === "string" ? summarySource : String(summarySource ?? "");
+    return {
+      id: obj.id,
+      type: obj.type ?? null,
+      summary,
+    };
   }
 
   private async loadBackgroundStubs(

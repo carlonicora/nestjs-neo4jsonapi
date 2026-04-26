@@ -8,10 +8,9 @@ import { KeyConceptModule } from "../keyconcept/keyconcept.module";
 import { S3Module } from "../s3/s3.module";
 import { TokenUsageModule } from "../tokenusage/tokenusage.module";
 import { ChunkController } from "./controllers/chunk.controller";
-import { ChunkModel } from "./entities/chunk.model";
+import { ChunkDescriptor } from "./entities/chunk.entity";
 import { ChunkProcessor } from "./processors/chunk.processor";
 import { ChunkRepository } from "./repositories/chunk.repository";
-import { ChunkSerialiser } from "./serialisers/chunk.serialiser";
 import { ChunkService } from "./services/chunk.service";
 
 /**
@@ -23,12 +22,12 @@ import { ChunkService } from "./services/chunk.service";
  */
 @Module({
   controllers: [ChunkController],
-  providers: [ChunkService, ChunkRepository, ChunkSerialiser, createWorkerProvider(ChunkProcessor)],
-  exports: [ChunkService, ChunkRepository, ChunkSerialiser],
+  providers: [ChunkDescriptor.model.serialiser, ChunkService, ChunkRepository, createWorkerProvider(ChunkProcessor)],
+  exports: [ChunkService, ChunkRepository],
   imports: [AtomicFactModule, GraphCreatorModule, KeyConceptModule, S3Module, LLMModule, TokenUsageModule],
 })
 export class ChunkModule implements OnModuleInit {
   onModuleInit() {
-    modelRegistry.register(ChunkModel);
+    modelRegistry.register(ChunkDescriptor.model);
   }
 }
