@@ -24,7 +24,10 @@ function fakeTool(name: string) {
 describe("GraphNodeService", () => {
   let service: GraphNodeService;
   const llm = { call: vi.fn() } as unknown as LLMService;
-  const catalog = { getMapFor: vi.fn().mockReturnValue("ENTITY CATALOG TEXT") } as unknown as GraphCatalogService;
+  const catalog = {
+    getMapFor: vi.fn().mockReturnValue("ENTITY CATALOG TEXT"),
+    getTypeIndexFor: vi.fn().mockReturnValue("- accounts — A customer."),
+  } as unknown as GraphCatalogService;
   const toolFactory = {} as ToolFactory;
   const mkBuild = (name: string) => ({ build: vi.fn().mockReturnValue(fakeTool(name)) });
   const resolveTool = mkBuild("resolve_entity") as unknown as ResolveEntityTool;
@@ -36,6 +39,7 @@ describe("GraphNodeService", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     (catalog.getMapFor as unknown as Mock).mockReturnValue("ENTITY CATALOG TEXT");
+    (catalog.getTypeIndexFor as unknown as Mock).mockReturnValue("- accounts — A customer.");
     // reset each tool's build to return a fresh fakeTool by default
     (resolveTool.build as unknown as Mock).mockImplementation(() => fakeTool("resolve_entity"));
     (describeTool.build as unknown as Mock).mockImplementation(() => fakeTool("describe_entity"));

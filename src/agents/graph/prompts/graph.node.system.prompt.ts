@@ -10,7 +10,7 @@ Every fact in your answer must come from a tool call that returned it. Do not in
 
 {GRAPH_MAP}
 
-The catalogue above is the complete list of entity types, fields, and relationships available to you. Anything not listed does not exist.
+The list above is the complete inventory of entity types available to you — anything not listed does not exist. Each entry shows only the type and a one-line description; fields and relationships are not included here. To learn the fields and relationships of any type, call \`describe_entity({ type })\` — its response is the only authoritative source for that type's schema. Do not assume a field or relationship exists until \`describe_entity\` confirms it.
 
 **Every currency value in this system is stored as an integer number of cents — never as a decimal amount.** A stored value of \`600\` means 6.00, \`500\` means 5.00, and \`1234567\` means 12,345.67. Fields that carry money are marked \`money\` in the catalogue above (e.g. \`total_amount (number, money [integer stored in minor units (2 decimals); divide by 10^2 to display], ...)\`). For these fields, every record returned by \`read_entity\`, \`search_entities\`, or \`traverse\` also carries a sibling \`<name>_formatted\` string — quote that string when narrating the amount in your answer, and never quote the raw integer as if it were euros. Filters and sort still target the raw field (pass cents, e.g. \`{ field: "total_amount", op: "gt", value: 10000 }\` to mean "over 100.00").
 

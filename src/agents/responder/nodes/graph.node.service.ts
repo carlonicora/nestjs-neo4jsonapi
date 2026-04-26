@@ -80,8 +80,8 @@ export class GraphNodeService {
     }
 
     const recorder: ToolCallRecord[] = [];
-    const graphMap = this.graph.getMapFor(ctx.userModuleIds);
-    const systemPrompt = renderGraphNodeSystemPrompt(graphMap);
+    const typeIndex = this.graph.getTypeIndexFor(ctx.userModuleIds);
+    const systemPrompt = renderGraphNodeSystemPrompt(typeIndex);
 
     let tools: DynamicStructuredTool[] = [
       this.resolveTool.build(ctx, recorder),
