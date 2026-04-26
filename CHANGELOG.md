@@ -1,3 +1,23 @@
+## [1.65.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.64.0...v1.65.0) (2026-04-26)
+
+### 🚀 Features
+
+* group assistant and responder agents in a single call ([ef8b166](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ef8b166a56a0ce5ad8998d9b4f0343f7df1ea047))
+* implement bridge materialisation for junction entities ([1a82c19](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1a82c1985131eb3db549b8cbb0b0909d42fb4ec1))
+
+### 🐛 Bug Fixes
+
+* **assistant:** loosen data-loading retry guard in graph node ([6e30075](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6e30075d156c562e774bd63625630aff82bf9bb2))
+
+### 📦 Code Refactoring
+
+* streamline logging in ToolFactory for unknown types ([9f58ddb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9f58ddb0e51b3d5b122901de2417ed71340d8304))
+
+### ⚡ Performance Improvements
+
+* **assistant:** slim planner catalog to a type index ([2091926](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2091926d611f04294486faaf9a88afbbc5841ac7))
+* **assistant:** use type index in graph node system prompt ([c539083](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c539083328604b784ab8d73b5229c1ee68a7629e))
+
 ## [1.64.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.63.0...v1.64.0) (2026-04-25)
 
 ### 🚀 Features
