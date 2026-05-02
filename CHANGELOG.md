@@ -1,3 +1,9 @@
+## [1.65.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.65.1...v1.65.2) (2026-05-02)
+
+### 🐛 Bug Fixes
+
+* update Discord client ID environment variable for consistency ([5b2787e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5b2787e1bb5769c290249105bc64d98dd19065f3))
+
 ## [1.65.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.65.0...v1.65.1) (2026-04-26)
 
 ### 🐛 Bug Fixes
