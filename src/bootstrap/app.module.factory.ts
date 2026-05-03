@@ -94,6 +94,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // i18n - optional with defaults
           I18nModule.forRoot({
             fallbackLanguage: options.i18n?.fallbackLanguage ?? "en",
+            logging: false,
             loaderOptions: {
               path: i18nPath,
               watch: true,
@@ -139,7 +140,11 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                     const discord = config.get<ConfigDiscordInterface>("discord");
                     return {
                       token: discord.token,
-                      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+                      intents: [
+                        GatewayIntentBits.Guilds,
+                        GatewayIntentBits.GuildMessages,
+                        GatewayIntentBits.GuildVoiceStates,
+                      ],
                       development: discord.devGuildId ? [discord.devGuildId] : false,
                     };
                   },
