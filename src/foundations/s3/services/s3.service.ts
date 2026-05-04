@@ -376,6 +376,7 @@ export class S3Service {
       "application/pdf": "pdf",
       "text/plain": "txt",
       "text/markdown": "md",
+      "text/vtt": "vtt",
     };
 
     const extension =
@@ -421,6 +422,7 @@ export class S3Service {
       "application/pdf": "pdf",
       "text/plain": "txt",
       "text/markdown": "md",
+      "text/vtt": "vtt",
     };
 
     const extension =

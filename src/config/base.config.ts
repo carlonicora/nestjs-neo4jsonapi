@@ -206,6 +206,24 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         googleCredentialsBase64:
           process.env.VISION_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
       },
+      audio: {
+        provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",
+        apiKey: process.env.AUDIO_API_KEY || process.env.AI_API_KEY || "",
+        model: process.env.AUDIO_MODEL || process.env.AI_MODEL || "",
+        url: process.env.AUDIO_URL || process.env.AI_URL || "",
+        region: process.env.AUDIO_REGION || process.env.AI_REGION || "",
+        secret: process.env.AUDIO_SECRET || process.env.AI_SECRET || "",
+        instance: process.env.AUDIO_INSTANCE || process.env.AI_INSTANCE || "",
+        apiVersion: process.env.AUDIO_API_VERSION || process.env.AI_API_VERSION || "",
+        inputCostPer1MTokens: parseFloat(
+          process.env.AUDIO_INPUT_COST_PER_1M_TOKENS || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
+        ),
+        outputCostPer1MTokens: parseFloat(
+          process.env.AUDIO_OUTPUT_COST_PER_1M_TOKENS || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
+        ),
+        googleCredentialsBase64:
+          process.env.AUDIO_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
+      },
       transcriber: {
         provider: process.env.TRANSCRIBER_PROVIDER || "",
         apiKey: process.env.TRANSCRIBER_API_KEY || "",

@@ -1,11 +1,12 @@
 import { Global, Module } from "@nestjs/common";
+import { AudioLLMService } from "./services/audio.llm.service";
 import { EmbedderService } from "./services/embedder.service";
 import { LLMCallDumper } from "./services/llm-call-dumper.service";
 import { LLMService } from "./services/llm.service";
 import { ModelService } from "./services/model.service";
 import { VisionLLMService } from "./services/vision.llm.service";
 
-const LLM_SERVICES = [LLMService, ModelService, EmbedderService, VisionLLMService, LLMCallDumper];
+const LLM_SERVICES = [LLMService, ModelService, EmbedderService, VisionLLMService, AudioLLMService, LLMCallDumper];
 
 /**
  * LLM Module

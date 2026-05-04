@@ -37,6 +37,10 @@ export class ModelService {
     return this.aiConfig.vision;
   }
 
+  private get audioConfig() {
+    return this.aiConfig.audio;
+  }
+
   /**
    * Gets a configured LLM instance based on the current config.
    *
@@ -211,6 +215,81 @@ export class ModelService {
     }
 
     // Create new model instance
+    return new ChatOpenAI(llmConfig);
+  }
+
+  /**
+   * Gets a configured LLM instance for audio operations based on the current config.
+   *
+   * Supports the same providers as getVisionLLM(): llamacpp/local, openrouter,
+   * requesty, vertex, azure. The configured chat model must accept multi-modal
+   * `input_audio` content parts in HumanMessage payloads (Gemini 2.5 family,
+   * GPT-4o-audio, etc.).
+   *
+   * @param params.temperature - default 0.1 (deterministic transcription)
+   */
+  getAudioLLM(params?: { temperature?: number }): BaseChatModel {
+    const temperature = params?.temperature ?? 0.1;
+
+    const llmConfig: LLMParameters = {
+      apiKey: this.audioConfig.apiKey || "not-needed",
+      temperature,
+      model: this.audioConfig.model || "local-model",
+      configuration: {
+        baseURL: this.audioConfig.url || "http://localhost:8033/v1",
+      },
+    };
+
+    switch (this.audioConfig.provider) {
+      case "llamacpp":
+        llmConfig.apiKey = "not-needed";
+        llmConfig.model = "local-model";
+        llmConfig.configuration.baseURL = this.audioConfig.url || "http://localhost:8033/v1";
+        break;
+
+      case "openrouter":
+        llmConfig.configuration.baseURL = this.audioConfig.url || "https://openrouter.ai/api/v1";
+        if (this.audioConfig.region) {
+          llmConfig.modelKwargs = {
+            provider: { order: [this.audioConfig.region], allow_fallbacks: true },
+          };
+        }
+        break;
+
+      case "requesty":
+        llmConfig.configuration.baseURL = this.audioConfig.url;
+        break;
+
+      case "vertex": {
+        const googleConfig = this.audioConfig;
+        if (googleConfig.googleCredentialsBase64) {
+          const credentialsJson = Buffer.from(googleConfig.googleCredentialsBase64, "base64").toString("utf-8");
+          const tempCredPath = path.join(os.tmpdir(), "gcp-credentials-audio.json");
+          fs.writeFileSync(tempCredPath, credentialsJson, { mode: 0o600 });
+          process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
+        }
+        return new ChatVertexAI({
+          model: googleConfig.model,
+          temperature,
+          location: googleConfig.region,
+        });
+      }
+
+      case "azure": {
+        const azureParameters: any = {
+          azureOpenAIApiKey: this.audioConfig.apiKey,
+          azureOpenAIApiInstanceName: this.audioConfig.instance,
+          azureOpenAIApiDeploymentName: this.audioConfig.model,
+          azureOpenAIApiVersion: this.audioConfig.apiVersion,
+          temperature,
+        };
+        return new AzureChatOpenAI(azureParameters);
+      }
+
+      default:
+        throw new Error(`Unsupported Audio LLM type: ${this.audioConfig.provider}`);
+    }
+
     return new ChatOpenAI(llmConfig);
   }
 
