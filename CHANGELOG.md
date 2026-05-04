@@ -1,3 +1,9 @@
+## [1.68.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.0...v1.68.1) (2026-05-04)
+
+### 🐛 Bug Fixes
+
+* **rbac:** lazy-import prettier in matrix-to-ts to avoid prod install dependency ([1ee26d3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1ee26d32e9eab8a9fd17a3271b0b0cadd08edebb))
+
 ## [1.68.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.67.0...v1.68.0) (2026-05-04)
 
 ### 🚀 Features
