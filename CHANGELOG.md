@@ -1,3 +1,9 @@
+## [1.68.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.67.0...v1.68.0) (2026-05-04)
+
+### 🚀 Features
+
+* add audio llm ([916cb23](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/916cb23605dcb0a86e520ee02132bfab9c7e25e4))
+
 ## [1.67.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.66.0...v1.67.0) (2026-05-04)
 
 ### 🚀 Features
