@@ -1,3 +1,9 @@
+## [1.66.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.65.2...v1.66.0) (2026-05-04)
+
+### 🚀 Features
+
+* **discord:** voice intents + silence i18n necord-context warning ([a1a8d3f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a1a8d3f683a08e9ea6b723ab9cd2a9a1cc4d8f46))
+
 ## [1.65.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.65.1...v1.65.2) (2026-05-02)
 
 ### 🐛 Bug Fixes
