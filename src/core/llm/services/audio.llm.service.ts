@@ -90,9 +90,7 @@ export class AudioLLMService {
    * @param params - Call parameters
    * @returns Promise resolving to parsed output + token usage metadata
    */
-  async call<T>(
-    params: AudioCallParams<T>,
-  ): Promise<T & { tokenUsage: { input: number; output: number } }> {
+  async call<T>(params: AudioCallParams<T>): Promise<T & { tokenUsage: { input: number; output: number } }> {
     const audioBuffer = await fs.promises.readFile(params.audioPath);
     const audioBase64 = audioBuffer.toString("base64");
     const format = this.formatForLangchain(params.mimeType);
@@ -150,8 +148,7 @@ export class AudioLLMService {
       if (!response.parsed) {
         const rawContent = raw?.content || "";
         if (rawContent) {
-          const jsonMatch =
-            rawContent.match(/```json\n?([\s\S]*?)\n?```/) || rawContent.match(/\{[\s\S]*\}/);
+          const jsonMatch = rawContent.match(/```json\n?([\s\S]*?)\n?```/) || rawContent.match(/\{[\s\S]*\}/);
           const jsonStr = jsonMatch ? jsonMatch[1] || jsonMatch[0] : rawContent;
           const parsed = JSON.parse(jsonStr);
           const validated = params.outputSchema.parse(parsed);
@@ -170,8 +167,7 @@ export class AudioLLMService {
       return { ...(response.parsed as T), tokenUsage: { input, output } };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const stack =
-        error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+      const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
       session.close({
         finalStatus: "error",
         errorMessage: message,
