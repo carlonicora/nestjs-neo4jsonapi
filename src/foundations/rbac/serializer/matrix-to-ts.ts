@@ -1,5 +1,7 @@
 // packages/nestjs-neo4jsonapi/src/foundations/rbac/serializer/matrix-to-ts.ts
-import prettier from "prettier";
+// `prettier` is dynamically imported inside `serializeMatrixToTs` so consumers
+// don't need it installed in production. The dev controller that calls this
+// serialiser is registered only when `RbacModule.register({ devMode: true })`.
 import type { RbacMatrix, PermToken } from "../dsl/types";
 
 interface Options {
@@ -13,6 +15,7 @@ interface Options {
  * normalised per action.
  */
 export async function serializeMatrixToTs(matrix: RbacMatrix, opts: Options): Promise<string> {
+  const prettier = (await import("prettier")).default;
   const moduleIds = Object.keys(matrix).sort();
   const lines: string[] = [];
   lines.push(`// Auto-maintained by the RBAC UI. Edit via \`pnpm dev\` + UI, or by hand.`);
