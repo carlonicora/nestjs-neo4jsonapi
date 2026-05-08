@@ -487,7 +487,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       relatedIds,
-      term: params.term,
+      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
       ...this.getPolyLabelParams(),
     };
 
@@ -510,11 +510,14 @@ export abstract class AbstractRepository<
       ${this.descriptor.isCompanyScoped ? `WHERE (node)-[:BELONGS_TO]->(company)` : `WHERE true`}
       `;
 
-      // Add relationship filter based on direction
+      // Add relationship filter based on direction.
+      // Use EXISTS subquery — pattern expressions inside WHERE cannot
+      // introduce new variables, so we cannot inline `WHERE related.id IN $relatedIds`
+      // on the related node directly.
       if (rel.direction === "in") {
-        query.query += `AND (node)<-[:${rel.relationship}]-(:${rel.model.labelName} WHERE id IN $relatedIds)\n`;
+        query.query += `AND EXISTS { MATCH (node)<-[:${rel.relationship}]-(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }\n`;
       } else {
-        query.query += `AND (node)-[:${rel.relationship}]->(:${rel.model.labelName} WHERE id IN $relatedIds)\n`;
+        query.query += `AND EXISTS { MATCH (node)-[:${rel.relationship}]->(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }\n`;
       }
 
       query.query += `WITH node as ${nodeName}, score
