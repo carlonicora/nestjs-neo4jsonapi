@@ -56,24 +56,18 @@ function convertNeo4jDate(value: any): string | null {
 }
 
 /**
- * Convert Neo4j DateTime to JavaScript Date object
+ * Convert Neo4j DateTime to JavaScript Date object.
+ *
+ * Neo4j's DateTime / ZonedDateTime classes implement .toString() returning ISO
+ * 8601 with the original timezone offset preserved (e.g.
+ * "2026-05-15T15:55:00.000000000+02:00"). Coercing through `new Date(value)`
+ * uses .toString() and produces the correct UTC instant. Manually
+ * reconstructing from {year.low, month.low, ...} discards
+ * `timeZoneOffsetSeconds` and silently shifts every datetime by the API
+ * server's local-UTC offset.
  */
 function convertNeo4jDateTime(value: any): Date | null {
   if (!value) return null;
-
-  // Handle Neo4j DateTime format
-  if (value.year?.low !== undefined) {
-    return new Date(
-      value.year.low,
-      value.month.low - 1,
-      value.day.low,
-      value.hour?.low ?? 0,
-      value.minute?.low ?? 0,
-      value.second?.low ?? 0,
-    );
-  }
-
-  // Already a Date or string, convert to Date
   return new Date(value);
 }
 
