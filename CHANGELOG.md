@@ -1,3 +1,9 @@
+## [1.68.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.2...v1.68.3) (2026-05-08)
+
+### 🐛 Bug Fixes
+
+* **repository:** enhance search term handling and improve relationship filtering in queries ([ba78056](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ba780566174a7eb31a09d99f6a1df3bf3198c21c))
+
 ## [1.68.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.1...v1.68.2) (2026-05-08)
 
 ### 📦 Code Refactoring
