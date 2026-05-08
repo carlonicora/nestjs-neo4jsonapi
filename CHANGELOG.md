@@ -1,3 +1,9 @@
+## [1.68.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.1...v1.68.2) (2026-05-08)
+
+### 📦 Code Refactoring
+
+* improve documentation for convertNeo4jDateTime function ([c41fe88](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c41fe8829e4a1712a4b46d52985615105418a3cc))
+
 ## [1.68.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.0...v1.68.1) (2026-05-04)
 
 ### 🐛 Bug Fixes
