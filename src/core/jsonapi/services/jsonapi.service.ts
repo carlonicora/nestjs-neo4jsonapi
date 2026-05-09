@@ -371,7 +371,18 @@ export class JsonApiService {
         this._addToIncluded(response.additionalIncludeds, includedElements.concat(serialisedData));
       }
     } else {
-      const { serialisedData, includedElements } = await this.serialiseData(data, builder, paginator);
+      // Polymorphic single-cardinality: resolve the per-instance serializer
+      // via the dynamic factory (mirrors the array branch above). Without
+      // this, source/target on a polymorphic to-one relationship would emit
+      // with the base meta's type instead of the discriminated type.
+      let actualBuilder = builder;
+      if (relationship?.dynamicFactory && data) {
+        const dynamicSerializer = relationship.dynamicFactory.createDynamicRelationship(data);
+        const dynamicBuilder = dynamicSerializer ? await dynamicSerializer.create() : null;
+        actualBuilder = dynamicBuilder || builder;
+      }
+
+      const { serialisedData, includedElements } = await this.serialiseData(data, actualBuilder, paginator);
 
       response.minimalData = {
         type: serialisedData.type,
