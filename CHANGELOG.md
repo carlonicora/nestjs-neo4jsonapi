@@ -1,3 +1,9 @@
+## [1.68.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.3...v1.68.4) (2026-05-09)
+
+### 🐛 Bug Fixes
+
+* **jsonapi:** apply polymorphic discriminator to single-cardinality relationships ([e59277a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e59277ac37bb2e56363faa074a2ef294824f3106))
+
 ## [1.68.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.2...v1.68.3) (2026-05-08)
 
 ### 🐛 Bug Fixes
