@@ -1,3 +1,9 @@
+## [1.68.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.5...v1.68.6) (2026-05-10)
+
+### 🐛 Bug Fixes
+
+* **chunk:** throw error if no job name is registered for content type ([dbbe123](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/dbbe1235a20d25fdbe15173025db00a764e04b99))
+
 ## [1.68.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.4...v1.68.5) (2026-05-10)
 
 ### 🚨 Tests
