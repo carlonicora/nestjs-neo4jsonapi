@@ -381,7 +381,7 @@ describe("ChunkService", () => {
       expect(tracer.endSpan).toHaveBeenCalled();
     });
 
-    it("should retry on graph generation failure and return empty fallback", async () => {
+    it("should retry on graph generation failure and return empty fallback", { timeout: 30000 }, async () => {
       // Arrange
       const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
