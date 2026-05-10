@@ -1,3 +1,9 @@
+## [1.69.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.6...v1.69.0) (2026-05-10)
+
+### 🚀 Features
+
+* **blocknote:** add support for rendering mentions in BlockNote content ([8e0965e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8e0965e8222650b69e74e2cc87aab5ca211cc2ff))
+
 ## [1.68.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.5...v1.68.6) (2026-05-10)
 
 ### 🐛 Bug Fixes
