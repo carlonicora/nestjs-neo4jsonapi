@@ -289,10 +289,23 @@ export class BlockNoteService {
           return text;
         } else if (contentNode.type === "relationship") {
           return this.processRelationship(contentNode);
+        } else if (contentNode.type === "mention") {
+          return this.processMention(contentNode);
         }
         return "";
       })
       .join("");
+  }
+
+  /**
+   * Render a BlockNote `mention` inline node. The editor displays
+   * `props.alias` (the human-readable name of the referenced entity); the
+   * converter emits the same alias so downstream consumers (LLM prompts,
+   * search indexes, etc.) see the entity by its readable name rather than
+   * a hole in the text.
+   */
+  protected processMention(node: any): string {
+    return node?.props?.alias ?? "";
   }
 
   protected applyTextStyles(text: string, styles: any): string {
