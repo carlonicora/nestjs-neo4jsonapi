@@ -1,3 +1,9 @@
+## [1.68.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.4...v1.68.5) (2026-05-10)
+
+### 🚨 Tests
+
+* **chunk:** increase timeout for graph generation retry test ([9c7ce44](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9c7ce44f09c600e9169e945da3691dbbefb3694c))
+
 ## [1.68.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.3...v1.68.4) (2026-05-09)
 
 ### 🐛 Bug Fixes
