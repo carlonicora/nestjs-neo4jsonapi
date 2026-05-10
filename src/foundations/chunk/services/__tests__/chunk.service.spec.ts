@@ -123,7 +123,7 @@ describe("ChunkService", () => {
 
   const createMockConfigService = () => ({
     get: vi.fn().mockReturnValue({
-      process: { content: "process-content" },
+      process: { content: "process-content", unknown: "process-unknown" },
       notifications: {},
     }),
   });

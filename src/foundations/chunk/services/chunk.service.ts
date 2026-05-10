@@ -315,6 +315,12 @@ export class ChunkService {
 
     this.tracer.endSpan();
 
+    if (!nextJobType) {
+      throw new Error(
+        `No job name registered for content type "${params.type}". Add "${params.type}" (and "${params.type.toLowerCase()}") under jobNames.process in your app config.`,
+      );
+    }
+
     const queue = this.selectQueue(params.type);
     await queue.add(nextJobType, {
       id: params.id,
