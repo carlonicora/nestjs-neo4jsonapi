@@ -1,3 +1,9 @@
+## [1.69.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.0...v1.69.1) (2026-05-12)
+
+### ♻️ Chores
+
+* **deps:** bump @fastify/multipart peer to ^10.0.0 ([02d86e9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/02d86e9d616ff49b1f9087d81b446ec51dfb56c7))
+
 ## [1.69.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.68.6...v1.69.0) (2026-05-10)
 
 ### 🚀 Features
