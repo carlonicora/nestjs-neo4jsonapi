@@ -1,3 +1,9 @@
+## [1.69.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.2...v1.69.3) (2026-05-13)
+
+### ♻️ Chores
+
+* **deps:** update @opentelemetry/instrumentation-nestjs-core to version ^0.64.0 ([cb91ed7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cb91ed7284cf1de8f7296db5ae54adf721b07026))
+
 ## [1.69.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.1...v1.69.2) (2026-05-13)
 
 ### ♻️ Chores
