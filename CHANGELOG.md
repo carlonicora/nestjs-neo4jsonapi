@@ -1,3 +1,9 @@
+## [1.69.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.1...v1.69.2) (2026-05-13)
+
+### ♻️ Chores
+
+* **deps:** May 2026 sweep ([2354d8c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2354d8cffd192e09c258dfad31dca8aea73ba794))
+
 ## [1.69.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.0...v1.69.1) (2026-05-12)
 
 ### ♻️ Chores
