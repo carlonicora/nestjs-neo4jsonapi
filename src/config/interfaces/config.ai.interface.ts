@@ -41,13 +41,16 @@ export interface ConfigAiInterface {
     outputCostPer1MTokens: number;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
-  };
-  transcriber: {
-    provider: string;
-    apiKey: string;
-    model: string;
-    url?: string;
-    apiVersion?: string;
+    /**
+     * Full URL of an OpenAI-style /audio/transcriptions endpoint. When set,
+     * AudioLLMService POSTs a multipart request here (using `apiKey` as Bearer
+     * auth and `model` / `language` from this same audio config). When unset
+     * or empty, the chat-LLM path is used instead (via ModelService.getAudioLLM).
+     * No provider whitelist — any OpenAI-compatible STT endpoint works.
+     */
+    directUrl?: string;
+    /** ISO-639-1 hint passed to /audio/transcriptions. Ignored in chat mode. */
+    language?: string;
   };
   embedder: {
     provider: string;

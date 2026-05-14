@@ -8,7 +8,6 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ClsService } from "nestjs-cls";
-import OpenAI, { AzureOpenAI } from "openai";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 
 interface LLMParameters {
@@ -356,36 +355,7 @@ export class ModelService {
     return response;
   }
 
-  getTranscriber(): any {
-    let response: any;
-    switch (this.aiConfig.transcriber.provider) {
-      case "openai":
-        response = new OpenAI({
-          apiKey: this.aiConfig.transcriber.apiKey,
-        });
-        break;
-      case "azure":
-        response = new AzureOpenAI({
-          apiKey: this.aiConfig.transcriber.apiKey,
-          apiVersion: this.aiConfig.transcriber.apiVersion,
-          endpoint: this.aiConfig.transcriber.url,
-          deployment: this.aiConfig.transcriber.model,
-        });
-        break;
-    }
-    return response;
-  }
-
   getEmbedderDimensions(): number {
     return this.aiConfig.embedder.dimensions;
-  }
-
-  async transcribeAudio(params: { filePath: string; prompt: string; language?: string }): Promise<any> {
-    return await this.getTranscriber().audio.transcriptions.create({
-      file: fs.createReadStream(params.filePath),
-      model: this.aiConfig.transcriber.model,
-      prompt: params.prompt,
-      response_format: "json",
-    });
   }
 }

@@ -223,13 +223,8 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         ),
         googleCredentialsBase64:
           process.env.AUDIO_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
-      },
-      transcriber: {
-        provider: process.env.TRANSCRIBER_PROVIDER || "",
-        apiKey: process.env.TRANSCRIBER_API_KEY || "",
-        model: process.env.TRANSCRIBER_MODEL || "",
-        url: process.env.TRANSCRIBER_URL || "",
-        apiVersion: process.env.TRANSCRIBER_API_VERSION || "",
+        directUrl: process.env.AUDIO_DIRECT_URL || undefined,
+        language: process.env.AUDIO_LANGUAGE || undefined,
       },
       embedder: {
         provider: process.env.EMBEDDER_PROVIDER || "",
