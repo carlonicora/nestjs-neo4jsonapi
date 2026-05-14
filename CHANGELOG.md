@@ -1,3 +1,15 @@
+## [1.70.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.3...v1.70.0) (2026-05-14)
+
+### ⚠ BREAKING CHANGES
+
+* **audio:** for direct lib consumers: AudioCallParams loses mimeType
+and outputSchema; the call() return type is concrete TranscriptionResult.
+narr8 is the only consumer.
+
+### 🚀 Features
+
+* **audio:** provider-agnostic transcription via AUDIO_DIRECT_URL + universal ffmpeg ([fde0d4e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fde0d4e640ebaf8d4a22ee5f10b2c0fcf3df5d53))
+
 ## [1.69.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.2...v1.69.3) (2026-05-13)
 
 ### ♻️ Chores
