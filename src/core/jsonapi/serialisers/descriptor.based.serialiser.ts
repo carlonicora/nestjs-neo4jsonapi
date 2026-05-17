@@ -52,9 +52,10 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
   }
 
   create(): JsonApiDataInterface {
-    // 1. Build attributes from fields (non-meta, non-excluded)
+    // 1. Build attributes from fields (non-meta, non-excluded, not serialise:false)
     const attributes: Record<string, any> = {};
     for (const [fieldName, fieldDef] of Object.entries(this.descriptor.fields || {})) {
+      if (fieldDef.serialise === false) continue;
       if (!fieldDef.meta && !fieldDef.excludeFromJsonApi) {
         if (fieldDef.transform) {
           // Wrap transformer with injected services
@@ -78,9 +79,10 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
     }
     this.attributes = attributes;
 
-    // 2. Build meta from fields + computed (where meta: true, not excluded)
+    // 2. Build meta from fields + computed (where meta: true, not excluded, not serialise:false)
     const meta: Record<string, any> = {};
     for (const [fieldName, fieldDef] of Object.entries(this.descriptor.fields || {})) {
+      if (fieldDef.serialise === false) continue;
       if (fieldDef.meta && !fieldDef.excludeFromJsonApi) {
         if (fieldDef.transform) {
           const transformer = fieldDef.transform;
