@@ -16,9 +16,6 @@ export * from "./core";
 // Foundation module exports
 export * from "./foundations";
 
-// Money helpers
-export { centsToFloat } from "./foundations/money/cents-to-float";
-
 // Agent module exports
 export * from "./agents";
 
