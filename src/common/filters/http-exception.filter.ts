@@ -148,11 +148,23 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // Sanitize the client-facing message (hide internal details in production for 5xx)
     const errorDetail = sanitizeClientMessage(status, rawErrorDetail);
 
+    // Surface structured exception payloads (e.g. `BadRequestException({ code,
+    // expected, received, mismatches })`) to the client so diagnostics survive
+    // the trip. Skip in production for 5xx to avoid leaking internals.
+    const structuredPayload: Record<string, unknown> | undefined =
+      typeof message === "object" && message !== null && !(status >= 500 && isProduction())
+        ? Object.fromEntries(
+            Object.entries(message as Record<string, unknown>).filter(([k]) => k !== "message" && k !== "statusCode"),
+          )
+        : undefined;
+    const code = typeof structuredPayload?.code === "string" ? (structuredPayload.code as string) : undefined;
+
     const errorResponse = {
       message: errorDetail, // Top-level message for easy frontend consumption
       errors: [
         {
           status: status.toString(),
+          ...(code ? { code } : {}),
           title: HttpStatus[status] || "Unknown Error",
           detail: errorDetail,
           source: {
@@ -164,6 +176,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
             method: request.method,
             // Only include requestId in response, never userId/companyId
             requestId: requestContext?.requestId || request.id,
+            ...(structuredPayload && Object.keys(structuredPayload).length > 0 ? { context: structuredPayload } : {}),
           },
         },
       ],

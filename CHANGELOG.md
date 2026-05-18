@@ -1,3 +1,23 @@
+## [1.72.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.71.0...v1.72.0) (2026-05-18)
+
+### 🚀 Features
+
+* support sidepost included, money int cast, structured error payload ([5449f1d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5449f1dbe569ba86ccbcea01d88df4b30bc97b0c))
+
+## [1.71.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.70.0...v1.71.0) (2026-05-17)
+
+### 🚀 Features
+
+* serialise:false flag + centsToFloat helper for cents-storage entities ([e284154](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e2841543b5655d89562782b5e6be0053c8773ccd))
+
+### 🐛 Bug Fixes
+
+* **neo4j:** unwrap driver Integer in relationship edge meta ([a83f986](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a83f9869171af2e905df78f62138218331ff2c35))
+
+### ♻️ Chores
+
+* drop centsToFloat helper ([f448ffd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f448ffd042c77b6f98a223e98192dcd5cddae9b9))
+
 ## [1.70.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.69.3...v1.70.0) (2026-05-14)
 
 ### ⚠ BREAKING CHANGES

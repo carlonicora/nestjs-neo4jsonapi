@@ -47,6 +47,13 @@ export interface FieldDef {
   transform?: FieldTransformFn;
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
+  /**
+   * If false, field is suppressed from JSON:API output (attributes and meta).
+   * Defaults to true. Used for storage-only fields (e.g. cents storage backing
+   * a float computed) that must remain readable from Neo4j and addressable in
+   * Cypher writes, but should never appear on the wire.
+   */
+  serialise?: boolean;
   /** Human-readable description. Required for the field to be visible to the chatbot. */
   description?: string;
   /**

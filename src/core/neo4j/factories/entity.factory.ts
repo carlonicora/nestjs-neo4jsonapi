@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { PolymorphicConfig } from "../../../common/interfaces/entity.schema.interface";
 import { modelRegistry } from "../../../common/registries/registry";
+import { unwrapNeo4jIntegers } from "../../../common/helpers/unwrap-neo4j-integer";
 import { TokenResolverService } from "../services/token-resolver.service";
 
 @Injectable()
@@ -576,11 +577,14 @@ export class EntityFactory {
         const collection = params.record.get(key);
         if (!collection || !Array.isArray(collection)) continue;
 
-        // Build edge props map from collection
+        // Build edge props map from collection. Edge values are raw Cypher
+        // map values — Cypher integers come back as neo4j-driver `Integer`
+        // (`{ low, high }`); unwrap to plain JS numbers so downstream
+        // consumers (JSON:API meta, frontend models) see normal scalars.
         const edgePropsMap: Record<string, Record<string, any>> = {};
         for (const item of collection) {
           if (item?.nodeId && item?.edgeProps) {
-            edgePropsMap[item.nodeId] = item.edgeProps;
+            edgePropsMap[item.nodeId] = unwrapNeo4jIntegers(item.edgeProps);
           }
         }
 
