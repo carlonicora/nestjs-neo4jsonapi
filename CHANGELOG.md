@@ -1,3 +1,9 @@
+## [1.73.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.72.0...v1.73.0) (2026-05-18)
+
+### 🚀 Features
+
+* **blocknote:** add support for mention links in markdown conversion ([ae43bb6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ae43bb683cded6d73689c91055d09ce82439ed2e))
+
 ## [1.72.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.71.0...v1.72.0) (2026-05-18)
 
 ### 🚀 Features
