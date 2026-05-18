@@ -189,6 +189,30 @@ export class BlockNoteService {
             styles: { code: true },
           });
           break;
+        case "link": {
+          const href = String(token.href ?? "");
+          const m = /^mention:\/\/([^/]+)\/(.+)$/.exec(href);
+          if (m) {
+            const [, entityType, id] = m;
+            const aliasText =
+              token.tokens && token.tokens.length > 0
+                ? this.inlineTokensToContent(token.tokens)
+                    .map((c: any) => c.text ?? "")
+                    .join("")
+                : (token.text ?? "");
+            content.push({
+              type: "mention",
+              props: { id, entityType, alias: aliasText },
+            });
+          } else {
+            if (token.tokens && token.tokens.length > 0) {
+              content.push(...this.inlineTokensToContent(token.tokens));
+            } else {
+              content.push({ type: "text", text: token.text || "", styles: {} });
+            }
+          }
+          break;
+        }
         default:
           // Fallback for any unsupported inline types.
           content.push({ type: "text", text: token.text || "", styles: {} });
