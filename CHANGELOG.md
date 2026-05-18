@@ -1,3 +1,9 @@
+## [1.72.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.71.0...v1.72.0) (2026-05-18)
+
+### 🚀 Features
+
+* support sidepost included, money int cast, structured error payload ([5449f1d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5449f1dbe569ba86ccbcea01d88df4b30bc97b0c))
+
 ## [1.71.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.70.0...v1.71.0) (2026-05-17)
 
 ### 🚀 Features
