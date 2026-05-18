@@ -690,6 +690,11 @@ export abstract class AbstractRepository<
           return `${fieldName}: [x IN $${fieldName} | datetime(x)]`;
         } else if (fieldType === "date[]") {
           return `${fieldName}: [x IN $${fieldName} | date(left(x, 10))]`;
+        } else if (fieldDef?.kind?.type === "money") {
+          // Money fields are integer cents on the wire (Phase 2C). JS Number has
+          // no int/float distinction so the Bolt driver serialises them as Float
+          // by default; toInteger() forces native Neo4j Integer storage.
+          return `${fieldName}: toInteger($${fieldName})`;
         }
         return `${fieldName}: $${fieldName}`;
       })
@@ -805,6 +810,8 @@ export abstract class AbstractRepository<
           return `${nodeName}.${fieldName} = [x IN $${fieldName} | datetime(x)]`;
         } else if (fieldType === "date[]") {
           return `${nodeName}.${fieldName} = [x IN $${fieldName} | date(left(x, 10))]`;
+        } else if (fieldDef?.kind?.type === "money") {
+          return `${nodeName}.${fieldName} = toInteger($${fieldName})`;
         }
         return `${nodeName}.${fieldName} = $${fieldName}`;
       })
@@ -929,6 +936,8 @@ export abstract class AbstractRepository<
           return `${nodeName}.${fieldName} = [x IN $${fieldName} | datetime(x)]`;
         } else if (fieldType === "date[]") {
           return `${nodeName}.${fieldName} = [x IN $${fieldName} | date(left(x, 10))]`;
+        } else if (fieldDef?.kind?.type === "money") {
+          return `${nodeName}.${fieldName} = toInteger($${fieldName})`;
         }
         return `${nodeName}.${fieldName} = $${fieldName}`;
       })

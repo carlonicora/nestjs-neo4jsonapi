@@ -66,20 +66,32 @@ export function createCrudHandlers<TService extends AbstractService<any, any>>(g
 
     /**
      * Handle create requests from JSON:API DTO
+     *
+     * Forwards `body.included` (JSON:API sidepost resources) to the service so
+     * that subclass overrides of `createFromDTO` / `create` can consume them.
+     * Existing callers that send no `included` receive `undefined`, which the
+     * abstract implementation silently ignores — fully backward-compatible.
      */
-    async create(reply: FastifyReply, body: { data: any }): Promise<void> {
+    async create(reply: FastifyReply, body: { data: any; included?: any[] }): Promise<void> {
       const response = await getService().createFromDTO({
         data: body.data as unknown as JsonApiDTOData,
+        included: body.included,
       });
       reply.send(response);
     },
 
     /**
      * Handle update (PUT) requests from JSON:API DTO
+     *
+     * Forwards `body.included` (JSON:API sidepost resources) to the service so
+     * that subclass overrides of `putFromDTO` / `put` can consume them.
+     * Existing callers that send no `included` receive `undefined`, which the
+     * abstract implementation silently ignores — fully backward-compatible.
      */
-    async update(reply: FastifyReply, body: { data: any }): Promise<void> {
+    async update(reply: FastifyReply, body: { data: any; included?: any[] }): Promise<void> {
       const response = await getService().putFromDTO({
         data: body.data as unknown as JsonApiDTOData,
+        included: body.included,
       });
       reply.send(response);
     },

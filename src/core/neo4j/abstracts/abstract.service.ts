@@ -190,8 +190,13 @@ export abstract class AbstractService<
   /**
    * Create a new entity
    * Override this method to map DTO fields to repository create params
+   *
+   * @param params - Repository create params derived from the DTO
+   * @param included - Optional JSON:API "included" sidepost resources. Subclass overrides
+   *   may use this to create related entities in the same transaction.
+   *   The abstract implementation ignores it.
    */
-  async create(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+  async create(params: { id: string; [key: string]: any }, included?: unknown[]): Promise<JsonApiDataInterface> {
     await this.repository.create(params);
 
     if (this.auditService) {
@@ -207,8 +212,13 @@ export abstract class AbstractService<
   /**
    * Update an existing entity (full update)
    * Override this method to map DTO fields to repository put params
+   *
+   * @param params - Repository put params derived from the DTO
+   * @param included - Optional JSON:API "included" sidepost resources. Subclass overrides
+   *   may use this to update related entities in the same transaction.
+   *   The abstract implementation ignores it.
    */
-  async put(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+  async put(params: { id: string; [key: string]: any }, included?: unknown[]): Promise<JsonApiDataInterface> {
     const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
 
     await this.repository.put(params);
@@ -368,19 +378,29 @@ export abstract class AbstractService<
   /**
    * Create a new entity from JSON:API DTO
    * Automatically maps attributes and relationships based on descriptor
+   *
+   * @param params.data - The JSON:API primary data object
+   * @param params.included - Optional JSON:API "included" sidepost resources forwarded
+   *   verbatim to {@link create}. Subclass overrides of `create` may consume them;
+   *   the abstract path silently ignores them.
    */
-  async createFromDTO(params: { data: JsonApiDTOData }): Promise<JsonApiDataInterface> {
+  async createFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiDataInterface> {
     const repoParams = this.mapDTOToParams(params.data);
-    return this.create(repoParams);
+    return this.create(repoParams, params.included);
   }
 
   /**
    * Update an existing entity from JSON:API DTO (full update)
    * Automatically maps attributes and relationships based on descriptor
+   *
+   * @param params.data - The JSON:API primary data object
+   * @param params.included - Optional JSON:API "included" sidepost resources forwarded
+   *   verbatim to {@link put}. Subclass overrides of `put` may consume them;
+   *   the abstract path silently ignores them.
    */
-  async putFromDTO(params: { data: JsonApiDTOData }): Promise<JsonApiDataInterface> {
+  async putFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiDataInterface> {
     const repoParams = this.mapDTOToParams(params.data, "put");
-    return this.put(repoParams);
+    return this.put(repoParams, params.included);
   }
 
   /**
