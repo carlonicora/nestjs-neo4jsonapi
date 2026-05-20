@@ -1,3 +1,9 @@
+## [1.74.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.73.0...v1.74.0) (2026-05-20)
+
+### 🚀 Features
+
+* implement abstract document generation service and related utilities ([01addf4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/01addf4cfe856e89210405c75e6432700e2d10e3))
+
 ## [1.73.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.72.0...v1.73.0) (2026-05-18)
 
 ### 🚀 Features
