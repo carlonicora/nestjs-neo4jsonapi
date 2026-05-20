@@ -12,6 +12,8 @@ export * from "./config";
 
 // Core module exports
 export * from "./core";
+export * from "./core/pdf";
+export * from "./core/document";
 
 // Foundation module exports
 export * from "./foundations";

@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { BlockNoteService } from "./services/blocknote.service";
+import { BlockNoteToDocxService } from "./services/blocknote-to-docx.service";
 
 /**
  * BlockNote Module
@@ -11,6 +12,7 @@ import { BlockNoteService } from "./services/blocknote.service";
  * - Convert Markdown to BlockNote JSON
  * - Support for rich text formatting
  * - Support for lists and code blocks
+ * - Convert BlockNote templates to DOCX buffers (Node-side)
  *
  * @example
  * ```typescript
@@ -21,7 +23,7 @@ import { BlockNoteService } from "./services/blocknote.service";
  * ```
  */
 @Module({
-  providers: [BlockNoteService],
-  exports: [BlockNoteService],
+  providers: [BlockNoteService, BlockNoteToDocxService],
+  exports: [BlockNoteService, BlockNoteToDocxService],
 })
 export class BlockNoteModule {}
