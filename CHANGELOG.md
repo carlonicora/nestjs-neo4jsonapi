@@ -1,3 +1,9 @@
+## [1.74.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.74.0...v1.74.1) (2026-05-22)
+
+### ♻️ Chores
+
+* update dependencies to latest versions ([edba2e2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/edba2e235d2f8c76885e2517a2d2a5602c2044f5))
+
 ## [1.74.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.73.0...v1.74.0) (2026-05-20)
 
 ### 🚀 Features
