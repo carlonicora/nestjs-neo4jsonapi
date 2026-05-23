@@ -1,3 +1,9 @@
+## [1.75.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.74.1...v1.75.0) (2026-05-23)
+
+### 🚀 Features
+
+* **llm:** add streamText with tool-use loop + TextGeneration usage type ([f9054da](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f9054da2b21f595dc6b694e37923a85d32ae40c5))
+
 ## [1.74.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.74.0...v1.74.1) (2026-05-22)
 
 ### ♻️ Chores
