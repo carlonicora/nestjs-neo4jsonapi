@@ -1,8 +1,10 @@
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { streamObject } from "ai";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
@@ -13,7 +15,7 @@ import {
   formatFieldWithDescription,
   sanitizeSchemaForGemini,
 } from "../../llm/utils/schema.utils";
-import { LLMCallDumper, DumpSession, DumpSessionStartParams } from "./llm-call-dumper.service";
+import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 
 /**
  * Raw LLM response structure with usage metadata
@@ -756,78 +758,185 @@ export class LLMService {
     };
   }
 
-  async streamText(params: {
-    systemPrompts: string[];
-    instructions: string;
-    temperature?: number;
-    maxOutputTokens?: number;
-    tools?: DynamicStructuredTool[];
-    maxToolIterations?: number;
-    metadata?: Record<string, any>;
-  }): Promise<AsyncIterable<string>> {
-    const model = this.modelService.getLLM({
-      temperature: params.temperature ?? 0.5,
-      maxOutputTokens: params.maxOutputTokens,
+  /**
+   * Streaming variant of {@link call}. Same structured-input/structured-output
+   * contract — uses `outputSchema` (Zod) for enforced structured output and
+   * `inputSchema` for schema-guided instructions — but yields the LLM's
+   * response progressively as it generates.
+   *
+   * Returns two handles:
+   *   - `textStream` — raw JSON-text fragments as the LLM builds the object.
+   *     Useful for forwarding to clients that incrementally parse JSON (e.g.
+   *     BlockNote AI's UIMessageStream consumer). MUST be consumed (even if
+   *     just to drain) for `result` to resolve — `streamObject` only commits
+   *     the final object after the source stream is fully read.
+   *   - `result` — Promise that resolves to the final fully-parsed structured
+   *     output + token usage, once the stream completes. Equivalent to what
+   *     `call` returns.
+   *
+   * Returns `partialObjectStream` (not `textStream`): each iteration yields
+   * the cumulative best-effort parse of the output object as it grows. For a
+   * schema like `z.object({ paragraph: z.string() })`, consumers see
+   * `{paragraph: undefined}` → `{paragraph: "Jam"}` → `{paragraph: "James"}`
+   * etc., letting them extract field-value deltas without parsing raw JSON
+   * tokens themselves.
+   *
+   * Note: only one stream view is exposed because `streamObject`'s
+   * `textStream` / `partialObjectStream` / `fullStream` getters all consume
+   * the same underlying source — accessing two of them locks the source on
+   * the first and throws on the second. For consumers that want raw JSON
+   * text fragments instead, add a separate variant.
+   *
+   * Implementation note: uses Vercel AI SDK's `streamObject` under the hood
+   * because LangChain's `withStructuredOutput().stream()` only yields parsed
+   * partials — not the raw JSON text fragments that downstream UI-message
+   * consumers (BlockNote AI, the AI SDK's own React hooks, etc.) need to
+   * apply changes incrementally. `call` stays on LangChain for non-streaming
+   * structured output — both paths share `_generateSchemaGuidedInstructions`
+   * for input formatting and the `LLMCallDumper` session for cost tracking.
+   *
+   * Provider support: currently OpenAI-compatible only (llamacpp, openrouter,
+   * requesty, plus any other provider exposed via an OpenAI-compatible URL).
+   * Throws for vertex/azure with native (non-OpenAI-compat) configurations.
+   * Extend via new `@ai-sdk/*` provider adapters when needed.
+   */
+  async streamCall<T extends Record<string, any>>(
+    params: LLMCallParams<T>,
+  ): Promise<{
+    partialObjectStream: AsyncIterable<Partial<T>>;
+    result: Promise<T & { tokenUsage: { input: number; output: number } }>;
+  }> {
+    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+    const session: DumpSession = this.dumper.startSession({
+      metadata: params.metadata as DumpSessionStartParams["metadata"],
+      model: aiConfig.model,
+      provider: aiConfig.provider,
+      temperature: params.temperature,
     });
-    const boundModel = params.tools && params.tools.length > 0 ? model.bindTools!(params.tools) : model;
 
-    const systemMessages: BaseMessage[] = params.systemPrompts.map((p) => new SystemMessage(p));
-    const messages: BaseMessage[] = [...systemMessages, new HumanMessage(params.instructions)];
-
-    const maxIterations = params.maxToolIterations ?? 5;
-    const toolMap = new Map((params.tools ?? []).map((t) => [t.name, t]));
-
-    async function* iterate(): AsyncIterable<string> {
-      let iteration = 0;
-      while (iteration < maxIterations) {
-        iteration += 1;
-        const stream = await boundModel.stream(messages);
-        const collectedToolCalls: any[] = [];
-        let assistantText = "";
-
-        for await (const chunk of stream) {
-          const text = typeof chunk.content === "string" ? chunk.content : "";
-          if (text) {
-            assistantText += text;
-            yield text;
-          }
-          const toolCalls = (chunk as any).tool_calls ?? (chunk as any).additional_kwargs?.tool_calls;
-          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-            collectedToolCalls.push(...toolCalls);
-          }
-        }
-
-        if (collectedToolCalls.length === 0) return;
-
-        messages.push(new AIMessage({ content: assistantText, tool_calls: collectedToolCalls } as any));
-        for (const call of collectedToolCalls) {
-          const tool = toolMap.get(call.name);
-          if (!tool) {
-            messages.push(new ToolMessage({ content: `Tool ${call.name} not found`, tool_call_id: call.id }));
-            continue;
-          }
-          let result: any;
-          try {
-            result = await tool.invoke(call.args ?? {});
-          } catch (err: any) {
-            const msg = err?.message ?? String(err);
-            // Feed validation errors back so the LLM can self-correct rather than crash the stream.
-            result =
-              `ERROR: Tool ${call.name} call failed validation: ${msg}. ` +
-              `Do not call this tool with invalid arguments. ` +
-              `If you cannot satisfy the schema, do not call the tool again.`;
-          }
-          messages.push(
-            new ToolMessage({
-              content: typeof result === "string" ? result : JSON.stringify(result),
-              tool_call_id: call.id,
-            }),
-          );
-        }
+    // Build the same schema-guided instruction string `call` would build, so
+    // structured input semantics (field descriptions from `inputSchema`) flow
+    // through identically. If the caller passed explicit `instructions` with
+    // {placeholders}, substitute them from `inputParams` (mimicking
+    // ChatPromptTemplate's behavior without dragging in the LangChain runtime).
+    let finalInstructions =
+      params.instructions || this._generateSchemaGuidedInstructions(params.inputParams, params.inputSchema);
+    if (params.instructions && params.inputParams) {
+      for (const [key, value] of Object.entries(params.inputParams)) {
+        const placeholder = `{${key}}`;
+        if (!finalInstructions.includes(placeholder)) continue;
+        const formatted = typeof value === "string" ? value : JSON.stringify(value);
+        finalInstructions = finalInstructions.split(placeholder).join(formatted);
       }
     }
 
-    return iterate();
+    const system = params.systemPrompts.join("\n\n");
+
+    session.recordInputs({
+      systemPrompts: params.systemPrompts,
+      instructions: finalInstructions,
+      inputParams: params.inputParams,
+      history: [],
+      tools: [],
+      outputSchemaName: (params.outputSchema as any)?.constructor?.name ?? "outputSchema",
+    });
+
+    // Map narr8 provider → Vercel AI SDK provider adapter. v1 supports
+    // OpenAI-compatible providers only; extend with new `@ai-sdk/*` packages
+    // (e.g. `@ai-sdk/google-vertex`, `@ai-sdk/azure`) when narr8 starts using
+    // a non-OpenAI-compat path with streamCall.
+    const openaiCompatProviders = new Set(["llamacpp", "local", "openrouter", "requesty"]);
+    if (!openaiCompatProviders.has(aiConfig.provider) && aiConfig.url) {
+      // If the configured `url` exists, treat as OpenAI-compatible by default —
+      // most narr8 setups route through an OpenAI-compatible endpoint even for
+      // azure/vertex via custom URLs.
+    } else if (!openaiCompatProviders.has(aiConfig.provider)) {
+      session.close({
+        finalStatus: "error",
+        errorMessage: `streamCall does not yet support provider "${aiConfig.provider}"`,
+        totalTokens: { input: 0, output: 0 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+      throw new Error(
+        `LLMService.streamCall: provider "${aiConfig.provider}" not supported. ` +
+          `Add a Vercel AI SDK adapter to LLMService.streamCall or use an OpenAI-compatible URL.`,
+      );
+    }
+
+    const provider = createOpenAICompatible({
+      name: aiConfig.provider || "narr8",
+      apiKey: aiConfig.apiKey,
+      baseURL: aiConfig.url,
+    });
+    const model = provider.chatModel(aiConfig.model);
+
+    // Reuse the "final-structured" iteration kind — semantically this IS the
+    // final-structured response, just streamed instead of awaited atomically.
+    // Avoids widening the dumper's union type for a single call site.
+    session.startIteration("final-structured", []);
+
+    // Schema cast: `streamObject`'s typing is a conditional union over the
+    // output mode (`object` / `enum` / `array` / `no-schema`). Our T is always
+    // a Zod object schema; the runtime call is correct.
+    const streamResult = streamObject({
+      model,
+      schema: params.outputSchema as any,
+      system,
+      prompt: finalInstructions,
+      temperature: params.temperature,
+      maxOutputTokens: params.maxTokens,
+    });
+
+    // Build the result Promise that closes the session once the stream finishes.
+    // This is awaitable independently of consuming the streams — `streamObject`
+    // internally tees the source, so consuming `textStream` (or not) doesn't
+    // affect `result` resolution.
+    const resultPromise: Promise<T & { tokenUsage: { input: number; output: number } }> = (async () => {
+      try {
+        const finalObject = (await streamResult.object) as T;
+        const usage = await streamResult.usage;
+        const input = usage?.inputTokens ?? 0;
+        const output = usage?.outputTokens ?? 0;
+
+        this._sessionTokens.input += input;
+        this._sessionTokens.output += output;
+        this._sessionTokens.total += input + output;
+        this._sessionTokens.callCount += 1;
+
+        session.recordResponse({
+          content: JSON.stringify(finalObject),
+          tokenUsage: { input, output },
+          finishReason: String(await streamResult.finishReason),
+        });
+        session.close({
+          finalStatus: "success",
+          totalTokens: { input, output },
+          warnings: [],
+          parseFallbacks: [],
+        });
+
+        return { ...(finalObject as any), tokenUsage: { input, output } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+        session.close({
+          finalStatus: "error",
+          errorMessage: message,
+          errorStack: stack,
+          totalTokens: { input: 0, output: 0 },
+          warnings: [],
+          parseFallbacks: [],
+        });
+        console.error("[LLMService.streamCall] Error:", error);
+        throw new Error(`LLM streamCall error: ${message}`);
+      }
+    })();
+
+    return {
+      partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
+      result: resultPromise,
+    };
   }
 
   /**
