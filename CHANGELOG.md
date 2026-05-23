@@ -1,3 +1,9 @@
+## [1.76.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.75.0...v1.76.0) (2026-05-23)
+
+### 🚀 Features
+
+* **llm:** add streamCall with partialObjectStream for structured streaming ([7d4534b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7d4534b09d5d9b18b2cd96c0523793b61c3e299e))
+
 ## [1.75.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.74.1...v1.75.0) (2026-05-23)
 
 ### 🚀 Features
