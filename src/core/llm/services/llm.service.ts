@@ -1,7 +1,7 @@
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
@@ -754,6 +754,80 @@ export class LLMService {
         output,
       },
     };
+  }
+
+  async streamText(params: {
+    systemPrompts: string[];
+    instructions: string;
+    temperature?: number;
+    maxOutputTokens?: number;
+    tools?: DynamicStructuredTool[];
+    maxToolIterations?: number;
+    metadata?: Record<string, any>;
+  }): Promise<AsyncIterable<string>> {
+    const model = this.modelService.getLLM({
+      temperature: params.temperature ?? 0.5,
+      maxOutputTokens: params.maxOutputTokens,
+    });
+    const boundModel = params.tools && params.tools.length > 0 ? model.bindTools!(params.tools) : model;
+
+    const systemMessages: BaseMessage[] = params.systemPrompts.map((p) => new SystemMessage(p));
+    const messages: BaseMessage[] = [...systemMessages, new HumanMessage(params.instructions)];
+
+    const maxIterations = params.maxToolIterations ?? 5;
+    const toolMap = new Map((params.tools ?? []).map((t) => [t.name, t]));
+
+    async function* iterate(): AsyncIterable<string> {
+      let iteration = 0;
+      while (iteration < maxIterations) {
+        iteration += 1;
+        const stream = await boundModel.stream(messages);
+        const collectedToolCalls: any[] = [];
+        let assistantText = "";
+
+        for await (const chunk of stream) {
+          const text = typeof chunk.content === "string" ? chunk.content : "";
+          if (text) {
+            assistantText += text;
+            yield text;
+          }
+          const toolCalls = (chunk as any).tool_calls ?? (chunk as any).additional_kwargs?.tool_calls;
+          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+            collectedToolCalls.push(...toolCalls);
+          }
+        }
+
+        if (collectedToolCalls.length === 0) return;
+
+        messages.push(new AIMessage({ content: assistantText, tool_calls: collectedToolCalls } as any));
+        for (const call of collectedToolCalls) {
+          const tool = toolMap.get(call.name);
+          if (!tool) {
+            messages.push(new ToolMessage({ content: `Tool ${call.name} not found`, tool_call_id: call.id }));
+            continue;
+          }
+          let result: any;
+          try {
+            result = await tool.invoke(call.args ?? {});
+          } catch (err: any) {
+            const msg = err?.message ?? String(err);
+            // Feed validation errors back so the LLM can self-correct rather than crash the stream.
+            result =
+              `ERROR: Tool ${call.name} call failed validation: ${msg}. ` +
+              `Do not call this tool with invalid arguments. ` +
+              `If you cannot satisfy the schema, do not call the tool again.`;
+          }
+          messages.push(
+            new ToolMessage({
+              content: typeof result === "string" ? result : JSON.stringify(result),
+              tool_call_id: call.id,
+            }),
+          );
+        }
+      }
+    }
+
+    return iterate();
   }
 
   /**

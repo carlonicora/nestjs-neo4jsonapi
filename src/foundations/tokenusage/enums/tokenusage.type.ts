@@ -6,4 +6,5 @@ export enum TokenUsageType {
   Ethicist = "ethicist",
   Analyser = "analyser",
   Strategy = "strategy",
+  TextGeneration = "text_generation",
 }
