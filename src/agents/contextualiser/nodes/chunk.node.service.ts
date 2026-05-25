@@ -125,8 +125,7 @@ export class ChunkNodeService {
     }
 
     this.logger.log(
-      `chunk lookup → ${chunks.length}/${queuedCount} chunks found by id ` +
-        `(missing=${queuedCount - chunks.length})`,
+      `chunk lookup → ${chunks.length}/${queuedCount} chunks found by id ` + `(missing=${queuedCount - chunks.length})`,
     );
 
     if (chunks.length === 0) {

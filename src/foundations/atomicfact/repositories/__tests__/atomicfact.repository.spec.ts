@@ -231,7 +231,9 @@ describe("AtomicFactRepository", () => {
       expect(mockQuery.queryParams).toMatchObject({
         chunkId: TEST_IDS.chunkId,
       });
-      expect(mockQuery.query).toContain("MATCH (chunk:Chunk {id: $chunkId})-[:HAS_ATOMIC_FACT]->(atomicfact: AtomicFact)");
+      expect(mockQuery.query).toContain(
+        "MATCH (chunk:Chunk {id: $chunkId})-[:HAS_ATOMIC_FACT]->(atomicfact: AtomicFact)",
+      );
       expect(mockQuery.query).not.toContain("BELONGS_TO");
       expect(mockQuery.query).toContain("RETURN atomicfact");
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);

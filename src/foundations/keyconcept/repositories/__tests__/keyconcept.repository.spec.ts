@@ -384,9 +384,7 @@ describe("KeyConceptRepository", () => {
   });
 
   describe("createOrUpdateKeyConceptRelationships", () => {
-    const relationships = [
-      { keyConcept1: "alpha", keyConcept2: "beta", relationship: "RELATED_TO" },
-    ];
+    const relationships = [{ keyConcept1: "alpha", keyConcept2: "beta", relationship: "RELATED_TO" }];
 
     it("scopes the relationship to the company when companyId is provided", async () => {
       const mockQuery = createMockQuery();
