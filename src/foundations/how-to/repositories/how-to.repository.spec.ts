@@ -190,4 +190,26 @@ describe("HowToRepository", () => {
       expect(neo4jService.writeOne).toHaveBeenCalled();
     });
   });
+
+  describe("findAllWithHelpContentSlug", () => {
+    it("returns only HowTos that carry a helpContentSlug", async () => {
+      const MOCK_HOWTO_WITH_SLUG = {
+        ...MOCK_HOWTO,
+        id: "11111111-1111-1111-1111-111111111111",
+        name: "A",
+        helpContentSlug: "how-to/a",
+        contentHash: "h1",
+      };
+
+      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO_WITH_SLUG]);
+
+      const results = await repository.findAllWithHelpContentSlug();
+
+      expect(neo4jService.initQuery).toHaveBeenCalled();
+      expect(neo4jService.readMany).toHaveBeenCalled();
+      const ids = results.map((r) => r.id).sort();
+      expect(ids).toContain("11111111-1111-1111-1111-111111111111");
+      expect(ids).not.toContain("22222222-2222-2222-2222-222222222222");
+    });
+  });
 });

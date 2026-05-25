@@ -33,3 +33,4 @@ export * from "./tokenusage";
 export * from "./two-factor";
 export * from "./user";
 export * from "./rbac";
+export * from "./help-content-sync";

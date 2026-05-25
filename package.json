@@ -47,6 +47,10 @@
     "./bootstrap": {
       "types": "./dist/bootstrap/index.d.ts",
       "default": "./dist/bootstrap/index.js"
+    },
+    "./help-content-build": {
+      "types": "./dist/tools/help-content-build/index.d.ts",
+      "default": "./dist/tools/help-content-build/index.js"
     }
   },
   "scripts": {
@@ -84,6 +88,13 @@
     "@sendgrid/mail": "^8.1.6",
     "@simplewebauthn/server": "^13.3.0",
     "adm-zip": "^0.5.17",
+    "gray-matter": "^4.0.3",
+    "mdast-util-mdx": "^3.0.0",
+    "mdast-util-to-markdown": "^2.1.2",
+    "remark-mdx": "^3.1.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
+    "uuid": "^14.0.0",
     "ai": "^6.0.5",
     "axios": "^1.16.1",
     "bcrypt": "^6.0.0",
@@ -144,7 +155,9 @@
     "@swc/core": "^1.15.33",
     "@types/bcrypt": "^6.0.0",
     "@types/bcryptjs": "^3.0.0",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^25.9.1",
+    "@types/uuid": "^10.0.0",
     "@types/nodemailer": "^8.0.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/qrcode": "^1.5.6",

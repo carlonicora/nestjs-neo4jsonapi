@@ -26,3 +26,6 @@ export * from "./bootstrap";
 
 // OpenAPI module exports
 export * from "./openapi";
+
+// RedisLockService is not re-exported by core/redis/index.ts, so export explicitly here.
+export { RedisLockService } from "./core/redis/services/redis.lock.service";

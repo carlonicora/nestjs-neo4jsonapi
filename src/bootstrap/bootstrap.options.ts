@@ -3,6 +3,7 @@ import { EntityDescriptor, RelationshipDef } from "../common/interfaces/entity.s
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
 import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
+import { HelpContentConfig } from "../foundations/help-content-sync";
 
 /**
  * i18n configuration options
@@ -101,6 +102,15 @@ export interface BootstrapOptions {
    * on application bootstrap. See docs for `defineRbac()`.
    */
   rbac?: RbacMatrix;
+
+  /**
+   * Help-content sync configuration.
+   * When provided, registers HelpContentSyncModule.forRoot(helpContent) into
+   * the app module. The module's services are worker-only via createWorkerProvider,
+   * so in --mode=api they don't instantiate.
+   * Omit to disable the help-content sync entirely.
+   */
+  helpContent?: HelpContentConfig;
 }
 
 /**

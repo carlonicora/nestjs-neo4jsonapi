@@ -12,6 +12,7 @@ export default defineConfig({
     'foundations/index': 'src/foundations/index.ts',
     'agents/index': 'src/agents/index.ts',
     'bootstrap/index': 'src/bootstrap/index.ts',
+    'tools/help-content-build/index': 'src/tools/help-content-build/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: {

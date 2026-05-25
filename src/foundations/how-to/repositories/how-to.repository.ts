@@ -34,4 +34,19 @@ export class HowToRepository extends AbstractRepository<HowTo, typeof HowToDescr
 
     await this.neo4j.writeOne(query);
   }
+
+  /**
+   * Returns every HowTo node whose helpContentSlug is set.
+   * Used by the help-content sync's deletion sweep to detect orphans.
+   * Unpaginated by design — this is a maintenance pass, not a JSON:API endpoint.
+   */
+  async findAllWithHelpContentSlug(): Promise<HowTo[]> {
+    const query = this.neo4j.initQuery({ serialiser: HowToDescriptor.model });
+    query.query = `
+      ${this.buildDefaultMatch()}
+      WHERE ${howToMeta.nodeName}.helpContentSlug IS NOT NULL
+      ${this.buildReturnStatement()}
+    `;
+    return this.neo4j.readMany(query);
+  }
 }

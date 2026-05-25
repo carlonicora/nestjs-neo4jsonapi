@@ -42,9 +42,25 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
 
   /**
    * Queue a HowTo for AI processing.
-   * Converts BlockNote JSON to Markdown, chunks it, and queues each chunk.
+   * Converts BlockNote JSON to Markdown, then delegates to _chunkAndQueue.
    */
   async queueHowToForProcessing(params: { howToId: string; description: string }): Promise<void> {
+    const markdown = this.blockNoteService.convertToMarkdown({ nodes: JSON.parse(params.description) });
+    await this._chunkAndQueue({ howToId: params.howToId, markdown });
+  }
+
+  /**
+   * Queue a HowTo for AI processing from pre-rendered markdown.
+   * Used by the help-content sync — bypasses the BlockNote conversion.
+   */
+  async queueHowToForProcessingFromMarkdown(params: { howToId: string; markdown: string }): Promise<void> {
+    await this._chunkAndQueue(params);
+  }
+
+  /**
+   * Private: mark in-progress, delete prior chunks, chunk the markdown, enqueue jobs.
+   */
+  private async _chunkAndQueue(params: { howToId: string; markdown: string }): Promise<void> {
     await this.updateAiStatus({
       id: params.howToId,
       aiStatus: AiStatus.InProgress,
@@ -56,7 +72,7 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
     });
 
     const data = await this.chunkerService.generateContentStructureFromMarkdown({
-      content: this.blockNoteService.convertToMarkdown({ nodes: JSON.parse(params.description) }),
+      content: params.markdown,
     });
 
     const chunks: Chunk[] = await this.chunkService.createChunks({
