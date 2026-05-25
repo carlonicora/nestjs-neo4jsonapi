@@ -68,7 +68,7 @@ export class HelpContentSyncService implements OnApplicationBootstrap {
         });
         created++;
       } else if (existing.contentHash !== article.contentHash) {
-        await this.howToRepository.put(baseFields);
+        await this.howToRepository.patch(baseFields);
         await this.howToService.queueHowToForProcessingFromMarkdown({
           howToId: id,
           markdown: plainMarkdown,
