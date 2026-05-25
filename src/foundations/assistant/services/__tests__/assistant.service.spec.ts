@@ -694,4 +694,64 @@ describe("AssistantService", () => {
       expect(sys.content).toMatch(/- accounts\/acc-1 — "n-acc-1"/);
     });
   });
+
+  describe("howToMode propagation", () => {
+    it("forwards howToMode to responder.run in createWithFirstMessage", async () => {
+      const { service, responder } = buildSut();
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessage({
+        companyId: "co-1",
+        userId: "u-1",
+        firstMessage: "hello",
+        howToMode: true,
+      });
+
+      expect(responder.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          companyId: "co-1",
+          userId: "u-1",
+          dataLimits: { howToMode: true, limitToHowToId: undefined },
+        }),
+      );
+    });
+
+    it("forwards howToMode + limitToHowToId to responder.run in appendMessage", async () => {
+      const { service, responder } = buildSut();
+
+      await service.appendMessage({
+        assistantId: "asst-1",
+        companyId: "co-1",
+        userId: "u-1",
+        newMessage: "follow up",
+        howToMode: true,
+        limitToHowToId: "ht-42",
+      });
+
+      expect(responder.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          companyId: "co-1",
+          userId: "u-1",
+          dataLimits: { howToMode: true, limitToHowToId: "ht-42" },
+        }),
+      );
+    });
+
+    it("passes empty dataLimits when howToMode is omitted (regression)", async () => {
+      const { service, responder } = buildSut();
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessage({
+        companyId: "co-1",
+        userId: "u-1",
+        firstMessage: "hello",
+      });
+
+      expect(responder.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataLimits: { howToMode: undefined, limitToHowToId: undefined },
+        }),
+      );
+    });
+  });
 });

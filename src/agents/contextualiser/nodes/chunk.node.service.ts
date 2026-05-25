@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { z } from "zod";
@@ -83,6 +83,7 @@ const inputSchema = z.object({
 
 @Injectable()
 export class ChunkNodeService {
+  private readonly logger = new Logger(ChunkNodeService.name);
   private readonly systemPrompt: string;
 
   constructor(
@@ -98,6 +99,10 @@ export class ChunkNodeService {
 
   async execute(params: { state: typeof ContextualiserContext.State }): Promise<Partial<ContextualiserContextState>> {
     if (params.state.queuedChunks.length === 0) {
+      this.logger.warn(
+        `chunks → ${params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes"} ` +
+          `(no queued chunks): processedChunks=${params.state.processedChunks.length}`,
+      );
       return {
         nextStep: params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes",
       };
@@ -109,6 +114,8 @@ export class ChunkNodeService {
       (chunkId) => !params.state.processedChunks.includes(chunkId),
     );
 
+    const queuedCount = chunkIdsToProcess.length;
+
     while (chunkIdsToProcess.length > 0) {
       const chunkId = chunkIdsToProcess.shift();
       const chunk = await this.chunkRepository.findChunkById({
@@ -117,7 +124,16 @@ export class ChunkNodeService {
       if (chunk) chunks.push(chunk);
     }
 
+    this.logger.log(
+      `chunk lookup → ${chunks.length}/${queuedCount} chunks found by id ` +
+        `(missing=${queuedCount - chunks.length})`,
+    );
+
     if (chunks.length === 0) {
+      this.logger.warn(
+        `chunks → ${params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes"} ` +
+          `(0 chunks resolved from ${queuedCount} ids — chunkIds may belong to deleted HowTos or company-scoped MATCH failed)`,
+      );
       return {
         queuedChunks: [],
         nextStep: params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes",

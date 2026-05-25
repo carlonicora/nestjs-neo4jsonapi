@@ -358,4 +358,54 @@ describe("ResponderService — unified workflow", () => {
 
     await expect(service.run(baseRunArgs())).rejects.toThrow(/answer LLM down/);
   });
+
+  describe("howToMode workflow", () => {
+    it("skips planner / graph / drift nodes when howToMode is true", async () => {
+      await service.run({
+        companyId: "co-1",
+        userId: "u-1",
+        userModuleIds: [],
+        dataLimits: { howToMode: true },
+        messages: [{ type: AgentMessageType.User, content: "q" }] as any,
+      });
+
+      expect(plannerNode.execute).not.toHaveBeenCalled();
+      expect(graphNode.execute).not.toHaveBeenCalled();
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+      expect(contextualiserService.run).toHaveBeenCalled();
+      expect(answerNode.execute).toHaveBeenCalled();
+    });
+
+    it("skips planner / graph / drift when limitToHowToId is set", async () => {
+      await service.run({
+        companyId: "co-1",
+        userId: "u-1",
+        userModuleIds: [],
+        dataLimits: { limitToHowToId: "ht-1" },
+        messages: [{ type: AgentMessageType.User, content: "q" }] as any,
+      });
+
+      expect(plannerNode.execute).not.toHaveBeenCalled();
+      expect(graphNode.execute).not.toHaveBeenCalled();
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+    });
+
+    it("runs planner + conditional fan-out when dataLimits is empty (regression)", async () => {
+      plannerNode.execute.mockResolvedValueOnce({
+        branchPlan: { runGraph: true, runContextualiser: true, runDrift: true },
+      });
+
+      await service.run({
+        companyId: "co-1",
+        userId: "u-1",
+        userModuleIds: [],
+        dataLimits: {},
+        messages: [{ type: AgentMessageType.User, content: "q" }] as any,
+      });
+
+      expect(plannerNode.execute).toHaveBeenCalled();
+      // graph / drift / contextualiser may or may not be called depending on branchPlan;
+      // the regression check is just that planner DID get called.
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import { END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import {
@@ -18,6 +18,8 @@ import { TracingService } from "../../../core/tracing/services/tracing.service";
 
 @Injectable()
 export class ContextualiserService {
+  private readonly logger = new Logger(ContextualiserService.name);
+
   constructor(
     private readonly contextualiserContextFactoryService: ContextualiserContextFactoryService,
     private readonly questionRefinedNode: QuestionRefinerNodeService,
@@ -44,6 +46,14 @@ export class ContextualiserService {
     const finalPrompt: string | undefined = undefined;
 
     const initial = params.messages.length === 0 ? "question_refiner" : "rational_plan";
+
+    this.logger.log(
+      `contextualiser START question="${params.question ?? "<from history>"}" ` +
+        `initial=${initial} messages=${params.messages.length} ` +
+        `howToMode=${!!params.dataLimits.howToMode} ` +
+        `limitToHowToId=${params.dataLimits.limitToHowToId ?? "none"} ` +
+        `contentType=${params.contentType ?? "none"}`,
+    );
 
     this.tracer.startSpan("Contextualiser Workflow", {
       attributes: {
@@ -187,6 +197,14 @@ export class ContextualiserService {
         finalHopCount: finalState.hops,
         totalSteps: stepCount,
       });
+
+      this.logger.log(
+        `contextualiser END hops=${finalState.hops}/${maxHops} ` +
+          `processedKeyConcepts=${finalState.processedKeyConcepts?.length ?? 0} ` +
+          `processedAtomicFacts=${finalState.processedAtomicFacts?.length ?? 0} ` +
+          `processedChunks=${finalState.processedChunks?.length ?? 0} ` +
+          `notebook=${finalState.notebook?.length ?? 0} entries`,
+      );
 
       this.tracer.setSpanSuccess();
       this.tracer.endSpan();

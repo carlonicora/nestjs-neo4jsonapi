@@ -44,7 +44,7 @@ export class KeyConceptService {
   }
 
   async addKeyConceptRelationships(params: {
-    companyId: string;
+    companyId?: string;
     chunkId: string;
     relationships: {
       keyConcept1: string;

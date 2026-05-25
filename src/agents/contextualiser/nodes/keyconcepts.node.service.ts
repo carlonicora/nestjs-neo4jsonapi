@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { z } from "zod";
@@ -76,6 +76,7 @@ const inputSchema = z.object({
 
 @Injectable()
 export class KeyConceptsNodeService {
+  private readonly logger = new Logger(KeyConceptsNodeService.name);
   private readonly systemPrompt: string;
 
   constructor(
@@ -99,12 +100,21 @@ export class KeyConceptsNodeService {
         question: params.state.question,
         dataLimits: params.state.limits,
       });
+      this.logger.log(
+        `findPotentialKeyConcepts → ${keyConcepts.length} concepts ` +
+          `(question="${params.state.question}" howToMode=${!!params.state.limits.howToMode} ` +
+          `limitToHowToId=${params.state.limits.limitToHowToId ?? "none"})`,
+      );
     } else if (params.state.nextStep === "negbouring_nodes") {
       params.state.neighbouringAlreadyExplored = true;
       keyConcepts = await this.keyConceptRepository.findNeighboursByKeyConcepts({
         keyConcepts: params.state.processedKeyConcepts,
         dataLimits: params.state.limits,
       });
+      this.logger.log(
+        `findNeighboursByKeyConcepts → ${keyConcepts.length} concepts ` +
+          `(from ${params.state.processedKeyConcepts.length} processed)`,
+      );
     }
 
     const metadataList: { node: string; metadata: any }[] = [];
@@ -124,6 +134,11 @@ export class KeyConceptsNodeService {
     const approachingMaxHops = params.state.hops >= 15;
 
     if (!usableNodes || !usableNodes.length || approachingMaxHops) {
+      this.logger.warn(
+        `key_concepts → answer (no usable concepts): usableNodes=${usableNodes?.length ?? 0} ` +
+          `processedKeyConcepts=${params.state.processedKeyConcepts.length} ` +
+          `approachingMaxHops=${approachingMaxHops}`,
+      );
       params.state.nextStep = "answer";
       return params.state;
     }

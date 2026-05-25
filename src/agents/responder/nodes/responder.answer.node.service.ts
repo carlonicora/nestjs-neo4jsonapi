@@ -215,6 +215,10 @@ export class ResponderAnswerNodeService {
 
     this.logger.log(
       `answer node input: branchesUsed=${JSON.stringify(branchesUsed)} ` +
+        `branchPlan=${JSON.stringify(branchPlan)} ` +
+        `stateBranchPlan=${state.branchPlan ? "set" : "undefined"} ` +
+        `context.notebook=${state.context?.notebook?.length ?? "no-context"} ` +
+        `context.processedChunks=${state.context?.processedChunks?.length ?? "no-context"} ` +
         `graphEntities=${state.graphContext?.entities?.length ?? 0} ` +
         `graphAnswerChars=${graphAnswer.length} ` +
         `notebookChars=${notebookSection.length} ` +

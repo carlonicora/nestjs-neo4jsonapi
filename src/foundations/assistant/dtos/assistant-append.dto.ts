@@ -1,11 +1,19 @@
 import { Type } from "class-transformer";
-import { Equals, IsNotEmpty, IsString, MaxLength, ValidateNested } from "class-validator";
+import { Equals, IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
 
 export class AssistantAppendAttributesDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(10_000)
   content!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  howToMode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  limitToHowToId?: string;
 }
 
 export class AssistantAppendDataDto {

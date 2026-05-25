@@ -231,9 +231,8 @@ describe("AtomicFactRepository", () => {
       expect(mockQuery.queryParams).toMatchObject({
         chunkId: TEST_IDS.chunkId,
       });
-      expect(mockQuery.query).toContain("MATCH (company)<-[:BELONGS_TO]");
-      expect(mockQuery.query).toContain("[:HAS_CHUNK]->(chunk:Chunk {id: $chunkId})");
-      expect(mockQuery.query).toContain("[:HAS_ATOMIC_FACT]->(atomicfact: AtomicFact)");
+      expect(mockQuery.query).toContain("MATCH (chunk:Chunk {id: $chunkId})-[:HAS_ATOMIC_FACT]->(atomicfact: AtomicFact)");
+      expect(mockQuery.query).not.toContain("BELONGS_TO");
       expect(mockQuery.query).toContain("RETURN atomicfact");
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_ATOMIC_FACT]);
@@ -272,8 +271,7 @@ describe("AtomicFactRepository", () => {
         atomicFactId: TEST_IDS.atomicFactId,
       });
       expect(mockQuery.query).toContain("MATCH (atomicfact: AtomicFact {id: $atomicFactId})");
-      expect(mockQuery.query).toContain("<-[:HAS_ATOMIC_FACT]-(chunk: Chunk)");
-      expect(mockQuery.query).toContain("<-[:HAS_CHUNK]-()-[:BELONGS_TO]->(company)");
+      expect(mockQuery.query).not.toContain("BELONGS_TO");
       expect(mockQuery.query).toContain("RETURN atomicfact");
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_ATOMIC_FACT);
@@ -357,8 +355,8 @@ describe("AtomicFactRepository", () => {
         atomicFactId: params.atomicFactId,
         atomicFactContent: params.content,
       });
-      expect(mockQuery.query).toContain("MATCH (company)<-[:BELONGS_TO]");
-      expect(mockQuery.query).toContain("[:HAS_CHUNK]->(chunk:Chunk {id: $chunkId})");
+      expect(mockQuery.query).toContain("MATCH (chunk:Chunk {id: $chunkId})");
+      expect(mockQuery.query).not.toContain("BELONGS_TO");
       expect(mockQuery.query).toContain("MERGE (atomicfact:AtomicFact {id: $atomicFactId})");
       expect(mockQuery.query).toContain("ON CREATE SET atomicfact.content = $atomicFactContent");
       expect(mockQuery.query).toContain("MERGE (chunk)-[:HAS_ATOMIC_FACT]->(atomicfact)");

@@ -71,6 +71,8 @@ describe("AssistantController", () => {
         userId: "u",
         firstMessage: "hello there",
         title: undefined,
+        howToMode: undefined,
+        limitToHowToId: undefined,
       });
     });
 
@@ -225,6 +227,8 @@ describe("AssistantController", () => {
         companyId: "c",
         userId: "u",
         newMessage: "continue",
+        howToMode: undefined,
+        limitToHowToId: undefined,
       });
     });
 
@@ -236,6 +240,50 @@ describe("AssistantController", () => {
       );
       expect(res.data).toHaveLength(2);
       expect(res.meta).toEqual({ toolCalls: [{ tool: "search_entities", input: {}, durationMs: 5 }] });
+    });
+
+    it("forwards data.attributes.howToMode to AssistantService.appendMessage", async () => {
+      const dto = {
+        data: {
+          type: "assistant-messages",
+          attributes: { content: "follow up", howToMode: true, limitToHowToId: "ht-42" },
+        },
+      } as any;
+
+      await ctl.append("a-1", dto, { user: { userId: "u-1", companyId: "co-1" } } as any);
+
+      expect(assistants.appendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assistantId: "a-1",
+          companyId: "co-1",
+          userId: "u-1",
+          newMessage: "follow up",
+          howToMode: true,
+          limitToHowToId: "ht-42",
+        }),
+      );
+    });
+  });
+
+  describe("howToMode forwarding", () => {
+    it("forwards data.attributes.howToMode to AssistantService.createWithFirstMessage", async () => {
+      const dto = {
+        data: {
+          type: "assistants",
+          attributes: { content: "hi", howToMode: true },
+        },
+      } as any;
+
+      await ctl.create(dto, { user: { userId: "u-1", companyId: "co-1" } } as any);
+
+      expect(assistants.createWithFirstMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          companyId: "co-1",
+          userId: "u-1",
+          firstMessage: "hi",
+          howToMode: true,
+        }),
+      );
     });
   });
 

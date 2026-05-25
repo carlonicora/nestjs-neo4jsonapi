@@ -96,15 +96,17 @@ export class AssistantController {
    */
   @Post(assistantMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
-    const firstMessage = body.data.attributes.content;
+    const { content, title, howToMode, limitToHowToId } = body.data.attributes;
     this.logger.log(
-      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${firstMessage.length}`,
+      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}`,
     );
     const { assistant, userMessage, assistantMessage, toolCalls } = await this.assistants.createWithFirstMessage({
       companyId: req.user.companyId,
       userId: req.user.userId,
-      firstMessage,
-      title: body.data.attributes.title,
+      firstMessage: content,
+      title,
+      howToMode,
+      limitToHowToId,
     });
     const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
     const messagesDoc = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
@@ -141,14 +143,15 @@ export class AssistantController {
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
-    this.logger.log(
-      `append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${body.data.attributes.content.length}`,
-    );
+    const { content, howToMode, limitToHowToId } = body.data.attributes;
+    this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);
     const { userMessage, assistantMessage, toolCalls } = await this.assistants.appendMessage({
       assistantId,
       companyId: req.user.companyId,
       userId: req.user.userId,
-      newMessage: body.data.attributes.content,
+      newMessage: content,
+      howToMode,
+      limitToHowToId,
     });
 
     const document = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [

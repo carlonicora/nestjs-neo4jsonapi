@@ -44,6 +44,12 @@ export class KeyConceptRepository implements OnModuleInit {
   }
 
   async findNeighboursByKeyConcepts(params: { keyConcepts: string[]; dataLimits: DataLimits }): Promise<KeyConcept[]> {
+    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
+    // Dispatch to the private method so the bypass is visible and quarantined here.
+    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
+      return this.findNeighboursByKeyConceptsFromHowTos(params);
+    }
+
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
 
     query.queryParams = {
@@ -53,7 +59,7 @@ export class KeyConceptRepository implements OnModuleInit {
 
     query.query += `
       MATCH (startingKeyConcept:KeyConcept)<-[:RELATES_TO]-(keyConceptRelationship:KeyConceptRelationship)-[:RELATES_TO]->(keyconcept:KeyConcept)
-      WHERE startingKeyConcept.value IN $keyConcepts 
+      WHERE startingKeyConcept.value IN $keyConcepts
       AND NOT keyconcept.value IN $keyConcepts
       AND NOT EXISTS {
         MATCH (startingKeyConcept)<-[:HAS_KEY_CONCEPT]-()<-[:HAS_ATOMIC_FACT]-()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept)
@@ -79,7 +85,58 @@ export class KeyConceptRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
+   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
+   * this repository; `findNeighboursByKeyConcepts` dispatches here based on
+   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
+   */
+  private async findNeighboursByKeyConceptsFromHowTos(params: {
+    keyConcepts: string[];
+    dataLimits: DataLimits;
+  }): Promise<KeyConcept[]> {
+    const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
+
+    query.queryParams = {
+      ...query.queryParams,
+      keyConcepts: params.keyConcepts,
+      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
+    };
+
+    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
+
+    query.query += `
+      MATCH (data:HowTo)
+      ${limitClause}
+      WITH data
+      MATCH (startingKeyConcept:KeyConcept)<-[:RELATES_TO]-(keyConceptRelationship:KeyConceptRelationship)-[:RELATES_TO]->(keyconcept:KeyConcept)
+      WHERE startingKeyConcept.value IN $keyConcepts
+      AND NOT keyconcept.value IN $keyConcepts
+      AND NOT EXISTS {
+        MATCH (startingKeyConcept)<-[:HAS_KEY_CONCEPT]-()<-[:HAS_ATOMIC_FACT]-()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept)
+      }
+      WITH keyconcept
+      WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
+
+      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
+      YIELD node AS candidateKeyConcept, score
+      WHERE candidateKeyConcept.id IN topicKeyConceptIds
+
+      RETURN candidateKeyConcept, score
+      ORDER BY score DESC
+      LIMIT 100
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
   async findPotentialKeyConcepts(params: { question: string; dataLimits: DataLimits }): Promise<KeyConcept[]> {
+    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
+    // Dispatch to the private method so the bypass is visible and quarantined here.
+    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
+      return this.findPotentialKeyConceptsFromHowTos(params);
+    }
+
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
 
     const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
@@ -97,6 +154,47 @@ export class KeyConceptRepository implements OnModuleInit {
         dataLimits: params.dataLimits,
         returnsData: true,
       })}
+      MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
+      WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
+
+      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
+      YIELD node AS candidateKeyConcept, score
+      WHERE candidateKeyConcept.id IN topicKeyConceptIds
+
+      RETURN candidateKeyConcept as ${keyConceptMeta.nodeName}, score
+      ORDER BY score DESC
+      LIMIT 100
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
+   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
+   * this repository; `findPotentialKeyConcepts` dispatches here based on
+   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
+   */
+  private async findPotentialKeyConceptsFromHowTos(params: {
+    question: string;
+    dataLimits: DataLimits;
+  }): Promise<KeyConcept[]> {
+    const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
+
+    const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
+
+    query.queryParams = {
+      ...query.queryParams,
+      queryEmbedding,
+      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
+    };
+
+    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
+
+    query.query += `
+      MATCH (data:HowTo)
+      ${limitClause}
+      WITH data
       MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
       WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
 
@@ -145,7 +243,7 @@ export class KeyConceptRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (company)<-[:BELONGS_TO]-()-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept {value: $keyConceptValue})
+      MATCH (keyconcept:KeyConcept {value: $keyConceptValue})
       RETURN keyconcept
   `;
 
@@ -257,7 +355,7 @@ export class KeyConceptRepository implements OnModuleInit {
   }
 
   async createOrUpdateKeyConceptRelationships(params: {
-    companyId: string;
+    companyId?: string;
     chunkId: string;
     relationships: {
       keyConcept1: string;
@@ -297,26 +395,46 @@ export class KeyConceptRepository implements OnModuleInit {
 
           const query = this.neo4j.initQuery();
 
-          query.queryParams = {
-            companyId: params.companyId,
-            chunkId: params.chunkId,
-            sortedKey1: sortedKeys[0],
-            sortedKey2: sortedKeys[1],
-          };
+          if (params.companyId) {
+            query.queryParams = {
+              companyId: params.companyId,
+              chunkId: params.chunkId,
+              sortedKey1: sortedKeys[0],
+              sortedKey2: sortedKeys[1],
+            };
 
-          query.query = `
-            MATCH (company:Company {id: $companyId})
-            MATCH (keyConcept1:KeyConcept {value: $sortedKey1})
-            MATCH (keyConcept2:KeyConcept {value: $sortedKey2})
-            MATCH (chunk:Chunk {id: $chunkId})
-            MERGE (rel:KeyConceptRelationship {key1: $sortedKey1, key2: $sortedKey2})
-            ON CREATE SET rel.weight = 1
-            ON MATCH SET rel.weight = rel.weight + 1
-            MERGE (rel)-[:BELONGS_TO]->(company)
-            MERGE (rel)-[:RELATES_TO]->(keyConcept1)
-            MERGE (rel)-[:RELATES_TO]->(keyConcept2)
-            MERGE (rel)-[:OCCURS_IN]->(chunk)
-          `;
+            query.query = `
+              MATCH (company:Company {id: $companyId})
+              MATCH (keyConcept1:KeyConcept {value: $sortedKey1})
+              MATCH (keyConcept2:KeyConcept {value: $sortedKey2})
+              MATCH (chunk:Chunk {id: $chunkId})
+              MERGE (rel:KeyConceptRelationship {key1: $sortedKey1, key2: $sortedKey2})
+              ON CREATE SET rel.weight = 1
+              ON MATCH SET rel.weight = rel.weight + 1
+              MERGE (rel)-[:BELONGS_TO]->(company)
+              MERGE (rel)-[:RELATES_TO]->(keyConcept1)
+              MERGE (rel)-[:RELATES_TO]->(keyConcept2)
+              MERGE (rel)-[:OCCURS_IN]->(chunk)
+            `;
+          } else {
+            query.queryParams = {
+              chunkId: params.chunkId,
+              sortedKey1: sortedKeys[0],
+              sortedKey2: sortedKeys[1],
+            };
+
+            query.query = `
+              MATCH (keyConcept1:KeyConcept {value: $sortedKey1})
+              MATCH (keyConcept2:KeyConcept {value: $sortedKey2})
+              MATCH (chunk:Chunk {id: $chunkId})
+              MERGE (rel:KeyConceptRelationship {key1: $sortedKey1, key2: $sortedKey2})
+              ON CREATE SET rel.weight = 1
+              ON MATCH SET rel.weight = rel.weight + 1
+              MERGE (rel)-[:RELATES_TO]->(keyConcept1)
+              MERGE (rel)-[:RELATES_TO]->(keyConcept2)
+              MERGE (rel)-[:OCCURS_IN]->(chunk)
+            `;
+          }
 
           await this.neo4j.writeOne(query);
         } catch (error) {
@@ -350,8 +468,7 @@ export class KeyConceptRepository implements OnModuleInit {
     };
 
     query.query += `
-      MATCH (rel:KeyConceptRelationship)-[:BELONGS_TO]->(company)
-      MATCH (rel)-[occursIn:OCCURS_IN]->(chunk:Chunk {id: $chunkId})
+      MATCH (rel:KeyConceptRelationship)-[occursIn:OCCURS_IN]->(chunk:Chunk {id: $chunkId})
       SET rel.weight = rel.weight - 1
       DELETE occursIn
       WITH rel

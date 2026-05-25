@@ -324,6 +324,7 @@ describe("ChunkRepository", () => {
       });
       expect(mockQuery.query).toContain("CREATE (chunk:Chunk");
       expect(mockQuery.query).toContain("MERGE (nodeType)-[:HAS_CHUNK]->(chunk)");
+      expect(mockQuery.query).toContain("OPTIONAL MATCH (nodeType)-[:BELONGS_TO]->(company)");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });
 

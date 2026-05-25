@@ -39,14 +39,15 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   async findPotentialChunks(params: { question: string; dataLimits: DataLimits }): Promise<Chunk[]> {
+    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
+    // Dispatch to the private method so the bypass is visible and quarantined here.
+    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
+      return this.findPotentialChunksFromHowTos(params);
+    }
+
     const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
-
     const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
-
-    query.queryParams = {
-      ...query.queryParams,
-      queryEmbedding,
-    };
+    query.queryParams = { ...query.queryParams, queryEmbedding };
 
     query.query = `
         MATCH (data)-[:BELONGS_TO]->(company)
@@ -71,6 +72,43 @@ export class ChunkRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
+   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
+   * this repository; `findPotentialChunks` dispatches here based on
+   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
+   */
+  private async findPotentialChunksFromHowTos(params: { question: string; dataLimits: DataLimits }): Promise<Chunk[]> {
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
+    const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
+
+    query.queryParams = {
+      ...query.queryParams,
+      queryEmbedding,
+      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
+    };
+
+    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
+
+    query.query = `
+        MATCH (data:HowTo)
+        ${limitClause}
+        WITH data
+        MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
+        WITH COLLECT(DISTINCT chunk.id) AS chunkIds
+
+        CALL db.index.vector.queryNodes('chunks', 1000, $queryEmbedding)
+        YIELD node AS candidateChunk, score
+        WHERE candidateChunk.id IN chunkIds
+
+        RETURN candidateChunk AS chunk, score
+        ORDER BY score DESC
+        LIMIT 20
+      `;
+
+    return this.neo4j.readMany(query);
+  }
+
   async findSubsequentChunkId(params: { chunkId: string }): Promise<Chunk> {
     const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
@@ -80,7 +118,7 @@ export class ChunkRepository implements OnModuleInit {
     };
 
     query.query += `
-        MATCH (company)<-[:BELONGS_TO]-()-[:HAS_CHUNK]->(current:Chunk {id: $chunkId})-[:NEXT]->(chunk:Chunk)
+        MATCH (current:Chunk {id: $chunkId})-[:NEXT]->(chunk:Chunk)
         RETURN chunk
       `;
 
@@ -96,7 +134,7 @@ export class ChunkRepository implements OnModuleInit {
     };
 
     query.query += `
-        MATCH (company)<-[:BELONGS_TO]-()-[:HAS_CHUNK]->(current:Chunk {id: $chunkId})<-[:NEXT]-(chunk:Chunk)
+        MATCH (current:Chunk {id: $chunkId})<-[:NEXT]-(chunk:Chunk)
         RETURN chunk
       `;
 
@@ -112,7 +150,7 @@ export class ChunkRepository implements OnModuleInit {
     };
 
     query.query += `
-      MATCH (company)<-[:BELONGS_TO]-()-[:HAS_CHUNK]->(chunk:Chunk {id: $chunkId})
+      MATCH (chunk:Chunk {id: $chunkId})
       RETURN chunk
     `;
 
@@ -128,7 +166,7 @@ export class ChunkRepository implements OnModuleInit {
     };
 
     query.query += `
-      MATCH (company)<-[:BELONGS_TO]-(chunk_type:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunk:Chunk)
+      MATCH (chunk_type:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunk:Chunk)
       RETURN chunk, chunk_type
       ORDER BY chunk.position
     `;
@@ -164,7 +202,7 @@ export class ChunkRepository implements OnModuleInit {
 
     query.query += `
       MATCH (nodeType:${params.nodeType} {id: $nodeId})
-      MATCH (nodeType)-[:BELONGS_TO]->(company)
+      OPTIONAL MATCH (nodeType)-[:BELONGS_TO]->(company)
       CREATE (chunk:Chunk {
         id: $id,
         content: $content, 

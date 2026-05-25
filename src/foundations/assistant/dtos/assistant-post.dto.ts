@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { Equals, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+import { Equals, IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
 import { assistantMeta } from "../entities/assistant.meta";
 
 export class AssistantPostAttributesDto {
@@ -12,6 +12,14 @@ export class AssistantPostAttributesDto {
   @IsOptional()
   @MaxLength(200)
   title?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  howToMode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  limitToHowToId?: string;
 }
 
 export class AssistantPostDataDto {

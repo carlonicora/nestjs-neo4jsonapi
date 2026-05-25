@@ -383,6 +383,46 @@ describe("KeyConceptRepository", () => {
     });
   });
 
+  describe("createOrUpdateKeyConceptRelationships", () => {
+    const relationships = [
+      { keyConcept1: "alpha", keyConcept2: "beta", relationship: "RELATED_TO" },
+    ];
+
+    it("scopes the relationship to the company when companyId is provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createOrUpdateKeyConceptRelationships({
+        companyId: TEST_IDS.companyId,
+        chunkId: TEST_IDS.chunkId,
+        relationships,
+      });
+
+      expect(mockQuery.queryParams).toMatchObject({ companyId: TEST_IDS.companyId });
+      expect(mockQuery.query).toContain("MATCH (company:Company {id: $companyId})");
+      expect(mockQuery.query).toContain("MERGE (rel)-[:BELONGS_TO]->(company)");
+    });
+
+    it("creates a global relationship (no BELONGS_TO) when companyId is omitted (HowTo case)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createOrUpdateKeyConceptRelationships({
+        chunkId: TEST_IDS.chunkId,
+        relationships,
+      });
+
+      expect(mockQuery.queryParams).not.toHaveProperty("companyId");
+      expect(mockQuery.query).not.toContain("BELONGS_TO");
+      expect(mockQuery.query).not.toContain("Company");
+      expect(mockQuery.query).toContain("MERGE (rel:KeyConceptRelationship");
+      expect(mockQuery.query).toContain("MERGE (rel)-[:RELATES_TO]->(keyConcept1)");
+      expect(mockQuery.query).toContain("MERGE (rel)-[:OCCURS_IN]->(chunk)");
+    });
+  });
+
   describe("resizeKeyConceptRelationshipsWeightOnChunkDeletion", () => {
     it("should decrease weight and cleanup relationships", async () => {
       const mockQuery = createMockQuery();

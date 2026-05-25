@@ -270,7 +270,7 @@ export class ChunkService {
           this.tracer.addSpanEvent("Write Atomic Facts in Database");
 
           await this.keyConceptService.addKeyConceptRelationships({
-            companyId: this.clsService.get("companyId"),
+            companyId: this.clsService.get("companyId") || undefined,
             chunkId: chunk.id,
             relationships: chunkAnalysis.keyConceptsRelationships.map((relationship) => {
               return {

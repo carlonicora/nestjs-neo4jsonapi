@@ -90,6 +90,12 @@ export class AtomicFactsNodeService {
     );
 
     if (filteredKeyConcepts.length === 0) {
+      this.logger.warn(
+        `atomic_facts → ${params.state.queuedChunks.length > 0 ? "chunks" : "answer"} (no new key concepts): ` +
+          `queuedKeyConcepts=${params.state.queuedKeyConcepts.length} ` +
+          `processedKeyConcepts=${params.state.processedKeyConcepts.length} ` +
+          `queuedChunks=${params.state.queuedChunks.length}`,
+      );
       return {
         queuedKeyConcepts: [],
         nextStep: params.state.queuedChunks.length > 0 ? "chunks" : "answer",
@@ -102,6 +108,12 @@ export class AtomicFactsNodeService {
       skipAtomicFactIds: params.state.processedAtomicFacts,
       dataLimits: params.state.limits,
     });
+
+    this.logger.log(
+      `findAtomicFactsByKeyConcepts → ${atomicFacts.length} atomic facts ` +
+        `(from ${filteredKeyConcepts.length} key concepts, ` +
+        `howToMode=${!!params.state.limits.howToMode} limitToHowToId=${params.state.limits.limitToHowToId ?? "none"})`,
+    );
 
     this.tracer.addSpanEvent("atomicfacts.retrieved", {
       keyConcepts: JSON.stringify(filteredKeyConcepts, null, 2),

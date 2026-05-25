@@ -51,9 +51,23 @@ export class ResponderService {
     initialState.rawQuestion = lastUserMessage;
     initialState.question = lastUserMessage;
 
+    const useHowToBranch = !!params.dataLimits.howToMode || !!params.dataLimits.limitToHowToId;
+
+    // Help-mode skips the planner node, so state.branchPlan stays undefined.
+    // The answer node reads branchPlan to decide which sections to include —
+    // when undefined it falls back to all-false → notebookSection="" → the LLM
+    // gets no chunks and replies "no information available". Pre-set the plan
+    // here so the help-mode answer node uses the contextualiser's output.
+    if (useHowToBranch) {
+      initialState.branchPlan = {
+        runGraph: false,
+        runContextualiser: true,
+        runDrift: false,
+        reasoning: "help-mode: contextualiser-only retrieval over HowTo chunks",
+      };
+    }
+
     const workflow = new StateGraph(ResponderContext)
-      .addNode("planner", async (state) => this.plannerNode.execute({ state }))
-      .addNode("graph", async (state) => this.graphNode.execute({ state }))
       .addNode("contextualiser", async (state) => {
         try {
           const ctx = await this.contextualiserService.run({
@@ -93,54 +107,62 @@ export class ResponderService {
           };
         }
       })
-      .addNode("drift", async (state) => {
-        try {
-          const result = await this.driftSearchService.search({ question: state.question });
-          return {
-            driftContext: result,
-            trace: {
-              drift: {
-                confidence: result.confidence ?? 0,
-                communitiesMatched: result.matchedCommunities?.length ?? 0,
-                status: "success" as const,
-                tokens: (result as any).tokens ?? { input: 0, output: 0 },
-              },
-            } as any,
-          };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.warn(`drift failed: ${message}`);
-          return {
-            driftError: message,
-            trace: {
-              drift: {
-                confidence: 0,
-                communitiesMatched: 0,
-                status: "failed" as const,
-                errorMessage: message,
-                tokens: { input: 0, output: 0 },
-              },
-            } as any,
-          };
-        }
-      })
-      .addNode("answer", async (state) => this.answerNode.execute({ state }))
-      .addEdge(START, "planner")
-      .addConditionalEdges(
-        "planner",
-        (state) => {
-          const picks: string[] = [];
-          if (state.branchPlan?.runGraph) picks.push("graph");
-          if (state.branchPlan?.runContextualiser) picks.push("contextualiser");
-          if (state.branchPlan?.runDrift) picks.push("drift");
-          return picks.length ? picks : ["answer"];
-        },
-        ["graph", "contextualiser", "drift", "answer"],
-      )
-      .addEdge("graph", "answer")
-      .addEdge("contextualiser", "answer")
-      .addEdge("drift", "answer")
-      .addEdge("answer", END);
+      .addNode("answer", async (state) => this.answerNode.execute({ state }));
+
+    if (useHowToBranch) {
+      workflow.addEdge(START, "contextualiser").addEdge("contextualiser", "answer").addEdge("answer", END);
+    } else {
+      workflow
+        .addNode("planner", async (state) => this.plannerNode.execute({ state }))
+        .addNode("graph", async (state) => this.graphNode.execute({ state }))
+        .addNode("drift", async (state) => {
+          try {
+            const result = await this.driftSearchService.search({ question: state.question });
+            return {
+              driftContext: result,
+              trace: {
+                drift: {
+                  confidence: result.confidence ?? 0,
+                  communitiesMatched: result.matchedCommunities?.length ?? 0,
+                  status: "success" as const,
+                  tokens: (result as any).tokens ?? { input: 0, output: 0 },
+                },
+              } as any,
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`drift failed: ${message}`);
+            return {
+              driftError: message,
+              trace: {
+                drift: {
+                  confidence: 0,
+                  communitiesMatched: 0,
+                  status: "failed" as const,
+                  errorMessage: message,
+                  tokens: { input: 0, output: 0 },
+                },
+              } as any,
+            };
+          }
+        })
+        .addEdge(START, "planner")
+        .addConditionalEdges(
+          "planner",
+          (state) => {
+            const picks: string[] = [];
+            if (state.branchPlan?.runGraph) picks.push("graph");
+            if (state.branchPlan?.runContextualiser) picks.push("contextualiser");
+            if (state.branchPlan?.runDrift) picks.push("drift");
+            return picks.length ? picks : ["answer"];
+          },
+          ["graph", "contextualiser", "drift", "answer"],
+        )
+        .addEdge("graph", "answer")
+        .addEdge("contextualiser", "answer")
+        .addEdge("drift", "answer")
+        .addEdge("answer", END);
+    }
 
     const threadId = randomUUID();
     const app = workflow.compile({ checkpointer: new MemorySaver() });

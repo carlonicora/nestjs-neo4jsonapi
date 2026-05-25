@@ -82,6 +82,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     userId: string;
     firstMessage: string;
     title?: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
   }): Promise<{
     assistant: Assistant;
     userMessage: AssistantMessage;
@@ -128,6 +130,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       priorMessages: [],
       newUserMessage: { role: "user", content: params.firstMessage },
       assistantId,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
     });
 
     // 4. Create the assistant message at position 1 with denormalised references JSON.
@@ -177,7 +181,14 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     return { assistant, userMessage, assistantMessage, toolCalls: turn.toolCalls };
   }
 
-  async appendMessage(params: { assistantId: string; companyId: string; userId: string; newMessage: string }): Promise<{
+  async appendMessage(params: {
+    assistantId: string;
+    companyId: string;
+    userId: string;
+    newMessage: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
+  }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
     toolCalls: ToolCallRecord[];
@@ -221,6 +232,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       priorMessages,
       newUserMessage: { role: "user", content: params.newMessage },
       assistantId: params.assistantId,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
     });
 
     const assistantMessageId = turn.id;
@@ -293,6 +306,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     priorMessages: AssistantMessage[];
     newUserMessage: { role: "user"; content: string };
     assistantId?: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
   }): Promise<AgentTurnResult> {
     // Anchor every LLMService.call() in this turn to the same assistant/turn
     // pair so the dumper can group dumps under
@@ -338,7 +353,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userModuleIds: params.userModuleIds,
       contentId,
       contentType,
-      dataLimits: {},
+      dataLimits: {
+        howToMode: params.howToMode,
+        limitToHowToId: params.limitToHowToId,
+      },
       messages,
       question: params.newUserMessage.content,
     });
