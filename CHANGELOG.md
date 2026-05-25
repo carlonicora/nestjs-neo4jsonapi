@@ -1,3 +1,19 @@
+## [1.77.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.76.0...v1.77.0) (2026-05-25)
+
+### 🚀 Features
+
+* **assistant:** support help-mode flow + extend AI pipeline for global content ([36147e6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/36147e6940bb6c6dfb451cf527e2ee2761129b97))
+* **help-content-sync:** add MDX→markdown sync foundation + Redis lock ([1f43b0a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1f43b0afb86044a4edbae17c0fe482ae9c6e7c23))
+
+### 🐛 Bug Fixes
+
+* **help-content-sync:** change put to patch for updating existing articles ([5e0eec1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5e0eec13c31942448eb800e9e3b7b29fa1b2b79f))
+* **package:** update docx dependency version to 9.6.1 ([110ca88](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/110ca882ad1972fdacdaa69d090413adfcf08ae1))
+
+### 💎 Styles
+
+* apply eslint --fix formatting ([17ee7fc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/17ee7fc07f6b0116fee3247b1b5f9af3076c9d05))
+
 ## [1.76.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.75.0...v1.76.0) (2026-05-23)
 
 ### 🚀 Features
