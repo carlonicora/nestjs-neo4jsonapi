@@ -1,3 +1,9 @@
+## [1.77.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.77.0...v1.77.1) (2026-06-02)
+
+### 🐛 Bug Fixes
+
+* **help-content-sync:** assert patch (not put) in stale update test ([1c7cb74](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1c7cb74c97fd3a4b084747bf727d8c577ebfd3d8))
+
 ## [1.77.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.76.0...v1.77.0) (2026-05-25)
 
 ### 🚀 Features
