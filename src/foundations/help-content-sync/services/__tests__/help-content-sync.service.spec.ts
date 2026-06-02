@@ -106,7 +106,7 @@ describe("HelpContentSyncService", () => {
     expect(howToRepository.put).not.toHaveBeenCalled();
   });
 
-  it("puts and re-queues when contentHash differs", async () => {
+  it("patches and re-queues when contentHash differs", async () => {
     const article = {
       slug: "a",
       mode: "how-to",
@@ -130,7 +130,8 @@ describe("HelpContentSyncService", () => {
       existingById: { [id]: { id, helpContentSlug: "how-to/a", contentHash: "h1" } },
     });
     await svc.run();
-    expect(howToRepository.put).toHaveBeenCalledTimes(1);
+    expect(howToRepository.patch).toHaveBeenCalledTimes(1);
+    expect(howToRepository.put).not.toHaveBeenCalled();
     expect(howToService.queueHowToForProcessingFromMarkdown).toHaveBeenCalledTimes(1);
   });
 
