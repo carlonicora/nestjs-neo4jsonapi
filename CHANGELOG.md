@@ -1,3 +1,9 @@
+## [1.78.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.77.1...v1.78.0) (2026-06-03)
+
+### 🚀 Features
+
+* **llm:** add lite/normal/large AI model tiers ([862a9f8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/862a9f87e9afd1b45d24ab94c49f1d3f7148f9bd))
+
 ## [1.77.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.77.0...v1.77.1) (2026-06-02)
 
 ### 🐛 Bug Fixes
