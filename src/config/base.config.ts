@@ -3,6 +3,31 @@ import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.int
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
 import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
+import { AiTierConfig } from "./interfaces/config.ai.interface";
+
+/**
+ * Resolves one AI model tier from env, falling back field-by-field to the
+ * normal `AI_*` vars. `suffix` is "" (normal), "_LITE", or "_LARGE".
+ * Mirrors the existing VISION_ and AUDIO_ env fallback convention.
+ */
+const buildAiTier = (suffix: string): AiTierConfig => ({
+  provider: process.env[`AI_PROVIDER${suffix}`] || process.env.AI_PROVIDER || "",
+  apiKey: process.env[`AI_API_KEY${suffix}`] || process.env.AI_API_KEY || "",
+  model: process.env[`AI_MODEL${suffix}`] || process.env.AI_MODEL || "",
+  url: process.env[`AI_URL${suffix}`] || process.env.AI_URL || "",
+  region: process.env[`AI_REGION${suffix}`] || process.env.AI_REGION || "",
+  secret: process.env[`AI_SECRET${suffix}`] || process.env.AI_SECRET || "",
+  instance: process.env[`AI_INSTANCE${suffix}`] || process.env.AI_INSTANCE || "",
+  apiVersion: process.env[`AI_API_VERSION${suffix}`] || process.env.AI_API_VERSION || "",
+  inputCostPer1MTokens: parseFloat(
+    process.env[`AI_INPUT_COST_PER_1M_TOKENS${suffix}`] || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
+  ),
+  outputCostPer1MTokens: parseFloat(
+    process.env[`AI_OUTPUT_COST_PER_1M_TOKENS${suffix}`] || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
+  ),
+  googleCredentialsBase64:
+    process.env[`AI_GOOGLE_CREDENTIALS_BASE64${suffix}`] || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
+});
 
 /**
  * Options for createBaseConfig
@@ -175,19 +200,9 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       region: process.env.S3_REGION || "us-east-1",
     },
     ai: {
-      ai: {
-        provider: process.env.AI_PROVIDER || "",
-        apiKey: process.env.AI_API_KEY || "",
-        model: process.env.AI_MODEL || "",
-        url: process.env.AI_URL || "",
-        region: process.env.AI_REGION || "",
-        secret: process.env.AI_SECRET || "",
-        instance: process.env.AI_INSTANCE || "",
-        apiVersion: process.env.AI_API_VERSION || "",
-        inputCostPer1MTokens: parseFloat(process.env.AI_INPUT_COST_PER_1M_TOKENS || "0"),
-        outputCostPer1MTokens: parseFloat(process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0"),
-        googleCredentialsBase64: process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
-      },
+      ai: buildAiTier(""),
+      aiLite: buildAiTier("_LITE"),
+      aiLarge: buildAiTier("_LARGE"),
       vision: {
         provider: process.env.VISION_PROVIDER || process.env.AI_PROVIDER || "",
         apiKey: process.env.VISION_API_KEY || process.env.AI_API_KEY || "",

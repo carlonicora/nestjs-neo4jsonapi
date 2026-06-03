@@ -9,6 +9,7 @@ import * as os from "os";
 import * as path from "path";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { ModelWeight } from "../enums/model.weight";
 
 interface LLMParameters {
   apiKey: string;
@@ -41,6 +42,21 @@ export class ModelService {
   }
 
   /**
+   * Resolves the AI config block for a model weight.
+   * Undefined / Normal → `ai`; Lite → `aiLite`; Large → `aiLarge`.
+   */
+  getResolvedConfig(weight?: ModelWeight): ConfigAiInterface["ai"] {
+    switch (weight) {
+      case ModelWeight.Lite:
+        return this.aiConfig.aiLite;
+      case ModelWeight.Large:
+        return this.aiConfig.aiLarge;
+      default:
+        return this.aiConfig.ai;
+    }
+  }
+
+  /**
    * Gets a configured LLM instance based on the current config.
    *
    * Supports multiple providers:
@@ -54,91 +70,15 @@ export class ModelService {
    * @param params.temperature - Temperature for text generation (0-2, default: 0.2)
    *                             Lower = more deterministic, Higher = more creative
    * @param params.maxOutputTokens - Maximum output tokens (default from config)
+   * @param params.modelWeight - Which AI tier to use (undefined → Normal)
    * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
    */
-  getLLM(params?: { temperature?: number; maxOutputTokens?: number }): BaseChatModel {
+  getLLM(params?: { temperature?: number; maxOutputTokens?: number; modelWeight?: ModelWeight }): BaseChatModel {
     const temperature = params?.temperature ?? 0.2;
-    const maxOutputTokens = params?.maxOutputTokens ?? this.aiConfig.ai.maxOutputTokens;
-
-    // Base configuration shared by all providers
-    const llmConfig: LLMParameters = {
-      apiKey: this.aiConfig.ai.apiKey || "not-needed",
-      temperature,
-      model: this.aiConfig.ai.model || "local-model",
-      configuration: {
-        baseURL: this.aiConfig.ai.url || "http://localhost:8033/v1",
-      },
-    };
-
-    // Provider-specific overrides
-    switch (this.aiConfig.ai.provider) {
-      case "llamacpp":
-        // Local models don't need API keys
-        llmConfig.apiKey = "not-needed";
-        llmConfig.model = "local-model";
-        llmConfig.configuration.baseURL = this.aiConfig.ai.url || "http://localhost:8033/v1";
-        break;
-
-      case "openrouter":
-        // OpenRouter uses configured values with required headers
-        llmConfig.configuration.baseURL = this.aiConfig.ai.url || "https://openrouter.ai/api/v1";
-        // Add provider routing if region is configured
-        if (this.aiConfig.ai.region) {
-          llmConfig.modelKwargs = {
-            provider: {
-              order: [this.aiConfig.ai.region],
-              allow_fallbacks: true,
-            },
-          };
-        }
-        break;
-
-      case "requesty":
-        // Requesty uses configured values (JSON mode is used for structured output instead of function calling)
-        llmConfig.configuration.baseURL = this.aiConfig.ai.url;
-        break;
-
-      case "vertex": {
-        // Google Vertex AI (Gemini models)
-        // Project ID is automatically extracted from the service account credentials JSON
-        const googleConfig = this.aiConfig.ai;
-
-        // Decode base64 credentials and write to temp file if provided
-        if (googleConfig.googleCredentialsBase64) {
-          const credentialsJson = Buffer.from(googleConfig.googleCredentialsBase64, "base64").toString("utf-8");
-          const tempCredPath = path.join(os.tmpdir(), "gcp-credentials-llm.json");
-          fs.writeFileSync(tempCredPath, credentialsJson, { mode: 0o600 });
-          process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
-        }
-
-        return new ChatVertexAI({
-          model: googleConfig.model,
-          temperature: temperature,
-          location: googleConfig.region,
-          ...(maxOutputTokens ? { maxOutputTokens } : {}),
-        });
-      }
-
-      case "azure": {
-        const azureParameters: any = {
-          azureOpenAIApiKey: this.aiConfig.ai.apiKey,
-          azureOpenAIApiInstanceName: this.aiConfig.ai.instance,
-          azureOpenAIApiDeploymentName: this.aiConfig.ai.model,
-          azureOpenAIApiVersion: this.aiConfig.ai.apiVersion,
-          temperature,
-          ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
-        };
-
-        return new AzureChatOpenAI(azureParameters);
-      }
-
-      default:
-        throw new Error(`Unsupported LLM type: ${this.aiConfig.ai.provider}`);
-    }
-
-    // Create new model instance
-    return new ChatOpenAI({ ...llmConfig, ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}) });
+    const cfg = this.getResolvedConfig(params?.modelWeight);
+    const maxOutputTokens = params?.maxOutputTokens ?? cfg.maxOutputTokens;
+    return this.buildChatModel(cfg, { temperature, maxOutputTokens, credentialFileTag: "llm" });
   }
 
   /**
@@ -149,6 +89,7 @@ export class ModelService {
    * - `openrouter`: OpenRouter cloud service
    * - `requesty`: Requesty service
    * - `vertex`: Google Vertex AI (Gemini models)
+   * - `azure`: Azure OpenAI Service
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.1)
@@ -157,64 +98,7 @@ export class ModelService {
    */
   getVisionLLM(params?: { temperature?: number }): BaseChatModel {
     const temperature = params?.temperature ?? 0.1;
-
-    // Base configuration shared by all providers
-    const llmConfig: LLMParameters = {
-      apiKey: this.visionConfig.apiKey || "not-needed",
-      temperature,
-      model: this.visionConfig.model || "local-model",
-      configuration: {
-        baseURL: this.visionConfig.url || "http://localhost:8033/v1",
-      },
-    };
-
-    // Provider-specific overrides
-    switch (this.visionConfig.provider) {
-      case "llamacpp":
-        llmConfig.apiKey = "not-needed";
-        llmConfig.model = "local-model";
-        llmConfig.configuration.baseURL = this.visionConfig.url || "http://localhost:8033/v1";
-        break;
-
-      case "openrouter":
-        llmConfig.configuration.baseURL = this.visionConfig.url || "https://openrouter.ai/api/v1";
-        if (this.visionConfig.region) {
-          llmConfig.modelKwargs = {
-            provider: {
-              order: [this.visionConfig.region],
-              allow_fallbacks: true,
-            },
-          };
-        }
-        break;
-
-      case "requesty":
-        llmConfig.configuration.baseURL = this.visionConfig.url;
-        break;
-
-      case "vertex": {
-        const googleConfig = this.visionConfig;
-
-        if (googleConfig.googleCredentialsBase64) {
-          const credentialsJson = Buffer.from(googleConfig.googleCredentialsBase64, "base64").toString("utf-8");
-          const tempCredPath = path.join(os.tmpdir(), "gcp-credentials-vision.json");
-          fs.writeFileSync(tempCredPath, credentialsJson, { mode: 0o600 });
-          process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
-        }
-
-        return new ChatVertexAI({
-          model: googleConfig.model,
-          temperature: temperature,
-          location: googleConfig.region,
-        });
-      }
-
-      default:
-        throw new Error(`Unsupported Vision LLM type: ${this.visionConfig.provider}`);
-    }
-
-    // Create new model instance
-    return new ChatOpenAI(llmConfig);
+    return this.buildChatModel(this.visionConfig, { temperature, credentialFileTag: "vision" });
   }
 
   /**
@@ -229,67 +113,91 @@ export class ModelService {
    */
   getAudioLLM(params?: { temperature?: number }): BaseChatModel {
     const temperature = params?.temperature ?? 0.1;
+    return this.buildChatModel(this.audioConfig, { temperature, credentialFileTag: "audio" });
+  }
+
+  /**
+   * Builds a LangChain chat model from a resolved config block.
+   * Single source of truth for the provider switch shared by getLLM /
+   * getVisionLLM / getAudioLLM. `credentialFileTag` keeps the per-modality
+   * Vertex temp-credential filenames distinct.
+   */
+  private buildChatModel(
+    cfg: {
+      provider: string;
+      apiKey: string;
+      model: string;
+      url: string;
+      region?: string;
+      instance?: string;
+      apiVersion?: string;
+      googleCredentialsBase64?: string;
+    },
+    opts: { temperature: number; maxOutputTokens?: number; credentialFileTag: "llm" | "vision" | "audio" },
+  ): BaseChatModel {
+    const { temperature, maxOutputTokens } = opts;
 
     const llmConfig: LLMParameters = {
-      apiKey: this.audioConfig.apiKey || "not-needed",
+      apiKey: cfg.apiKey || "not-needed",
       temperature,
-      model: this.audioConfig.model || "local-model",
+      model: cfg.model || "local-model",
       configuration: {
-        baseURL: this.audioConfig.url || "http://localhost:8033/v1",
+        baseURL: cfg.url || "http://localhost:8033/v1",
       },
     };
 
-    switch (this.audioConfig.provider) {
+    switch (cfg.provider) {
       case "llamacpp":
         llmConfig.apiKey = "not-needed";
         llmConfig.model = "local-model";
-        llmConfig.configuration.baseURL = this.audioConfig.url || "http://localhost:8033/v1";
+        llmConfig.configuration.baseURL = cfg.url || "http://localhost:8033/v1";
         break;
 
       case "openrouter":
-        llmConfig.configuration.baseURL = this.audioConfig.url || "https://openrouter.ai/api/v1";
-        if (this.audioConfig.region) {
+        llmConfig.configuration.baseURL = cfg.url || "https://openrouter.ai/api/v1";
+        if (cfg.region) {
           llmConfig.modelKwargs = {
-            provider: { order: [this.audioConfig.region], allow_fallbacks: true },
+            provider: { order: [cfg.region], allow_fallbacks: true },
           };
         }
         break;
 
       case "requesty":
-        llmConfig.configuration.baseURL = this.audioConfig.url;
+        llmConfig.configuration.baseURL = cfg.url;
         break;
 
       case "vertex": {
-        const googleConfig = this.audioConfig;
-        if (googleConfig.googleCredentialsBase64) {
-          const credentialsJson = Buffer.from(googleConfig.googleCredentialsBase64, "base64").toString("utf-8");
-          const tempCredPath = path.join(os.tmpdir(), "gcp-credentials-audio.json");
+        if (cfg.googleCredentialsBase64) {
+          const credentialsJson = Buffer.from(cfg.googleCredentialsBase64, "base64").toString("utf-8");
+          const tempCredPath = path.join(os.tmpdir(), `gcp-credentials-${opts.credentialFileTag}.json`);
           fs.writeFileSync(tempCredPath, credentialsJson, { mode: 0o600 });
           process.env.GOOGLE_APPLICATION_CREDENTIALS = tempCredPath;
         }
         return new ChatVertexAI({
-          model: googleConfig.model,
+          model: cfg.model,
           temperature,
-          location: googleConfig.region,
+          location: cfg.region,
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
         });
       }
 
       case "azure": {
         const azureParameters: any = {
-          azureOpenAIApiKey: this.audioConfig.apiKey,
-          azureOpenAIApiInstanceName: this.audioConfig.instance,
-          azureOpenAIApiDeploymentName: this.audioConfig.model,
-          azureOpenAIApiVersion: this.audioConfig.apiVersion,
+          azureOpenAIApiKey: cfg.apiKey,
+          azureOpenAIApiInstanceName: cfg.instance,
+          azureOpenAIApiDeploymentName: cfg.model,
+          azureOpenAIApiVersion: cfg.apiVersion,
           temperature,
+          ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
         };
         return new AzureChatOpenAI(azureParameters);
       }
 
       default:
-        throw new Error(`Unsupported Audio LLM type: ${this.audioConfig.provider}`);
+        throw new Error(`Unsupported LLM type: ${cfg.provider}`);
     }
 
-    return new ChatOpenAI(llmConfig);
+    return new ChatOpenAI({ ...llmConfig, ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}) });
   }
 
   getEmbedder(): EmbeddingsInterface {

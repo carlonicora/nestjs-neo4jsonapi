@@ -1,4 +1,5 @@
 export * from "./abstracts/abstract.tools";
+export * from "./enums/model.weight";
 export * from "./llm.module";
 export * from "./services/audio.llm.service";
 export * from "./services/embedder.service";

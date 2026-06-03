@@ -144,6 +144,7 @@ describe("LLMService", () => {
 
     mockModelService = {
       getLLM: vi.fn().mockReturnValue(mockLLM),
+      getResolvedConfig: vi.fn().mockReturnValue(TEST_AI_CONFIG.ai),
     } as any;
 
     mockConfigService = {
@@ -242,7 +243,7 @@ describe("LLMService", () => {
         temperature: 0.8,
       });
 
-      expect(mockModelService.getLLM).toHaveBeenCalledWith({ temperature: 0.8 });
+      expect(mockModelService.getLLM).toHaveBeenCalledWith({ temperature: 0.8, modelWeight: undefined });
     });
 
     it("should handle conversation history", async () => {

@@ -5,6 +5,7 @@ import { TokenUsageService } from "../tokenusage.service";
 import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { ConfigAiInterface } from "../../../../config/interfaces/config.ai.interface";
+import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 
 describe("TokenUsageService", () => {
   let service: TokenUsageService;
@@ -28,6 +29,22 @@ describe("TokenUsageService", () => {
       url: "https://api.openai.com",
       inputCostPer1MTokens: 10,
       outputCostPer1MTokens: 30,
+    },
+    aiLite: {
+      provider: "openai",
+      apiKey: "test-key",
+      model: "gpt-4o-mini",
+      url: "https://api.openai.com",
+      inputCostPer1MTokens: 1,
+      outputCostPer1MTokens: 2,
+    },
+    aiLarge: {
+      provider: "openai",
+      apiKey: "test-key",
+      model: "gpt-4-turbo",
+      url: "https://api.openai.com",
+      inputCostPer1MTokens: 50,
+      outputCostPer1MTokens: 100,
     },
     vision: {
       provider: "openai",
@@ -375,6 +392,40 @@ describe("TokenUsageService", () => {
       const createCall = tokenUsageRepository.create.mock.calls[0][0];
       // Cost: (10 * 1000 / 1000000) + (30 * 500 / 1000000) = 0.01 + 0.015 = 0.025
       expect(createCall.cost).toBeCloseTo(0.025, 6);
+    });
+
+    it("uses the lite cost block when modelWeight is Lite", async () => {
+      await service.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: "r1",
+        relationshipType: "Rel",
+        modelWeight: ModelWeight.Lite,
+      });
+      expect(tokenUsageRepository.create).toHaveBeenCalledWith(expect.objectContaining({ cost: 1 + 2 }));
+    });
+
+    it("uses the large cost block when modelWeight is Large", async () => {
+      await service.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: "r1",
+        relationshipType: "Rel",
+        modelWeight: ModelWeight.Large,
+      });
+      expect(tokenUsageRepository.create).toHaveBeenCalledWith(expect.objectContaining({ cost: 50 + 100 }));
+    });
+
+    it("ignores modelWeight and uses vision costs when useVisionCosts is true", async () => {
+      await service.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: "r1",
+        relationshipType: "Rel",
+        useVisionCosts: true,
+        modelWeight: ModelWeight.Large,
+      });
+      expect(tokenUsageRepository.create).toHaveBeenCalledWith(expect.objectContaining({ cost: 20 + 60 }));
     });
   });
 });

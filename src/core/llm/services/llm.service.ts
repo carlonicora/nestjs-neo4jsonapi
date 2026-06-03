@@ -7,7 +7,8 @@ import { ConfigService } from "@nestjs/config";
 import { streamObject } from "ai";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
-import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { BaseConfigInterface } from "../../../config/interfaces";
+import { ModelWeight } from "../enums/model.weight";
 import { ModelService } from "../../llm/services/model.service";
 import {
   convertZodToJsonSchema,
@@ -58,6 +59,7 @@ interface LLMCallParams<T> {
   validateInput?: boolean; // Optional flag to enable input validation (default: false)
   tools?: DynamicStructuredTool[]; // Optional tools to bind to the LLM
   maxToolIterations?: number; // Max tool call iterations (default: 5)
+  modelWeight?: ModelWeight; // Optional model tier (lite/normal/large). Default: Normal.
 }
 
 /**
@@ -368,8 +370,11 @@ export class LLMService {
    * });
    * ```
    */
-  async call<T>(params: LLMCallParams<T>): Promise<T & { tokenUsage: { input: number; output: number } }> {
-    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+  async call<T>(
+    params: LLMCallParams<T>,
+  ): Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> {
+    const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
       metadata: params.metadata as DumpSessionStartParams["metadata"],
       model: aiConfig.model,
@@ -397,7 +402,7 @@ export class LLMService {
         warnings,
         parseFallbacks,
       });
-      return result;
+      return { ...result, modelWeight };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
@@ -448,6 +453,7 @@ export class LLMService {
     // Get base model
     const baseModel = this.modelService.getLLM({
       temperature: params.temperature,
+      modelWeight: params.modelWeight,
     });
 
     // Build config options for the invocation
@@ -593,8 +599,9 @@ export class LLMService {
     }
 
     // Get final structured response (unified path for both tool and non-tool flows)
-    // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects
-    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+    // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects.
+    // Resolve against the same weight getLLM used, so lite/large Gemini models are detected correctly.
+    const aiConfig = this.modelService.getResolvedConfig(params.modelWeight);
     // Check if model is Gemini (handles both "gemini-..." and "google/gemini-..." formats)
     const modelLower = aiConfig.model.toLowerCase();
     const isGeminiModel = modelLower.startsWith("gemini") || modelLower.includes("/gemini");
@@ -804,9 +811,10 @@ export class LLMService {
     params: LLMCallParams<T>,
   ): Promise<{
     partialObjectStream: AsyncIterable<Partial<T>>;
-    result: Promise<T & { tokenUsage: { input: number; output: number } }>;
+    result: Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }>;
   }> {
-    const aiConfig = this.config.get<ConfigAiInterface>("ai").ai;
+    const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
       metadata: params.metadata as DumpSessionStartParams["metadata"],
       model: aiConfig.model,
@@ -892,46 +900,47 @@ export class LLMService {
     // This is awaitable independently of consuming the streams — `streamObject`
     // internally tees the source, so consuming `textStream` (or not) doesn't
     // affect `result` resolution.
-    const resultPromise: Promise<T & { tokenUsage: { input: number; output: number } }> = (async () => {
-      try {
-        const finalObject = (await streamResult.object) as T;
-        const usage = await streamResult.usage;
-        const input = usage?.inputTokens ?? 0;
-        const output = usage?.outputTokens ?? 0;
+    const resultPromise: Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> =
+      (async () => {
+        try {
+          const finalObject = (await streamResult.object) as T;
+          const usage = await streamResult.usage;
+          const input = usage?.inputTokens ?? 0;
+          const output = usage?.outputTokens ?? 0;
 
-        this._sessionTokens.input += input;
-        this._sessionTokens.output += output;
-        this._sessionTokens.total += input + output;
-        this._sessionTokens.callCount += 1;
+          this._sessionTokens.input += input;
+          this._sessionTokens.output += output;
+          this._sessionTokens.total += input + output;
+          this._sessionTokens.callCount += 1;
 
-        session.recordResponse({
-          content: JSON.stringify(finalObject),
-          tokenUsage: { input, output },
-          finishReason: String(await streamResult.finishReason),
-        });
-        session.close({
-          finalStatus: "success",
-          totalTokens: { input, output },
-          warnings: [],
-          parseFallbacks: [],
-        });
+          session.recordResponse({
+            content: JSON.stringify(finalObject),
+            tokenUsage: { input, output },
+            finishReason: String(await streamResult.finishReason),
+          });
+          session.close({
+            finalStatus: "success",
+            totalTokens: { input, output },
+            warnings: [],
+            parseFallbacks: [],
+          });
 
-        return { ...(finalObject as any), tokenUsage: { input, output } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
-        session.close({
-          finalStatus: "error",
-          errorMessage: message,
-          errorStack: stack,
-          totalTokens: { input: 0, output: 0 },
-          warnings: [],
-          parseFallbacks: [],
-        });
-        console.error("[LLMService.streamCall] Error:", error);
-        throw new Error(`LLM streamCall error: ${message}`);
-      }
-    })();
+          return { ...(finalObject as any), tokenUsage: { input, output }, modelWeight };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+          session.close({
+            finalStatus: "error",
+            errorMessage: message,
+            errorStack: stack,
+            totalTokens: { input: 0, output: 0 },
+            warnings: [],
+            parseFallbacks: [],
+          });
+          console.error("[LLMService.streamCall] Error:", error);
+          throw new Error(`LLM streamCall error: ${message}`);
+        }
+      })();
 
     return {
       partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
