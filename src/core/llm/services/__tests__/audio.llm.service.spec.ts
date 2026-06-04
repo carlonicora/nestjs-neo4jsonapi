@@ -110,7 +110,28 @@ describe("AudioLLMService", () => {
 
       await service.call({ audioPath: "/tmp/stem.ogg", prompt: "p" });
 
-      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg");
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", undefined);
+    });
+
+    it("forwards optional transcode cleanup options to the transcode step", async () => {
+      configService.get.mockReturnValue({ audio: buildAudioConfig({ directUrl: undefined }) });
+      modelService.getAudioLLM.mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "hi",
+          usage_metadata: { input_tokens: 1, output_tokens: 1 },
+        }),
+      });
+
+      await service.call({
+        audioPath: "/tmp/stem.ogg",
+        prompt: "p",
+        transcode: { highpassHz: 85, trimSilence: true },
+      });
+
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", {
+        highpassHz: 85,
+        trimSilence: true,
+      });
     });
 
     it("wraps ffmpeg failures with the canonical prefix regardless of branch", async () => {
@@ -256,7 +277,7 @@ describe("AudioLLMService", () => {
         prompt: "Bias toward: Elric, Tamsin.",
       });
 
-      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg");
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", undefined);
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];

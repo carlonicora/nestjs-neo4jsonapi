@@ -3,7 +3,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
-import { transcodeForDirect, type TranscodeResult } from "./audio/ffmpeg-transcode";
+import { transcodeForDirect, type TranscodeOptions, type TranscodeResult } from "./audio/ffmpeg-transcode";
 import { DumpSession, LLMCallDumper } from "./llm-call-dumper.service";
 import { ModelService } from "./model.service";
 
@@ -22,6 +22,11 @@ export interface AudioCallParams {
    */
   prompt: string;
   temperature?: number;
+  /**
+   * Optional in-pass audio cleanup applied during the universal transcode
+   * (high-pass, silence trim). Omit for the plain resample. See TranscodeOptions.
+   */
+  transcode?: TranscodeOptions;
 }
 
 export interface TranscriptionResult {
@@ -101,7 +106,8 @@ export class AudioLLMService {
     );
 
     // Universal ffmpeg pre-normalisation. See class JSDoc for rationale.
-    const transcode = await transcodeForDirect(params.audioPath).catch((err) => {
+    // `params.transcode` adds optional in-pass cleanup (high-pass, silence trim).
+    const transcode = await transcodeForDirect(params.audioPath, params.transcode).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`audio-call: ffmpeg failed for ${params.audioPath}: ${message}`);
       throw new Error(`Audio LLM service error: ffmpeg failed: ${message}`);

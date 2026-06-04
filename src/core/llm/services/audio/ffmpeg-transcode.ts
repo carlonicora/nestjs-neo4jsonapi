@@ -14,15 +14,62 @@ export interface TranscodeResult {
 }
 
 /**
+ * Optional, in-pass audio cleanup applied during the transcode. All fields are
+ * opt-in — omit them (or pass `{}`) and the transcode behaves exactly as before
+ * (plain resample, no filtering). Callers that transcribe speech can enable a
+ * high-pass and/or silence trim without a second ffmpeg pass.
+ */
+export interface TranscodeOptions {
+  /**
+   * High-pass cutoff in Hz: removes sub-speech rumble, handling noise and
+   * plosive energy below this frequency. Typical speech value ≈ 80–100.
+   * Omit or set ≤ 0 to disable.
+   */
+  highpassHz?: number;
+  /** Trim leading and trailing silence from the clip. */
+  trimSilence?: boolean;
+  /** Silence floor (dBFS) used when `trimSilence` is set. Default -50. */
+  silenceThresholdDb?: number;
+}
+
+/**
+ * Build the ffmpeg `-af` filter chain from the opt-in cleanup options. Returns
+ * an empty array when nothing is enabled (caller then omits `-af` entirely).
+ */
+function buildAudioFilters(options: TranscodeOptions): string[] {
+  const filters: string[] = [];
+  if (options.highpassHz && options.highpassHz > 0) {
+    filters.push(`highpass=f=${options.highpassHz}`);
+  }
+  if (options.trimSilence) {
+    const threshold = options.silenceThresholdDb ?? -50;
+    // Trim leading silence, reverse, trim the (now-leading) trailing silence,
+    // reverse back — the canonical ffmpeg both-ends silenceremove idiom.
+    filters.push(
+      `silenceremove=start_periods=1:start_threshold=${threshold}dB`,
+      "areverse",
+      `silenceremove=start_periods=1:start_threshold=${threshold}dB`,
+      "areverse",
+    );
+  }
+  return filters;
+}
+
+/**
  * Transcode the source audio file to a normalised 16 kHz mono mp3 in a
  * unique temp path. Always re-encodes — never trusts the source container
  * framing (the narr8 recorder writes OGG via a hand-rolled encoder, and
  * STT endpoints can be brittle about non-standard containers).
+ *
+ * `options` enables optional in-pass cleanup (high-pass, silence trim). When
+ * omitted the behaviour is unchanged.
  */
-export async function transcodeForDirect(srcPath: string): Promise<TranscodeResult> {
+export async function transcodeForDirect(srcPath: string, options: TranscodeOptions = {}): Promise<TranscodeResult> {
   const outDir = join(tmpdir(), "narr8", "audio-direct");
   await mkdir(outDir, { recursive: true });
   const outPath = join(outDir, `${randomUUID()}.mp3`);
+
+  const filters = buildAudioFilters(options);
 
   const args = [
     "-hide_banner",
@@ -31,6 +78,7 @@ export async function transcodeForDirect(srcPath: string): Promise<TranscodeResu
     "-y",
     "-i",
     srcPath,
+    ...(filters.length > 0 ? ["-af", filters.join(",")] : []),
     "-ar",
     "16000",
     "-ac",
