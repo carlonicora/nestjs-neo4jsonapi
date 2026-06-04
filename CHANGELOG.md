@@ -1,3 +1,9 @@
+## [1.79.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.78.0...v1.79.0) (2026-06-04)
+
+### 🚀 Features
+
+* **how-to:** make HowTo the source of truth for help content ([20700b9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/20700b9c30e0e4c9386b406490a9548bc34b56ea))
+
 ## [1.78.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.77.1...v1.78.0) (2026-06-03)
 
 ### 🚀 Features
