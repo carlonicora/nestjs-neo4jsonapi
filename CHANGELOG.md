@@ -1,3 +1,9 @@
+## [1.80.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.79.0...v1.80.0) (2026-06-04)
+
+### 🚀 Features
+
+* **transcoding:** add optional audio cleanup options for transcode ([59a16e7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/59a16e76dcb5ca6948612a1cd72a096c349c9812))
+
 ## [1.79.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.78.0...v1.79.0) (2026-06-04)
 
 ### 🚀 Features
