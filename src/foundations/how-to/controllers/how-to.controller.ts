@@ -90,4 +90,34 @@ export class HowToController {
   async delete(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
     return this.crud.delete(reply, howToId);
   }
+
+  @Post(`${howToMeta.endpoint}/reindex`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async reindex(@Res() reply: FastifyReply) {
+    await this.howToService.reindexAll();
+    reply.send();
+  }
+
+  @Post(`${howToMeta.endpoint}/:howToId/related/:relatedId`)
+  @CacheInvalidate(howToMeta, "howToId")
+  async addRelated(
+    @Res() reply: FastifyReply,
+    @Param("howToId") howToId: string,
+    @Param("relatedId") relatedId: string,
+  ) {
+    const response = await this.howToService.addRelated({ howToId, relatedId });
+    reply.send(response);
+  }
+
+  @Delete(`${howToMeta.endpoint}/:howToId/related/:relatedId`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @CacheInvalidate(howToMeta, "howToId")
+  async removeRelated(
+    @Res() reply: FastifyReply,
+    @Param("howToId") howToId: string,
+    @Param("relatedId") relatedId: string,
+  ) {
+    await this.howToService.removeRelated({ howToId, relatedId });
+    reply.send();
+  }
 }

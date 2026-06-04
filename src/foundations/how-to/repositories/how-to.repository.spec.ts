@@ -191,25 +191,91 @@ describe("HowToRepository", () => {
     });
   });
 
-  describe("findAllWithHelpContentSlug", () => {
-    it("returns only HowTos that carry a helpContentSlug", async () => {
-      const MOCK_HOWTO_WITH_SLUG = {
-        ...MOCK_HOWTO,
-        id: "11111111-1111-1111-1111-111111111111",
-        name: "A",
-        helpContentSlug: "how-to/a",
-        contentHash: "h1",
-      };
+  describe("findPublished", () => {
+    it("returns published howTos and excludes drafts in the query", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
 
-      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO_WITH_SLUG]);
+      const result = await repository.findPublished({});
 
-      const results = await repository.findAllWithHelpContentSlug();
+      expect(queryObj.query).toContain("draft");
+      expect(queryObj.query).toContain("ORDER BY");
+      expect(result).toEqual([MOCK_HOWTO]);
+    });
 
-      expect(neo4jService.initQuery).toHaveBeenCalled();
+    it("filters by howToType when provided", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findPublished({ howToType: "tutorial" });
+
+      expect(queryObj.queryParams.howToType).toBe("tutorial");
+      expect(queryObj.query).toContain("howToType");
+    });
+  });
+
+  describe("findPublishedByTypeAndSlug", () => {
+    it("looks up by type + slug and returns a single howTo", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.readOne.mockResolvedValue(MOCK_HOWTO);
+
+      const result = await repository.findPublishedByTypeAndSlug({ howToType: "how-to", slug: "add-an-npc" });
+
+      expect(queryObj.queryParams.howToType).toBe("how-to");
+      expect(queryObj.queryParams.slug).toBe("add-an-npc");
+      expect(result).toEqual(MOCK_HOWTO);
+    });
+  });
+
+  describe("findRelated", () => {
+    it("traverses RELATED undirected from the given howTo id", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
+
+      const result = await repository.findRelated({ howToId: TEST_IDS.howToId });
+
+      expect(queryObj.query).toContain("-[:RELATED]-");
+      expect(queryObj.queryParams.howToId).toBe(TEST_IDS.howToId);
+      expect(result).toEqual([MOCK_HOWTO]);
+    });
+  });
+
+  describe("addRelated / removeRelated", () => {
+    it("merges a RELATED edge", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.addRelated({ howToId: TEST_IDS.howToId, relatedId: "22222222-2222-2222-2222-222222222222" });
+
+      expect(queryObj.query).toContain("MERGE");
+      expect(queryObj.query).toContain("RELATED");
+      expect(neo4jService.writeOne).toHaveBeenCalled();
+    });
+
+    it("deletes a RELATED edge in either direction", async () => {
+      const queryObj = { query: "", queryParams: {} as any };
+      neo4jService.initQuery.mockReturnValue(queryObj);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.removeRelated({ howToId: TEST_IDS.howToId, relatedId: "22222222-2222-2222-2222-222222222222" });
+
+      expect(queryObj.query).toContain("DELETE");
+      expect(queryObj.query).toContain("-[r:RELATED]-");
+      expect(neo4jService.writeOne).toHaveBeenCalled();
+    });
+  });
+
+  describe("findAllHowTos", () => {
+    it("returns every howTo unpaginated", async () => {
+      neo4jService.readMany.mockResolvedValue([MOCK_HOWTO]);
+      const result = await repository.findAllHowTos();
       expect(neo4jService.readMany).toHaveBeenCalled();
-      const ids = results.map((r) => r.id).sort();
-      expect(ids).toContain("11111111-1111-1111-1111-111111111111");
-      expect(ids).not.toContain("22222222-2222-2222-2222-222222222222");
+      expect(result).toEqual([MOCK_HOWTO]);
     });
   });
 });

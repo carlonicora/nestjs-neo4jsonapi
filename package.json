@@ -47,10 +47,6 @@
     "./bootstrap": {
       "types": "./dist/bootstrap/index.d.ts",
       "default": "./dist/bootstrap/index.js"
-    },
-    "./help-content-build": {
-      "types": "./dist/tools/help-content-build/index.d.ts",
-      "default": "./dist/tools/help-content-build/index.js"
     }
   },
   "scripts": {

@@ -11,8 +11,14 @@ export type HowTo = Entity & {
   abstract?: string;
   tldr?: string;
   aiStatus?: string;
-  helpContentSlug?: string;
-  contentHash?: string;
+
+  howToType?: string;
+  slug?: string;
+  order?: number;
+  summary?: string;
+  tags?: string[];
+  contextualKeys?: string[];
+  draft?: boolean;
 
   relevance?: number;
 };
@@ -35,8 +41,13 @@ export const HowToDescriptor = defineEntity<HowTo>()({
     abstract: { type: "string" },
     tldr: { type: "string" },
     aiStatus: { type: "string" },
-    helpContentSlug: { type: "string" },
-    contentHash: { type: "string" },
+    howToType: { type: "string" },
+    slug: { type: "string" },
+    order: { type: "number" },
+    summary: { type: "string" },
+    tags: { type: "string[]" },
+    contextualKeys: { type: "string[]" },
+    draft: { type: "boolean" },
   },
 
   computed: {

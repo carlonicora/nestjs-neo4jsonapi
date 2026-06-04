@@ -1,5 +1,5 @@
 import { InjectQueue } from "@nestjs/bullmq";
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
@@ -9,7 +9,9 @@ import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.n
 import { QueueId } from "../../../config/enums/queue.id";
 import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { Chunk } from "../../chunk/entities/chunk.entity";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
@@ -35,6 +37,7 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
     private readonly chunkRepository: ChunkRepository,
     @InjectQueue(QueueId.CHUNK) private readonly chunkQueue: Queue,
     configService: ConfigService<BaseConfigInterface>,
+    private readonly logger: AppLoggingService,
   ) {
     super(jsonApiService, howToRepository, clsService, HowToDescriptor.model);
     this.jobNames = configService.get("jobNames", { infer: true }) ?? { process: {}, notifications: {} };
@@ -47,14 +50,6 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
   async queueHowToForProcessing(params: { howToId: string; description: string }): Promise<void> {
     const markdown = this.blockNoteService.convertToMarkdown({ nodes: JSON.parse(params.description) });
     await this._chunkAndQueue({ howToId: params.howToId, markdown });
-  }
-
-  /**
-   * Queue a HowTo for AI processing from pre-rendered markdown.
-   * Used by the help-content sync — bypasses the BlockNote conversion.
-   */
-  async queueHowToForProcessingFromMarkdown(params: { howToId: string; markdown: string }): Promise<void> {
-    await this._chunkAndQueue(params);
   }
 
   /**
@@ -97,6 +92,64 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
         contentType: howToMeta.labelName,
       });
     }
+  }
+
+  async findPublishedList(params: { query: any; howToType?: string }): Promise<any> {
+    const paginator = new JsonApiPaginator(params.query);
+    const data = await this.howToRepository.findPublished({ howToType: params.howToType });
+    return this.jsonApiService.buildList(HowToDescriptor.model, data, paginator);
+  }
+
+  async findPublishedArticle(params: { howToType: string; slug: string }): Promise<any> {
+    const data = await this.howToRepository.findPublishedByTypeAndSlug(params);
+    if (!data) {
+      throw new NotFoundException(`HowTo ${params.howToType}/${params.slug} not found`);
+    }
+    return this.jsonApiService.buildSingle(HowToDescriptor.model, data);
+  }
+
+  async findRelatedList(params: { howToType: string; slug: string; query: any }): Promise<any> {
+    const article = await this.howToRepository.findPublishedByTypeAndSlug({
+      howToType: params.howToType,
+      slug: params.slug,
+    });
+    if (!article) {
+      throw new NotFoundException(`HowTo ${params.howToType}/${params.slug} not found`);
+    }
+    const paginator = new JsonApiPaginator(params.query);
+    const data = await this.howToRepository.findRelated({ howToId: article.id });
+    return this.jsonApiService.buildList(HowToDescriptor.model, data, paginator);
+  }
+
+  async addRelated(params: { howToId: string; relatedId: string }): Promise<any> {
+    await this.howToRepository.addRelated(params);
+    return this.findById({ id: params.howToId });
+  }
+
+  async removeRelated(params: { howToId: string; relatedId: string }): Promise<void> {
+    await this.howToRepository.removeRelated(params);
+  }
+
+  /**
+   * Re-chunk every HowTo (seeded nodes get no chunks from a raw-Cypher migration).
+   * Per-item failures (e.g. legacy plain-text descriptions that are not BlockNote JSON)
+   * are logged and skipped, never silently dropped.
+   */
+  async reindexAll(): Promise<void> {
+    const all = await this.howToRepository.findAllHowTos();
+    let queued = 0;
+    let failed = 0;
+    for (const howTo of all) {
+      if (!howTo.description) continue;
+      try {
+        await this.queueHowToForProcessing({ howToId: howTo.id, description: howTo.description });
+        queued++;
+      } catch (error: any) {
+        failed++;
+        this.logger.warn(`reindexAll: skipped HowTo ${howTo.id}: ${error?.message ?? error}`);
+      }
+    }
+    this.logger.log(`HowTo reindex done — total=${all.length} queued=${queued} failed=${failed}`);
   }
 
   /**

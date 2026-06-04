@@ -16,7 +16,6 @@ import { AppModeModule } from "../core/appmode/app.mode.module";
 import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
 import { FoundationsModule } from "../foundations/foundations.modules";
-import { HelpContentSyncModule } from "../foundations/help-content-sync";
 import { OpenApiModule } from "../openapi/module/openapi.module";
 import { BootstrapOptions } from "./bootstrap.options";
 
@@ -41,9 +40,6 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
   @Module({})
   class GeneratedAppModule {
     static forRoot(modeConfig: AppModeConfig): DynamicModule {
-      // Conditionally include the help-content sync module
-      const helpModules = options.helpContent ? [HelpContentSyncModule.forRoot(options.helpContent)] : [];
-
       // Get app config for extracting queue IDs (needed at module definition time)
       const appConfig = options.config ? options.config() : {};
       const queueIds = appConfig.chunkQueues?.queueIds ?? [];
@@ -132,9 +128,6 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
 
           // User's app-specific modules (MUST be before NecordModule so Necord can discover handlers)
           ...options.appModules,
-
-          // Help-content sync module (worker-only services; no-op when helpContent is not set)
-          ...helpModules,
 
           // Discord bot (only in worker mode when token is configured)
           // IMPORTANT: Must be AFTER appModules so Necord can discover decorated handlers
