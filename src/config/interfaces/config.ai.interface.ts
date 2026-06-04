@@ -62,6 +62,20 @@ export interface ConfigAiInterface {
     directUrl?: string;
     /** ISO-639-1 hint passed to /audio/transcriptions. Ignored in chat mode. */
     language?: string;
+    /**
+     * Request format for the direct (`directUrl`) endpoint:
+     *   - "multipart" (default) — OpenAI / self-hosted Whisper multipart form-data.
+     *   - "json" — OpenRouter-style JSON body with base64 `input_audio`.
+     * Set via AUDIO_DIRECT_FORMAT. Ignored in chat mode.
+     */
+    directFormat?: string;
+    /**
+     * Optional provider to pin for the JSON direct endpoint, sent as
+     * `provider.order` with `allow_fallbacks: false`. Lets you route around a
+     * dead provider (e.g. OpenRouter's Groq `whisper-large-v3` endpoint 400s
+     * everything — pin "Together" instead). Set via AUDIO_DIRECT_PROVIDER.
+     */
+    directProvider?: string;
   };
   embedder: {
     provider: string;

@@ -45,6 +45,7 @@ export default defineConfig({
     'class-transformer',
 
     // Optional dependencies (external, loaded at runtime if present)
+    'onnxruntime-node',
     'neo4j-driver',
     'ioredis',
     'stripe',

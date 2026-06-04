@@ -30,6 +30,12 @@ export interface TranscodeOptions {
   trimSilence?: boolean;
   /** Silence floor (dBFS) used when `trimSilence` is set. Default -50. */
   silenceThresholdDb?: number;
+  /**
+   * Output container/codec: "mp3" (default, libmp3lame 64k — for chat
+   * `input_audio` and OpenAI-style endpoints) or "wav" (PCM s16le — the most
+   * universally-accepted STT format; some OpenRouter STT providers reject mp3).
+   */
+  outputFormat?: "mp3" | "wav";
 }
 
 /**
@@ -67,9 +73,11 @@ function buildAudioFilters(options: TranscodeOptions): string[] {
 export async function transcodeForDirect(srcPath: string, options: TranscodeOptions = {}): Promise<TranscodeResult> {
   const outDir = join(tmpdir(), "narr8", "audio-direct");
   await mkdir(outDir, { recursive: true });
-  const outPath = join(outDir, `${randomUUID()}.mp3`);
+  const format = options.outputFormat === "wav" ? "wav" : "mp3";
+  const outPath = join(outDir, `${randomUUID()}.${format}`);
 
   const filters = buildAudioFilters(options);
+  const codecArgs = format === "wav" ? ["-c:a", "pcm_s16le"] : ["-c:a", "libmp3lame", "-b:a", "64k"];
 
   const args = [
     "-hide_banner",
@@ -83,10 +91,7 @@ export async function transcodeForDirect(srcPath: string, options: TranscodeOpti
     "16000",
     "-ac",
     "1",
-    "-c:a",
-    "libmp3lame",
-    "-b:a",
-    "64k",
+    ...codecArgs,
     outPath,
   ];
 

@@ -240,6 +240,8 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
           process.env.AUDIO_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
         directUrl: process.env.AUDIO_DIRECT_URL || undefined,
         language: process.env.AUDIO_LANGUAGE || undefined,
+        directFormat: process.env.AUDIO_DIRECT_FORMAT || undefined,
+        directProvider: process.env.AUDIO_DIRECT_PROVIDER || undefined,
       },
       embedder: {
         provider: process.env.EMBEDDER_PROVIDER || "",

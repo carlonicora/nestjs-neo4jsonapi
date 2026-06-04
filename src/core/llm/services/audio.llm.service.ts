@@ -107,7 +107,10 @@ export class AudioLLMService {
 
     // Universal ffmpeg pre-normalisation. See class JSDoc for rationale.
     // `params.transcode` adds optional in-pass cleanup (high-pass, silence trim).
-    const transcode = await transcodeForDirect(params.audioPath, params.transcode).catch((err) => {
+    // The JSON STT path emits WAV (some OpenRouter STT providers reject mp3);
+    // chat + multipart paths keep mp3.
+    const outputFormat = audio.directUrl && audio.directFormat === "json" ? "wav" : "mp3";
+    const transcode = await transcodeForDirect(params.audioPath, { ...params.transcode, outputFormat }).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`audio-call: ffmpeg failed for ${params.audioPath}: ${message}`);
       throw new Error(`Audio LLM service error: ffmpeg failed: ${message}`);
@@ -285,25 +288,47 @@ export class AudioLLMService {
     });
 
     try {
-      const mp3Buffer = await fs.promises.readFile(transcode.path);
-      const formData = new FormData();
-      formData.append("file", new Blob([new Uint8Array(mp3Buffer)], { type: "audio/mpeg" }), "audio.mp3");
-      formData.append("model", audio.model);
-      formData.append("prompt", params.prompt);
-      if (audio.language) formData.append("language", audio.language);
-      formData.append("temperature", String(params.temperature ?? 0.1));
-      formData.append("response_format", "json");
+      const audioBuffer = await fs.promises.readFile(transcode.path);
+
+      // Request shape is CONFIG-DRIVEN (AUDIO_DIRECT_FORMAT) — never inferred:
+      //   - "json"      → OpenRouter-style: JSON body with base64 `input_audio`
+      //                   (no biasing prompt — a dedicated STT needs none).
+      //   - "multipart" → OpenAI / self-hosted Whisper: multipart form-data (default).
+      let headers: Record<string, string>;
+      let body: string | FormData;
+      if (audio.directFormat === "json") {
+        // OpenRouter STT: the documented "complete working example" is ONLY the
+        // required fields (model + input_audio). Optional language/temperature get
+        // forwarded to the provider and some reject them (→ "Provider returned
+        // 400"), so we keep the body minimal. `data` is raw base64, NOT a data URI.
+        // `format` matches the transcode output (wav for STT). `directProvider`
+        // pins a provider (e.g. "Together") to route around dead ones (Groq's
+        // whisper-large-v3 endpoint 400s everything).
+        const audioFormat = transcode.path.endsWith(".wav") ? "wav" : "mp3";
+        headers = { Authorization: `Bearer ${audio.apiKey}`, "Content-Type": "application/json" };
+        body = JSON.stringify({
+          model: audio.model,
+          input_audio: { data: audioBuffer.toString("base64"), format: audioFormat },
+          ...(audio.directProvider ? { provider: { order: [audio.directProvider], allow_fallbacks: false } } : {}),
+        });
+      } else {
+        const formData = new FormData();
+        formData.append("file", new Blob([new Uint8Array(audioBuffer)], { type: "audio/mpeg" }), "audio.mp3");
+        formData.append("model", audio.model);
+        formData.append("prompt", params.prompt);
+        if (audio.language) formData.append("language", audio.language);
+        formData.append("temperature", String(params.temperature ?? 0.1));
+        formData.append("response_format", "json");
+        headers = { Authorization: `Bearer ${audio.apiKey}` };
+        body = formData;
+      }
 
       this.logger.log(
-        `audio-direct: POST ${directUrl} model=${audio.model} language=${audio.language || "(unset)"} ` +
-          `mp3Bytes=${mp3Buffer.length} apiKeyPrefix=${(audio.apiKey || "").slice(0, 6)}...`,
+        `audio-direct: POST ${directUrl} format=${audio.directFormat || "multipart"} model=${audio.model} ` +
+          `language=${audio.language || "(unset)"} audioBytes=${audioBuffer.length} apiKeyPrefix=${(audio.apiKey || "").slice(0, 6)}...`,
       );
 
-      const response = await fetch(directUrl, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${audio.apiKey}` },
-        body: formData,
-      });
+      const response = await fetch(directUrl, { method: "POST", headers, body });
 
       this.logger.log(`audio-direct: response status=${response.status}`);
 

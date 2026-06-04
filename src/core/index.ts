@@ -25,6 +25,14 @@ export * from "./cors";
 export * from "./version";
 export * from "./websocket";
 export * from "./llm";
+export * from "./onnx-runtime";
+// Model-manager: export only the runtime surface. The config TYPES
+// (ModelRegistry, ModelsConfig, OnnxModelConfig, …) are NOT re-exported here —
+// they collide with neo4j's ModelRegistry and aren't part of the public API
+// (the app declares models in config/models.config.yaml, not in TS).
+export { ModelManagerModule } from "./model-manager/model-manager.module";
+export { ModelManagerService } from "./model-manager/model-manager.service";
+export { getModelLoader } from "./model-manager/model-loader";
 export * from "./blocknote";
 export * from "./migrator";
 export * from "./debug";

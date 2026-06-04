@@ -33,6 +33,7 @@ describe("AudioLLMService", () => {
   // exist for the whole suite (any test that hits service.call needs it).
   let tmpDir: string;
   let tmpMp3: string;
+  let tmpWav: string;
 
   const buildAudioConfig = (overrides: Partial<Record<string, unknown>> = {}) => ({
     provider: "openrouter",
@@ -54,6 +55,8 @@ describe("AudioLLMService", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "vitest-audio-"));
     tmpMp3 = join(tmpDir, "test.mp3");
     writeFileSync(tmpMp3, "fake-mp3-bytes");
+    tmpWav = join(tmpDir, "test.wav");
+    writeFileSync(tmpWav, "fake-wav-bytes");
   });
 
   afterAll(() => {
@@ -110,7 +113,7 @@ describe("AudioLLMService", () => {
 
       await service.call({ audioPath: "/tmp/stem.ogg", prompt: "p" });
 
-      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", undefined);
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", { outputFormat: "mp3" });
     });
 
     it("forwards optional transcode cleanup options to the transcode step", async () => {
@@ -131,6 +134,7 @@ describe("AudioLLMService", () => {
       expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", {
         highpassHz: 85,
         trimSilence: true,
+        outputFormat: "mp3",
       });
     });
 
@@ -277,7 +281,7 @@ describe("AudioLLMService", () => {
         prompt: "Bias toward: Elric, Tamsin.",
       });
 
-      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", undefined);
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", { outputFormat: "mp3" });
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -317,6 +321,73 @@ describe("AudioLLMService", () => {
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       const form = init.body as FormData;
       expect(form.has("language")).toBe(false);
+    });
+
+    it("POSTs minimal JSON with base64 WAV + pinned provider when directFormat='json' (OpenRouter STT)", async () => {
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: "https://openrouter.ai/api/v1/audio/transcriptions",
+          directFormat: "json",
+          directProvider: "Together",
+          apiKey: "or-key",
+          model: "openai/whisper-large-v3",
+          language: "en",
+        }),
+      });
+      // JSON STT path transcodes to WAV — the body format derives from the path.
+      mockedTranscodeForDirect.mockResolvedValueOnce({
+        path: tmpWav,
+        durationSeconds: 5,
+        cleanup: vi.fn().mockResolvedValue(undefined),
+      });
+      fetchMock.mockResolvedValue(okResponse({ text: "spoken words" }));
+
+      const result = await service.call({ audioPath: "/tmp/stem.ogg", prompt: "ignored for STT" });
+
+      // call() asked the transcoder for WAV (some STT providers reject mp3).
+      expect(mockedTranscodeForDirect).toHaveBeenCalledWith("/tmp/stem.ogg", { outputFormat: "wav" });
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://openrouter.ai/api/v1/audio/transcriptions");
+      expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer or-key");
+      expect(typeof init.body).toBe("string");
+
+      const payload = JSON.parse(init.body as string);
+      expect(payload.model).toBe("openai/whisper-large-v3");
+      expect(payload.input_audio.format).toBe("wav");
+      expect(typeof payload.input_audio.data).toBe("string"); // raw base64, not a data URI
+      expect(payload.provider).toEqual({ order: ["Together"], allow_fallbacks: false });
+      // Minimal documented body — no prompt/language/temperature (providers reject them).
+      expect(payload.prompt).toBeUndefined();
+      expect(payload.language).toBeUndefined();
+      expect(payload.temperature).toBeUndefined();
+
+      expect(result.text).toBe("spoken words");
+    });
+
+    it("omits the provider key from the JSON body when directProvider is unset", async () => {
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: "https://openrouter.ai/api/v1/audio/transcriptions",
+          directFormat: "json",
+          apiKey: "or-key",
+          model: "openai/whisper-large-v3-turbo",
+        }),
+      });
+      mockedTranscodeForDirect.mockResolvedValueOnce({
+        path: tmpWav,
+        durationSeconds: 5,
+        cleanup: vi.fn().mockResolvedValue(undefined),
+      });
+      fetchMock.mockResolvedValue(okResponse({ text: "ok" }));
+
+      await service.call({ audioPath: "/tmp/stem.ogg", prompt: "p" });
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const payload = JSON.parse(init.body as string);
+      expect(payload.provider).toBeUndefined();
+      expect(payload.input_audio.format).toBe("wav");
     });
 
     it("cleans up the transcoded mp3 even on non-2xx response", async () => {
