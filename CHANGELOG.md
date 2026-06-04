@@ -1,3 +1,9 @@
+## [1.81.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.80.0...v1.81.0) (2026-06-04)
+
+### 🚀 Features
+
+* **audio:** ONNX runtime + model-manager services; JSON STT direct format ([10298a9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/10298a938c30807c5cbd0cf9cc89d509716ad697))
+
 ## [1.80.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.79.0...v1.80.0) (2026-06-04)
 
 ### 🚀 Features
