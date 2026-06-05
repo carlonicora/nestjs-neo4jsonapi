@@ -53,6 +53,11 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     dtoPropertyKey = dtoKey; // Same as dtoKey (already camelCase-compatible)
   }
 
+  // Explicit dtoKey from schema wins over derivation (e.g. "estimateitems").
+  if (rel.dtoKey) {
+    dtoKey = rel.dtoKey;
+  }
+
   // Determine relationship key (what it's called in the descriptor)
   const key = toCamelCase(rel.alias || rel.variant || rel.name);
 
@@ -113,6 +118,7 @@ export function mapRelationship(rel: JsonRelationshipDefinition): DescriptorRela
     contextKey,
     dtoKey,
     dtoPropertyKey,
+    description: rel.description,
     required: !rel.nullable,
     relatedEntity: {
       name: rel.name,

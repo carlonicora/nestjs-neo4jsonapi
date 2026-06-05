@@ -141,13 +141,14 @@ import { ClsService } from "nestjs-cls";
 import { NotFoundException, ForbiddenException } from "@nestjs/common";
 import { ${names.pascalCase}Service } from "./${names.kebabCase}.service";
 import { ${names.pascalCase}Repository } from "../repositories/${names.kebabCase}.repository";${needsDescriptor ? `\nimport { ${names.pascalCase}Descriptor } from "../entities/${names.kebabCase}";` : ``}
-import { JsonApiService } from "@carlonicora/nestjs-neo4jsonapi";
+import { AuditService, JsonApiService } from "@carlonicora/nestjs-neo4jsonapi";
 
 describe("${names.pascalCase}Service", () => {
   let service: ${names.pascalCase}Service;
   let repository: Mocked<${names.pascalCase}Repository>;
   let jsonApiService: Mocked<JsonApiService>;
   let clsService: Mocked<ClsService>;
+  let auditService: Mocked<AuditService>;
 
   ${testIdsCode}
 
@@ -180,6 +181,15 @@ describe("${names.pascalCase}Service", () => {
       set: vi.fn(),
     };
 
+    const mockAuditService = {
+      logCreate: vi.fn(),
+      logRead: vi.fn(),
+      logUpdate: vi.fn(),
+      logDelete: vi.fn(),
+      findByEntity: vi.fn(),
+      findByUser: vi.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ${names.pascalCase}Service,
@@ -195,6 +205,10 @@ describe("${names.pascalCase}Service", () => {
           provide: ClsService,
           useValue: mockClsService,
         },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
+        },
       ],
     }).compile();
 
@@ -204,6 +218,7 @@ describe("${names.pascalCase}Service", () => {
     ) as Mocked<${names.pascalCase}Repository>;
     jsonApiService = module.get<JsonApiService>(JsonApiService) as Mocked<JsonApiService>;
     clsService = module.get<ClsService>(ClsService) as Mocked<ClsService>;
+    auditService = module.get<AuditService>(AuditService) as Mocked<AuditService>;
 
     // Default CLS context
     clsService.get.mockImplementation((key: string) => {

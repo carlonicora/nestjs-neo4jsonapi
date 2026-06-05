@@ -30,6 +30,10 @@ export interface TemplateField {
   type: string;
   required: boolean;
   tsType: string; // TypeScript type
+  description?: string;
+  kind?: { type: string };
+  computed?: string;
+  readOnly?: boolean;
 }
 
 /**
@@ -62,6 +66,7 @@ export interface DescriptorRelationship {
   immutable?: boolean;
   // PascalCase alias when multiple relationships target the same entity
   alias?: string;
+  description?: string;
 }
 
 /**
@@ -129,6 +134,10 @@ export interface TemplateData {
   // Configuration
   isCompanyScoped: boolean;
   targetDir: string;
+  description?: string;
+  chat?: { summary: string; textSearchFields: string[] };
+  requiresS3: boolean;
+  exportService: boolean;
 
   // Fields
   fields: TemplateField[];

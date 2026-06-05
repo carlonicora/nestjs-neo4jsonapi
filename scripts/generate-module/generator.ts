@@ -113,6 +113,10 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
         type: normalizedType,
         required: !field.nullable,
         tsType: getTsType(normalizedType),
+        description: field.description,
+        kind: field.kind,
+        computed: field.computed,
+        readOnly: field.readOnly,
       };
     });
 
@@ -158,6 +162,10 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       nodeName: names.camelCase,
       isCompanyScoped: jsonSchema.isCompanyScoped !== false, // Default: true
       targetDir: jsonSchema.targetDir,
+      description: jsonSchema.description,
+      chat: jsonSchema.chat,
+      requiresS3: jsonSchema.requiresS3 === true,
+      exportService: jsonSchema.exportService !== false, // default: export
       fields,
       relationships,
       aliasMetas,

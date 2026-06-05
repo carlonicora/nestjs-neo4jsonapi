@@ -84,22 +84,35 @@ export function generateEntityFile(data: TemplateData): string {
     }
   }
 
-  // Build field definitions for descriptor
-  const fieldDefinitions = fields
+  // Build field definitions for descriptor (readOnly fields go under computed{}, not here)
+  const writableFields = fields.filter((f) => !f.readOnly && !f.computed);
+  const fieldDefinitions = writableFields
     .map((field) => {
-      const parts: string[] = [];
-      parts.push(`type: "${field.type}"`);
-      if (field.required) {
-        parts.push(`required: true`);
-      }
+      const parts: string[] = [`type: "${field.type}"`];
+      if (field.required) parts.push(`required: true`);
+      if (field.description) parts.push(`description: ${JSON.stringify(field.description)}`);
+      if (field.kind) parts.push(`kind: { type: "${field.kind.type}" }`);
       return `    ${field.name}: { ${parts.join(", ")} },`;
     })
     .join("\n");
+
+  // Build computed{} block from fields carrying a `computed` expression
+  const computedFields = fields.filter((f) => f.computed);
+  const computedBlock = computedFields.length
+    ? `\n  computed: {\n${computedFields
+        .map((f) => {
+          const expr = f.computed!.trim();
+          const desc = f.description ? `\n      description: ${JSON.stringify(f.description)},` : "";
+          return `    ${f.name}: {\n      compute: (p) => ${expr},${desc}\n    },`;
+        })
+        .join("\n")}\n  },\n`
+    : "";
 
   // Build relationship definitions for descriptor
   const relationshipDefinitions = relationships
     .map((rel) => {
       const parts: string[] = [];
+      if (rel.description) parts.push(`description: ${JSON.stringify(rel.description)}`);
       parts.push(`model: ${rel.model}`);
       parts.push(`direction: "${rel.direction}"`);
       parts.push(`relationship: "${rel.relationship}"`);
@@ -182,11 +195,15 @@ ${data.isCompanyScoped ? "  company: Company;\n" : ""}${relationships
  */
 export const ${names.pascalCase}Descriptor = defineEntity<${names.pascalCase}>()({
   ...${names.camelCase}Meta,
-${!data.isCompanyScoped ? "\n  isCompanyScoped: false,\n" : ""}
+${data.description ? `\n  description: ${JSON.stringify(data.description)},\n` : ""}${
+    data.chat
+      ? `\n  chat: {\n    summary: (data) => ${data.chat.summary},\n    textSearchFields: ${JSON.stringify(data.chat.textSearchFields)},\n  },\n`
+      : ""
+  }${!data.isCompanyScoped ? "\n  isCompanyScoped: false,\n" : ""}
   fields: {
 ${fieldDefinitions}
   },
-
+${computedBlock}
   relationships: {
 ${relationshipDefinitions}
   },

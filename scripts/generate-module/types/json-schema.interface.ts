@@ -12,6 +12,12 @@ export interface JsonFieldDefinition {
   name: string;
   type: string;
   nullable: boolean;
+  description?: string;
+  kind?: { type: string };
+  /** Raw TS expression used as the body of (p) => … in the descriptor's computed{} block. */
+  computed?: string;
+  /** Present in entity type + interface + rehydrate, omitted from write paths. */
+  readOnly?: boolean;
 }
 
 /**
@@ -31,6 +37,9 @@ export interface JsonRelationshipDefinition {
   fields?: JsonFieldDefinition[];
   /** If true, relationship is set only on creation and skipped during PUT (default: false) */
   immutable?: boolean;
+  /** JSON:API wire key; taken verbatim when present (e.g. "estimateitems"). */
+  dtoKey?: string;
+  description?: string;
 }
 
 /**
@@ -46,4 +55,8 @@ export interface JsonModuleDefinition {
   languages: string[];
   fields: JsonFieldDefinition[];
   relationships: JsonRelationshipDefinition[];
+  description?: string;
+  chat?: { summary: string; textSearchFields: string[] };
+  requiresS3?: boolean;
+  exportService?: boolean;
 }

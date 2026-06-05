@@ -20,7 +20,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/**/*.spec.ts", "tools/**/*.spec.ts"],
+    include: ["src/**/*.spec.ts", "tools/**/*.spec.ts", "scripts/**/*.spec.ts"],
     silent: true,
     reporters: ["default"],
     onConsoleLog: () => false,

@@ -13,6 +13,7 @@ export function generateServiceFile(data: TemplateData): string {
 import { ClsService } from "nestjs-cls";
 import {
   AbstractService,
+  AuditService,
   JsonApiService,
 } from "@carlonicora/nestjs-neo4jsonapi";
 import { ${names.pascalCase} } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}";
@@ -27,8 +28,9 @@ export class ${names.pascalCase}Service extends AbstractService<${names.pascalCa
     jsonApiService: JsonApiService,
     private readonly ${names.camelCase}Repository: ${names.pascalCase}Repository,
     clsService: ClsService,
+    auditService: AuditService,
   ) {
-    super(jsonApiService, ${names.camelCase}Repository, clsService, ${names.pascalCase}Descriptor.model);
+    super(jsonApiService, ${names.camelCase}Repository, clsService, ${names.pascalCase}Descriptor.model, auditService);
   }
 
   // Inherited methods:
