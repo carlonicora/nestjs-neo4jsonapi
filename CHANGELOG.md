@@ -1,3 +1,9 @@
+## [1.82.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.81.0...v1.82.0) (2026-06-05)
+
+### 🚀 Features
+
+* **generator:** align module generator templates with live codebase ([b5b4d6e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b5b4d6e09988dc1e47e697ed291bf4c729698e0c))
+
 ## [1.81.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.80.0...v1.81.0) (2026-06-04)
 
 ### 🚀 Features
