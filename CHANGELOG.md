@@ -1,3 +1,9 @@
+## [1.83.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.82.0...v1.83.0) (2026-06-06)
+
+### 🚀 Features
+
+* update generator ([1afeb8c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1afeb8cf44358c7a5c325f839bbd9eefc2e013b2))
+
 ## [1.82.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.81.0...v1.82.0) (2026-06-05)
 
 ### 🚀 Features
