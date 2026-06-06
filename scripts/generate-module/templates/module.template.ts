@@ -7,7 +7,7 @@ import { TemplateData } from "../types/template-data.interface";
  * @returns Generated TypeScript code
  */
 export function generateModuleFile(data: TemplateData): string {
-  const { names, targetDir, requiresS3, exportService } = data;
+  const { names, targetDir, requiresS3, exportService, sharedScope } = data;
 
   const libImports = ["AuditModule", "GraphModule", "GraphDescriptorRegistry", "modelRegistry"];
   if (requiresS3) libImports.push("S3Module");
@@ -19,7 +19,7 @@ export function generateModuleFile(data: TemplateData): string {
   ${[...libImports].sort().join(",\n  ")},
 } from "@carlonicora/nestjs-neo4jsonapi";
 import { Module, OnModuleInit } from "@nestjs/common";
-import { ModuleId } from "@neural-erp/shared";
+import { ModuleId } from "${sharedScope}";
 import { ${names.pascalCase}Controller } from "src/${targetDir}/${names.kebabCase}/controllers/${names.kebabCase}.controller";
 import { ${names.pascalCase}Descriptor } from "src/${targetDir}/${names.kebabCase}/entities/${names.kebabCase}";
 import { ${names.pascalCase}Repository } from "src/${targetDir}/${names.kebabCase}/repositories/${names.kebabCase}.repository";

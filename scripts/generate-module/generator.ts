@@ -23,6 +23,8 @@ import { generateControllerSpecFile } from "./templates/controller.spec.template
 import { generateDTOSpecFile } from "./templates/dto.spec.template";
 import { writeFiles, formatFiles, FileToWrite } from "./utils/file-writer";
 import { registerModule } from "./utils/module-registrar";
+import { detectSharedScope } from "./utils/scope-detector";
+import { pruneClassValidatorImports } from "./utils/dto-imports";
 import { normalizeCypherType, getTsType, getValidationDecorators, CypherType } from "./utils/type-utils";
 
 export interface GenerateModuleOptions {
@@ -30,6 +32,8 @@ export interface GenerateModuleOptions {
   dryRun?: boolean;
   force?: boolean;
   noRegister?: boolean;
+  /** Override the detected host-app shared package scope (source of ModuleId). */
+  sharedScope?: string;
 }
 
 /**
@@ -39,6 +43,9 @@ export interface GenerateModuleOptions {
  */
 export async function generateModule(options: GenerateModuleOptions): Promise<void> {
   const { jsonPath, dryRun = false, force = false, noRegister = false } = options;
+
+  // Resolve the host app's shared package scope (source of ModuleId) once.
+  const sharedScope = detectSharedScope({ override: options.sharedScope });
 
   // 1. Load and parse JSON
   console.info(`📖 Loading JSON schema from: ${jsonPath}`);
@@ -162,6 +169,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
       nodeName: names.camelCase,
       isCompanyScoped: jsonSchema.isCompanyScoped !== false, // Default: true
       targetDir: jsonSchema.targetDir,
+      sharedScope,
       description: jsonSchema.description,
       chat: jsonSchema.chat,
       requiresS3: jsonSchema.requiresS3 === true,
@@ -219,18 +227,18 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
         path: path.resolve(process.cwd(), `${basePath}/controllers/${names.kebabCase}.controller.ts`),
         content: generateControllerFile(templateData),
       },
-      // DTOs
+      // DTOs (class-validator imports pruned to exactly what each file uses)
       {
         path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.dto.ts`),
-        content: generateBaseDTOFile(templateData),
+        content: pruneClassValidatorImports(generateBaseDTOFile(templateData)),
       },
       {
         path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.post.dto.ts`),
-        content: generatePostDTOFile(templateData),
+        content: pruneClassValidatorImports(generatePostDTOFile(templateData)),
       },
       {
         path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.put.dto.ts`),
-        content: generatePutDTOFile(templateData),
+        content: pruneClassValidatorImports(generatePutDTOFile(templateData)),
       },
     ];
 
@@ -239,7 +247,7 @@ export async function generateModule(options: GenerateModuleOptions): Promise<vo
     if (relationshipDTOContent) {
       filesToWrite.push({
         path: path.resolve(process.cwd(), `${basePath}/dtos/${names.kebabCase}.relationship.dto.ts`),
-        content: relationshipDTOContent,
+        content: pruneClassValidatorImports(relationshipDTOContent),
       });
     }
 

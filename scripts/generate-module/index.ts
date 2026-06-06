@@ -13,7 +13,8 @@ program
   .argument("<json-file>", "Path to JSON schema file")
   .option("--dry-run", "Preview files without writing them", false)
   .option("--force", "Overwrite existing files", false)
-  .option("--no-register", "Skip module registration in parent module", false)
+  .option("--no-register", "Skip module registration in parent module")
+  .option("--shared-scope <scope>", "Override the shared package scope that exports ModuleId (auto-detected by default)")
   .action(async (jsonFile: string, options) => {
     try {
       const jsonPath = path.resolve(process.cwd(), jsonFile);
@@ -29,6 +30,7 @@ program
         dryRun: options.dryRun,
         force: options.force,
         noRegister: !options.register,
+        sharedScope: options.sharedScope,
       });
     } catch (error: any) {
       console.error(`\n❌ Error: ${error.message}\n`);

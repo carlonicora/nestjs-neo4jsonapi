@@ -148,7 +148,6 @@ describe("${names.pascalCase}Service", () => {
   let repository: Mocked<${names.pascalCase}Repository>;
   let jsonApiService: Mocked<JsonApiService>;
   let clsService: Mocked<ClsService>;
-  let auditService: Mocked<AuditService>;
 
   ${testIdsCode}
 
@@ -218,7 +217,6 @@ describe("${names.pascalCase}Service", () => {
     ) as Mocked<${names.pascalCase}Repository>;
     jsonApiService = module.get<JsonApiService>(JsonApiService) as Mocked<JsonApiService>;
     clsService = module.get<ClsService>(ClsService) as Mocked<ClsService>;
-    auditService = module.get<AuditService>(AuditService) as Mocked<AuditService>;
 
     // Default CLS context
     clsService.get.mockImplementation((key: string) => {

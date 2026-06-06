@@ -2,16 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 
 /**
- * Convert kebab-case to PascalCase
- */
-function toPascalCase(str: string): string {
-  return str
-    .split("-")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join("");
-}
-
-/**
  * Register an import and add to @Module imports array in a module file
  */
 function addToModuleFile(params: {
@@ -73,27 +63,17 @@ function addToModuleFile(params: {
   content = content.slice(0, insertPosition) + newImport + content.slice(insertPosition);
 
   // Find the @Module imports array
-  const moduleImportsRegex = /imports:\s*\[([\s\S]*?)\]/;
-  const match = content.match(moduleImportsRegex);
-
-  if (!match) {
+  // Insert the new module as the first entry in the @Module imports array.
+  // We deliberately do NOT split/re-sort the existing entries: an entry such as
+  // `RbacModule.register({ moduleUserPaths, rbac, devMode })` contains commas and
+  // would be shredded by a naive `split(",")`. Prepending after the opening `[`
+  // is comma-safe; Prettier (run afterwards) normalises the formatting.
+  const importsArrayOpenRegex = /imports:\s*\[/;
+  if (!importsArrayOpenRegex.test(content)) {
     throw new Error(`Could not find @Module imports array in ${fullPath}`);
   }
 
-  // Parse existing modules
-  const importsArrayContent = match[1];
-  const modules = importsArrayContent
-    .split(",")
-    .map((m) => m.trim())
-    .filter((m) => m);
-
-  // Add new module alphabetically
-  modules.push(moduleClassName);
-  modules.sort();
-
-  // Rebuild imports array with proper formatting
-  const newImportsArray = `imports: [\n    ${modules.join(",\n    ")},\n  ]`;
-  content = content.replace(moduleImportsRegex, newImportsArray);
+  content = content.replace(importsArrayOpenRegex, (open) => `${open}\n    ${moduleClassName},`);
 
   // Write back
   fs.writeFileSync(fullPath, content, "utf-8");
@@ -101,43 +81,12 @@ function addToModuleFile(params: {
 }
 
 /**
- * Create a new subfolder modules file
- */
-function createSubfolderModulesFile(params: {
-  subfolderName: string;
-  targetDir: string;
-  dryRun: boolean;
-}): void {
-  const { subfolderName, targetDir, dryRun } = params;
-  const pascalName = toPascalCase(subfolderName);
-
-  const content = `import { Module } from "@nestjs/common";
-
-@Module({
-  imports: [],
-})
-export class ${pascalName}Modules {}
-`;
-
-  const filePath = path.resolve(process.cwd(), `apps/api/src/${targetDir}/${subfolderName}.modules.ts`);
-
-  if (dryRun) {
-    console.info(`[DRY RUN] Would create ${filePath}`);
-    return;
-  }
-
-  // Ensure the directory exists
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  fs.writeFileSync(filePath, content, "utf-8");
-  console.info(`✓ Created ${filePath}`);
-}
-
-/**
- * Update parent modules.ts to register the new module
+ * Register the new module in the base aggregator module file.
+ *
+ * The leaf `<Module>Module` is added directly to `features.modules.ts`
+ * (or `foundations.modules.ts`) regardless of how deep `targetDir` is. The repo
+ * lists leaf feature modules there directly; creating per-domain sub-aggregators
+ * produced orphan `*.modules.ts` files and double-registration.
  *
  * @param params - Module information
  */
@@ -149,56 +98,16 @@ export function registerModule(params: {
 }): void {
   const { moduleName, targetDir, kebabName, dryRun = false } = params;
 
-  const segments = targetDir.split("/");
-  const baseDir = segments[0]; // "features" or "foundations"
+  const baseDir = targetDir.split("/")[0]; // "features" or "foundations"
 
   if (!["features", "foundations"].includes(baseDir)) {
     throw new Error(`Unknown target directory: ${targetDir}. Must start with "features" or "foundations"`);
   }
 
-  const moduleClassName = `${moduleName}Module`;
-  const importPath = `src/${targetDir}/${kebabName}/${kebabName}.module`;
-
-  if (segments.length === 1) {
-    // Simple case: "features" or "foundations" → register in top-level
-    addToModuleFile({
-      moduleFilePath: `apps/api/src/${baseDir}/${baseDir}.modules.ts`,
-      moduleClassName,
-      importPath,
-      dryRun,
-    });
-  } else {
-    // Subdirectory case: "features/customer-management" → register in subfolder
-    const subfolderName = segments[1]; // e.g., "customer-management"
-    const subfolderModulePath = `apps/api/src/${targetDir}/${subfolderName}.modules.ts`;
-    const fullSubfolderPath = path.resolve(process.cwd(), subfolderModulePath);
-
-    // Check if subfolder's .modules.ts exists
-    if (!fs.existsSync(fullSubfolderPath)) {
-      // Create the subfolder's .modules.ts file
-      createSubfolderModulesFile({
-        subfolderName,
-        targetDir,
-        dryRun,
-      });
-
-      // Register the new subfolder modules in the parent
-      const parentModulePath = `apps/api/src/${baseDir}/${baseDir}.modules.ts`;
-      const pascalSubfolderName = toPascalCase(subfolderName);
-      addToModuleFile({
-        moduleFilePath: parentModulePath,
-        moduleClassName: `${pascalSubfolderName}Modules`,
-        importPath: `src/${targetDir}/${subfolderName}.modules`,
-        dryRun,
-      });
-    }
-
-    // Register the new module in the subfolder's .modules.ts
-    addToModuleFile({
-      moduleFilePath: subfolderModulePath,
-      moduleClassName,
-      importPath,
-      dryRun,
-    });
-  }
+  addToModuleFile({
+    moduleFilePath: `apps/api/src/${baseDir}/${baseDir}.modules.ts`,
+    moduleClassName: `${moduleName}Module`,
+    importPath: `src/${targetDir}/${kebabName}/${kebabName}.module`,
+    dryRun,
+  });
 }

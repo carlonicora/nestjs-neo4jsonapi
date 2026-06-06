@@ -8,6 +8,7 @@ export function makeTemplateData(overrides: Partial<TemplateData> = {}): Templat
     nodeName: "widget",
     isCompanyScoped: true,
     targetDir: "features/demo",
+    sharedScope: "@test/shared",
     fields: [
       { name: "name", type: "string", required: true, tsType: "string" },
       { name: "due_date", type: "date", required: false, tsType: "string" },

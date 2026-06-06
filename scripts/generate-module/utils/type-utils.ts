@@ -17,11 +17,21 @@ export type CypherType = CypherBaseType | CypherArrayType;
  * Normalize a type string to canonical lowercase form
  * Handles case-insensitive input (e.g., "String", "NUMBER[]", "DateTime")
  *
+ * The pseudo-type "blocknote" is a frontend-facing rich-text marker: on the
+ * backend it is persisted as a stringified-JSON `string` (Neo4j cannot store
+ * nested objects as a property), so it normalises to "string". The frontend
+ * generator reads the raw "blocknote" type to wire a BlockNote editor.
+ *
  * @param input - The input type string (case-insensitive)
  * @returns The normalized CypherType or null if invalid
  */
 export function normalizeCypherType(input: string): CypherType | null {
   const normalized = input.toLowerCase().trim();
+
+  // Rich-text BlockNote fields are stored as stringified JSON on the backend.
+  if (normalized === "blocknote") {
+    return "string";
+  }
 
   if ((VALID_BASE_TYPES as readonly string[]).includes(normalized)) {
     return normalized as CypherBaseType;
@@ -210,5 +220,5 @@ export function getValidationImports(types: CypherType[]): string[] {
  * @returns Array of all valid type strings
  */
 export function getValidTypes(): string[] {
-  return [...VALID_BASE_TYPES, ...VALID_ARRAY_TYPES];
+  return [...VALID_BASE_TYPES, ...VALID_ARRAY_TYPES, "blocknote"];
 }

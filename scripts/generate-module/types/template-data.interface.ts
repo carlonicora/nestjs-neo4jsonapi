@@ -134,6 +134,8 @@ export interface TemplateData {
   // Configuration
   isCompanyScoped: boolean;
   targetDir: string;
+  /** Host app's shared package scope, e.g. "@dreamer/shared" (source of ModuleId). */
+  sharedScope: string;
   description?: string;
   chat?: { summary: string; textSearchFields: string[] };
   requiresS3: boolean;

@@ -17,7 +17,7 @@ describe("backend module template", () => {
     const out = generateModuleFile(makeTemplateData());
     expect(out).toContain("GraphModule");
     expect(out).toContain("GraphDescriptorRegistry");
-    expect(out).toContain('import { ModuleId } from "@neural-erp/shared"');
+    expect(out).toContain('import { ModuleId } from "@test/shared"');
     expect(out).toContain("this.graphRegistry.register({");
     expect(out).toContain("moduleId: ModuleId.Widget");
     expect(out).toContain("imports: [AuditModule, GraphModule]");
