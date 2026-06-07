@@ -166,6 +166,14 @@ export class ModelService {
         llmConfig.configuration.baseURL = cfg.url;
         break;
 
+      case "ollama":
+        // Ollama exposes an OpenAI-compatible API. Unlike `llamacpp`, the model
+        // name matters (e.g. "gemma3:12b"), so keep cfg.model. The API key is
+        // ignored by Ollama; "not-needed" satisfies the OpenAI client.
+        llmConfig.apiKey = "not-needed";
+        llmConfig.configuration.baseURL = cfg.url || "http://localhost:11434/v1";
+        break;
+
       case "vertex": {
         if (cfg.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(cfg.googleCredentialsBase64, "base64").toString("utf-8");

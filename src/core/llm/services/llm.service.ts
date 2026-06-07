@@ -4,7 +4,7 @@ import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { streamObject } from "ai";
+import { streamObject, streamText } from "ai";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { BaseConfigInterface } from "../../../config/interfaces";
@@ -946,6 +946,238 @@ export class LLMService {
       partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
       result: resultPromise,
     };
+  }
+
+  /**
+   * Plain-text streaming variant of {@link streamCall}. Unlike `streamCall`
+   * (which enforces a Zod `outputSchema` via `streamObject` and therefore
+   * requires the model/provider to support structured/JSON output), this method
+   * streams free-form text via the Vercel AI SDK's `streamText`.
+   *
+   * Use this when:
+   *   - The desired output is just prose (no structured object), AND/OR
+   *   - The provider/model does not support JSON response formats
+   *     (e.g. Ollama with many local models), where `streamObject` fails with
+   *     `NoObjectGeneratedError` because the model returns prose, not JSON.
+   *
+   * Returns two handles:
+   *   - `fullStream` — normalized incremental parts as the model generates them:
+   *     `{ type: "text", delta }` for answer content and `{ type: "reasoning",
+   *     delta }` for a reasoning/"thinking" trace (emitted by reasoning-capable
+   *     models — e.g. Ollama surfaces `delta.reasoning` over its OpenAI-compatible
+   *     endpoint). Non-reasoning models simply never yield `reasoning` parts.
+   *     MUST be consumed for `result` to resolve.
+   *   - `result` — Promise resolving to the final concatenated answer `text`, the
+   *     full `reasoning` trace (empty string when the model emits none), and token
+   *     usage once the stream completes.
+   *
+   * Provider support mirrors `streamCall`: OpenAI-compatible only (llamacpp,
+   * local, openrouter, requesty, ollama, plus any provider exposed via an
+   * OpenAI-compatible URL).
+   */
+  async streamText(params: {
+    systemPrompts: string[];
+    prompt: string;
+    temperature?: number;
+    maxTokens?: number;
+    modelWeight?: ModelWeight;
+    metadata?: Record<string, any>;
+  }): Promise<{
+    fullStream: AsyncIterable<{ type: "text" | "reasoning"; delta: string }>;
+    result: Promise<{
+      text: string;
+      reasoning: string;
+      tokenUsage: { input: number; output: number };
+      modelWeight: ModelWeight;
+    }>;
+  }> {
+    const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
+    const session: DumpSession = this.dumper.startSession({
+      metadata: params.metadata as DumpSessionStartParams["metadata"],
+      model: aiConfig.model,
+      provider: aiConfig.provider,
+      temperature: params.temperature,
+    });
+
+    const system = params.systemPrompts.join("\n\n");
+
+    session.recordInputs({
+      systemPrompts: params.systemPrompts,
+      instructions: params.prompt,
+      inputParams: {},
+      history: [],
+      tools: [],
+      outputSchemaName: "text",
+    });
+
+    // Same OpenAI-compatible provider gate as streamCall.
+    const openaiCompatProviders = new Set(["llamacpp", "local", "openrouter", "requesty", "ollama"]);
+    if (!openaiCompatProviders.has(aiConfig.provider) && !aiConfig.url) {
+      session.close({
+        finalStatus: "error",
+        errorMessage: `streamText does not yet support provider "${aiConfig.provider}"`,
+        totalTokens: { input: 0, output: 0 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+      throw new Error(
+        `LLMService.streamText: provider "${aiConfig.provider}" not supported. ` +
+          `Add a Vercel AI SDK adapter to LLMService.streamText or use an OpenAI-compatible URL.`,
+      );
+    }
+
+    const provider = createOpenAICompatible({
+      name: aiConfig.provider || "narr8",
+      apiKey: aiConfig.apiKey,
+      baseURL: aiConfig.url,
+    });
+    const model = provider.chatModel(aiConfig.model);
+
+    session.startIteration("final-structured", []);
+
+    const streamResult = streamText({
+      model,
+      system,
+      prompt: params.prompt,
+      temperature: params.temperature,
+      maxOutputTokens: params.maxTokens,
+    });
+
+    const resultPromise: Promise<{
+      text: string;
+      reasoning: string;
+      tokenUsage: { input: number; output: number };
+      modelWeight: ModelWeight;
+    }> = (async () => {
+      try {
+        const text = await streamResult.text;
+        const reasoning = (await streamResult.reasoningText) ?? "";
+        const usage = await streamResult.usage;
+        const input = usage?.inputTokens ?? 0;
+        const output = usage?.outputTokens ?? 0;
+
+        this._sessionTokens.input += input;
+        this._sessionTokens.output += output;
+        this._sessionTokens.total += input + output;
+        this._sessionTokens.callCount += 1;
+
+        session.recordResponse({
+          content: text,
+          tokenUsage: { input, output },
+          finishReason: String(await streamResult.finishReason),
+        });
+        session.close({
+          finalStatus: "success",
+          totalTokens: { input, output },
+          warnings: [],
+          parseFallbacks: [],
+        });
+
+        return { text, reasoning, tokenUsage: { input, output }, modelWeight };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+        session.close({
+          finalStatus: "error",
+          errorMessage: message,
+          errorStack: stack,
+          totalTokens: { input: 0, output: 0 },
+          warnings: [],
+          parseFallbacks: [],
+        });
+        console.error("[LLMService.streamText] Error:", error);
+        throw new Error(`LLM streamText error: ${message}`);
+      }
+    })();
+
+    // Normalize the AI SDK `fullStream` to text/reasoning deltas. Consuming this
+    // is what drives `resultPromise` (the `text`/`reasoning`/`usage` promises) to
+    // resolve. Reasoning-capable models interleave `reasoning-delta` parts (e.g.
+    // Ollama emits the full thinking trace before answer content).
+    async function* normalizedStream(): AsyncGenerator<{ type: "text" | "reasoning"; delta: string }> {
+      for await (const part of streamResult.fullStream) {
+        if (part.type === "text-delta") {
+          yield { type: "text", delta: part.text };
+        } else if (part.type === "reasoning-delta") {
+          yield { type: "reasoning", delta: part.text };
+        } else if (part.type === "error") {
+          throw part.error;
+        }
+      }
+    }
+
+    return {
+      fullStream: normalizedStream(),
+      result: resultPromise,
+    };
+  }
+
+  /**
+   * Structured extraction via FORCED tool calling — the gemma/Ollama-reliable
+   * counterpart to `streamCall`/`call()`'s `withStructuredOutput`, which fails on
+   * models that don't support `response_format` json_schema. Forces the model to
+   * call a single tool and returns its (Zod-validated) arguments.
+   */
+  async extractViaTool<T>(params: {
+    systemPrompts: string[];
+    prompt: string;
+    tool: { name: string; description: string; schema: ZodType<T> };
+    modelWeight?: ModelWeight;
+    metadata?: Record<string, any>;
+  }): Promise<T> {
+    const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
+    const session: DumpSession = this.dumper.startSession({
+      metadata: params.metadata as DumpSessionStartParams["metadata"],
+      model: aiConfig.model,
+      provider: aiConfig.provider,
+      temperature: 0,
+    });
+
+    session.recordInputs({
+      systemPrompts: params.systemPrompts,
+      instructions: params.prompt,
+      inputParams: {},
+      history: [],
+      tools: [{ name: params.tool.name, description: params.tool.description, schema: params.tool.schema }],
+      outputSchemaName: params.tool.name,
+    });
+
+    try {
+      const model = this.modelService.getLLM({ modelWeight });
+      const tool = new DynamicStructuredTool({
+        name: params.tool.name,
+        description: params.tool.description,
+        schema: params.tool.schema as any,
+        func: async (input: unknown) => JSON.stringify(input),
+      });
+      const bound = model.bindTools!([tool], { tool_choice: params.tool.name });
+      const messages = [new SystemMessage(params.systemPrompts.join("\n\n")), new HumanMessage(params.prompt)];
+      session.startIteration("final-structured", []);
+      const response = (await bound.invoke(messages)) as AIMessage;
+      const call = (response.tool_calls ?? [])[0];
+      if (!call) throw new Error("extractViaTool: model did not call the tool");
+      const parsed = params.tool.schema.parse(call.args);
+      session.recordResponse({
+        content: JSON.stringify(parsed),
+        tokenUsage: { input: 0, output: 0 },
+        finishReason: "tool_call",
+      });
+      session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 }, warnings: [], parseFallbacks: [] });
+      return parsed as T;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      session.close({
+        finalStatus: "error",
+        errorMessage: message,
+        totalTokens: { input: 0, output: 0 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+      console.error("[LLMService.extractViaTool] Error:", error);
+      throw error instanceof Error ? error : new Error(message);
+    }
   }
 
   /**
