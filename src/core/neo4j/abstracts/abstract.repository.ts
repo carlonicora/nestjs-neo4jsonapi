@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
+import { modelRegistry } from "../../../common/registries/registry";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
 import { buildFilterClauses } from "../helpers/build-filter-clauses";
@@ -145,6 +146,7 @@ export abstract class AbstractRepository<
 
     let query = "";
     const returnParts = [nodeName];
+    const emittedIncludeAliases = new Set<string>();
     const collectParts: string[] = []; // For MANY relationships with edge fields
     const manyRelationshipsWithFields: Array<{ name: string; relatedNodeName: string }> = [];
 
@@ -239,6 +241,51 @@ export abstract class AbstractRepository<
       } else {
         // No fields - just include the related node directly
         returnParts.push(relatedNodeName);
+      }
+
+      // Nested include expansion — emits OPTIONAL MATCH clauses for each dot-path
+      // declared on this relationship. Deduplicates shared path prefixes.
+      if (rel.include && rel.include.length > 0) {
+        for (const path of rel.include) {
+          let currentAlias = relatedNodeName; // e.g. "round_turns"
+          let currentNodeName = rel.model.nodeName; // e.g. "turn"
+          for (const segment of path.split(".")) {
+            const targetModel = modelRegistry.get(currentNodeName);
+            const candidates = [
+              ...(targetModel?.singleChildrenRelationships ?? []),
+              ...(targetModel?.childrenRelationships ?? []),
+            ];
+            const nested = candidates.find((r) => r.relationshipName === segment);
+            if (!nested || !nested.relationship || !nested.direction) {
+              // Descriptor authoring error (wrong `include` string), surfaced at
+              // query-build time — a programming defect, not an HTTP condition,
+              // so throw a plain Error rather than an HttpException/500.
+              throw new Error(
+                `include "${path}": relationship "${segment}" not found on "${currentNodeName}". ` +
+                  `Each include segment must be a relationship key on the target descriptor.`,
+              );
+            }
+            const nestedLabel = modelRegistry.get(nested.nodeName)?.labelName;
+            if (!nestedLabel) {
+              throw new Error(
+                `include "${path}": target model "${nested.nodeName}" for segment "${segment}" is not registered. ` +
+                  `Ensure the related entity's module is loaded so its model is in the registry.`,
+              );
+            }
+            const childAlias = `${currentAlias}_${segment}`;
+            if (!emittedIncludeAliases.has(childAlias)) {
+              emittedIncludeAliases.add(childAlias);
+              const pattern =
+                nested.direction === "in"
+                  ? `(${currentAlias})<-[:${nested.relationship}]-(${childAlias}:${nestedLabel})`
+                  : `(${currentAlias})-[:${nested.relationship}]->(${childAlias}:${nestedLabel})`;
+              query += `OPTIONAL MATCH ${pattern}\n`;
+              returnParts.push(childAlias);
+            }
+            currentAlias = childAlias;
+            currentNodeName = nested.nodeName;
+          }
+        }
       }
     }
 

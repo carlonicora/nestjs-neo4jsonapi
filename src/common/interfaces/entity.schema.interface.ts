@@ -154,6 +154,16 @@ export interface RelationshipDef {
     name: string;
     description: string;
   };
+  /**
+   * Dot-paths, relative to THIS relationship's TARGET descriptor, to also fetch
+   * and nest in the response. Each segment must be a relationship key on the
+   * descriptor at that level. Finite by construction → no cycle risk.
+   *   include: ["npc"]          // 3rd level: turn.npc
+   *   include: ["npc", "user"]  // turn.npc + turn.user
+   *   include: ["npc.faction"]  // 4th level: turn.npc.faction
+   * Not allowed together with edge `fields` on the same relationship (v1).
+   */
+  include?: string[];
 }
 
 /**

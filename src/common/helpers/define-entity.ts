@@ -16,6 +16,9 @@ import {
   VirtualFieldDef,
 } from "../interfaces/entity.schema.interface";
 
+/** Maximum number of dot-path segments allowed in a single `include` entry (each segment = one relationship hop from the include root). */
+export const MAX_INCLUDE_DEPTH = 6;
+
 /**
  * Convert Neo4j Integer {low, high} to JavaScript number
  */
@@ -210,6 +213,23 @@ export function defineEntity<T>() {
       }
     }
 
+    for (const [relName, rel] of Object.entries(relationships)) {
+      if (!rel.include || rel.include.length === 0) continue;
+      if (rel.fields && rel.fields.length > 0) {
+        throw new Error(
+          `defineEntity(${type}): relationship "${relName}" declares both edge "fields" and "include"; ` +
+            `nested include on an edge-property relationship is not supported (v1).`,
+        );
+      }
+      for (const path of rel.include) {
+        if (path.split(".").length > MAX_INCLUDE_DEPTH) {
+          throw new Error(
+            `defineEntity(${type}): include path "${path}" on "${relName}" exceeds MAX_INCLUDE_DEPTH (${MAX_INCLUDE_DEPTH}).`,
+          );
+        }
+      }
+    }
+
     // Extract field information
     const fieldEntries = Object.entries(fields) as [string, FieldDef][];
     const fieldNames = fieldEntries.map(([name]) => name);
@@ -258,6 +278,10 @@ export function defineEntity<T>() {
           nodeName: rel.model.nodeName,
           relationshipName: name,
           polymorphic: rel.polymorphic,
+          direction: rel.direction,
+          relationship: rel.relationship,
+          cardinality: rel.cardinality,
+          required: rel.required,
         });
       } else {
         childrenTokens.push(rel.model.nodeName);
@@ -265,6 +289,10 @@ export function defineEntity<T>() {
           nodeName: rel.model.nodeName,
           relationshipName: name,
           polymorphic: rel.polymorphic,
+          direction: rel.direction,
+          relationship: rel.relationship,
+          cardinality: rel.cardinality,
+          required: rel.required,
         });
       }
     }

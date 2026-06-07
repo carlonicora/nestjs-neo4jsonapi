@@ -32,6 +32,10 @@ export type RelationshipInfo = {
   nodeName: string; // Model's nodeName for looking up in registry
   relationshipName: string; // Property name on entity (for Cypher column and assignment)
   polymorphic?: PolymorphicConfig;
+  direction?: "in" | "out"; // Traversal direction — emits the OPTIONAL MATCH arrow for nested includes
+  relationship?: string; // Cypher relationship type (e.g. "PLAYED_BY")
+  cardinality?: "one" | "many"; // Whether this hop returns one node or many
+  required?: boolean; // Mirrors RelationshipDef.required (nested includes always emit OPTIONAL MATCH regardless)
 };
 
 export type DataModelInterface<T> = DataMeta & {
