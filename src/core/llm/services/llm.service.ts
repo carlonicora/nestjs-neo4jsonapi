@@ -80,6 +80,106 @@ interface StructuredOutputResponse<T> {
   raw?: LLMRawResponse;
 }
 
+/**
+ * Best-effort extraction of a JSON object from free-form model text. Local
+ * models (notably Gemma over Ollama) routinely ignore a forced `tool_choice`
+ * and emit the structured payload as plain text — sometimes bare, sometimes
+ * wrapped in a ```json fence or surrounded by prose. Returns the first parseable
+ * object, or `null` when none is found. Never throws.
+ */
+function extractJsonObject(text: unknown): Record<string, unknown> | null {
+  if (typeof text !== "string" || text.trim() === "") return null;
+  const tryParse = (s: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(s);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParse(text.trim());
+  if (direct) return direct;
+
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    const fenced = tryParse(fence[1].trim());
+    if (fenced) return fenced;
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const sliced = tryParse(text.slice(start, end + 1));
+    if (sliced) return sliced;
+  }
+
+  return null;
+}
+
+/**
+ * Recovers a forced tool call that a Gemma/MLX model emitted as TEXT instead of
+ * a structured `tool_calls` entry. These models (e.g. `gemma4:26b-mlx` over
+ * Ollama, whose Modelfile template is the bare `{{ .Prompt }}` with no real
+ * tool-calling support) leak their native tool format as literal pseudo-tokens:
+ *
+ *   toolName{key:<|"|>value<|"|>,key:<|"|>value<|"|>}<tool_call|>
+ *
+ * Ollama can't parse that, so it returns it as `content` with `tool_calls=[]`
+ * and `finish_reason=stop`. It is NOT valid JSON (unquoted keys, `<|"|>` quote
+ * tokens, values that themselves contain `"`), so `extractJsonObject` misses it.
+ * We split on the `<|"|>` pseudo-quote — which never appears inside real text —
+ * giving alternating [keyspec, value, keyspec, value, …] and rebuild the object.
+ * Returns the recovered object, or `null` when the marker is absent. Never throws.
+ */
+function parseGemmaToolCallText(text: unknown): Record<string, unknown> | null {
+  if (typeof text !== "string" || !text.includes('<|"|>')) return null;
+  const open = text.indexOf("{");
+  const close = text.lastIndexOf("}");
+  const body = open >= 0 && close > open ? text.slice(open + 1, close) : text;
+
+  const parts = body.split('<|"|>');
+  const obj: Record<string, unknown> = {};
+  // Even-indexed parts hold the `…,key:` spec; the following odd part is its value.
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const keyMatch = parts[i].match(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$/);
+    if (keyMatch) obj[keyMatch[1]] = parts[i + 1];
+  }
+  return Object.keys(obj).length > 0 ? obj : null;
+}
+
+/**
+ * A structured tool call's `args` is usually the parsed object, but models
+ * served over Ollama deliver variants that fail strict `safeParse`:
+ *  - the raw JSON arguments STRING instead of a parsed object, and/or
+ *  - the real payload nested under a single wrapper key (often the tool name):
+ *    `{ record_memories: { operations: [...] } }`.
+ * Return every plausible shape so the caller can validate each against the
+ * schema and accept the first that matches. Order: as-is, JSON-parsed, unwrapped.
+ */
+function toolArgCandidates(args: unknown): unknown[] {
+  const candidates: unknown[] = [args];
+  let obj: unknown = args;
+  if (typeof args === "string") {
+    try {
+      obj = JSON.parse(args);
+      candidates.push(obj);
+    } catch {
+      obj = undefined;
+    }
+  }
+  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    const keys = Object.keys(obj as Record<string, unknown>);
+    if (keys.length === 1) {
+      const inner = (obj as Record<string, unknown>)[keys[0]];
+      if (inner && typeof inner === "object") candidates.push(inner);
+    }
+  }
+  return candidates;
+}
+
 @Injectable()
 export class LLMService {
   private _sessionTokens: SessionUsage;
@@ -1164,12 +1264,91 @@ export class LLMService {
         func: async (input: unknown) => JSON.stringify(input),
       });
       const bound = model.bindTools!([tool], { tool_choice: params.tool.name });
-      const messages = [new SystemMessage(params.systemPrompts.join("\n\n")), new HumanMessage(params.prompt)];
+      const systemPrompt = params.systemPrompts.join("\n\n");
+      const baseMessages = [new SystemMessage(systemPrompt), new HumanMessage(params.prompt)];
       session.startIteration("final-structured", []);
-      const response = (await bound.invoke(messages)) as AIMessage;
-      const call = (response.tool_calls ?? [])[0];
-      if (!call) throw new Error("extractViaTool: model did not call the tool");
-      const parsed = params.tool.schema.parse(call.args);
+
+      // Diagnostic for the no-tool-call path: dump exactly what the provider
+      // returned so a future regression is debuggable without re-instrumenting.
+      const describe = (r: AIMessage, attempt: string) => {
+        const content = typeof r?.content === "string" ? r.content : JSON.stringify(r?.content);
+        const call0 = (r?.tool_calls ?? [])[0];
+        console.error(
+          `[extractViaTool] ${params.tool.name} ${attempt}: no parseable tool call — ` +
+            `finish_reason=${(r as any)?.response_metadata?.finish_reason} ` +
+            `tool_calls=${(r?.tool_calls ?? []).length} invalid_tool_calls=${((r as any)?.invalid_tool_calls ?? []).length} ` +
+            `contentLen=${content?.length ?? 0}`,
+        );
+        if (call0) {
+          // A tool call WAS returned but its args failed the schema — log the args
+          // and the validation issues so the mismatch is visible.
+          const issues = params.tool.schema.safeParse(call0.args as unknown);
+          console.error(
+            `[extractViaTool] ${params.tool.name} ${attempt} tool_call.args(typeof=${typeof call0.args})=` +
+              `${JSON.stringify(call0.args)?.slice(0, 2000)}`,
+          );
+          console.error(
+            `[extractViaTool] ${params.tool.name} ${attempt} zodIssues=` +
+              `${JSON.stringify(issues.success ? [] : issues.error.issues)?.slice(0, 1500)}`,
+          );
+        }
+        console.error(`[extractViaTool] ${params.tool.name} ${attempt} content<<<\n${content?.slice(0, 2000)}\n>>>`);
+      };
+
+      // Resilience for local models (Gemma/Ollama) that ignore the forced
+      // `tool_choice` and answer with text: accept a real tool call OR a payload
+      // recovered from the message content (JSON, or Gemma's pseudo-token tool
+      // text). `tool_choice` is only a soft hint on the OpenAI-compatible Ollama
+      // endpoint, so a single empty `tool_calls` is NOT a hard failure — mirror
+      // `streamCall`'s tool_calls → raw-content fallback chain. Returns the
+      // validated payload or null.
+      const tryExtract = (response: AIMessage): T | null => {
+        const call = (response.tool_calls ?? [])[0];
+        if (call) {
+          // Try the args as-is, JSON-parsed (if a string), and unwrapped from a
+          // single-key wrapper — accept the first shape that matches the schema.
+          for (const candidate of toolArgCandidates(call.args)) {
+            const fromTool = params.tool.schema.safeParse(candidate);
+            if (fromTool.success) return fromTool.data;
+          }
+        }
+        // 1) Model emitted the call as a JSON object in content (bare/fenced/prose).
+        const salvaged = extractJsonObject(response.content);
+        if (salvaged) {
+          const fromContent = params.tool.schema.safeParse(salvaged);
+          if (fromContent.success) {
+            console.warn(`[extractViaTool] recovered ${params.tool.name} from JSON in message content`);
+            return fromContent.data;
+          }
+        }
+        // 2) Gemma/MLX emitted the call as pseudo-token text (`name{k:<|"|>v<|"|>}<tool_call|>`).
+        const gemma = parseGemmaToolCallText(response.content);
+        if (gemma) {
+          const fromGemma = params.tool.schema.safeParse(gemma);
+          if (fromGemma.success) {
+            console.warn(`[extractViaTool] recovered ${params.tool.name} from Gemma pseudo-token tool text`);
+            return fromGemma.data;
+          }
+        }
+        return null;
+      };
+
+      let response = (await bound.invoke(baseMessages)) as AIMessage;
+      let parsed = tryExtract(response);
+
+      // One retry with an explicit nudge — local models frequently comply on a
+      // second pass once told plainly that prose is not acceptable.
+      if (parsed === null) {
+        describe(response, "attempt-1");
+        const nudge = new HumanMessage(
+          `You did NOT call the \`${params.tool.name}\` tool. Do not write prose, refusals, or explanations. Respond ONLY by calling \`${params.tool.name}\` with valid arguments now.`,
+        );
+        response = (await bound.invoke([...baseMessages, nudge])) as AIMessage;
+        parsed = tryExtract(response);
+        if (parsed === null) describe(response, "attempt-2");
+      }
+
+      if (parsed === null) throw new Error("extractViaTool: model did not call the tool");
       session.recordResponse({
         content: JSON.stringify(parsed),
         tokenUsage: { input: 0, output: 0 },
