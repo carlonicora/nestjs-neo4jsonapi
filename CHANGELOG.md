@@ -1,3 +1,11 @@
+## [1.84.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.83.0...v1.84.0) (2026-06-08)
+
+### 🚀 Features
+
+* add disableThinking parameter to LLMService and ModelService for improved control over model behavior ([af70c52](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/af70c52d42ca81436424e0b6dc0a6c5151c6d5c9))
+* add streamText method for plain-text streaming and enhance model service for Ollama compatibility ([b687a49](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b687a494b63e9a0c734ac880f08eff67627e26a7))
+* implement nested include functionality in defineEntity and add tests ([f2fb91a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f2fb91a2b540f1b0a74fe6b14e12fd862f844e5c))
+
 ## [1.83.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.82.0...v1.83.0) (2026-06-06)
 
 ### 🚀 Features
