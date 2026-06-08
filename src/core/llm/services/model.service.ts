@@ -74,11 +74,21 @@ export class ModelService {
    * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
    */
-  getLLM(params?: { temperature?: number; maxOutputTokens?: number; modelWeight?: ModelWeight }): BaseChatModel {
+  getLLM(params?: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    modelWeight?: ModelWeight;
+    disableThinking?: boolean;
+  }): BaseChatModel {
     const temperature = params?.temperature ?? 0.2;
     const cfg = this.getResolvedConfig(params?.modelWeight);
     const maxOutputTokens = params?.maxOutputTokens ?? cfg.maxOutputTokens;
-    return this.buildChatModel(cfg, { temperature, maxOutputTokens, credentialFileTag: "llm" });
+    return this.buildChatModel(cfg, {
+      temperature,
+      maxOutputTokens,
+      credentialFileTag: "llm",
+      disableThinking: params?.disableThinking,
+    });
   }
 
   /**
@@ -133,7 +143,12 @@ export class ModelService {
       apiVersion?: string;
       googleCredentialsBase64?: string;
     },
-    opts: { temperature: number; maxOutputTokens?: number; credentialFileTag: "llm" | "vision" | "audio" },
+    opts: {
+      temperature: number;
+      maxOutputTokens?: number;
+      credentialFileTag: "llm" | "vision" | "audio";
+      disableThinking?: boolean;
+    },
   ): BaseChatModel {
     const { temperature, maxOutputTokens } = opts;
 
@@ -205,7 +220,11 @@ export class ModelService {
         throw new Error(`Unsupported LLM type: ${cfg.provider}`);
     }
 
-    return new ChatOpenAI({ ...llmConfig, ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}) });
+    return new ChatOpenAI({
+      ...llmConfig,
+      ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
+      ...(opts.disableThinking ? { modelKwargs: { ...(llmConfig.modelKwargs ?? {}), reasoning_effort: "none" } } : {}),
+    });
   }
 
   getEmbedder(): EmbeddingsInterface {

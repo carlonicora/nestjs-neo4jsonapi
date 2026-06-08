@@ -942,6 +942,9 @@ export class LLMService {
         }
       })();
 
+    // Guard against an unhandled rejection if the caller never awaits `result`.
+    void resultPromise.catch(() => undefined);
+
     return {
       partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
       result: resultPromise,
@@ -1107,6 +1110,13 @@ export class LLMService {
       }
     }
 
+    // Prevent an unhandled promise rejection from crashing the process if the
+    // caller stops consuming `fullStream` on error (e.g. the model is
+    // unreachable) and therefore never awaits `result`. Attaching a no-op
+    // handler marks the promise as handled; callers that DO await it still
+    // receive the rejection.
+    void resultPromise.catch(() => undefined);
+
     return {
       fullStream: normalizedStream(),
       result: resultPromise,
@@ -1125,6 +1135,7 @@ export class LLMService {
     tool: { name: string; description: string; schema: ZodType<T> };
     modelWeight?: ModelWeight;
     metadata?: Record<string, any>;
+    disableThinking?: boolean;
   }): Promise<T> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
@@ -1145,7 +1156,7 @@ export class LLMService {
     });
 
     try {
-      const model = this.modelService.getLLM({ modelWeight });
+      const model = this.modelService.getLLM({ modelWeight, disableThinking: params.disableThinking });
       const tool = new DynamicStructuredTool({
         name: params.tool.name,
         description: params.tool.description,
