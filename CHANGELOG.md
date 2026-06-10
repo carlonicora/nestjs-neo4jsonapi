@@ -1,3 +1,9 @@
+## [1.85.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.84.0...v1.85.0) (2026-06-10)
+
+### 🚀 Features
+
+* enhance LLMService.extractViaTool to salvage tool-call args from message content and improve JSON extraction ([745318b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/745318b4a35acd87ea4fbb0bdfc4e7aca2338f9b))
+
 ## [1.84.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.83.0...v1.84.0) (2026-06-08)
 
 ### 🚀 Features
