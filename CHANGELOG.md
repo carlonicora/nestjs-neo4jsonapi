@@ -1,3 +1,9 @@
+## [1.86.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.85.0...v1.86.0) (2026-06-10)
+
+### 🚀 Features
+
+* **config:** full per-tier AI configuration with provider switching ([b95eb9b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b95eb9b430f36268ba61576f1870da2d24b1ad77))
+
 ## [1.85.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.84.0...v1.85.0) (2026-06-10)
 
 ### 🚀 Features
