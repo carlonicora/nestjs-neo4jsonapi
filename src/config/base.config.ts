@@ -6,28 +6,40 @@ import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
 import { AiTierConfig } from "./interfaces/config.ai.interface";
 
 /**
- * Resolves one AI model tier from env, falling back field-by-field to the
- * normal `AI_*` vars. `suffix` is "" (normal), "_LITE", or "_LARGE".
- * Mirrors the existing VISION_ and AUDIO_ env fallback convention.
+ * Resolves one AI model tier from env. `suffix` is "" (normal), "_LITE", or
+ * "_LARGE".
+ *
+ * Fallback semantics:
+ * - A tier WITHOUT its own `AI_PROVIDER<suffix>` (or re-declaring the same
+ *   provider as the base tier) inherits field-by-field from the normal `AI_*`
+ *   vars — a lone `AI_MODEL_LITE` overrides only the model. Mirrors the
+ *   existing VISION_ and AUDIO_ env fallback convention.
+ * - A tier that switches to a DIFFERENT provider is standalone: no field
+ *   inherits from the base tier, because base values (URL, API key, costs…)
+ *   point at the wrong service. Each field resolves only from its suffixed
+ *   var, so e.g. the base Ollama URL can never leak into an opencode tier.
  */
-const buildAiTier = (suffix: string): AiTierConfig => ({
-  provider: process.env[`AI_PROVIDER${suffix}`] || process.env.AI_PROVIDER || "",
-  apiKey: process.env[`AI_API_KEY${suffix}`] || process.env.AI_API_KEY || "",
-  model: process.env[`AI_MODEL${suffix}`] || process.env.AI_MODEL || "",
-  url: process.env[`AI_URL${suffix}`] || process.env.AI_URL || "",
-  region: process.env[`AI_REGION${suffix}`] || process.env.AI_REGION || "",
-  secret: process.env[`AI_SECRET${suffix}`] || process.env.AI_SECRET || "",
-  instance: process.env[`AI_INSTANCE${suffix}`] || process.env.AI_INSTANCE || "",
-  apiVersion: process.env[`AI_API_VERSION${suffix}`] || process.env.AI_API_VERSION || "",
-  inputCostPer1MTokens: parseFloat(
-    process.env[`AI_INPUT_COST_PER_1M_TOKENS${suffix}`] || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
-  ),
-  outputCostPer1MTokens: parseFloat(
-    process.env[`AI_OUTPUT_COST_PER_1M_TOKENS${suffix}`] || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
-  ),
-  googleCredentialsBase64:
-    process.env[`AI_GOOGLE_CREDENTIALS_BASE64${suffix}`] || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
-});
+const buildAiTier = (suffix: string): AiTierConfig => {
+  const baseProvider = process.env.AI_PROVIDER || "";
+  const tierProvider = (suffix ? process.env[`AI_PROVIDER${suffix}`] : baseProvider) || "";
+  const standalone = suffix !== "" && tierProvider !== "" && tierProvider !== baseProvider;
+  const env = (key: string): string => process.env[`${key}${suffix}`] || (standalone ? "" : process.env[key]) || "";
+  const maxOutputTokens = env("AI_MAX_OUTPUT_TOKENS");
+  return {
+    provider: tierProvider || baseProvider,
+    apiKey: env("AI_API_KEY"),
+    model: env("AI_MODEL"),
+    url: env("AI_URL"),
+    region: env("AI_REGION"),
+    secret: env("AI_SECRET"),
+    instance: env("AI_INSTANCE"),
+    apiVersion: env("AI_API_VERSION"),
+    inputCostPer1MTokens: parseFloat(env("AI_INPUT_COST_PER_1M_TOKENS") || "0"),
+    outputCostPer1MTokens: parseFloat(env("AI_OUTPUT_COST_PER_1M_TOKENS") || "0"),
+    ...(maxOutputTokens ? { maxOutputTokens: parseInt(maxOutputTokens, 10) } : {}),
+    googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),
+  };
+};
 
 /**
  * Options for createBaseConfig

@@ -13,6 +13,7 @@ describe("createBaseConfig — AI tiers", () => {
     "AI_API_VERSION",
     "AI_INPUT_COST_PER_1M_TOKENS",
     "AI_OUTPUT_COST_PER_1M_TOKENS",
+    "AI_MAX_OUTPUT_TOKENS",
     "AI_GOOGLE_CREDENTIALS_BASE64",
   ];
   const suffixed = (s: string) => AI_KEYS.map((k) => `${k}${s}`);
@@ -67,5 +68,68 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLarge.model).toBe("large-model");
     expect(cfg.aiLarge.inputCostPer1MTokens).toBe(15);
     expect(cfg.aiLite.model).toBe("normal-model");
+  });
+
+  it("resolves maxOutputTokens per tier, falling back to the base value", () => {
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_MAX_OUTPUT_TOKENS = "4096";
+    process.env.AI_MAX_OUTPUT_TOKENS_LARGE = "16384";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.maxOutputTokens).toBe(4096);
+    expect(cfg.aiLite.maxOutputTokens).toBe(4096);
+    expect(cfg.aiLarge.maxOutputTokens).toBe(16384);
+  });
+
+  it("leaves maxOutputTokens undefined when no env var is set", () => {
+    process.env.AI_MODEL = "normal-model";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.maxOutputTokens).toBeUndefined();
+    expect(cfg.aiLarge.maxOutputTokens).toBeUndefined();
+  });
+
+  it("treats a tier that switches provider as standalone — no field leaks from the base tier", () => {
+    process.env.AI_PROVIDER = "ollama";
+    process.env.AI_MODEL = "gemma:12b";
+    process.env.AI_URL = "http://localhost:11434/v1";
+    process.env.AI_API_KEY = "local-key";
+    process.env.AI_INPUT_COST_PER_1M_TOKENS = "0.1";
+    process.env.AI_OUTPUT_COST_PER_1M_TOKENS = "0.4";
+
+    process.env.AI_PROVIDER_LARGE = "opencode";
+    process.env.AI_MODEL_LARGE = "big-model";
+    process.env.AI_API_KEY_LARGE = "opencode-key";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.aiLarge.provider).toBe("opencode");
+    expect(cfg.aiLarge.model).toBe("big-model");
+    expect(cfg.aiLarge.apiKey).toBe("opencode-key");
+    // The base tier's ollama URL must NOT leak into the opencode tier.
+    expect(cfg.aiLarge.url).toBe("");
+    expect(cfg.aiLarge.inputCostPer1MTokens).toBe(0);
+    expect(cfg.aiLarge.outputCostPer1MTokens).toBe(0);
+    // Base tier untouched.
+    expect(cfg.ai.provider).toBe("ollama");
+    expect(cfg.ai.url).toBe("http://localhost:11434/v1");
+  });
+
+  it("keeps field-by-field inheritance when the tier re-declares the SAME provider", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_URL = "https://openrouter.ai/api/v1";
+    process.env.AI_API_KEY = "shared-key";
+
+    process.env.AI_PROVIDER_LITE = "openrouter";
+    process.env.AI_MODEL_LITE = "lite-model";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.aiLite.model).toBe("lite-model");
+    expect(cfg.aiLite.url).toBe("https://openrouter.ai/api/v1");
+    expect(cfg.aiLite.apiKey).toBe("shared-key");
   });
 });

@@ -21,9 +21,15 @@ export interface AiTierConfig {
 export interface ConfigAiInterface {
   /** Normal tier — the default model. */
   ai: AiTierConfig;
-  /** Lite tier — cheaper/faster. Falls back field-by-field to `ai`. */
+  /**
+   * Lite tier — cheaper/faster. Falls back field-by-field to `ai` unless it
+   * declares a different provider, in which case it is standalone.
+   */
   aiLite: AiTierConfig;
-  /** Large tier — more capable. Falls back field-by-field to `ai`. */
+  /**
+   * Large tier — more capable. Falls back field-by-field to `ai` unless it
+   * declares a different provider, in which case it is standalone.
+   */
   aiLarge: AiTierConfig;
   vision: {
     provider: string;

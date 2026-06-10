@@ -65,6 +65,10 @@ export class ModelService {
    * - `requesty`: Requesty proxy service
    * - `vertex`: Google Vertex AI (Gemini models)
    * - `azure`: Azure OpenAI Service
+   * - any other provider name: generic OpenAI-compatible endpoint (requires `url`)
+   *
+   * Each model weight resolves its own full config block (provider, apiKey,
+   * url, model, …), so different tiers can live on different providers.
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.2)
@@ -217,7 +221,17 @@ export class ModelService {
       }
 
       default:
-        throw new Error(`Unsupported LLM type: ${cfg.provider}`);
+        // Any other provider (opencode, openai, groq, a custom gateway…) is
+        // treated as a generic OpenAI-compatible endpoint when a base URL is
+        // configured — same rule streamCall/streamText already apply. The named
+        // cases above exist only where a provider needs special handling.
+        if (!cfg.url) {
+          throw new Error(
+            `Unsupported LLM provider "${cfg.provider}": set its AI_URL (with the matching tier suffix) to use it as an OpenAI-compatible endpoint`,
+          );
+        }
+        llmConfig.configuration.baseURL = cfg.url;
+        break;
     }
 
     return new ChatOpenAI({

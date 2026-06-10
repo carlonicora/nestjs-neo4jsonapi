@@ -53,3 +53,35 @@ describe("ModelService.getLLM tier selection", () => {
     expect(llm.model ?? llm.modelName).toBe("lite");
   });
 });
+
+describe("ModelService.getLLM generic OpenAI-compatible providers", () => {
+  it("builds a ChatOpenAI against the configured URL for an unlisted provider (e.g. opencode)", () => {
+    const svc = makeService({
+      ai: tier({ provider: "opencode", model: "big-model", url: "https://opencode.ai/zen/v1", apiKey: "zen-key" }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    expect(llm.model ?? llm.modelName).toBe("big-model");
+    expect(llm.clientConfig?.baseURL ?? llm.configuration?.baseURL).toBe("https://opencode.ai/zen/v1");
+  });
+
+  it("throws a configuration error for an unlisted provider without a URL", () => {
+    const svc = makeService({
+      ai: tier({ provider: "opencode", model: "big-model", url: "", apiKey: "zen-key" }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    expect(() => svc.getLLM()).toThrow(/opencode/);
+  });
+
+  it("applies the tier's maxOutputTokens from config", () => {
+    const svc = makeService({
+      ai: tier({ model: "normal", maxOutputTokens: 2048 }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    expect(llm.maxTokens).toBe(2048);
+  });
+});
