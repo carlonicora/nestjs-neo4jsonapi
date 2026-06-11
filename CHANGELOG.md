@@ -1,3 +1,9 @@
+## [1.87.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.86.0...v1.87.0) (2026-06-11)
+
+### 🚀 Features
+
+* **llm:** add maxOutputTokens and frequencyPenalty parameters to LLM service calls ([c748a88](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c748a88e217f17dbea45a5c5cade5853721602aa))
+
 ## [1.86.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.85.0...v1.86.0) (2026-06-10)
 
 ### 🚀 Features
