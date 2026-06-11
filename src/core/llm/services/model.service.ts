@@ -81,6 +81,7 @@ export class ModelService {
   getLLM(params?: {
     temperature?: number;
     maxOutputTokens?: number;
+    frequencyPenalty?: number;
     modelWeight?: ModelWeight;
     disableThinking?: boolean;
   }): BaseChatModel {
@@ -90,6 +91,7 @@ export class ModelService {
     return this.buildChatModel(cfg, {
       temperature,
       maxOutputTokens,
+      frequencyPenalty: params?.frequencyPenalty,
       credentialFileTag: "llm",
       disableThinking: params?.disableThinking,
     });
@@ -150,11 +152,12 @@ export class ModelService {
     opts: {
       temperature: number;
       maxOutputTokens?: number;
+      frequencyPenalty?: number;
       credentialFileTag: "llm" | "vision" | "audio";
       disableThinking?: boolean;
     },
   ): BaseChatModel {
-    const { temperature, maxOutputTokens } = opts;
+    const { temperature, maxOutputTokens, frequencyPenalty } = opts;
 
     const llmConfig: LLMParameters = {
       apiKey: cfg.apiKey || "not-needed",
@@ -237,6 +240,11 @@ export class ModelService {
     return new ChatOpenAI({
       ...llmConfig,
       ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
+      // A positive frequency penalty discourages the token-level repetition loops
+      // local models fall into on forced tool calls at temperature 0 (e.g. the
+      // memory extractor emitting `{op:"ADD",...}` endlessly). Maps to OpenAI's
+      // `frequency_penalty`, honoured by the Ollama/llamacpp OpenAI-compatible APIs.
+      ...(typeof frequencyPenalty === "number" ? { frequencyPenalty } : {}),
       ...(opts.disableThinking ? { modelKwargs: { ...(llmConfig.modelKwargs ?? {}), reasoning_effort: "none" } } : {}),
     });
   }

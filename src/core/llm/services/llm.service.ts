@@ -1236,6 +1236,8 @@ export class LLMService {
     modelWeight?: ModelWeight;
     metadata?: Record<string, any>;
     disableThinking?: boolean;
+    maxOutputTokens?: number;
+    frequencyPenalty?: number;
   }): Promise<T> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
@@ -1256,7 +1258,12 @@ export class LLMService {
     });
 
     try {
-      const model = this.modelService.getLLM({ modelWeight, disableThinking: params.disableThinking });
+      const model = this.modelService.getLLM({
+        modelWeight,
+        disableThinking: params.disableThinking,
+        maxOutputTokens: params.maxOutputTokens,
+        frequencyPenalty: params.frequencyPenalty,
+      });
       const tool = new DynamicStructuredTool({
         name: params.tool.name,
         description: params.tool.description,
