@@ -25,6 +25,9 @@ const buildAiTier = (suffix: string): AiTierConfig => {
   const standalone = suffix !== "" && tierProvider !== "" && tierProvider !== baseProvider;
   const env = (key: string): string => process.env[`${key}${suffix}`] || (standalone ? "" : process.env[key]) || "";
   const maxOutputTokens = env("AI_MAX_OUTPUT_TOKENS");
+  // Default true (matches OpenRouter's own default); only an explicit "false"
+  // turns `region` into a hard pin.
+  const allowFallbacks = env("AI_ALLOW_FALLBACKS").toLowerCase() !== "false";
   return {
     provider: tierProvider || baseProvider,
     apiKey: env("AI_API_KEY"),
@@ -37,6 +40,7 @@ const buildAiTier = (suffix: string): AiTierConfig => {
     inputCostPer1MTokens: parseFloat(env("AI_INPUT_COST_PER_1M_TOKENS") || "0"),
     outputCostPer1MTokens: parseFloat(env("AI_OUTPUT_COST_PER_1M_TOKENS") || "0"),
     ...(maxOutputTokens ? { maxOutputTokens: parseInt(maxOutputTokens, 10) } : {}),
+    allowFallbacks,
     googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),
   };
 };

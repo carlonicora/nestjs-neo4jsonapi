@@ -14,6 +14,7 @@ describe("createBaseConfig — AI tiers", () => {
     "AI_INPUT_COST_PER_1M_TOKENS",
     "AI_OUTPUT_COST_PER_1M_TOKENS",
     "AI_MAX_OUTPUT_TOKENS",
+    "AI_ALLOW_FALLBACKS",
     "AI_GOOGLE_CREDENTIALS_BASE64",
   ];
   const suffixed = (s: string) => AI_KEYS.map((k) => `${k}${s}`);
@@ -131,5 +132,18 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLite.model).toBe("lite-model");
     expect(cfg.aiLite.url).toBe("https://openrouter.ai/api/v1");
     expect(cfg.aiLite.apiKey).toBe("shared-key");
+  });
+
+  it("defaults allowFallbacks to true and resolves it per tier from an explicit 'false'", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_API_KEY = "key";
+    process.env.AI_ALLOW_FALLBACKS_LARGE = "false";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.allowFallbacks).toBe(true);
+    expect(cfg.aiLite.allowFallbacks).toBe(true);
+    expect(cfg.aiLarge.allowFallbacks).toBe(false);
   });
 });

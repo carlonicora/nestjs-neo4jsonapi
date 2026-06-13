@@ -145,6 +145,7 @@ export class ModelService {
       model: string;
       url: string;
       region?: string;
+      allowFallbacks?: boolean;
       instance?: string;
       apiVersion?: string;
       googleCredentialsBase64?: string;
@@ -178,8 +179,11 @@ export class ModelService {
       case "openrouter":
         llmConfig.configuration.baseURL = cfg.url || "https://openrouter.ai/api/v1";
         if (cfg.region) {
+          const allowFallbacks = cfg.allowFallbacks ?? true;
           llmConfig.modelKwargs = {
-            provider: { order: [cfg.region], allow_fallbacks: true },
+            // require_parameters keeps routing off endpoints that drop request
+            // params (e.g. a tools-less endpoint would break forced tool calls).
+            provider: { order: [cfg.region], allow_fallbacks: allowFallbacks, require_parameters: true },
           };
         }
         break;

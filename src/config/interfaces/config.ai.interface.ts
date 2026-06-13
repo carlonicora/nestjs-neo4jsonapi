@@ -14,6 +14,15 @@ export interface AiTierConfig {
   inputCostPer1MTokens: number;
   outputCostPer1MTokens: number;
   maxOutputTokens?: number;
+  /**
+   * OpenRouter only: whether `region` (sent as `provider.order`) permits routing
+   * to other providers on failure/load. `true` (default) makes the pin a mere
+   * preference — OpenRouter may reroute to ANY provider, including ones with
+   * mandatory output moderation (e.g. Alibaba) that abort explicit content
+   * mid-stream. `false` makes `region` a hard pin: the request fails loudly
+   * rather than silently rerouting. Set per tier via `AI_ALLOW_FALLBACKS{suffix}`.
+   */
+  allowFallbacks?: boolean;
   /** Base64-encoded GCP service account JSON for Google Vertex AI */
   googleCredentialsBase64?: string;
 }
