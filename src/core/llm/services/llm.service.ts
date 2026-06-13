@@ -19,6 +19,35 @@ import {
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 
 /**
+ * Inject OpenRouter's `provider` routing block into a JSON request body.
+ * OpenRouter routes a request to ANY provider unless the body carries this
+ * block — and a misroute can land on a moderating provider that refuses
+ * explicit content mid-stream. The LangChain path (ModelService.buildChatModel)
+ * sets this via modelKwargs; the Vercel AI SDK streaming path builds its own
+ * model and must inject it here. Mirrors buildChatModel: order + allow_fallbacks
+ * + require_parameters. Returns the body unchanged if it is not JSON.
+ */
+export function injectOpenRouterProvider(bodyStr: string, region: string, allowFallbacks: boolean): string {
+  try {
+    const body = JSON.parse(bodyStr);
+    body.provider = { order: [region], allow_fallbacks: allowFallbacks, require_parameters: true };
+    return JSON.stringify(body);
+  } catch {
+    return bodyStr;
+  }
+}
+
+/** A `fetch` middleware that pins OpenRouter routing on every request body. */
+function openRouterPinnedFetch(region: string, allowFallbacks: boolean): typeof fetch {
+  return ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    if (init?.body && typeof init.body === "string") {
+      init = { ...init, body: injectOpenRouterProvider(init.body, region, allowFallbacks) };
+    }
+    return fetch(input, init);
+  }) as typeof fetch;
+}
+
+/**
  * Raw LLM response structure with usage metadata
  */
 interface LLMRawResponse {
@@ -976,6 +1005,12 @@ export class LLMService {
       name: aiConfig.provider || "narr8",
       apiKey: aiConfig.apiKey,
       baseURL: aiConfig.url,
+      // Pin OpenRouter routing on the streaming path too (the LangChain path
+      // pins via modelKwargs; this SDK builds its own model). Without it the
+      // stream is unpinned and can be moderated by a misrouted provider.
+      ...(aiConfig.provider === "openrouter" && aiConfig.region
+        ? { fetch: openRouterPinnedFetch(aiConfig.region, aiConfig.allowFallbacks ?? true) }
+        : {}),
     });
     const model = provider.chatModel(aiConfig.model);
 
@@ -1134,6 +1169,12 @@ export class LLMService {
       name: aiConfig.provider || "narr8",
       apiKey: aiConfig.apiKey,
       baseURL: aiConfig.url,
+      // Pin OpenRouter routing on the streaming path too (see streamCall). The
+      // narrator runs here; an unpinned stream can be misrouted to a moderating
+      // provider that refuses explicit content mid-stream.
+      ...(aiConfig.provider === "openrouter" && aiConfig.region
+        ? { fetch: openRouterPinnedFetch(aiConfig.region, aiConfig.allowFallbacks ?? true) }
+        : {}),
     });
     const model = provider.chatModel(aiConfig.model);
 
