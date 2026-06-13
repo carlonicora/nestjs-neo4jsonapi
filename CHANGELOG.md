@@ -1,3 +1,9 @@
+## [1.88.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.87.0...v1.88.0) (2026-06-13)
+
+### 🚀 Features
+
+* **llm:** per-tier allow_fallbacks + require_parameters for OpenRouter pinning ([5e9ab4a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5e9ab4a41bcaa33eeca9c494e7eb84d52e4bd317))
+
 ## [1.87.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.86.0...v1.87.0) (2026-06-11)
 
 ### 🚀 Features
