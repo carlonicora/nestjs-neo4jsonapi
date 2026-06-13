@@ -1,3 +1,9 @@
+## [1.89.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.88.0...v1.89.0) (2026-06-13)
+
+### 🚀 Features
+
+* **llm:** pin OpenRouter routing on the streaming path ([c028d93](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c028d93545135b278c8105394fb2008ee2bf6f57))
+
 ## [1.88.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.87.0...v1.88.0) (2026-06-13)
 
 ### 🚀 Features
