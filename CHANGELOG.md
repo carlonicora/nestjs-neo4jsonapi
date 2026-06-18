@@ -1,3 +1,9 @@
+## [1.91.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.90.0...v1.91.0) (2026-06-18)
+
+### 🚀 Features
+
+* **llm:** add temperature parameter for sampling control in LLM service ([997a9e7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/997a9e7f658a1d62ddf8eee5938c81e3c1a98d98))
+
 ## [1.90.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.89.0...v1.90.0) (2026-06-18)
 
 ### 🚀 Features
