@@ -1256,6 +1256,10 @@ export class LLMService {
     disableThinking?: boolean;
     maxOutputTokens?: number;
     frequencyPenalty?: number;
+    /** Sampling temperature. Defaults to getLLM's 0.2 (near-greedy, good for
+     * deterministic extraction). Raise it for creative generation (e.g. game
+     * creation) where greedy decoding collapses onto the model's prior names. */
+    temperature?: number;
   }): Promise<T> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
@@ -1263,7 +1267,7 @@ export class LLMService {
       metadata: params.metadata as DumpSessionStartParams["metadata"],
       model: aiConfig.model,
       provider: aiConfig.provider,
-      temperature: 0,
+      temperature: params.temperature ?? 0.2,
     });
 
     session.recordInputs({
@@ -1281,6 +1285,7 @@ export class LLMService {
         disableThinking: params.disableThinking,
         maxOutputTokens: params.maxOutputTokens,
         frequencyPenalty: params.frequencyPenalty,
+        temperature: params.temperature,
       });
       const tool = new DynamicStructuredTool({
         name: params.tool.name,
