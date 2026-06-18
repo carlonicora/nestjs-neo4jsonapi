@@ -10,6 +10,7 @@ import * as path from "path";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { ModelWeight } from "../enums/model.weight";
+import { openRouterEscalatingFetch } from "./openrouter-fetch";
 
 interface LLMParameters {
   apiKey: string;
@@ -18,6 +19,7 @@ interface LLMParameters {
   configuration: {
     baseURL: string;
     defaultHeaders?: Record<string, string>;
+    fetch?: typeof fetch;
   };
   modelKwargs?: Record<string, unknown>;
 }
@@ -179,12 +181,10 @@ export class ModelService {
       case "openrouter":
         llmConfig.configuration.baseURL = cfg.url || "https://openrouter.ai/api/v1";
         if (cfg.region) {
-          const allowFallbacks = cfg.allowFallbacks ?? true;
-          llmConfig.modelKwargs = {
-            // require_parameters keeps routing off endpoints that drop request
-            // params (e.g. a tools-less endpoint would break forced tool calls).
-            provider: { order: [cfg.region], allow_fallbacks: allowFallbacks, require_parameters: true },
-          };
+          // Escalating pin: attempt 1 honours the configured pin, retries allow fallbacks.
+          // The fetch injects the full provider block (order + allow_fallbacks + require_parameters),
+          // so it is no longer set via modelKwargs.
+          llmConfig.configuration.fetch = openRouterEscalatingFetch(cfg.region, cfg.allowFallbacks ?? true);
         }
         break;
 
@@ -243,6 +243,9 @@ export class ModelService {
 
     return new ChatOpenAI({
       ...llmConfig,
+      // 1 hard attempt + 2 soft retries. Retries escalate the OpenRouter pin
+      // (see openRouterEscalatingFetch) so a transient provider error can reroute.
+      maxRetries: 2,
       ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
       // A positive frequency penalty discourages the token-level repetition loops
       // local models fall into on forced tool calls at temperature 0 (e.g. the

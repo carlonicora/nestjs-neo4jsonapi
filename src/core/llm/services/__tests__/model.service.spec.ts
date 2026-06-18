@@ -85,3 +85,29 @@ describe("ModelService.getLLM generic OpenAI-compatible providers", () => {
     expect(llm.maxTokens).toBe(2048);
   });
 });
+
+describe("ModelService.getLLM openrouter escalating pin", () => {
+  it("installs an escalating-fetch on the OpenAI client when a region is pinned (no static modelKwargs.provider)", () => {
+    const svc = makeService({
+      ai: tier({ provider: "openrouter", region: "together", allowFallbacks: false }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
+    expect(typeof fetchFn).toBe("function");
+    // The provider routing is now injected by the fetch middleware, not via modelKwargs.
+    expect(llm.modelKwargs?.provider).toBeUndefined();
+  });
+
+  it("does not install a fetch when no region is configured", () => {
+    const svc = makeService({
+      ai: tier({ provider: "openrouter", region: undefined }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
+    expect(fetchFn).toBeUndefined();
+  });
+});
