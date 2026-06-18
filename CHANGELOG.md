@@ -1,3 +1,9 @@
+## [1.90.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.89.0...v1.90.0) (2026-06-18)
+
+### 🚀 Features
+
+* **llm:** implement openRouterEscalatingFetch for enhanced routing with fallbacks ([455058a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/455058afe4682dafd5406e4f553027e235d2775f))
+
 ## [1.89.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.88.0...v1.89.0) (2026-06-13)
 
 ### 🚀 Features
