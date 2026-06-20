@@ -1,3 +1,9 @@
+## [1.92.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.92.0...v1.92.1) (2026-06-20)
+
+### 🚨 Tests
+
+* add tests for handling immutable fields in repository and service updates ([96e5164](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/96e51648ddf1af5df1e3e0e0c39971becedc74d4))
+
 ## [1.92.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.91.0...v1.92.0) (2026-06-20)
 
 ### 🚀 Features
