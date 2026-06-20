@@ -844,8 +844,11 @@ export abstract class AbstractRepository<
       ...params,
     };
 
-    // Build SET assignments for all fields with proper Cypher type casting
+    // Build SET assignments for all fields with proper Cypher type casting.
+    // Immutable fields are server-managed (worker / dedicated Cypher / clone) and
+    // must never be overwritten by a full update — exclude them from the SET clause.
     const setAssignments = fieldNames
+      .filter((fieldName) => !fields[fieldName as keyof typeof fields]?.immutable)
       .map((fieldName) => {
         const fieldDef = fields[fieldName as keyof typeof fields];
         const fieldType = fieldDef?.type;
