@@ -1,3 +1,9 @@
+## [1.95.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.94.0...v1.95.0) (2026-06-20)
+
+### 🚀 Features
+
+* **llm:** add disableThinking parameter to LLMCallParams for fast structured calls ([28e6969](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/28e696971b39193732bdfa9282f1ac934dee8336))
+
 ## [1.94.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.93.0...v1.94.0) (2026-06-20)
 
 ### 🚀 Features
