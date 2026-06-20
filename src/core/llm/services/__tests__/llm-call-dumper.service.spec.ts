@@ -27,6 +27,8 @@ describe("LLMCallDumper", () => {
     vi.resetModules();
     delete process.env.ASSISTANT_DUMP_LLM_CALLS;
     delete process.env.ASSISTANT_DUMP_LLM_CALLS_DIR;
+    delete process.env.ASSISTANT_DUMP_LLM_REDACT;
+    delete process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS;
   });
 
   afterEach(() => {
@@ -199,6 +201,107 @@ describe("LLMCallDumper", () => {
       expect(json.meta.errorStack).toMatch(/at foo/);
 
       await fs.rm(tmp, { recursive: true, force: true });
+    });
+
+    describe("redaction (ASSISTANT_DUMP_LLM_REDACT)", () => {
+      const SECRET_MESSAGE = "SUPER_SECRET_USER_MESSAGE_42";
+      const SECRET_HISTORY = "SECRET_HISTORY_CONTENT_99";
+
+      async function writeDump(tmp: string) {
+        const { LLMCallDumper } = await import("../llm-call-dumper.service");
+        const dumper = new LLMCallDumper(null as any);
+        const session = dumper.startSession({
+          metadata: {
+            nodeName: "graph",
+            agentName: "responder",
+            gameId: "game-abc",
+            roundId: "round-xyz",
+            userId: "user-123",
+          } as any,
+          model: "m",
+          provider: "p",
+        });
+        session.recordInputs({
+          systemPrompts: ["ordinary system prompt", "You must respect consent and ethical boundaries at all times."],
+          instructions: "instr",
+          inputParams: { userMessage: SECRET_MESSAGE, locale: "en" },
+          history: [{ role: "user", content: SECRET_HISTORY }],
+          tools: [],
+          outputSchemaName: "S",
+          metadata: { gameId: "game-abc", roundId: "round-xyz", userId: "user-123" },
+        } as any);
+        session.startIteration("final-structured", [{ _getType: () => "system", content: "S" }]);
+        session.recordResponse({ content: SECRET_MESSAGE, tokenUsage: { input: 1, output: 2 } });
+        session.close({ finalStatus: "success", totalTokens: { input: 1, output: 2 } });
+
+        const found = await waitForFile(tmp, 2000);
+        expect(found).toBeTruthy();
+        const fs = await import("fs/promises");
+        const raw = await fs.readFile(found!, "utf8");
+        return { raw, json: JSON.parse(raw) };
+      }
+
+      it("redacts userMessage, history content and policy systemPrompts; raw secret appears nowhere", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-redact-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        process.env.ASSISTANT_DUMP_LLM_REDACT = "true";
+
+        const { raw, json } = await writeDump(tmp);
+
+        expect(json.inputs.inputParams.userMessage).toBe("[REDACTED]");
+        expect(json.inputs.history[0].content).toBe("[REDACTED]");
+        // policy prompt redacted, ordinary one kept
+        expect(json.inputs.systemPrompts[0]).toBe("ordinary system prompt");
+        expect(json.inputs.systemPrompts[1]).toBe("[REDACTED]");
+        // iteration response.content redacted
+        expect(json.iterations[0].response.content).toBe("[REDACTED]");
+        // the raw secret text must appear NOWHERE in the file
+        expect(raw).not.toContain(SECRET_MESSAGE);
+        expect(raw).not.toContain(SECRET_HISTORY);
+        // non-secret field preserved
+        expect(json.inputs.inputParams.locale).toBe("en");
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
+
+      it("keeps dot-paths listed in ASSISTANT_DUMP_LLM_KEEP_FIELDS but still redacts others", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-keep-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        process.env.ASSISTANT_DUMP_LLM_REDACT = "true";
+        process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS = "metadata.gameId,metadata.roundId";
+
+        const { json } = await writeDump(tmp);
+
+        expect(json.inputs.metadata.gameId).toBe("game-abc");
+        expect(json.inputs.metadata.roundId).toBe("round-xyz");
+        // userId not in keep-list -> redacted
+        expect(json.inputs.metadata.userId).toBe("[REDACTED]");
+        // userMessage still redacted regardless of keep-list
+        expect(json.inputs.inputParams.userMessage).toBe("[REDACTED]");
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
+
+      it("does NOT redact when ASSISTANT_DUMP_LLM_REDACT is unset (default off)", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-noredact-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        delete process.env.ASSISTANT_DUMP_LLM_REDACT;
+
+        const { raw, json } = await writeDump(tmp);
+
+        expect(json.inputs.inputParams.userMessage).toBe(SECRET_MESSAGE);
+        expect(json.inputs.history[0].content).toBe(SECRET_HISTORY);
+        expect(json.iterations[0].response.content).toBe(SECRET_MESSAGE);
+        expect(raw).toContain(SECRET_MESSAGE);
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
     });
 
     it("close() does not throw when the disk write fails", async () => {

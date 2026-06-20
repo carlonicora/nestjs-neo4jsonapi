@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { GraphCreatorService } from "../graph.creator.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
+import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
 
 describe("GraphCreatorService", () => {
   let service: GraphCreatorService;
@@ -241,6 +242,34 @@ describe("GraphCreatorService", () => {
               content: content.trim(),
             }),
             temperature: 0.1,
+          }),
+        );
+      });
+
+      it("should thread GraphCreator attribution to the LLM call", async () => {
+        // Arrange
+        const content = `Joe Bauer was born in London on 03.04.1985. He studied computer science at a prestigious university.`;
+
+        llmService.call.mockResolvedValue(createValidLLMResponse());
+
+        // Act
+        await service.generateGraph({
+          content,
+          relationshipId: "article-123",
+          relationshipType: "Article",
+        });
+
+        // Assert - central persistUsage uses tokenUsageType + relationshipId/relationshipType
+        // (top-level call params) to attribute the call as GraphCreator against the chunk's owning node.
+        expect(llmService.call).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tokenUsageType: TokenUsageType.GraphCreator,
+            relationshipId: "article-123",
+            relationshipType: "Article",
+            metadata: expect.objectContaining({
+              nodeName: "graph_creator",
+              agentName: "graph",
+            }),
           }),
         );
       });

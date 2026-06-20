@@ -1,7 +1,6 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { tokenUsageMeta } from "../../tokenusage/entities/tokenusage.meta";
-import { TokenUsageType } from "../../tokenusage/enums/tokenusage.type";
 
 @Injectable()
 export class TokenUsageRepository implements OnModuleInit {
@@ -15,7 +14,7 @@ export class TokenUsageRepository implements OnModuleInit {
 
   async create(params: {
     id: string;
-    tokenUsageType: TokenUsageType;
+    tokenUsageType: string;
     inputTokens: number;
     outputTokens: number;
     cost?: number;

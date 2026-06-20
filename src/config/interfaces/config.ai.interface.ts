@@ -1,4 +1,42 @@
 /**
+ * AI Configuration Environment Variables (Security Hardening 2026-06-19)
+ *
+ * ASSISTANT_DUMP_LLM_REDACT
+ *   "true" | "false" (default: unset = off)
+ *   When "true", LLM dump files have user prompts, history content,
+ *   and consent-related system prompts replaced with "[REDACTED]".
+ *   Production deployments should set this to "true".
+ *
+ * ASSISTANT_DUMP_LLM_KEEP_FIELDS
+ *   Comma-separated dot-paths to preserve despite redaction.
+ *   Example: "metadata.gameId,metadata.roundId"
+ *
+ * AI_URL_ALLOWLIST
+ *   Comma-separated hostnames that AI_URL is allowed to point at.
+ *   Subdomains are allowed (e.g. "openai.com" permits "api.openai.com").
+ *   If unset, any HTTPS hostname is permitted.
+ */
+
+/**
+ * LangSmith tracing (developer observability)
+ *
+ * LangSmith traces every LLM call as a structured run tree — the LangChain /
+ * LangGraph path (call / extractViaTool / the tool loop, and the whole game-play
+ * StateGraph) is traced natively, and the Vercel AI SDK streaming path (narrate
+ * and structured streaming) is traced via `wrapAISDK` in `llm.service.ts`. All of
+ * it is gated entirely by env vars — set none and there is zero tracing and zero
+ * overhead.
+ *
+ * LANGSMITH_TRACING        "true" to enable (legacy alias: LANGCHAIN_TRACING_V2)
+ * LANGSMITH_API_KEY        LangSmith API key (legacy alias: LANGCHAIN_API_KEY)
+ * LANGSMITH_PROJECT        Project name to group traces (legacy alias: LANGCHAIN_PROJECT)
+ *
+ * Per-call `metadata` (nodeName, agentName, …) forwarded in `LLMService` appears
+ * on each run for filtering. This is a dev/debug tool, distinct from the in-app
+ * websocket telemetry (live play UI) and the persisted Neo4j TokenUsage (cost).
+ */
+
+/**
  * Configuration for a single AI text-generation model tier.
  * Shared shape for the `ai` (normal), `aiLite`, and `aiLarge` blocks.
  */

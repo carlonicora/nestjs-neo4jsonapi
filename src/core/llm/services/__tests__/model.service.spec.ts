@@ -1,5 +1,35 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { ModelService } from "../model.service";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// --- Module mocks ---------------------------------------------------------
+// `model.service.ts` uses `import * as fs from "fs"` and `import * as crypto
+// from "crypto"`. ESM namespace exports cannot be spied with `vi.spyOn`, so we
+// mock the whole modules. We keep `os`/`path` real so the produced temp path is
+// realistic, and only stub the file write + UUID generation.
+const fsMock = vi.hoisted(() => ({ writeFileSync: vi.fn(), unlinkSync: vi.fn() }));
+const cryptoMock = vi.hoisted(() => ({ randomUUID: vi.fn(() => "00000000-0000-0000-0000-000000000000") }));
+
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return { ...actual, writeFileSync: fsMock.writeFileSync, unlinkSync: fsMock.unlinkSync };
+});
+
+vi.mock("crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("crypto")>();
+  return { ...actual, randomUUID: cryptoMock.randomUUID };
+});
+
+// Stub the Vertex SDK so the env-restore contract test does not depend on real
+// Google credentials/libraries at construction time.
+vi.mock("@langchain/google-vertexai", () => ({
+  ChatVertexAI: class {
+    constructor(public readonly opts: any) {}
+  },
+  VertexAIEmbeddings: class {
+    constructor(public readonly opts: any) {}
+  },
+}));
+
+import { ModelService, validateAiUrl, writeGcpCredentials } from "../model.service";
 import { ModelWeight } from "../../enums/model.weight";
 
 function makeService(aiConfig: any): ModelService {
@@ -109,5 +139,128 @@ describe("ModelService.getLLM openrouter escalating pin", () => {
     const llm = svc.getLLM() as any;
     const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
     expect(fetchFn).toBeUndefined();
+  });
+});
+
+// === TASK 4: validateAiUrl ================================================
+describe("validateAiUrl", () => {
+  const ENV_KEY = "AI_URL_ALLOWLIST";
+  let savedAllowlist: string | undefined;
+
+  beforeEach(() => {
+    savedAllowlist = process.env[ENV_KEY];
+    delete process.env[ENV_KEY];
+  });
+
+  afterEach(() => {
+    if (savedAllowlist === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = savedAllowlist;
+  });
+
+  it("accepts an https url", () => {
+    expect(() => validateAiUrl("https://api.example.com/v1", "openrouter")).not.toThrow();
+  });
+
+  it("accepts http://localhost", () => {
+    expect(() => validateAiUrl("http://localhost:8033/v1", "llamacpp")).not.toThrow();
+  });
+
+  it("accepts http://127.0.0.1", () => {
+    expect(() => validateAiUrl("http://127.0.0.1:11434/v1", "ollama")).not.toThrow();
+  });
+
+  it("accepts an http://*.local host", () => {
+    expect(() => validateAiUrl("http://mybox.local:8080/v1", "local")).not.toThrow();
+  });
+
+  it("rejects http to a public host (HTTPS required)", () => {
+    expect(() => validateAiUrl("http://api.example.com/v1", "openrouter")).toThrow(/HTTPS/);
+  });
+
+  it("rejects a malformed url", () => {
+    expect(() => validateAiUrl("not a url", "openrouter")).toThrow(/valid URL/);
+  });
+
+  it("rejects an empty url", () => {
+    expect(() => validateAiUrl("", "openrouter")).toThrow(/AI_URL/);
+  });
+
+  describe("AI_URL_ALLOWLIST enforcement", () => {
+    it("allows a host that is exactly listed", () => {
+      process.env[ENV_KEY] = "api.example.com,openrouter.ai";
+      expect(() => validateAiUrl("https://api.example.com/v1", "openrouter")).not.toThrow();
+    });
+
+    it("allows a subdomain of a listed host", () => {
+      process.env[ENV_KEY] = "example.com";
+      expect(() => validateAiUrl("https://api.example.com/v1", "openrouter")).not.toThrow();
+    });
+
+    it("rejects a host that is not in the allowlist", () => {
+      process.env[ENV_KEY] = "example.com";
+      expect(() => validateAiUrl("https://evil.com/v1", "openrouter")).toThrow(/allowlist/);
+    });
+  });
+});
+
+// === TASK 2: writeGcpCredentials =========================================
+describe("writeGcpCredentials", () => {
+  beforeEach(() => {
+    fsMock.writeFileSync.mockClear();
+    cryptoMock.randomUUID.mockReset();
+    cryptoMock.randomUUID.mockReturnValue("11111111-1111-1111-1111-111111111111");
+  });
+
+  it("writes to a UUID-unique path matching gcp-creds-<tag>-<uuid>.json", () => {
+    const p = writeGcpCredentials(Buffer.from("hello").toString("base64"), "llm");
+    expect(p).toMatch(/gcp-creds-llm-.*\.json$/);
+  });
+
+  it("produces different paths on two calls", () => {
+    const uuids = ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"];
+    let i = 0;
+    cryptoMock.randomUUID.mockImplementation(() => uuids[i++]);
+    const p1 = writeGcpCredentials("Zm9v", "llm");
+    const p2 = writeGcpCredentials("Zm9v", "llm");
+    expect(p1).not.toBe(p2);
+  });
+
+  it("writes with mode 0o600", () => {
+    writeGcpCredentials(Buffer.from("secret").toString("base64"), "embedder");
+    expect(fsMock.writeFileSync).toHaveBeenCalledWith(expect.any(String), expect.anything(), { mode: 0o600 });
+  });
+});
+
+// === TASK 2: vertex env-restore contract =================================
+describe("ModelService vertex env restore contract", () => {
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    fsMock.writeFileSync.mockClear();
+    cryptoMock.randomUUID.mockReturnValue("22222222-2222-2222-2222-222222222222");
+    savedEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  });
+
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = savedEnv;
+  });
+
+  it("restores GOOGLE_APPLICATION_CREDENTIALS to undefined after building a vertex model", () => {
+    const svc = makeService({
+      ai: tier({
+        provider: "vertex",
+        model: "gemini-2.5-flash",
+        region: "us-central1",
+        googleCredentialsBase64: Buffer.from("{}").toString("base64"),
+      }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    // ChatVertexAI (mocked) reads creds at construction; the finally block must
+    // restore the env to its prior value (undefined here).
+    svc.getLLM();
+    expect(process.env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 });

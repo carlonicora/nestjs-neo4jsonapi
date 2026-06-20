@@ -34,6 +34,7 @@ export interface DumpInputs {
   history: Array<{ role: string; content: string }>;
   tools: Array<{ name: string; description: string; schema: unknown }>;
   outputSchemaName: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface DumpResponse {
@@ -226,10 +227,16 @@ class RealDumpSession implements DumpSession {
       warnings: params.warnings ?? [],
       parseFallbacks: params.parseFallbacks ?? [],
     };
+    const redact = this.shouldRedact();
     const payload = {
       meta,
-      inputs: this.inputs,
-      iterations: this.iterations,
+      inputs: redact ? this.redactPayload(this.inputs) : this.inputs,
+      iterations: redact
+        ? this.iterations.map((it) => ({
+            ...it,
+            response: it.response ? { ...it.response, content: "[REDACTED]" } : it.response,
+          }))
+        : this.iterations,
     };
 
     if (this.onClose) {
@@ -247,7 +254,10 @@ class RealDumpSession implements DumpSession {
           totalTokens: meta.totalTokens,
           finishReason: last?.finishReason,
           reply: {
-            content: last?.content ?? "",
+            // Honour the same redaction as the on-disk dump (response.content →
+            // "[REDACTED]"); otherwise the ephemeral llm:dump websocket event would
+            // leak the raw model output that redaction strips from the file.
+            content: redact ? "[REDACTED]" : (last?.content ?? ""),
             toolCalls: (last?.toolCalls ?? []).map((tc) => ({ name: tc.name, args: tc.args })),
           },
         });
@@ -278,6 +288,93 @@ class RealDumpSession implements DumpSession {
           `[LLMCallDumper] Failed to write dump ${file}: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
+  }
+
+  /**
+   * Redaction is opt-in via ASSISTANT_DUMP_LLM_REDACT="true". DEFAULT IS OFF so
+   * local development keeps seeing full prompts. Any other value (incl. unset)
+   * means no redaction.
+   */
+  private shouldRedact(): boolean {
+    return process.env.ASSISTANT_DUMP_LLM_REDACT === "true";
+  }
+
+  /**
+   * Dot-path keep-list parsed from ASSISTANT_DUMP_LLM_KEEP_FIELDS (CSV). A field
+   * whose full dot-path (relative to the redacted object root) is in this set is
+   * left untouched even if it would otherwise be redacted.
+   */
+  private get keepFields(): Set<string> {
+    const raw = process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS ?? "";
+    return new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    );
+  }
+
+  private static readonly POLICY_PROMPT_RE = /consent|ethical|moral|legal/i;
+
+  /**
+   * Deep-clones `payload` (via JSON round-trip) then walks the clone, replacing
+   * sensitive values with "[REDACTED]". The original object is never mutated.
+   *
+   * Redaction rules:
+   *  - any key named `userMessage` or `content`
+   *  - any `systemPrompts` array entry matching the policy regex (the boundaries
+   *    prompt) becomes "[REDACTED]"
+   *  - every field nested under a `metadata` object that is NOT in the keep-list
+   *
+   * The keep-list (dot-paths) wins: a key whose full dot-path is listed is left
+   * untouched. All metadata/schema/token-count/iteration-count/parse-fallback
+   * fields outside the above rules stay intact for perf debugging.
+   */
+  private redactPayload(payload: unknown): unknown {
+    if (payload == null) return payload;
+    const clone = JSON.parse(JSON.stringify(payload));
+    const keep = this.keepFields;
+
+    const redact = (obj: unknown, path: string): unknown => {
+      if (obj == null || typeof obj !== "object") return obj;
+
+      if (Array.isArray(obj)) {
+        // systemPrompts entries: redact policy/boundaries prompts in place.
+        if (path === "systemPrompts") {
+          return obj.map((entry, i) => {
+            const childPath = `${path}.${i}`;
+            if (keep.has(childPath)) return entry;
+            if (typeof entry === "string" && RealDumpSession.POLICY_PROMPT_RE.test(entry)) {
+              return "[REDACTED]";
+            }
+            return redact(entry, childPath);
+          });
+        }
+        return obj.map((entry, i) => redact(entry, path ? `${path}.${i}` : `${i}`));
+      }
+
+      const result: Record<string, unknown> = {};
+      const insideMetadata = path === "metadata" || path.endsWith(".metadata");
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        const childPath = path ? `${path}.${key}` : key;
+        if (keep.has(childPath)) {
+          result[key] = value;
+          continue;
+        }
+        if (key === "userMessage" || key === "content") {
+          result[key] = "[REDACTED]";
+          continue;
+        }
+        if (insideMetadata && (value == null || typeof value !== "object")) {
+          result[key] = "[REDACTED]";
+          continue;
+        }
+        result[key] = redact(value, childPath);
+      }
+      return result;
+    };
+
+    return redact(clone, "");
   }
 
   /** Test-only: peek at in-memory state. Not part of the public DumpSession interface. */

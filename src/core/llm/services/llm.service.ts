@@ -2,13 +2,17 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { streamObject, streamText } from "ai";
+import * as ai from "ai";
+import { wrapAISDK } from "langsmith/experimental/vercel";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { BaseConfigInterface } from "../../../config/interfaces";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { ModelWeight } from "../enums/model.weight";
+import { LLMCacheService, buildCacheKey } from "./llm-cache.service";
 import { ModelService } from "../../llm/services/model.service";
 import {
   convertZodToJsonSchema,
@@ -16,33 +20,21 @@ import {
   formatFieldWithDescription,
   sanitizeSchemaForGemini,
 } from "../../llm/utils/schema.utils";
+import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 
+// LangSmith tracing for the Vercel AI SDK streaming path. `wrapAISDK` wraps the
+// SDK functions; when LangSmith tracing is disabled (no LANGSMITH_TRACING /
+// LANGSMITH_API_KEY) it is a pure passthrough — no behaviour change, no overhead.
+// The LangChain / LangGraph path (call/extractViaTool/_invokeOriginal via
+// `.invoke(...)`) is already traced natively via the same env vars and the
+// `metadata` we forward in configOptions; this closes the streaming gap so
+// `narrate` and structured streaming also appear in the trace tree.
+const { streamText, streamObject } = wrapAISDK(ai);
+
 // Re-export for the existing test import path.
 export { injectOpenRouterProvider } from "./openrouter-fetch";
-
-/**
- * Raw LLM response structure with usage metadata
- */
-interface LLMRawResponse {
-  usage_metadata?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  response_metadata?: {
-    finish_reason?: string;
-    [key: string]: any;
-  };
-  content?: string;
-}
-
-/**
- * Type guard to validate raw response structure
- */
-function isValidRaw(raw: unknown): raw is LLMRawResponse {
-  return typeof raw === "object" && raw !== null;
-}
 
 /**
  * Parameters for LLM service calls
@@ -64,24 +56,10 @@ interface LLMCallParams<T> {
   tools?: DynamicStructuredTool[]; // Optional tools to bind to the LLM
   maxToolIterations?: number; // Max tool call iterations (default: 5)
   modelWeight?: ModelWeight; // Optional model tier (lite/normal/large). Default: Normal.
-}
-
-/**
- * Session usage statistics
- */
-interface SessionUsage {
-  input: number;
-  output: number;
-  total: number;
-  callCount: number;
-}
-
-/**
- * Structured output response from LLM
- */
-interface StructuredOutputResponse<T> {
-  parsed: T | null;
-  raw?: LLMRawResponse;
+  tokenUsageType?: string; // Optional cost-attribution category. Default: "text_generation". Callers own their own type values.
+  relationshipId?: string; // Optional: id of the entity this usage is attributed to.
+  relationshipType?: string; // Optional: Neo4j label of the attributed entity. Persistence is skipped unless both relationshipId and relationshipType are set.
+  cacheable?: boolean; // Optional: when true, the response is read from / written to the Redis LLM cache keyed on generic params (modelWeight/temperature/systemPrompts/prompt). A hit returns early WITHOUT invoking the provider — and therefore costs no tokens. Default: false.
 }
 
 /**
@@ -186,19 +164,49 @@ function toolArgCandidates(args: unknown): unknown[] {
 
 @Injectable()
 export class LLMService {
-  private _sessionTokens: SessionUsage;
+  private readonly logger = new Logger(LLMService.name);
 
   constructor(
     private readonly modelService: ModelService,
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly dumper: LLMCallDumper,
-  ) {
-    this._sessionTokens = {
-      input: 0,
-      output: 0,
-      total: 0,
-      callCount: 0,
-    };
+    private readonly tokenUsageService: TokenUsageService,
+    // Optional: the LLM cache is an opt-in optimisation. Marked @Optional so
+    // existing test harnesses (and any consumer that doesn't register the
+    // cache) keep resolving LLMService; when absent, cacheable calls simply
+    // skip the cache and run normally.
+    @Optional() private readonly cache?: LLMCacheService,
+  ) {}
+
+  /**
+   * Records token usage for cost/observability attribution. Never throws —
+   * a persistence failure logs a warning and the LLM call continues, so
+   * observability problems can't break the primary request path.
+   */
+  private async persistUsage(
+    params: {
+      tokenUsageType?: string;
+      relationshipId?: string;
+      relationshipType?: string;
+      modelWeight?: ModelWeight;
+    },
+    tokens: { input: number; output: number },
+  ): Promise<void> {
+    // Attribution is opt-in: the caller decides which entity this usage is
+    // recorded against. With no relationship, there is nothing to attribute to,
+    // so we skip — the package stays domain-agnostic.
+    if (!params.relationshipId || !params.relationshipType) return;
+    try {
+      await this.tokenUsageService.recordTokenUsage({
+        tokens,
+        type: params.tokenUsageType ?? TokenUsageType.TextGeneration,
+        relationshipId: params.relationshipId,
+        relationshipType: params.relationshipType,
+        modelWeight: params.modelWeight,
+      });
+    } catch (err) {
+      this.logger.warn(`TokenUsage persistence failed — continuing: ${String(err)}`);
+    }
   }
 
   /**
@@ -478,6 +486,26 @@ export class LLMService {
     params: LLMCallParams<T>,
   ): Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+
+    // Cache lookup BEFORE any provider invocation. A hit returns the stored
+    // result immediately, skipping the provider call AND token persistence — a
+    // cache hit costs nothing, which is the correct accounting. The key is
+    // built from generic params only (modelWeight/temperature/systemPrompts +
+    // a stable serialisation of inputParams as the prompt) to keep the cache
+    // domain-agnostic.
+    type CallResult = T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight };
+    let cacheKey: string | undefined;
+    if (params.cacheable === true && this.cache) {
+      cacheKey = buildCacheKey({
+        modelWeight,
+        temperature: params.temperature,
+        systemPrompts: params.systemPrompts,
+        prompt: JSON.stringify(params.inputParams),
+      });
+      const hit = await this.cache.get<CallResult>(cacheKey);
+      if (hit !== null) return hit;
+    }
+
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
       metadata: params.metadata as DumpSessionStartParams["metadata"],
@@ -506,7 +534,19 @@ export class LLMService {
         warnings,
         parseFallbacks,
       });
-      return { ...result, modelWeight };
+      await this.persistUsage(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input: totalInput, output: totalOutput },
+      );
+      const finalResult = { ...result, modelWeight };
+      // Write-through on a miss so the next identical cacheable call hits.
+      if (cacheKey && this.cache) await this.cache.set<CallResult>(cacheKey, finalResult);
+      return finalResult;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
@@ -746,12 +786,6 @@ export class LLMService {
     });
     const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
     const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
-
-    // Update session tracking
-    this._sessionTokens.input += input;
-    this._sessionTokens.output += output;
-    this._sessionTokens.total += input + output;
-    this._sessionTokens.callCount += 1;
 
     // Warn if high token usage
     const totalTokens = input + output;
@@ -994,6 +1028,12 @@ export class LLMService {
     // Avoids widening the dumper's union type for a single call site.
     session.startIteration("final-structured", []);
 
+    // Abort the stream if the provider stalls, so a hung connection can't pin
+    // the session open indefinitely. The AbortError surfaces as a rejection on
+    // the awaited promises below (caught + logged).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), params.timeout ?? 60_000);
+
     // Schema cast: `streamObject`'s typing is a conditional union over the
     // output mode (`object` / `enum` / `array` / `no-schema`). Our T is always
     // a Zod object schema; the runtime call is correct.
@@ -1005,6 +1045,7 @@ export class LLMService {
       temperature: params.temperature,
       maxOutputTokens: params.maxTokens,
       maxRetries: 2,
+      abortSignal: controller.signal,
     });
 
     // Build the result Promise that closes the session once the stream finishes.
@@ -1019,11 +1060,6 @@ export class LLMService {
           const input = usage?.inputTokens ?? 0;
           const output = usage?.outputTokens ?? 0;
 
-          this._sessionTokens.input += input;
-          this._sessionTokens.output += output;
-          this._sessionTokens.total += input + output;
-          this._sessionTokens.callCount += 1;
-
           session.recordResponse({
             content: JSON.stringify(finalObject),
             tokenUsage: { input, output },
@@ -1035,6 +1071,15 @@ export class LLMService {
             warnings: [],
             parseFallbacks: [],
           });
+          await this.persistUsage(
+            {
+              tokenUsageType: params.tokenUsageType,
+              relationshipId: params.relationshipId,
+              relationshipType: params.relationshipType,
+              modelWeight,
+            },
+            { input, output },
+          );
 
           return { ...(finalObject as any), tokenUsage: { input, output }, modelWeight };
         } catch (error) {
@@ -1050,11 +1095,14 @@ export class LLMService {
           });
           console.error("[LLMService.streamCall] Error:", error);
           throw new Error(`LLM streamCall error: ${message}`);
+        } finally {
+          clearTimeout(timeoutId);
         }
       })();
 
-    // Guard against an unhandled rejection if the caller never awaits `result`.
-    void resultPromise.catch(() => undefined);
+    // Surface (don't swallow) a rejected result even when the caller never
+    // awaits `result` — e.g. on abort/timeout or an unreachable provider.
+    resultPromise.catch((err) => this.logger.warn(`streamCall result rejected: ${String(err)}`));
 
     return {
       partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
@@ -1094,8 +1142,12 @@ export class LLMService {
     prompt: string;
     temperature?: number;
     maxTokens?: number;
+    timeout?: number;
     modelWeight?: ModelWeight;
     metadata?: Record<string, any>;
+    tokenUsageType?: string;
+    relationshipId?: string;
+    relationshipType?: string;
   }): Promise<{
     fullStream: AsyncIterable<{ type: "text" | "reasoning"; delta: string }>;
     result: Promise<{
@@ -1156,6 +1208,11 @@ export class LLMService {
 
     session.startIteration("final-structured", []);
 
+    // Abort the stream if the provider stalls (see streamCall). The AbortError
+    // surfaces as a rejection on the awaited promises below (caught + logged).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), params.timeout ?? 60_000);
+
     const streamResult = streamText({
       model,
       system,
@@ -1163,6 +1220,7 @@ export class LLMService {
       temperature: params.temperature,
       maxOutputTokens: params.maxTokens,
       maxRetries: 2,
+      abortSignal: controller.signal,
     });
 
     const resultPromise: Promise<{
@@ -1178,11 +1236,6 @@ export class LLMService {
         const input = usage?.inputTokens ?? 0;
         const output = usage?.outputTokens ?? 0;
 
-        this._sessionTokens.input += input;
-        this._sessionTokens.output += output;
-        this._sessionTokens.total += input + output;
-        this._sessionTokens.callCount += 1;
-
         session.recordResponse({
           content: text,
           tokenUsage: { input, output },
@@ -1194,6 +1247,15 @@ export class LLMService {
           warnings: [],
           parseFallbacks: [],
         });
+        await this.persistUsage(
+          {
+            tokenUsageType: params.tokenUsageType,
+            relationshipId: params.relationshipId,
+            relationshipType: params.relationshipType,
+            modelWeight,
+          },
+          { input, output },
+        );
 
         return { text, reasoning, tokenUsage: { input, output }, modelWeight };
       } catch (error) {
@@ -1209,6 +1271,8 @@ export class LLMService {
         });
         console.error("[LLMService.streamText] Error:", error);
         throw new Error(`LLM streamText error: ${message}`);
+      } finally {
+        clearTimeout(timeoutId);
       }
     })();
 
@@ -1228,12 +1292,11 @@ export class LLMService {
       }
     }
 
-    // Prevent an unhandled promise rejection from crashing the process if the
-    // caller stops consuming `fullStream` on error (e.g. the model is
-    // unreachable) and therefore never awaits `result`. Attaching a no-op
-    // handler marks the promise as handled; callers that DO await it still
-    // receive the rejection.
-    void resultPromise.catch(() => undefined);
+    // Surface (don't swallow) a rejected result even when the caller stops
+    // consuming `fullStream` on error (e.g. abort/timeout or an unreachable
+    // model) and therefore never awaits `result`. Logging marks the promise as
+    // handled; callers that DO await it still receive the rejection.
+    resultPromise.catch((err) => this.logger.warn(`streamText result rejected: ${String(err)}`));
 
     return {
       fullStream: normalizedStream(),
@@ -1253,6 +1316,9 @@ export class LLMService {
     tool: { name: string; description: string; schema: ZodType<T> };
     modelWeight?: ModelWeight;
     metadata?: Record<string, any>;
+    tokenUsageType?: string;
+    relationshipId?: string;
+    relationshipType?: string;
     disableThinking?: boolean;
     maxOutputTokens?: number;
     frequencyPenalty?: number;
@@ -1260,8 +1326,27 @@ export class LLMService {
      * deterministic extraction). Raise it for creative generation (e.g. game
      * creation) where greedy decoding collapses onto the model's prior names. */
     temperature?: number;
+    /** Opt-in Redis caching keyed on generic params (modelWeight/temperature/
+     * systemPrompts/prompt). A hit returns early WITHOUT invoking the provider,
+     * so it costs no tokens. Default: false. */
+    cacheable?: boolean;
   }): Promise<T> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+
+    // Cache lookup BEFORE provider invocation. A hit returns the stored payload
+    // immediately — no provider call, no token persistence (a hit is free).
+    let cacheKey: string | undefined;
+    if (params.cacheable === true && this.cache) {
+      cacheKey = buildCacheKey({
+        modelWeight,
+        temperature: params.temperature,
+        systemPrompts: params.systemPrompts,
+        prompt: params.prompt,
+      });
+      const hit = await this.cache.get<T>(cacheKey);
+      if (hit !== null) return hit;
+    }
+
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
       metadata: params.metadata as DumpSessionStartParams["metadata"],
@@ -1379,12 +1464,32 @@ export class LLMService {
       }
 
       if (parsed === null) throw new Error("extractViaTool: model did not call the tool");
+
+      const inputTokens = (response as unknown as LLMRawResponse).usage_metadata?.input_tokens ?? 0;
+      const outputTokens = (response as unknown as LLMRawResponse).usage_metadata?.output_tokens ?? 0;
+
       session.recordResponse({
         content: JSON.stringify(parsed),
-        tokenUsage: { input: 0, output: 0 },
+        tokenUsage: { input: inputTokens, output: outputTokens },
         finishReason: "tool_call",
       });
-      session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 }, warnings: [], parseFallbacks: [] });
+      session.close({
+        finalStatus: "success",
+        totalTokens: { input: inputTokens, output: outputTokens },
+        warnings: [],
+        parseFallbacks: [],
+      });
+      await this.persistUsage(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input: inputTokens, output: outputTokens },
+      );
+      // Write-through on a miss so the next identical cacheable call hits.
+      if (cacheKey && this.cache) await this.cache.set<T>(cacheKey, parsed as T);
       return parsed as T;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1398,28 +1503,5 @@ export class LLMService {
       console.error("[LLMService.extractViaTool] Error:", error);
       throw error instanceof Error ? error : new Error(message);
     }
-  }
-
-  /**
-   * Get session-level token usage statistics
-   *
-   * @returns Session usage data including total tokens and call count
-   */
-  getSessionUsage(): SessionUsage {
-    return { ...this._sessionTokens };
-  }
-
-  /**
-   * Reset session token tracking
-   *
-   * Useful when starting a new conversation or game session
-   */
-  resetSession(): void {
-    this._sessionTokens = {
-      input: 0,
-      output: 0,
-      total: 0,
-      callCount: 0,
-    };
   }
 }

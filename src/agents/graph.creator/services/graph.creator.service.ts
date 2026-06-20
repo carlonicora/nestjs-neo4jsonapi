@@ -4,6 +4,7 @@ import { z } from "zod";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { ChunkAnalysisInterface } from "../../graph.creator/interfaces/chunk.analysis.interface";
 
 export const prompt = `
@@ -358,7 +359,11 @@ export class GraphCreatorService {
     this.systemPrompt = prompts?.graphCreator ?? prompt;
   }
 
-  async generateGraph(params: { content: string }): Promise<ChunkAnalysisInterface> {
+  async generateGraph(params: {
+    content: string;
+    relationshipId?: string;
+    relationshipType?: string;
+  }): Promise<ChunkAnalysisInterface> {
     this.logger.debug("Starting graph generation", "GraphCreatorService", {
       contentLength: params.content?.length,
       contentPreview: params.content?.substring(0, 100),
@@ -426,6 +431,13 @@ export class GraphCreatorService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      tokenUsageType: TokenUsageType.GraphCreator,
+      relationshipId: params.relationshipId,
+      relationshipType: params.relationshipType,
+      metadata: {
+        nodeName: "graph_creator",
+        agentName: "graph",
+      },
     });
 
     this.logger.debug("LLM response received", "GraphCreatorService", {

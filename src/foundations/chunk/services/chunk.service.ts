@@ -20,8 +20,6 @@ import { Chunk, ChunkDescriptor } from "../../chunk/entities/chunk.entity";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
 import { KeyConceptRepository } from "../../keyconcept/repositories/keyconcept.repository";
 import { KeyConceptService } from "../../keyconcept/services/keyconcept.service";
-import { TokenUsageType } from "../../tokenusage/enums/tokenusage.type";
-import { TokenUsageService } from "../../tokenusage/services/tokenusage.service";
 
 @Injectable()
 export class ChunkService {
@@ -37,7 +35,6 @@ export class ChunkService {
     private readonly keyConceptService: KeyConceptService,
     private readonly graphGeneratorService: GraphCreatorService,
     private readonly keyConceptRepository: KeyConceptRepository,
-    private readonly tokenUsageService: TokenUsageService,
     private readonly moduleRef: ModuleRef,
     configService: ConfigService<BaseConfigInterface>,
   ) {
@@ -217,6 +214,8 @@ export class ChunkService {
       () =>
         this.graphGeneratorService.generateGraph({
           content: chunk.content,
+          relationshipId: params.id,
+          relationshipType: params.type,
         }),
       3,
       1000,
@@ -230,13 +229,6 @@ export class ChunkService {
         chunkId: params.chunkId,
         atomicFactsCount: chunkAnalysis.atomicFacts.length,
         relationshipsCount: chunkAnalysis.keyConceptsRelationships.length,
-      });
-
-      await this.tokenUsageService.recordTokenUsage({
-        tokens: chunkAnalysis.tokens,
-        type: TokenUsageType.GraphCreator,
-        relationshipId: params.id,
-        relationshipType: params.type,
       });
 
       await this.retryWithExponentialBackoff(

@@ -325,7 +325,7 @@ export class AudioLLMService {
 
       this.logger.log(
         `audio-direct: POST ${directUrl} format=${audio.directFormat || "multipart"} model=${audio.model} ` +
-          `language=${audio.language || "(unset)"} audioBytes=${audioBuffer.length} apiKeyPrefix=${(audio.apiKey || "").slice(0, 6)}...`,
+          `language=${audio.language || "(unset)"} audioBytes=${audioBuffer.length} provider=${audio.provider}`,
       );
 
       const response = await fetch(directUrl, { method: "POST", headers, body });

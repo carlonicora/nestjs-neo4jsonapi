@@ -165,8 +165,8 @@ describe("TokenUsageService", () => {
       expect(createCall.cost).toBeCloseTo(0.05, 6);
     });
 
-    it("should set cost to 0 when inputCostPer1MTokens is 0", async () => {
-      // Arrange
+    it("computes cost from the output rate alone when inputCostPer1MTokens is 0", async () => {
+      // Arrange — input rate free, output rate non-zero
       const zeroInputCostConfig = createMockAiConfig();
       zeroInputCostConfig.ai.inputCostPer1MTokens = 0;
 
@@ -199,13 +199,48 @@ describe("TokenUsageService", () => {
         relationshipType: "Content",
       });
 
-      // Assert
+      // Assert — only output contributes: (0 * 1000 / 1e6) + (30 * 500 / 1e6) = 0.015
       const createCall = repoWithZeroCost.create.mock.calls[0][0];
-      expect(createCall.cost).toBe(0);
+      expect(createCall.cost).toBeCloseTo(0.015, 6);
     });
 
-    it("should set cost to 0 when outputCostPer1MTokens is 0", async () => {
-      // Arrange
+    it("computes cost when only output rate is non-zero (input free)", async () => {
+      // Arrange — input rate 0, output rate 5
+      const config = createMockAiConfig();
+      config.ai.inputCostPer1MTokens = 0;
+      config.ai.outputCostPer1MTokens = 5;
+
+      const mockConfigService = {
+        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TokenUsageService,
+          { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      const svc = module.get<TokenUsageService>(TokenUsageService);
+      const repo = module.get(TokenUsageRepository) as MockedObject<TokenUsageRepository>;
+      repo.create.mockResolvedValue(undefined);
+
+      // Act
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 500_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // Assert — (0 * 1e6 / 1e6) + (5 * 500000 / 1e6) = 2.5
+      const createCall = repo.create.mock.calls[0][0];
+      expect(createCall.cost).toBeCloseTo(2.5, 6);
+    });
+
+    it("computes cost from the input rate alone when outputCostPer1MTokens is 0", async () => {
+      // Arrange — output rate free, input rate non-zero
       const zeroOutputCostConfig = createMockAiConfig();
       zeroOutputCostConfig.ai.outputCostPer1MTokens = 0;
 
@@ -238,9 +273,9 @@ describe("TokenUsageService", () => {
         relationshipType: "Content",
       });
 
-      // Assert
+      // Assert — only input contributes: (10 * 1000 / 1e6) + (0 * 500 / 1e6) = 0.01
       const createCall = repoWithZeroCost.create.mock.calls[0][0];
-      expect(createCall.cost).toBe(0);
+      expect(createCall.cost).toBeCloseTo(0.01, 6);
     });
 
     it("should generate a unique UUID for each record", async () => {
