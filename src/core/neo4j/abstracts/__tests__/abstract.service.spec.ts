@@ -192,4 +192,51 @@ describe("AbstractService - Audit Integration", () => {
       expect(auditService.logDelete).not.toHaveBeenCalled();
     });
   });
+
+  // Immutable fields are server-managed (set by a worker / dedicated Cypher), never
+  // by the client DTO. A PUT that omits them must NOT null them out. See game.intro /
+  // game.originPlot: editing a game's name was wiping its generated opening.
+  describe("mapDTOToParams - immutable fields", () => {
+    const immutableDescriptor = {
+      fieldNames: ["name", "intro"],
+      fieldDefaults: {},
+      relationships: {},
+      fields: {
+        name: { type: "string" },
+        intro: { type: "string", immutable: true },
+      },
+      computed: {},
+      virtualFields: {},
+      isCompanyScoped: true,
+      model: testModel,
+    } as unknown as EntityDescriptor<TestEntity, Record<string, RelationshipDef>>;
+
+    class ImmutableService extends AbstractService<TestEntity> {
+      protected readonly descriptor = immutableDescriptor;
+      public exposedMap(data: any, op: "create" | "put") {
+        return (this as unknown as { mapDTOToParams(d: any, o: "create" | "put"): any }).mapDTOToParams(data, op);
+      }
+    }
+
+    let svc: ImmutableService;
+    beforeEach(() => {
+      svc = new ImmutableService(jsonApiService, repository, clsService, testModel);
+    });
+
+    it("omits an immutable field on PUT when absent (preserves stored value)", () => {
+      const params = svc.exposedMap({ id: TEST_IDS.entityId, attributes: { name: "New" } }, "put");
+      expect(params).toEqual({ id: TEST_IDS.entityId, name: "New" });
+      expect("intro" in params).toBe(false);
+    });
+
+    it("nulls a non-immutable field that is absent on PUT (unchanged behavior)", () => {
+      const params = svc.exposedMap({ id: TEST_IDS.entityId, attributes: { intro: "ignored" } }, "put");
+      expect(params.name).toBeNull();
+    });
+
+    it("ignores a client-supplied value for an immutable field on PUT", () => {
+      const params = svc.exposedMap({ id: TEST_IDS.entityId, attributes: { name: "New", intro: "hacked" } }, "put");
+      expect("intro" in params).toBe(false);
+    });
+  });
 });
