@@ -60,6 +60,7 @@ interface LLMCallParams<T> {
   relationshipId?: string; // Optional: id of the entity this usage is attributed to.
   relationshipType?: string; // Optional: Neo4j label of the attributed entity. Persistence is skipped unless both relationshipId and relationshipType are set.
   cacheable?: boolean; // Optional: when true, the response is read from / written to the Redis LLM cache keyed on generic params (modelWeight/temperature/systemPrompts/prompt). A hit returns early WITHOUT invoking the provider — and therefore costs no tokens. Default: false.
+  disableThinking?: boolean; // Optional: turn off reasoning/"thinking" for this call (maps to reasoning_effort: "none"). Use for fast structured calls on reasoning-capable models. Default: false.
 }
 
 /**
@@ -599,6 +600,7 @@ export class LLMService {
     const baseModel = this.modelService.getLLM({
       temperature: params.temperature,
       modelWeight: params.modelWeight,
+      disableThinking: params.disableThinking,
     });
 
     // Build config options for the invocation
