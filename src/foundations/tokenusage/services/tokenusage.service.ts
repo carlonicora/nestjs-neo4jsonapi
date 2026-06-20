@@ -28,6 +28,18 @@ export class TokenUsageService {
     }
   }
 
+  /**
+   * Computes the monetary cost of a call from the per-tier rates in config
+   * (`inputCostPer1MTokens` / `outputCostPer1MTokens`). Single source of truth —
+   * used both for persistence and for surfacing cost in ephemeral telemetry.
+   */
+  computeCost(params: { tokens: TokenUsageInterface; useVisionCosts?: boolean; modelWeight?: ModelWeight }): number {
+    const costConfig = params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
+    const inputCost = (params.tokens.input / 1_000_000) * (costConfig.inputCostPer1MTokens ?? 0);
+    const outputCost = (params.tokens.output / 1_000_000) * (costConfig.outputCostPer1MTokens ?? 0);
+    return inputCost + outputCost;
+  }
+
   async recordTokenUsage(params: {
     tokens: TokenUsageInterface;
     type: string;
@@ -36,11 +48,11 @@ export class TokenUsageService {
     useVisionCosts?: boolean;
     modelWeight?: ModelWeight;
   }): Promise<void> {
-    const costConfig = params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
-
-    const inputCost = (params.tokens.input / 1_000_000) * (costConfig.inputCostPer1MTokens ?? 0);
-    const outputCost = (params.tokens.output / 1_000_000) * (costConfig.outputCostPer1MTokens ?? 0);
-    const cost = inputCost + outputCost;
+    const cost = this.computeCost({
+      tokens: params.tokens,
+      useVisionCosts: params.useVisionCosts,
+      modelWeight: params.modelWeight,
+    });
 
     await this.tokenUsageRepository.create({
       id: randomUUID(),

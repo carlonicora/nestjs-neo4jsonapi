@@ -512,6 +512,7 @@ export class LLMService {
       model: aiConfig.model,
       provider: aiConfig.provider,
       temperature: params.temperature,
+      costFn: (tokens) => this.tokenUsageService.computeCost({ tokens, modelWeight }),
     });
     let totalInput = 0;
     let totalOutput = 0;
@@ -958,6 +959,7 @@ export class LLMService {
       model: aiConfig.model,
       provider: aiConfig.provider,
       temperature: params.temperature,
+      costFn: (tokens) => this.tokenUsageService.computeCost({ tokens, modelWeight }),
     });
 
     // Build the same schema-guided instruction string `call` would build, so
@@ -1164,6 +1166,7 @@ export class LLMService {
       model: aiConfig.model,
       provider: aiConfig.provider,
       temperature: params.temperature,
+      costFn: (tokens) => this.tokenUsageService.computeCost({ tokens, modelWeight }),
     });
 
     const system = params.systemPrompts.join("\n\n");
@@ -1353,6 +1356,7 @@ export class LLMService {
       model: aiConfig.model,
       provider: aiConfig.provider,
       temperature: params.temperature ?? 0.2,
+      costFn: (tokens) => this.tokenUsageService.computeCost({ tokens, modelWeight }),
     });
 
     session.recordInputs({

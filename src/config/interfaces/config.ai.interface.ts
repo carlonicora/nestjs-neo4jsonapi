@@ -30,6 +30,10 @@
  * LANGSMITH_TRACING        "true" to enable (legacy alias: LANGCHAIN_TRACING_V2)
  * LANGSMITH_API_KEY        LangSmith API key (legacy alias: LANGCHAIN_API_KEY)
  * LANGSMITH_PROJECT        Project name to group traces (legacy alias: LANGCHAIN_PROJECT)
+ * LANGSMITH_ENDPOINT       Region/self-hosted base URL (legacy alias: LANGCHAIN_ENDPOINT).
+ *                          EU: "https://eu.api.smith.langchain.com". Default is the US
+ *                          endpoint. The API key MUST belong to a workspace in the same
+ *                          region as the endpoint, or traces are rejected (403).
  *
  * Per-call `metadata` (nodeName, agentName, …) forwarded in `LLMService` appears
  * on each run for filtering. This is a dev/debug tool, distinct from the in-app

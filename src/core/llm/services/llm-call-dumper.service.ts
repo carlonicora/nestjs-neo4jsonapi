@@ -16,6 +16,8 @@ export interface LlmDumpEvent {
   errorMessage?: string;
   durationMs: number;
   totalTokens: { input: number; output: number };
+  /** Monetary cost of the call from the per-tier config rates (0 when not computable). */
+  cost: number;
   finishReason?: string;
   reply: { content: string; toolCalls: Array<{ name: string; args: unknown }> };
 }
@@ -25,6 +27,12 @@ export interface DumpSessionStartParams {
   model: string;
   provider: string;
   temperature?: number;
+  /**
+   * Computes the call's monetary cost from its final token counts. Supplied by the
+   * caller (which knows the model tier + config rates) so the dumper stays free of
+   * cost/config concerns. Omitted ⇒ cost reported as 0.
+   */
+  costFn?: (tokens: { input: number; output: number }) => number;
 }
 
 export interface DumpInputs {
@@ -49,6 +57,8 @@ export interface DumpCloseParams {
   errorMessage?: string;
   errorStack?: string;
   totalTokens: { input: number; output: number };
+  /** Monetary cost of the call (computed from the per-tier config rates by the caller). */
+  cost?: number;
   warnings?: string[];
   parseFallbacks?: Array<"tool_calls" | "lenient" | "raw">;
 }
@@ -206,6 +216,7 @@ class RealDumpSession implements DumpSession {
 
   close(params: DumpCloseParams): void {
     const completedAt = new Date();
+    const cost = this.start.costFn ? this.start.costFn(params.totalTokens) : (params.cost ?? 0);
     const meta = {
       callId: this.callId,
       requestId: this.clsContext.requestId,
@@ -224,6 +235,7 @@ class RealDumpSession implements DumpSession {
       errorMessage: params.errorMessage,
       errorStack: params.errorStack,
       totalTokens: params.totalTokens,
+      cost,
       warnings: params.warnings ?? [],
       parseFallbacks: params.parseFallbacks ?? [],
     };
@@ -252,6 +264,7 @@ class RealDumpSession implements DumpSession {
           errorMessage: meta.errorMessage,
           durationMs: meta.durationMs,
           totalTokens: meta.totalTokens,
+          cost: meta.cost,
           finishReason: last?.finishReason,
           reply: {
             // Honour the same redaction as the on-disk dump (response.content →
