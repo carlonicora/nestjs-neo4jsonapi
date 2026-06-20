@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "crypto";
 import { Redis } from "ioredis";
@@ -52,7 +52,7 @@ export class LLMCacheService implements OnModuleDestroy {
   private readonly logger = new Logger(LLMCacheService.name);
   private readonly redis: Redis;
 
-  constructor(configService: ConfigService<BaseConfigInterface>, clientOverride?: Redis) {
+  constructor(configService: ConfigService<BaseConfigInterface>, @Optional() clientOverride?: Redis) {
     if (clientOverride) {
       this.redis = clientOverride;
       return;
