@@ -1,3 +1,9 @@
+## [1.92.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.91.0...v1.92.0) (2026-06-20)
+
+### 🚀 Features
+
+* add llm call dumper ([a325279](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a32527922fd765f2cb330b29f87ff08c2663ed70))
+
 ## [1.91.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.90.0...v1.91.0) (2026-06-18)
 
 ### 🚀 Features
