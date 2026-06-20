@@ -30,3 +30,5 @@ coverage/
 # Temp
 *.tmp
 *.temp
+
+.llm-dumps/

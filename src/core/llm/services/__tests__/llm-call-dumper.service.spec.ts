@@ -224,4 +224,63 @@ describe("LLMCallDumper", () => {
       await fs.rm(blocker, { force: true });
     });
   });
+
+  describe("websocket emit (flag on)", () => {
+    function makeStartParams() {
+      return { model: "m", provider: "p", metadata: { nodeName: "direct", agentName: "game" } };
+    }
+
+    it("emits a reply-focused llm:dump to the resolved user on close", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const cls = {
+        has: (k: string) => k === "userId",
+        get: (k: string) => (k === "userId" ? "user-1" : undefined),
+      } as any;
+      const dumper = new LLMCallDumper(cls, ws);
+
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({
+        content: "",
+        toolCalls: [{ id: "1", name: "direct_scene", args: { lead: "Mara" } }],
+        tokenUsage: { input: 3, output: 4 },
+        finishReason: "tool_calls",
+      });
+      session.close({ finalStatus: "success", totalTokens: { input: 3, output: 4 } });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ uid: "user-1", ev: "llm:dump" });
+      expect(sent[0].data).toMatchObject({
+        nodeName: "direct",
+        agentName: "game",
+        finalStatus: "success",
+        totalTokens: { input: 3, output: 4 },
+        reply: { content: "", toolCalls: [{ name: "direct_scene", args: { lead: "Mara" } }] },
+      });
+    });
+
+    it("does not emit when there is no userId in CLS", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const dumper = new LLMCallDumper({ has: () => false, get: () => undefined } as any, ws);
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({ content: "x" });
+      session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 } });
+      expect(sent).toHaveLength(0);
+    });
+
+    it("does not emit (and does not throw) when no websocket is provided", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const cls = { has: (k: string) => k === "userId", get: () => "user-1" } as any;
+      const dumper = new LLMCallDumper(cls);
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({ content: "x" });
+      expect(() => session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 } })).not.toThrow();
+    });
+  });
 });

@@ -2,6 +2,23 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { LLMCallMetadata } from "../interfaces/llm-call-metadata.interface";
+import { WebSocketService } from "../../websocket/services/websocket.service";
+
+export const LLM_DUMP_EVENT = "llm:dump";
+
+export interface LlmDumpEvent {
+  callId: string;
+  nodeName: string;
+  agentName: string;
+  model: string;
+  provider: string;
+  finalStatus: "success" | "error" | "partial";
+  errorMessage?: string;
+  durationMs: number;
+  totalTokens: { input: number; output: number };
+  finishReason?: string;
+  reply: { content: string; toolCalls: Array<{ name: string; args: unknown }> };
+}
 
 export interface DumpSessionStartParams {
   metadata?: LLMCallMetadata & Record<string, unknown>;
@@ -139,6 +156,7 @@ class RealDumpSession implements DumpSession {
     },
     private readonly fileWriter: (path: string, body: string) => Promise<void>,
     private readonly mkdirp: (dir: string) => Promise<void>,
+    private readonly onClose?: (event: LlmDumpEvent) => void,
   ) {}
 
   recordInputs(inputs: DumpInputs): void {
@@ -214,6 +232,30 @@ class RealDumpSession implements DumpSession {
       iterations: this.iterations,
     };
 
+    if (this.onClose) {
+      try {
+        const last = [...this.iterations].reverse().find((it) => it.response)?.response;
+        this.onClose({
+          callId: this.callId,
+          nodeName: meta.nodeName,
+          agentName: meta.agentName,
+          model: meta.model,
+          provider: meta.provider,
+          finalStatus: meta.finalStatus,
+          errorMessage: meta.errorMessage,
+          durationMs: meta.durationMs,
+          totalTokens: meta.totalTokens,
+          finishReason: last?.finishReason,
+          reply: {
+            content: last?.content ?? "",
+            toolCalls: (last?.toolCalls ?? []).map((tc) => ({ name: tc.name, args: tc.args })),
+          },
+        });
+      } catch {
+        // telemetry must never break a turn — swallow
+      }
+    }
+
     const body = JSON.stringify(payload, null, 2);
     const yyyyMmDd = this.startedAt.toISOString().slice(0, 10);
     const hhMmSsMs = this.startedAt.toISOString().slice(11, 23).replace(/[:.]/g, "-");
@@ -250,7 +292,10 @@ export class LLMCallDumper {
   private readonly enabled: boolean;
   private readonly outputDir: string;
 
-  constructor(@Optional() private readonly cls?: ClsService) {
+  constructor(
+    @Optional() private readonly cls?: ClsService,
+    @Optional() private readonly webSocket?: WebSocketService,
+  ) {
     this.enabled = process.env.ASSISTANT_DUMP_LLM_CALLS === "1";
     // Default to `<cwd>/.llm-dumps`. When the API runs via
     // `pnpm --filter neural-erp-api dev`, cwd is `apps/api/`, so this lands at
@@ -272,6 +317,16 @@ export class LLMCallDumper {
       turnStartedAt: turn?.turnStartedAt,
     };
 
+    const userId =
+      (log?.userId as string | undefined) ??
+      (this.cls?.has?.("userId") ? (this.cls.get("userId") as string) : undefined);
+    const onClose =
+      this.webSocket && userId
+        ? (event: LlmDumpEvent) => {
+            void this.webSocket!.sendMessageToUser(userId, LLM_DUMP_EVENT, event);
+          }
+        : undefined;
+
     // fs is loaded lazily so the no-op path stays I/O-free.
 
     const fs = require("fs/promises") as typeof import("fs/promises");
@@ -282,6 +337,7 @@ export class LLMCallDumper {
       clsContext,
       (path, body) => fs.writeFile(path, body, "utf8"),
       (dir) => fs.mkdir(dir, { recursive: true }).then(() => undefined),
+      onClose,
     );
   }
 }
