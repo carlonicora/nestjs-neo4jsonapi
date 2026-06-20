@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
-import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
+import { EntityDescriptor, FieldDef, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { AuditService } from "../../../foundations/audit/services/audit.service";
 import { JsonApiDataInterface } from "../../jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
@@ -297,6 +297,13 @@ export abstract class AbstractService<
 
     // Map all fields from descriptor - use DTO value, default, or null
     for (const fieldName of this.descriptor.fieldNames) {
+      // Immutable fields are server-managed and never written via the generic PUT
+      // path. Skip them so the stored value is preserved (and a client-supplied
+      // value is ignored) instead of being nulled out by full replacement.
+      const fieldDef = (this.descriptor.fields as Record<string, FieldDef | undefined>)[fieldName];
+      if (operation === "put" && fieldDef?.immutable) {
+        continue;
+      }
       if (data.attributes && fieldName in data.attributes) {
         params[fieldName] = data.attributes[fieldName];
       } else if (fieldName in this.descriptor.fieldDefaults) {

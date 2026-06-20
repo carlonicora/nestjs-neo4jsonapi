@@ -57,6 +57,15 @@ export interface FieldDef {
   /** Human-readable description. Required for the field to be visible to the chatbot. */
   description?: string;
   /**
+   * If true, the field is never written through the generic create/update (PUT)
+   * path. On PUT the existing stored value is preserved instead of being nulled,
+   * and any client-supplied value is ignored. Use for server-generated fields that
+   * a client edit form does not carry (e.g. an AI-generated opening) so a partial
+   * full-replacement does not wipe them. Mirrors relationship-level `immutable`.
+   * (default: false)
+   */
+  immutable?: boolean;
+  /**
    * Semantic kind for chatbot rendering. When set to `{ type: "money" }`,
    * the field is stored as an integer in the currency's minor unit (cents by
    * default). The catalogue annotates it and tool returns emit a companion
