@@ -1,3 +1,13 @@
+## [1.94.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.93.0...v1.94.0) (2026-06-20)
+
+### 🚀 Features
+
+* **llm:** per-call cost in telemetry (computeCost) + LangSmith EU endpoint doc ([c5d927c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c5d927ccf92a54708d3395b344012573baf92177))
+
+### 🐛 Bug Fixes
+
+* **llm:** mark LLMCacheService Redis override @Optional so DI bootstrap resolves ([a36de39](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a36de39058b5bcfea96e902e63342b388c083e5e))
+
 ## [1.93.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.92.1...v1.93.0) (2026-06-20)
 
 ### 🚀 Features
