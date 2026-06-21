@@ -1,3 +1,9 @@
+## [1.96.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.95.0...v1.96.0) (2026-06-21)
+
+### 🚀 Features
+
+* **tokenusage:** implement event-driven token usage recording and handling ([28991ac](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/28991ac73138f26b7f1497e5a694dcc778b45e4f))
+
 ## [1.95.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.94.0...v1.95.0) (2026-06-20)
 
 ### 🚀 Features
