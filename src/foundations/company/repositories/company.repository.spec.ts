@@ -347,6 +347,33 @@ describe("CompanyRepository", () => {
 
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();
     });
+
+    it("deducts entirely from extra tokens when monthly is exhausted (writes a valid SET query)", async () => {
+      const companyNoMonthly = {
+        ...MOCK_COMPANY,
+        availableMonthlyTokens: 0,
+        availableExtraTokens: 1000,
+      };
+      mockNeo4jService.readOne.mockResolvedValue(companyNoMonthly);
+      mockNeo4jService.writeOne.mockResolvedValue();
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      await repository.useTokens({ input: 100, output: 50 }); // 150 tokens, monthly = 0
+
+      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
+      const writtenQuery = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(writtenQuery.query).toContain("SET company.availableExtraTokens = $availableExtraTokens");
+      expect(writtenQuery.queryParams.availableExtraTokens).toBe(850);
+    });
+
+    it("does nothing when zero tokens are consumed", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      await repository.useTokens({ input: 0, output: 0 });
+
+      expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
+      expect(mockNeo4jService.writeOne).not.toHaveBeenCalled();
+    });
   });
 
   describe("markSubscriptionStatus", () => {

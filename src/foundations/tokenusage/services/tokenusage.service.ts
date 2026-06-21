@@ -1,16 +1,21 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { randomUUID } from "crypto";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { TokenUsageRepository } from "../../tokenusage/repositories/tokenusage.repository";
 import { ModelWeight } from "../../../core/llm/enums/model.weight";
+import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
 
 @Injectable()
 export class TokenUsageService {
+  private readonly logger = new Logger(TokenUsageService.name);
+
   constructor(
     private readonly tokenUsageRepository: TokenUsageRepository,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private get aiConfig(): ConfigAiInterface {
@@ -63,5 +68,20 @@ export class TokenUsageService {
       relationshipId: params.relationshipId,
       relationshipType: params.relationshipType,
     });
+
+    // Notify listeners (e.g. company balance deduction) that usage occurred.
+    // Decoupled via the event bus so this foundation module never imports CompanyModule.
+    // Best-effort: emitting must never break the LLM call that triggered it.
+    try {
+      const payload: TokenUsageRecordedPayload = {
+        input: params.tokens.input,
+        output: params.tokens.output,
+      };
+      this.eventEmitter.emit(TOKEN_USAGE_RECORDED_EVENT, payload);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to emit ${TOKEN_USAGE_RECORDED_EVENT}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }

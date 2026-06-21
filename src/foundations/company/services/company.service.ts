@@ -1,6 +1,8 @@
 import { InjectQueue } from "@nestjs/bullmq";
-import { HttpException, HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
+import { OnEvent } from "@nestjs/event-emitter";
+import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../../tokenusage/events/tokenusage.events";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { QueueId } from "../../../config/enums/queue.id";
@@ -19,6 +21,8 @@ import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/
 
 @Injectable()
 export class CompanyService {
+  private readonly logger = new Logger(CompanyService.name);
+
   constructor(
     private readonly builder: JsonApiService,
     private readonly companyRepository: CompanyRepository,
@@ -74,6 +78,21 @@ export class CompanyService {
         type: "company:tokens_updated",
         companyId,
       });
+    }
+  }
+
+  /**
+   * Reacts to LLM token consumption recorded by TokenUsageService and decrements
+   * the company's running balance. Decoupled via the event bus so the tokenusage
+   * module never imports CompanyModule. Best-effort: must never throw back into
+   * the emitter (the LLM call that triggered it must not break).
+   */
+  @OnEvent(TOKEN_USAGE_RECORDED_EVENT)
+  async handleTokenUsageRecorded(payload: TokenUsageRecordedPayload): Promise<void> {
+    try {
+      await this.useTokens({ inputTokens: payload.input, outputTokens: payload.output });
+    } catch (error) {
+      this.logger.warn(`Failed to deduct company tokens: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

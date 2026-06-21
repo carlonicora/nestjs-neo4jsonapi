@@ -6,11 +6,14 @@ import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { ConfigAiInterface } from "../../../../config/interfaces/config.ai.interface";
 import { ModelWeight } from "../../../../core/llm/enums/model.weight";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { TOKEN_USAGE_RECORDED_EVENT } from "../../events/tokenusage.events";
 
 describe("TokenUsageService", () => {
   let service: TokenUsageService;
   let tokenUsageRepository: MockedObject<TokenUsageRepository>;
   let configService: MockedObject<ConfigService>;
+  let eventEmitter: MockedObject<EventEmitter2>;
 
   const TEST_IDS = {
     relationshipId: "550e8400-e29b-41d4-a716-446655440000",
@@ -19,6 +22,10 @@ describe("TokenUsageService", () => {
   const createMockTokenUsageRepository = () => ({
     create: vi.fn(),
     onModuleInit: vi.fn(),
+  });
+
+  const createMockEventEmitter = () => ({
+    emit: vi.fn(),
   });
 
   const createMockAiConfig = (): ConfigAiInterface => ({
@@ -83,18 +90,21 @@ describe("TokenUsageService", () => {
     const mockAiConfig = createMockAiConfig();
     const mockTokenUsageRepository = createMockTokenUsageRepository();
     const mockConfigService = createMockConfigService(mockAiConfig);
+    const mockEventEmitter = createMockEventEmitter();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TokenUsageService,
         { provide: TokenUsageRepository, useValue: mockTokenUsageRepository },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
     service = module.get<TokenUsageService>(TokenUsageService);
     tokenUsageRepository = module.get(TokenUsageRepository) as MockedObject<TokenUsageRepository>;
     configService = module.get(ConfigService) as MockedObject<ConfigService>;
+    eventEmitter = module.get(EventEmitter2) as MockedObject<EventEmitter2>;
   });
 
   afterEach(() => {
@@ -108,6 +118,37 @@ describe("TokenUsageService", () => {
   });
 
   describe("recordTokenUsage", () => {
+    it("emits the tokenusage.recorded event with the input/output tokens after recording", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+
+      await service.recordTokenUsage({
+        tokens: { input: 1000, output: 500 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, { input: 1000, output: 500 });
+    });
+
+    it("does not throw when the event emit fails (best-effort)", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+      eventEmitter.emit.mockImplementation(() => {
+        throw new Error("emit boom");
+      });
+
+      await expect(
+        service.recordTokenUsage({
+          tokens: { input: 100, output: 50 },
+          type: TokenUsageType.Summariser,
+          relationshipId: TEST_IDS.relationshipId,
+          relationshipType: "Content",
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(tokenUsageRepository.create).toHaveBeenCalled();
+    });
+
     it("should record token usage with calculated cost using AI config", async () => {
       // Arrange
       tokenUsageRepository.create.mockResolvedValue(undefined);
@@ -184,6 +225,7 @@ describe("TokenUsageService", () => {
           TokenUsageService,
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
           { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
       }).compile();
 
@@ -219,6 +261,7 @@ describe("TokenUsageService", () => {
           TokenUsageService,
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
           { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
       }).compile();
 
@@ -258,6 +301,7 @@ describe("TokenUsageService", () => {
           TokenUsageService,
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
           { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
       }).compile();
 
