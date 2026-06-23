@@ -13,6 +13,7 @@ describe("createBaseConfig — AI tiers", () => {
     "AI_API_VERSION",
     "AI_INPUT_COST_PER_1M_TOKENS",
     "AI_OUTPUT_COST_PER_1M_TOKENS",
+    "AI_CACHED_INPUT_COST_PER_1M_TOKENS",
     "AI_MAX_OUTPUT_TOKENS",
     "AI_ALLOW_FALLBACKS",
     "AI_GOOGLE_CREDENTIALS_BASE64",
@@ -92,6 +93,28 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLarge.maxOutputTokens).toBeUndefined();
   });
 
+  it("parses the cached input rate per tier, leaving it undefined when unset", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_CACHED_INPUT_COST_PER_1M_TOKENS = "0.03";
+    process.env.AI_CACHED_INPUT_COST_PER_1M_TOKENS_LARGE = "0.05";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.cachedInputCostPer1MTokens).toBe(0.03);
+    expect(cfg.aiLite.cachedInputCostPer1MTokens).toBe(0.03); // inherits base
+    expect(cfg.aiLarge.cachedInputCostPer1MTokens).toBe(0.05); // own override
+  });
+
+  it("leaves cachedInputCostPer1MTokens undefined when the env var is unset", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.cachedInputCostPer1MTokens).toBeUndefined();
+  });
+
   it("treats a tier that switches provider as standalone — no field leaks from the base tier", () => {
     process.env.AI_PROVIDER = "ollama";
     process.env.AI_MODEL = "gemma:12b";
@@ -145,5 +168,45 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.ai.allowFallbacks).toBe(true);
     expect(cfg.aiLite.allowFallbacks).toBe(true);
     expect(cfg.aiLarge.allowFallbacks).toBe(false);
+  });
+
+  it("does NOT inherit the base AI_REGION into tiers that override only the model", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_REGION = "friendli";
+    process.env.AI_MODEL_LITE = "lite-model";
+
+    const cfg = createBaseConfig().ai;
+
+    // Base tier keeps its pin; lite must not drag friendli onto a model the
+    // provider may not serve there (would 404/422).
+    expect(cfg.ai.region).toBe("friendli");
+    expect(cfg.aiLite.region).toBe("");
+    expect(cfg.aiLarge.region).toBe("");
+  });
+
+  it("resolves AI_REGION per tier when set explicitly", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_REGION = "friendli";
+    process.env.AI_REGION_LARGE = "together";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.region).toBe("friendli");
+    expect(cfg.aiLite.region).toBe("");
+    expect(cfg.aiLarge.region).toBe("together");
+  });
+
+  it("does NOT inherit a base AI_ALLOW_FALLBACKS=false pin into the other tiers", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_ALLOW_FALLBACKS = "false";
+
+    const cfg = createBaseConfig().ai;
+
+    expect(cfg.ai.allowFallbacks).toBe(false);
+    expect(cfg.aiLite.allowFallbacks).toBe(true);
+    expect(cfg.aiLarge.allowFallbacks).toBe(true);
   });
 });

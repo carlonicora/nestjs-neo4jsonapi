@@ -40,9 +40,14 @@ export class TokenUsageService {
    */
   computeCost(params: { tokens: TokenUsageInterface; useVisionCosts?: boolean; modelWeight?: ModelWeight }): number {
     const costConfig = params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
-    const inputCost = (params.tokens.input / 1_000_000) * (costConfig.inputCostPer1MTokens ?? 0);
-    const outputCost = (params.tokens.output / 1_000_000) * (costConfig.outputCostPer1MTokens ?? 0);
-    return inputCost + outputCost;
+    const inputRate = costConfig.inputCostPer1MTokens ?? 0;
+    const outputRate = costConfig.outputCostPer1MTokens ?? 0;
+    // vision/audio configs have no cached rate → falls back to the full input rate (no discount).
+    const cachedRate = (costConfig as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens ?? inputRate;
+    const cached = Math.min(params.tokens.cached ?? 0, params.tokens.input);
+    const uncachedInput = params.tokens.input - cached;
+    const cost = uncachedInput * inputRate + cached * cachedRate + params.tokens.output * outputRate;
+    return cost / 1_000_000;
   }
 
   async recordTokenUsage(params: {
@@ -64,6 +69,7 @@ export class TokenUsageService {
       tokenUsageType: params.type,
       inputTokens: params.tokens.input,
       outputTokens: params.tokens.output,
+      cachedInputTokens: params.tokens.cached ?? 0,
       cost: cost,
       relationshipId: params.relationshipId,
       relationshipType: params.relationshipType,

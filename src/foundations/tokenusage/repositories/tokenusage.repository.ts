@@ -17,6 +17,7 @@ export class TokenUsageRepository implements OnModuleInit {
     tokenUsageType: string;
     inputTokens: number;
     outputTokens: number;
+    cachedInputTokens?: number;
     cost?: number;
     relationshipId: string;
     relationshipType: string;
@@ -29,6 +30,7 @@ export class TokenUsageRepository implements OnModuleInit {
       tokenUsageType: params.tokenUsageType,
       inputTokens: params.inputTokens,
       outputTokens: params.outputTokens,
+      cachedInputTokens: params.cachedInputTokens ?? 0,
       relationshipId: params.relationshipId,
       cost: params.cost ?? 0,
     };
@@ -39,6 +41,7 @@ export class TokenUsageRepository implements OnModuleInit {
         tokenUsageType: $tokenUsageType,
         inputTokens: $inputTokens,
         outputTokens: $outputTokens,
+        cachedInputTokens: $cachedInputTokens,
         cost: $cost,
         createdAt: datetime(),
         updatedAt: datetime()

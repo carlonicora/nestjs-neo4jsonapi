@@ -658,7 +658,7 @@ describe("LLMService", () => {
 
       expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
       const arg = recordTokenUsageMock.mock.calls[0][0];
-      expect(arg.tokens).toEqual({ input: 100, output: 50 });
+      expect(arg.tokens).toEqual({ input: 100, output: 50, cached: 0 });
       expect(arg.type).toBe("custom_node");
       expect(arg.relationshipId).toBe("round-1");
       expect(arg.relationshipType).toBe("Round");
@@ -729,7 +729,7 @@ describe("LLMService", () => {
 
       expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
       const arg = recordTokenUsageMock.mock.calls[0][0];
-      expect(arg.tokens).toEqual({ input: 250, output: 80 });
+      expect(arg.tokens).toEqual({ input: 250, output: 80, cached: 0 });
       expect(arg.type).toBe("custom_extract");
     });
   });
@@ -767,7 +767,7 @@ describe("LLMService", () => {
       expect(streamTextMock.mock.calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
       expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
       const arg = recordTokenUsageMock.mock.calls[0][0];
-      expect(arg.tokens).toEqual({ input: 30, output: 12 });
+      expect(arg.tokens).toEqual({ input: 30, output: 12, cached: 0 });
       expect(arg.type).toBe("custom_narrate");
       expect(arg.relationshipId).toBe("r7");
       expect(arg.relationshipType).toBe("Round");

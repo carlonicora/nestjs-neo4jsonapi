@@ -55,6 +55,12 @@ export interface AiTierConfig {
   apiVersion?: string;
   inputCostPer1MTokens: number;
   outputCostPer1MTokens: number;
+  /**
+   * Optional discounted rate for cached (cache-read) input tokens, which providers
+   * report as a SUBSET of the input tokens. When unset, cached tokens are billed at
+   * `inputCostPer1MTokens` (no discount). Set via AI_CACHED_INPUT_COST_PER_1M_TOKENS.
+   */
+  cachedInputCostPer1MTokens?: number;
   maxOutputTokens?: number;
   /**
    * OpenRouter only: whether `region` (sent as `provider.order`) permits routing

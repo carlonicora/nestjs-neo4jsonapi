@@ -4,6 +4,7 @@ import { Company } from "../../company/entities/company";
 export type TokenUsage = Entity & {
   inputTokens: number;
   outputTokens: number;
+  cachedInputTokens?: number;
   cost?: number;
   tokenUsageType: string;
 

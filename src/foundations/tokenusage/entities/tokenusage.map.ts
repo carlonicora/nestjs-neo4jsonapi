@@ -7,6 +7,7 @@ export const mapTokenUsage = (params: { data: any; record: any; entityFactory: E
     ...mapEntity({ record: params.data }),
     inputTokens: params.data.inputTokens,
     outputTokens: params.data.outputTokens,
+    cachedInputTokens: params.data.cachedInputTokens,
     cost: params.data.cost,
     tokenUsageType: params.data.tokenUsageType,
     company: undefined,

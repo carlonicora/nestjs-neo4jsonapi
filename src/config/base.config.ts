@@ -14,6 +14,11 @@ import { AiTierConfig } from "./interfaces/config.ai.interface";
  *   provider as the base tier) inherits field-by-field from the normal `AI_*`
  *   vars — a lone `AI_MODEL_LITE` overrides only the model. Mirrors the
  *   existing VISION_ and AUDIO_ env fallback convention.
+ * - EXCEPTION: `AI_REGION` and `AI_ALLOW_FALLBACKS` never inherit the base.
+ *   They are per-MODEL routing (the OpenRouter provider pin), not provider-wide
+ *   credentials, so inheriting them would pin a tier's overridden model to a
+ *   provider that may not serve it (404/422). A tier that wants a pin must set
+ *   `AI_REGION<suffix>` / `AI_ALLOW_FALLBACKS<suffix>` explicitly.
  * - A tier that switches to a DIFFERENT provider is standalone: no field
  *   inherits from the base tier, because base values (URL, API key, costs…)
  *   point at the wrong service. Each field resolves only from its suffixed
@@ -24,21 +29,32 @@ const buildAiTier = (suffix: string): AiTierConfig => {
   const tierProvider = (suffix ? process.env[`AI_PROVIDER${suffix}`] : baseProvider) || "";
   const standalone = suffix !== "" && tierProvider !== "" && tierProvider !== baseProvider;
   const env = (key: string): string => process.env[`${key}${suffix}`] || (standalone ? "" : process.env[key]) || "";
+  // `region` and `allowFallbacks` describe per-MODEL routing (the OpenRouter
+  // provider pin), NOT shared credentials/endpoint. A tier that overrides only
+  // AI_MODEL must not drag the base tier's pin onto a different model, or the
+  // provider 404s (model not served there) / 422s (rejects the oneOf). So these
+  // resolve strictly from the tier's own suffixed var and never inherit the
+  // base — unlike apiKey/url/instance/costs, which are provider-wide.
+  const own = (key: string): string => process.env[`${key}${suffix}`] || "";
   const maxOutputTokens = env("AI_MAX_OUTPUT_TOKENS");
+  // Conditional spread avoids `parseFloat("") = NaN` — when the env var is unset,
+  // the field is omitted entirely so it stays `undefined` (no-discount fallback).
+  const cachedInputCost = env("AI_CACHED_INPUT_COST_PER_1M_TOKENS");
   // Default true (matches OpenRouter's own default); only an explicit "false"
   // turns `region` into a hard pin.
-  const allowFallbacks = env("AI_ALLOW_FALLBACKS").toLowerCase() !== "false";
+  const allowFallbacks = own("AI_ALLOW_FALLBACKS").toLowerCase() !== "false";
   return {
     provider: tierProvider || baseProvider,
     apiKey: env("AI_API_KEY"),
     model: env("AI_MODEL"),
     url: env("AI_URL"),
-    region: env("AI_REGION"),
+    region: own("AI_REGION"),
     secret: env("AI_SECRET"),
     instance: env("AI_INSTANCE"),
     apiVersion: env("AI_API_VERSION"),
     inputCostPer1MTokens: parseFloat(env("AI_INPUT_COST_PER_1M_TOKENS") || "0"),
     outputCostPer1MTokens: parseFloat(env("AI_OUTPUT_COST_PER_1M_TOKENS") || "0"),
+    ...(cachedInputCost ? { cachedInputCostPer1MTokens: parseFloat(cachedInputCost) } : {}),
     ...(maxOutputTokens ? { maxOutputTokens: parseInt(maxOutputTokens, 10) } : {}),
     allowFallbacks,
     googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),

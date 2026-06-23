@@ -364,6 +364,34 @@ describe("LLMCallDumper", () => {
       });
     });
 
+    it("includes cached tokens in the dump event and passes them to costFn", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const cls = {
+        has: (k: string) => k === "userId",
+        get: (k: string) => (k === "userId" ? "user-1" : undefined),
+      } as any;
+      const dumper = new LLMCallDumper(cls, ws);
+
+      const costFn = vi.fn().mockReturnValue(0.001);
+      const session = dumper.startSession({ ...makeStartParams(), costFn });
+      session.startIteration("final-structured", []);
+      session.recordResponse({ content: "{}", tokenUsage: { input: 1000, output: 200 } });
+      session.close({
+        finalStatus: "success",
+        totalTokens: { input: 1000, output: 200, cached: 300 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+
+      expect(costFn).toHaveBeenCalledWith({ input: 1000, output: 200, cached: 300 });
+      expect(sent).toHaveLength(1);
+      const event = sent[0].data;
+      expect(event.totalTokens.cached).toBe(300);
+      expect(event.cost).toBe(0.001);
+    });
+
     it("does not emit when there is no userId in CLS", () => {
       process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
       const sent: any[] = [];

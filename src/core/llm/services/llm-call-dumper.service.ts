@@ -15,7 +15,7 @@ export interface LlmDumpEvent {
   finalStatus: "success" | "error" | "partial";
   errorMessage?: string;
   durationMs: number;
-  totalTokens: { input: number; output: number };
+  totalTokens: { input: number; output: number; cached?: number };
   /** Monetary cost of the call from the per-tier config rates (0 when not computable). */
   cost: number;
   finishReason?: string;
@@ -32,7 +32,7 @@ export interface DumpSessionStartParams {
    * caller (which knows the model tier + config rates) so the dumper stays free of
    * cost/config concerns. Omitted ⇒ cost reported as 0.
    */
-  costFn?: (tokens: { input: number; output: number }) => number;
+  costFn?: (tokens: { input: number; output: number; cached?: number }) => number;
 }
 
 export interface DumpInputs {
@@ -56,7 +56,7 @@ export interface DumpCloseParams {
   finalStatus: "success" | "error" | "partial";
   errorMessage?: string;
   errorStack?: string;
-  totalTokens: { input: number; output: number };
+  totalTokens: { input: number; output: number; cached?: number };
   /** Monetary cost of the call (computed from the per-tier config rates by the caller). */
   cost?: number;
   warnings?: string[];

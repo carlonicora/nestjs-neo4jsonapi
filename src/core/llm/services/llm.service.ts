@@ -191,7 +191,7 @@ export class LLMService {
       relationshipType?: string;
       modelWeight?: ModelWeight;
     },
-    tokens: { input: number; output: number },
+    tokens: { input: number; output: number; cached?: number },
   ): Promise<void> {
     // Attribution is opt-in: the caller decides which entity this usage is
     // recorded against. With no relationship, there is nothing to attribute to,
@@ -517,22 +517,24 @@ export class LLMService {
     });
     let totalInput = 0;
     let totalOutput = 0;
+    let totalCached = 0;
     const parseFallbacks: Array<"tool_calls" | "lenient" | "raw"> = [];
     const warnings: string[] = [];
     try {
       const result = await this._invokeOriginal<T>(
         params,
         session,
-        (i, o) => {
+        (i, o, c) => {
           totalInput += i;
           totalOutput += o;
+          totalCached += c;
         },
         (kind) => parseFallbacks.push(kind),
         (w) => warnings.push(w),
       );
       session.close({
         finalStatus: "success",
-        totalTokens: { input: totalInput, output: totalOutput },
+        totalTokens: { input: totalInput, output: totalOutput, cached: totalCached },
         warnings,
         parseFallbacks,
       });
@@ -543,7 +545,7 @@ export class LLMService {
           relationshipType: params.relationshipType,
           modelWeight,
         },
-        { input: totalInput, output: totalOutput },
+        { input: totalInput, output: totalOutput, cached: totalCached },
       );
       const finalResult = { ...result, modelWeight };
       // Write-through on a miss so the next identical cacheable call hits.
@@ -556,7 +558,7 @@ export class LLMService {
         finalStatus: "error",
         errorMessage: message,
         errorStack: stack,
-        totalTokens: { input: totalInput, output: totalOutput },
+        totalTokens: { input: totalInput, output: totalOutput, cached: totalCached },
         warnings,
         parseFallbacks,
       });
@@ -568,10 +570,10 @@ export class LLMService {
   private async _invokeOriginal<T>(
     params: LLMCallParams<T>,
     session: DumpSession,
-    addTokens: (input: number, output: number) => void,
+    addTokens: (input: number, output: number, cached: number) => void,
     addParseFallback: (kind: "tool_calls" | "lenient" | "raw") => void,
     addWarning: (msg: string) => void,
-  ): Promise<T & { tokenUsage: { input: number; output: number } }> {
+  ): Promise<T & { tokenUsage: { input: number; output: number; cached?: number } }> {
     // Optional: Validate input parameters against schema
     if (params.inputSchema && params.validateInput) {
       try {
@@ -613,6 +615,7 @@ export class LLMService {
     // Track token usage across tool iterations
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let totalCachedTokens = 0;
 
     // Build initial messages for the conversation
     const conversationMessages: BaseMessage[] = await prompt.formatMessages({
@@ -675,6 +678,7 @@ export class LLMService {
         if (responseUsage) {
           totalInputTokens += responseUsage.input_tokens ?? 0;
           totalOutputTokens += responseUsage.output_tokens ?? 0;
+          totalCachedTokens += responseUsage.input_token_details?.cache_read ?? 0;
         }
 
         // Check for tool calls
@@ -789,6 +793,7 @@ export class LLMService {
     });
     const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
     const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
+    const cached = totalCachedTokens + (raw?.usage_metadata?.input_token_details?.cache_read ?? 0);
 
     // Warn if high token usage
     const totalTokens = input + output;
@@ -820,10 +825,10 @@ export class LLMService {
 
           console.warn("[LLMService] Fallback tool_calls parsing succeeded");
 
-          addTokens(input, output);
+          addTokens(input, output, cached);
           return {
             ...(validated as T),
-            tokenUsage: { input, output },
+            tokenUsage: { input, output, cached },
           };
         } catch (_toolCallFallbackError) {
           // Lenient fallback: filter out malformed array entries from tool_calls args
@@ -861,10 +866,10 @@ export class LLMService {
             const validated = params.outputSchema.parse(cleanedArgs);
             console.warn("[LLMService] Lenient tool_calls parsing succeeded");
 
-            addTokens(input, output);
+            addTokens(input, output, cached);
             return {
               ...(validated as T),
-              tokenUsage: { input, output },
+              tokenUsage: { input, output, cached },
             };
           } catch {
             // Fall through to raw content parsing
@@ -881,10 +886,10 @@ export class LLMService {
 
         console.warn("[LLMService] Fallback parsing succeeded");
 
-        addTokens(input, output);
+        addTokens(input, output, cached);
         return {
           ...(validated as T),
-          tokenUsage: { input, output },
+          tokenUsage: { input, output, cached },
         };
       } catch (fallbackError) {
         throw new Error(
@@ -896,12 +901,13 @@ export class LLMService {
       }
     }
 
-    addTokens(input, output);
+    addTokens(input, output, cached);
     return {
       ...(response.parsed as T),
       tokenUsage: {
         input,
         output,
+        cached,
       },
     };
   }
@@ -1063,6 +1069,7 @@ export class LLMService {
           const usage = await streamResult.usage;
           const input = usage?.inputTokens ?? 0;
           const output = usage?.outputTokens ?? 0;
+          const cached = usage?.cachedInputTokens ?? 0;
 
           session.recordResponse({
             content: JSON.stringify(finalObject),
@@ -1071,7 +1078,7 @@ export class LLMService {
           });
           session.close({
             finalStatus: "success",
-            totalTokens: { input, output },
+            totalTokens: { input, output, cached },
             warnings: [],
             parseFallbacks: [],
           });
@@ -1082,7 +1089,7 @@ export class LLMService {
               relationshipType: params.relationshipType,
               modelWeight,
             },
-            { input, output },
+            { input, output, cached },
           );
 
           return { ...(finalObject as any), tokenUsage: { input, output }, modelWeight };
@@ -1240,6 +1247,7 @@ export class LLMService {
         const usage = await streamResult.usage;
         const input = usage?.inputTokens ?? 0;
         const output = usage?.outputTokens ?? 0;
+        const cached = usage?.cachedInputTokens ?? 0;
 
         session.recordResponse({
           content: text,
@@ -1248,7 +1256,7 @@ export class LLMService {
         });
         session.close({
           finalStatus: "success",
-          totalTokens: { input, output },
+          totalTokens: { input, output, cached },
           warnings: [],
           parseFallbacks: [],
         });
@@ -1259,7 +1267,7 @@ export class LLMService {
             relationshipType: params.relationshipType,
             modelWeight,
           },
-          { input, output },
+          { input, output, cached },
         );
 
         return { text, reasoning, tokenUsage: { input, output }, modelWeight };
@@ -1473,6 +1481,7 @@ export class LLMService {
 
       const inputTokens = (response as unknown as LLMRawResponse).usage_metadata?.input_tokens ?? 0;
       const outputTokens = (response as unknown as LLMRawResponse).usage_metadata?.output_tokens ?? 0;
+      const cachedTokens = (response as unknown as LLMRawResponse).usage_metadata?.input_token_details?.cache_read ?? 0;
 
       session.recordResponse({
         content: JSON.stringify(parsed),
@@ -1481,7 +1490,7 @@ export class LLMService {
       });
       session.close({
         finalStatus: "success",
-        totalTokens: { input: inputTokens, output: outputTokens },
+        totalTokens: { input: inputTokens, output: outputTokens, cached: cachedTokens },
         warnings: [],
         parseFallbacks: [],
       });
@@ -1492,7 +1501,7 @@ export class LLMService {
           relationshipType: params.relationshipType,
           modelWeight,
         },
-        { input: inputTokens, output: outputTokens },
+        { input: inputTokens, output: outputTokens, cached: cachedTokens },
       );
       // Write-through on a miss so the next identical cacheable call hits.
       if (cacheKey && this.cache) await this.cache.set<T>(cacheKey, parsed as T);

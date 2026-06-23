@@ -1,5 +1,9 @@
 export interface LLMRawResponse {
-  usage_metadata?: { input_tokens?: number; output_tokens?: number };
+  usage_metadata?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    input_token_details?: { cache_read?: number; cache_creation?: number };
+  };
   response_metadata?: { finish_reason?: string; [key: string]: unknown };
   content?: string;
 }

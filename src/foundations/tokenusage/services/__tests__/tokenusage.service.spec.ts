@@ -117,6 +117,68 @@ describe("TokenUsageService", () => {
     });
   });
 
+  describe("computeCost (cached input discount)", () => {
+    const buildServiceWithRates = async (rates: {
+      inputCostPer1MTokens: number;
+      outputCostPer1MTokens: number;
+      cachedInputCostPer1MTokens?: number;
+    }) => {
+      const config = createMockAiConfig();
+      config.ai.inputCostPer1MTokens = rates.inputCostPer1MTokens;
+      config.ai.outputCostPer1MTokens = rates.outputCostPer1MTokens;
+      if (rates.cachedInputCostPer1MTokens !== undefined) {
+        (config.ai as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens =
+          rates.cachedInputCostPer1MTokens;
+      }
+
+      const mockConfigService = {
+        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TokenUsageService,
+          { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
+        ],
+      }).compile();
+
+      return module.get<TokenUsageService>(TokenUsageService);
+    };
+
+    it("bills cached tokens at the cached rate (cached is a subset of input)", async () => {
+      // input=1000 (300 cached), output=500; inputRate=2, cachedRate=0.2, outputRate=8 per 1M
+      // (1000-300)*2 + 300*0.2 + 500*8 = 1400 + 60 + 4000 = 5460  → /1e6
+      const svc = await buildServiceWithRates({
+        inputCostPer1MTokens: 2,
+        outputCostPer1MTokens: 8,
+        cachedInputCostPer1MTokens: 0.2,
+      });
+      const cost = svc.computeCost({ tokens: { input: 1000, output: 500, cached: 300 } });
+      expect(cost).toBeCloseTo(5460 / 1_000_000, 12);
+    });
+
+    it("falls back to the input rate when no cached rate is configured (unchanged cost)", async () => {
+      // cachedInputCostPer1MTokens undefined → cached billed at inputRate → same as no-cache
+      const svc = await buildServiceWithRates({ inputCostPer1MTokens: 2, outputCostPer1MTokens: 8 });
+      const withCache = svc.computeCost({ tokens: { input: 1000, output: 500, cached: 300 } });
+      const noCache = svc.computeCost({ tokens: { input: 1000, output: 500 } });
+      expect(withCache).toBeCloseTo(noCache, 12);
+    });
+
+    it("clamps cached to input (never negative uncached input)", async () => {
+      const svc = await buildServiceWithRates({
+        inputCostPer1MTokens: 2,
+        outputCostPer1MTokens: 8,
+        cachedInputCostPer1MTokens: 0.2,
+      });
+      const cost = svc.computeCost({ tokens: { input: 100, output: 0, cached: 500 } });
+      const allCached = svc.computeCost({ tokens: { input: 100, output: 0, cached: 100 } });
+      expect(cost).toBeCloseTo(allCached, 12);
+    });
+  });
+
   describe("recordTokenUsage", () => {
     it("emits the tokenusage.recorded event with the input/output tokens after recording", async () => {
       tokenUsageRepository.create.mockResolvedValue(undefined);
