@@ -1,3 +1,9 @@
+## [1.97.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.96.0...v1.97.0) (2026-06-23)
+
+### 🚀 Features
+
+* **tokenusage:** add support for cached input tokens and their billing logic ([369c98f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/369c98f2bf1a120a7d4bef167b94c0c0c2c023cf))
+
 ## [1.96.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.95.0...v1.96.0) (2026-06-21)
 
 ### 🚀 Features
