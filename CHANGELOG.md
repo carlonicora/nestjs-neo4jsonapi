@@ -1,3 +1,9 @@
+## [1.98.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.97.0...v1.98.0) (2026-06-24)
+
+### 🚀 Features
+
+* **operator:** durable operator agent with checkpointing and approval gates ([0356538](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/035653861ac37bb055c1e66fe0df591bf38ea125))
+
 ## [1.97.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.96.0...v1.97.0) (2026-06-23)
 
 ### 🚀 Features
