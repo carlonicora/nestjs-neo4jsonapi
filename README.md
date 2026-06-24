@@ -241,7 +241,10 @@ CORS_PREFLIGHT_CONTINUE=false
 CORS_OPTIONS_SUCCESS_STATUS=204
 CORS_LOG_VIOLATIONS=true
 
-# AI Configuration (optional)
+# AI Configuration (optional) — normal tier, the default for every LLM call.
+# Named providers: llamacpp, ollama, openrouter, requesty, vertex, azure.
+# Any other provider name is treated as a generic OpenAI-compatible endpoint
+# and requires AI_URL.
 AI_PROVIDER=openai
 AI_API_KEY=sk-...
 AI_MODEL=gpt-4o-mini
@@ -251,7 +254,22 @@ AI_INSTANCE=
 AI_API_VERSION=
 AI_INPUT_COST_PER_1M_TOKENS=0
 AI_OUTPUT_COST_PER_1M_TOKENS=0
+AI_MAX_OUTPUT_TOKENS=
 AI_GOOGLE_CREDENTIALS_BASE64=
+
+# AI lite/large tiers (optional) — every AI_* variable also exists with a
+# _LITE / _LARGE suffix, selected per call via ModelWeight (lite/normal/large).
+# A tier without its own AI_PROVIDER_<TIER> (or re-declaring the same provider)
+# inherits field-by-field from AI_*; a tier that switches to a DIFFERENT
+# provider is standalone and inherits nothing — configure it fully.
+AI_PROVIDER_LITE=
+AI_API_KEY_LITE=
+AI_MODEL_LITE=
+AI_URL_LITE=
+AI_PROVIDER_LARGE=
+AI_API_KEY_LARGE=
+AI_MODEL_LARGE=
+AI_URL_LARGE=
 
 # Vision LLM (optional - falls back to AI_ settings if not set)
 VISION_PROVIDER=openai

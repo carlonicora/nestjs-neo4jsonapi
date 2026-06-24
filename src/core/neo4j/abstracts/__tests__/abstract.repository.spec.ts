@@ -603,6 +603,36 @@ describe("AbstractRepository", () => {
       expect(mockQuery.query).toContain("MATCH (testEntity:TestEntity {id: $id})");
       expect(mockQuery.query).not.toContain("BELONGS_TO");
     });
+
+    it("should never SET an immutable field on full update (preserves server-managed value)", async () => {
+      // A PUT must not overwrite immutable fields (e.g. game.intro / game.originPlot),
+      // even when they are part of the descriptor's fieldNames.
+      class ImmutableFieldRepository extends AbstractRepository<TestEntity, TestRelationships> {
+        protected readonly descriptor = {
+          ...createMockDescriptor(true),
+          fieldNames: ["name", "intro"],
+          fields: {
+            name: { type: "string", required: true },
+            intro: { type: "string", immutable: true },
+          },
+        } as unknown as EntityDescriptor<TestEntity, TestRelationships>;
+      }
+
+      const repo = new ImmutableFieldRepository(
+        neo4jService as unknown as Neo4jService,
+        securityService as unknown as SecurityService,
+        clsService as unknown as ClsService,
+      );
+
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repo.put({ id: TEST_IDS.entityId, name: "Updated", intro: null });
+
+      expect(mockQuery.query).toContain("testEntity.name = $name");
+      expect(mockQuery.query).not.toContain("testEntity.intro");
+    });
   });
 
   describe("patch", () => {

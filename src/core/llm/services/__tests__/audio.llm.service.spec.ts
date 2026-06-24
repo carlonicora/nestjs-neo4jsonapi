@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, beforeAll, afterAll, afterEach, type Mock } from "vitest";
 import { Test, type TestingModule } from "@nestjs/testing";
+import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -414,6 +415,37 @@ describe("AudioLLMService", () => {
         "Audio LLM service error: HTTP 401 — unauthorized",
       );
       expect(cleanup).toHaveBeenCalled();
+    });
+
+    it("never logs the API key (or any prefix of it) on the audio-direct log line", async () => {
+      const distinctiveKey = "sk-proj-abc123definitelysecret";
+      const logSpy = vi.spyOn(Logger.prototype, "log").mockImplementation(() => undefined);
+
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: "https://api.openai.com/v1/audio/transcriptions",
+          apiKey: distinctiveKey,
+          model: "gpt-4o-mini-transcribe",
+          language: "en",
+        }),
+      });
+      fetchMock.mockResolvedValue(okResponse({ text: "ok" }));
+
+      await service.call({ audioPath: "/tmp/stem.ogg", prompt: "p" });
+
+      const allLogged = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+
+      // The full key must never appear.
+      expect(allLogged).not.toContain(distinctiveKey);
+      // No 6-char (or any) prefix of the key — assert on the distinctive token.
+      expect(allLogged).not.toContain("sk-proj");
+      // The old leaky behaviour logged apiKey.slice(0, 6) === "sk-pro".
+      expect(allLogged).not.toContain(distinctiveKey.slice(0, 6));
+      // The replacement keeps useful, non-secret diagnostics.
+      expect(allLogged).toContain("provider=openrouter");
+      expect(allLogged).toContain("model=gpt-4o-mini-transcribe");
+
+      logSpy.mockRestore();
     });
 
     it("returns empty text gracefully when the upstream JSON has no `text` field", async () => {

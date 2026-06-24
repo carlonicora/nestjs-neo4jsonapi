@@ -2,12 +2,37 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { LLMCallMetadata } from "../interfaces/llm-call-metadata.interface";
+import { WebSocketService } from "../../websocket/services/websocket.service";
+
+export const LLM_DUMP_EVENT = "llm:dump";
+
+export interface LlmDumpEvent {
+  callId: string;
+  nodeName: string;
+  agentName: string;
+  model: string;
+  provider: string;
+  finalStatus: "success" | "error" | "partial";
+  errorMessage?: string;
+  durationMs: number;
+  totalTokens: { input: number; output: number; cached?: number };
+  /** Monetary cost of the call from the per-tier config rates (0 when not computable). */
+  cost: number;
+  finishReason?: string;
+  reply: { content: string; toolCalls: Array<{ name: string; args: unknown }> };
+}
 
 export interface DumpSessionStartParams {
   metadata?: LLMCallMetadata & Record<string, unknown>;
   model: string;
   provider: string;
   temperature?: number;
+  /**
+   * Computes the call's monetary cost from its final token counts. Supplied by the
+   * caller (which knows the model tier + config rates) so the dumper stays free of
+   * cost/config concerns. Omitted ⇒ cost reported as 0.
+   */
+  costFn?: (tokens: { input: number; output: number; cached?: number }) => number;
 }
 
 export interface DumpInputs {
@@ -17,6 +42,7 @@ export interface DumpInputs {
   history: Array<{ role: string; content: string }>;
   tools: Array<{ name: string; description: string; schema: unknown }>;
   outputSchemaName: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface DumpResponse {
@@ -30,7 +56,9 @@ export interface DumpCloseParams {
   finalStatus: "success" | "error" | "partial";
   errorMessage?: string;
   errorStack?: string;
-  totalTokens: { input: number; output: number };
+  totalTokens: { input: number; output: number; cached?: number };
+  /** Monetary cost of the call (computed from the per-tier config rates by the caller). */
+  cost?: number;
   warnings?: string[];
   parseFallbacks?: Array<"tool_calls" | "lenient" | "raw">;
 }
@@ -139,6 +167,7 @@ class RealDumpSession implements DumpSession {
     },
     private readonly fileWriter: (path: string, body: string) => Promise<void>,
     private readonly mkdirp: (dir: string) => Promise<void>,
+    private readonly onClose?: (event: LlmDumpEvent) => void,
   ) {}
 
   recordInputs(inputs: DumpInputs): void {
@@ -187,6 +216,7 @@ class RealDumpSession implements DumpSession {
 
   close(params: DumpCloseParams): void {
     const completedAt = new Date();
+    const cost = this.start.costFn ? this.start.costFn(params.totalTokens) : (params.cost ?? 0);
     const meta = {
       callId: this.callId,
       requestId: this.clsContext.requestId,
@@ -205,14 +235,49 @@ class RealDumpSession implements DumpSession {
       errorMessage: params.errorMessage,
       errorStack: params.errorStack,
       totalTokens: params.totalTokens,
+      cost,
       warnings: params.warnings ?? [],
       parseFallbacks: params.parseFallbacks ?? [],
     };
+    const redact = this.shouldRedact();
     const payload = {
       meta,
-      inputs: this.inputs,
-      iterations: this.iterations,
+      inputs: redact ? this.redactPayload(this.inputs) : this.inputs,
+      iterations: redact
+        ? this.iterations.map((it) => ({
+            ...it,
+            response: it.response ? { ...it.response, content: "[REDACTED]" } : it.response,
+          }))
+        : this.iterations,
     };
+
+    if (this.onClose) {
+      try {
+        const last = [...this.iterations].reverse().find((it) => it.response)?.response;
+        this.onClose({
+          callId: this.callId,
+          nodeName: meta.nodeName,
+          agentName: meta.agentName,
+          model: meta.model,
+          provider: meta.provider,
+          finalStatus: meta.finalStatus,
+          errorMessage: meta.errorMessage,
+          durationMs: meta.durationMs,
+          totalTokens: meta.totalTokens,
+          cost: meta.cost,
+          finishReason: last?.finishReason,
+          reply: {
+            // Honour the same redaction as the on-disk dump (response.content →
+            // "[REDACTED]"); otherwise the ephemeral llm:dump websocket event would
+            // leak the raw model output that redaction strips from the file.
+            content: redact ? "[REDACTED]" : (last?.content ?? ""),
+            toolCalls: (last?.toolCalls ?? []).map((tc) => ({ name: tc.name, args: tc.args })),
+          },
+        });
+      } catch {
+        // telemetry must never break a turn — swallow
+      }
+    }
 
     const body = JSON.stringify(payload, null, 2);
     const yyyyMmDd = this.startedAt.toISOString().slice(0, 10);
@@ -238,6 +303,93 @@ class RealDumpSession implements DumpSession {
       });
   }
 
+  /**
+   * Redaction is opt-in via ASSISTANT_DUMP_LLM_REDACT="true". DEFAULT IS OFF so
+   * local development keeps seeing full prompts. Any other value (incl. unset)
+   * means no redaction.
+   */
+  private shouldRedact(): boolean {
+    return process.env.ASSISTANT_DUMP_LLM_REDACT === "true";
+  }
+
+  /**
+   * Dot-path keep-list parsed from ASSISTANT_DUMP_LLM_KEEP_FIELDS (CSV). A field
+   * whose full dot-path (relative to the redacted object root) is in this set is
+   * left untouched even if it would otherwise be redacted.
+   */
+  private get keepFields(): Set<string> {
+    const raw = process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS ?? "";
+    return new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    );
+  }
+
+  private static readonly POLICY_PROMPT_RE = /consent|ethical|moral|legal/i;
+
+  /**
+   * Deep-clones `payload` (via JSON round-trip) then walks the clone, replacing
+   * sensitive values with "[REDACTED]". The original object is never mutated.
+   *
+   * Redaction rules:
+   *  - any key named `userMessage` or `content`
+   *  - any `systemPrompts` array entry matching the policy regex (the boundaries
+   *    prompt) becomes "[REDACTED]"
+   *  - every field nested under a `metadata` object that is NOT in the keep-list
+   *
+   * The keep-list (dot-paths) wins: a key whose full dot-path is listed is left
+   * untouched. All metadata/schema/token-count/iteration-count/parse-fallback
+   * fields outside the above rules stay intact for perf debugging.
+   */
+  private redactPayload(payload: unknown): unknown {
+    if (payload == null) return payload;
+    const clone = JSON.parse(JSON.stringify(payload));
+    const keep = this.keepFields;
+
+    const redact = (obj: unknown, path: string): unknown => {
+      if (obj == null || typeof obj !== "object") return obj;
+
+      if (Array.isArray(obj)) {
+        // systemPrompts entries: redact policy/boundaries prompts in place.
+        if (path === "systemPrompts") {
+          return obj.map((entry, i) => {
+            const childPath = `${path}.${i}`;
+            if (keep.has(childPath)) return entry;
+            if (typeof entry === "string" && RealDumpSession.POLICY_PROMPT_RE.test(entry)) {
+              return "[REDACTED]";
+            }
+            return redact(entry, childPath);
+          });
+        }
+        return obj.map((entry, i) => redact(entry, path ? `${path}.${i}` : `${i}`));
+      }
+
+      const result: Record<string, unknown> = {};
+      const insideMetadata = path === "metadata" || path.endsWith(".metadata");
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        const childPath = path ? `${path}.${key}` : key;
+        if (keep.has(childPath)) {
+          result[key] = value;
+          continue;
+        }
+        if (key === "userMessage" || key === "content") {
+          result[key] = "[REDACTED]";
+          continue;
+        }
+        if (insideMetadata && (value == null || typeof value !== "object")) {
+          result[key] = "[REDACTED]";
+          continue;
+        }
+        result[key] = redact(value, childPath);
+      }
+      return result;
+    };
+
+    return redact(clone, "");
+  }
+
   /** Test-only: peek at in-memory state. Not part of the public DumpSession interface. */
   __snapshot() {
     return { meta: this.start.metadata, inputs: this.inputs, iterations: this.iterations };
@@ -250,7 +402,10 @@ export class LLMCallDumper {
   private readonly enabled: boolean;
   private readonly outputDir: string;
 
-  constructor(@Optional() private readonly cls?: ClsService) {
+  constructor(
+    @Optional() private readonly cls?: ClsService,
+    @Optional() private readonly webSocket?: WebSocketService,
+  ) {
     this.enabled = process.env.ASSISTANT_DUMP_LLM_CALLS === "1";
     // Default to `<cwd>/.llm-dumps`. When the API runs via
     // `pnpm --filter neural-erp-api dev`, cwd is `apps/api/`, so this lands at
@@ -272,6 +427,16 @@ export class LLMCallDumper {
       turnStartedAt: turn?.turnStartedAt,
     };
 
+    const userId =
+      (log?.userId as string | undefined) ??
+      (this.cls?.has?.("userId") ? (this.cls.get("userId") as string) : undefined);
+    const onClose =
+      this.webSocket && userId
+        ? (event: LlmDumpEvent) => {
+            void this.webSocket!.sendMessageToUser(userId, LLM_DUMP_EVENT, event);
+          }
+        : undefined;
+
     // fs is loaded lazily so the no-op path stays I/O-free.
 
     const fs = require("fs/promises") as typeof import("fs/promises");
@@ -282,6 +447,7 @@ export class LLMCallDumper {
       clsContext,
       (path, body) => fs.writeFile(path, body, "utf8"),
       (dir) => fs.mkdir(dir, { recursive: true }).then(() => undefined),
+      onClose,
     );
   }
 }

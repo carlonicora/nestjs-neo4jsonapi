@@ -1,3 +1,91 @@
+## [1.97.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.96.0...v1.97.0) (2026-06-23)
+
+### 🚀 Features
+
+* **tokenusage:** add support for cached input tokens and their billing logic ([369c98f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/369c98f2bf1a120a7d4bef167b94c0c0c2c023cf))
+
+## [1.96.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.95.0...v1.96.0) (2026-06-21)
+
+### 🚀 Features
+
+* **tokenusage:** implement event-driven token usage recording and handling ([28991ac](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/28991ac73138f26b7f1497e5a694dcc778b45e4f))
+
+## [1.95.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.94.0...v1.95.0) (2026-06-20)
+
+### 🚀 Features
+
+* **llm:** add disableThinking parameter to LLMCallParams for fast structured calls ([28e6969](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/28e696971b39193732bdfa9282f1ac934dee8336))
+
+## [1.94.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.93.0...v1.94.0) (2026-06-20)
+
+### 🚀 Features
+
+* **llm:** per-call cost in telemetry (computeCost) + LangSmith EU endpoint doc ([c5d927c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c5d927ccf92a54708d3395b344012573baf92177))
+
+### 🐛 Bug Fixes
+
+* **llm:** mark LLMCacheService Redis override @Optional so DI bootstrap resolves ([a36de39](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a36de39058b5bcfea96e902e63342b388c083e5e))
+
+## [1.93.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.92.1...v1.93.0) (2026-06-20)
+
+### 🚀 Features
+
+* add support for immutable fields in entity schema and repository updates ([1422dc4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1422dc40d64e697ee17bc154810f837ed43b3a28))
+
+## [1.92.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.92.0...v1.92.1) (2026-06-20)
+
+### 🚨 Tests
+
+* add tests for handling immutable fields in repository and service updates ([96e5164](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/96e51648ddf1af5df1e3e0e0c39971becedc74d4))
+
+## [1.92.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.91.0...v1.92.0) (2026-06-20)
+
+### 🚀 Features
+
+* add llm call dumper ([a325279](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a32527922fd765f2cb330b29f87ff08c2663ed70))
+
+## [1.91.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.90.0...v1.91.0) (2026-06-18)
+
+### 🚀 Features
+
+* **llm:** add temperature parameter for sampling control in LLM service ([997a9e7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/997a9e7f658a1d62ddf8eee5938c81e3c1a98d98))
+
+## [1.90.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.89.0...v1.90.0) (2026-06-18)
+
+### 🚀 Features
+
+* **llm:** implement openRouterEscalatingFetch for enhanced routing with fallbacks ([455058a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/455058afe4682dafd5406e4f553027e235d2775f))
+
+## [1.89.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.88.0...v1.89.0) (2026-06-13)
+
+### 🚀 Features
+
+* **llm:** pin OpenRouter routing on the streaming path ([c028d93](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c028d93545135b278c8105394fb2008ee2bf6f57))
+
+## [1.88.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.87.0...v1.88.0) (2026-06-13)
+
+### 🚀 Features
+
+* **llm:** per-tier allow_fallbacks + require_parameters for OpenRouter pinning ([5e9ab4a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5e9ab4a41bcaa33eeca9c494e7eb84d52e4bd317))
+
+## [1.87.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.86.0...v1.87.0) (2026-06-11)
+
+### 🚀 Features
+
+* **llm:** add maxOutputTokens and frequencyPenalty parameters to LLM service calls ([c748a88](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c748a88e217f17dbea45a5c5cade5853721602aa))
+
+## [1.86.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.85.0...v1.86.0) (2026-06-10)
+
+### 🚀 Features
+
+* **config:** full per-tier AI configuration with provider switching ([b95eb9b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b95eb9b430f36268ba61576f1870da2d24b1ad77))
+
+## [1.85.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.84.0...v1.85.0) (2026-06-10)
+
+### 🚀 Features
+
+* enhance LLMService.extractViaTool to salvage tool-call args from message content and improve JSON extraction ([745318b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/745318b4a35acd87ea4fbb0bdfc4e7aca2338f9b))
+
 ## [1.84.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.83.0...v1.84.0) (2026-06-08)
 
 ### 🚀 Features

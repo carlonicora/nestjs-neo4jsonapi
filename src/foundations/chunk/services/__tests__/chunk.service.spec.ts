@@ -10,7 +10,6 @@ import { AtomicFactService } from "../../../atomicfact/services/atomicfact.servi
 import { KeyConceptService } from "../../../keyconcept/services/keyconcept.service";
 import { KeyConceptRepository } from "../../../keyconcept/repositories/keyconcept.repository";
 import { GraphCreatorService } from "../../../../agents/graph.creator/services/graph.creator.service";
-import { TokenUsageService } from "../../../tokenusage/services/tokenusage.service";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { TracingService } from "../../../../core/tracing/services/tracing.service";
@@ -37,7 +36,6 @@ describe("ChunkService", () => {
   let keyConceptService: MockedObject<KeyConceptService>;
   let graphCreatorService: MockedObject<GraphCreatorService>;
   let keyConceptRepository: MockedObject<KeyConceptRepository>;
-  let tokenUsageService: MockedObject<TokenUsageService>;
   let moduleRef: MockedObject<ModuleRef>;
   let mockQueue: any;
 
@@ -117,10 +115,6 @@ describe("ChunkService", () => {
     updateKeyConceptDescriptions: vi.fn(),
   });
 
-  const createMockTokenUsageService = () => ({
-    recordTokenUsage: vi.fn(),
-  });
-
   const createMockConfigService = () => ({
     get: vi.fn().mockReturnValue({
       process: { content: "process-content", unknown: "process-unknown" },
@@ -152,7 +146,6 @@ describe("ChunkService", () => {
         { provide: KeyConceptService, useValue: createMockKeyConceptService() },
         { provide: GraphCreatorService, useValue: createMockGraphCreatorService() },
         { provide: KeyConceptRepository, useValue: createMockKeyConceptRepository() },
-        { provide: TokenUsageService, useValue: createMockTokenUsageService() },
         { provide: ModuleRef, useValue: mockModuleRef },
         { provide: ConfigService, useValue: createMockConfigService() },
       ],
@@ -168,7 +161,6 @@ describe("ChunkService", () => {
     keyConceptService = module.get(KeyConceptService) as MockedObject<KeyConceptService>;
     graphCreatorService = module.get(GraphCreatorService) as MockedObject<GraphCreatorService>;
     keyConceptRepository = module.get(KeyConceptRepository) as MockedObject<KeyConceptRepository>;
-    tokenUsageService = module.get(TokenUsageService) as MockedObject<TokenUsageService>;
     moduleRef = module.get(ModuleRef) as MockedObject<ModuleRef>;
   });
 
@@ -347,7 +339,6 @@ describe("ChunkService", () => {
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
-      tokenUsageService.recordTokenUsage.mockResolvedValue(undefined);
       keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
       keyConceptRepository.updateKeyConceptDescriptions.mockResolvedValue(undefined);
       atomicFactService.createAtomicFact.mockResolvedValue(undefined);
@@ -371,8 +362,11 @@ describe("ChunkService", () => {
         id: TEST_IDS.chunkId,
         aiStatus: AiStatus.InProgress,
       });
-      expect(graphCreatorService.generateGraph).toHaveBeenCalledWith({ content: "Test content" });
-      expect(tokenUsageService.recordTokenUsage).toHaveBeenCalled();
+      expect(graphCreatorService.generateGraph).toHaveBeenCalledWith({
+        content: "Test content",
+        relationshipId: TEST_IDS.contentId,
+        relationshipType: "content",
+      });
       expect(atomicFactService.createAtomicFact).toHaveBeenCalledTimes(2);
       expect(chunkRepository.updateStatus).toHaveBeenCalledWith({
         id: TEST_IDS.chunkId,
@@ -444,7 +438,6 @@ describe("ChunkService", () => {
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
-      tokenUsageService.recordTokenUsage.mockResolvedValue(undefined);
       keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
       keyConceptRepository.updateKeyConceptDescriptions.mockResolvedValue(undefined);
       atomicFactService.createAtomicFact.mockResolvedValue(undefined);
@@ -475,7 +468,6 @@ describe("ChunkService", () => {
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
-      tokenUsageService.recordTokenUsage.mockResolvedValue(undefined);
       keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
       keyConceptRepository.updateKeyConceptDescriptions.mockResolvedValue(undefined);
       atomicFactService.createAtomicFact.mockResolvedValue(undefined);

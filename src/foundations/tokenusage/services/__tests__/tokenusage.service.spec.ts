@@ -6,11 +6,14 @@ import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { ConfigAiInterface } from "../../../../config/interfaces/config.ai.interface";
 import { ModelWeight } from "../../../../core/llm/enums/model.weight";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { TOKEN_USAGE_RECORDED_EVENT } from "../../events/tokenusage.events";
 
 describe("TokenUsageService", () => {
   let service: TokenUsageService;
   let tokenUsageRepository: MockedObject<TokenUsageRepository>;
   let configService: MockedObject<ConfigService>;
+  let eventEmitter: MockedObject<EventEmitter2>;
 
   const TEST_IDS = {
     relationshipId: "550e8400-e29b-41d4-a716-446655440000",
@@ -19,6 +22,10 @@ describe("TokenUsageService", () => {
   const createMockTokenUsageRepository = () => ({
     create: vi.fn(),
     onModuleInit: vi.fn(),
+  });
+
+  const createMockEventEmitter = () => ({
+    emit: vi.fn(),
   });
 
   const createMockAiConfig = (): ConfigAiInterface => ({
@@ -83,18 +90,21 @@ describe("TokenUsageService", () => {
     const mockAiConfig = createMockAiConfig();
     const mockTokenUsageRepository = createMockTokenUsageRepository();
     const mockConfigService = createMockConfigService(mockAiConfig);
+    const mockEventEmitter = createMockEventEmitter();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TokenUsageService,
         { provide: TokenUsageRepository, useValue: mockTokenUsageRepository },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
     service = module.get<TokenUsageService>(TokenUsageService);
     tokenUsageRepository = module.get(TokenUsageRepository) as MockedObject<TokenUsageRepository>;
     configService = module.get(ConfigService) as MockedObject<ConfigService>;
+    eventEmitter = module.get(EventEmitter2) as MockedObject<EventEmitter2>;
   });
 
   afterEach(() => {
@@ -107,7 +117,100 @@ describe("TokenUsageService", () => {
     });
   });
 
+  describe("computeCost (cached input discount)", () => {
+    const buildServiceWithRates = async (rates: {
+      inputCostPer1MTokens: number;
+      outputCostPer1MTokens: number;
+      cachedInputCostPer1MTokens?: number;
+    }) => {
+      const config = createMockAiConfig();
+      config.ai.inputCostPer1MTokens = rates.inputCostPer1MTokens;
+      config.ai.outputCostPer1MTokens = rates.outputCostPer1MTokens;
+      if (rates.cachedInputCostPer1MTokens !== undefined) {
+        (config.ai as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens =
+          rates.cachedInputCostPer1MTokens;
+      }
+
+      const mockConfigService = {
+        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TokenUsageService,
+          { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
+        ],
+      }).compile();
+
+      return module.get<TokenUsageService>(TokenUsageService);
+    };
+
+    it("bills cached tokens at the cached rate (cached is a subset of input)", async () => {
+      // input=1000 (300 cached), output=500; inputRate=2, cachedRate=0.2, outputRate=8 per 1M
+      // (1000-300)*2 + 300*0.2 + 500*8 = 1400 + 60 + 4000 = 5460  → /1e6
+      const svc = await buildServiceWithRates({
+        inputCostPer1MTokens: 2,
+        outputCostPer1MTokens: 8,
+        cachedInputCostPer1MTokens: 0.2,
+      });
+      const cost = svc.computeCost({ tokens: { input: 1000, output: 500, cached: 300 } });
+      expect(cost).toBeCloseTo(5460 / 1_000_000, 12);
+    });
+
+    it("falls back to the input rate when no cached rate is configured (unchanged cost)", async () => {
+      // cachedInputCostPer1MTokens undefined → cached billed at inputRate → same as no-cache
+      const svc = await buildServiceWithRates({ inputCostPer1MTokens: 2, outputCostPer1MTokens: 8 });
+      const withCache = svc.computeCost({ tokens: { input: 1000, output: 500, cached: 300 } });
+      const noCache = svc.computeCost({ tokens: { input: 1000, output: 500 } });
+      expect(withCache).toBeCloseTo(noCache, 12);
+    });
+
+    it("clamps cached to input (never negative uncached input)", async () => {
+      const svc = await buildServiceWithRates({
+        inputCostPer1MTokens: 2,
+        outputCostPer1MTokens: 8,
+        cachedInputCostPer1MTokens: 0.2,
+      });
+      const cost = svc.computeCost({ tokens: { input: 100, output: 0, cached: 500 } });
+      const allCached = svc.computeCost({ tokens: { input: 100, output: 0, cached: 100 } });
+      expect(cost).toBeCloseTo(allCached, 12);
+    });
+  });
+
   describe("recordTokenUsage", () => {
+    it("emits the tokenusage.recorded event with the input/output tokens after recording", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+
+      await service.recordTokenUsage({
+        tokens: { input: 1000, output: 500 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, { input: 1000, output: 500 });
+    });
+
+    it("does not throw when the event emit fails (best-effort)", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+      eventEmitter.emit.mockImplementation(() => {
+        throw new Error("emit boom");
+      });
+
+      await expect(
+        service.recordTokenUsage({
+          tokens: { input: 100, output: 50 },
+          type: TokenUsageType.Summariser,
+          relationshipId: TEST_IDS.relationshipId,
+          relationshipType: "Content",
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(tokenUsageRepository.create).toHaveBeenCalled();
+    });
+
     it("should record token usage with calculated cost using AI config", async () => {
       // Arrange
       tokenUsageRepository.create.mockResolvedValue(undefined);
@@ -165,8 +268,8 @@ describe("TokenUsageService", () => {
       expect(createCall.cost).toBeCloseTo(0.05, 6);
     });
 
-    it("should set cost to 0 when inputCostPer1MTokens is 0", async () => {
-      // Arrange
+    it("computes cost from the output rate alone when inputCostPer1MTokens is 0", async () => {
+      // Arrange — input rate free, output rate non-zero
       const zeroInputCostConfig = createMockAiConfig();
       zeroInputCostConfig.ai.inputCostPer1MTokens = 0;
 
@@ -184,6 +287,7 @@ describe("TokenUsageService", () => {
           TokenUsageService,
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
           { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
       }).compile();
 
@@ -199,13 +303,49 @@ describe("TokenUsageService", () => {
         relationshipType: "Content",
       });
 
-      // Assert
+      // Assert — only output contributes: (0 * 1000 / 1e6) + (30 * 500 / 1e6) = 0.015
       const createCall = repoWithZeroCost.create.mock.calls[0][0];
-      expect(createCall.cost).toBe(0);
+      expect(createCall.cost).toBeCloseTo(0.015, 6);
     });
 
-    it("should set cost to 0 when outputCostPer1MTokens is 0", async () => {
-      // Arrange
+    it("computes cost when only output rate is non-zero (input free)", async () => {
+      // Arrange — input rate 0, output rate 5
+      const config = createMockAiConfig();
+      config.ai.inputCostPer1MTokens = 0;
+      config.ai.outputCostPer1MTokens = 5;
+
+      const mockConfigService = {
+        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          TokenUsageService,
+          { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
+        ],
+      }).compile();
+
+      const svc = module.get<TokenUsageService>(TokenUsageService);
+      const repo = module.get(TokenUsageRepository) as MockedObject<TokenUsageRepository>;
+      repo.create.mockResolvedValue(undefined);
+
+      // Act
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 500_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // Assert — (0 * 1e6 / 1e6) + (5 * 500000 / 1e6) = 2.5
+      const createCall = repo.create.mock.calls[0][0];
+      expect(createCall.cost).toBeCloseTo(2.5, 6);
+    });
+
+    it("computes cost from the input rate alone when outputCostPer1MTokens is 0", async () => {
+      // Arrange — output rate free, input rate non-zero
       const zeroOutputCostConfig = createMockAiConfig();
       zeroOutputCostConfig.ai.outputCostPer1MTokens = 0;
 
@@ -223,6 +363,7 @@ describe("TokenUsageService", () => {
           TokenUsageService,
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
           { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
       }).compile();
 
@@ -238,9 +379,9 @@ describe("TokenUsageService", () => {
         relationshipType: "Content",
       });
 
-      // Assert
+      // Assert — only input contributes: (10 * 1000 / 1e6) + (0 * 500 / 1e6) = 0.01
       const createCall = repoWithZeroCost.create.mock.calls[0][0];
-      expect(createCall.cost).toBe(0);
+      expect(createCall.cost).toBeCloseTo(0.01, 6);
     });
 
     it("should generate a unique UUID for each record", async () => {

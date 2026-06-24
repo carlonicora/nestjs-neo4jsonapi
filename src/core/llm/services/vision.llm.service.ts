@@ -5,6 +5,7 @@ import { ZodType } from "zod";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { ModelService } from "../../llm/services/model.service";
 import { convertZodToJsonSchema, sanitizeSchemaForGemini } from "../utils/schema.utils";
+import { StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
 
 /**
  * Error thrown when vision model's content moderation blocks an image analysis request.
@@ -25,36 +26,6 @@ interface VisionCallParams<T> {
   systemPrompt: string;
   outputSchema: ZodType<T>;
   temperature?: number;
-}
-
-/**
- * Raw LLM response structure with usage metadata
- */
-interface LLMRawResponse {
-  usage_metadata?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
-  response_metadata?: {
-    finish_reason?: string;
-    [key: string]: unknown;
-  };
-  content?: string;
-}
-
-/**
- * Type guard to validate raw response structure
- */
-function isValidRaw(raw: unknown): raw is LLMRawResponse {
-  return typeof raw === "object" && raw !== null;
-}
-
-/**
- * Structured output response from LLM
- */
-interface StructuredOutputResponse<T> {
-  parsed: T | null;
-  raw?: LLMRawResponse;
 }
 
 @Injectable()

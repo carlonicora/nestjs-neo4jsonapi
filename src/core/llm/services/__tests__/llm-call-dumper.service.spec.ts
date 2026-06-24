@@ -27,6 +27,8 @@ describe("LLMCallDumper", () => {
     vi.resetModules();
     delete process.env.ASSISTANT_DUMP_LLM_CALLS;
     delete process.env.ASSISTANT_DUMP_LLM_CALLS_DIR;
+    delete process.env.ASSISTANT_DUMP_LLM_REDACT;
+    delete process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS;
   });
 
   afterEach(() => {
@@ -201,6 +203,107 @@ describe("LLMCallDumper", () => {
       await fs.rm(tmp, { recursive: true, force: true });
     });
 
+    describe("redaction (ASSISTANT_DUMP_LLM_REDACT)", () => {
+      const SECRET_MESSAGE = "SUPER_SECRET_USER_MESSAGE_42";
+      const SECRET_HISTORY = "SECRET_HISTORY_CONTENT_99";
+
+      async function writeDump(tmp: string) {
+        const { LLMCallDumper } = await import("../llm-call-dumper.service");
+        const dumper = new LLMCallDumper(null as any);
+        const session = dumper.startSession({
+          metadata: {
+            nodeName: "graph",
+            agentName: "responder",
+            gameId: "game-abc",
+            roundId: "round-xyz",
+            userId: "user-123",
+          } as any,
+          model: "m",
+          provider: "p",
+        });
+        session.recordInputs({
+          systemPrompts: ["ordinary system prompt", "You must respect consent and ethical boundaries at all times."],
+          instructions: "instr",
+          inputParams: { userMessage: SECRET_MESSAGE, locale: "en" },
+          history: [{ role: "user", content: SECRET_HISTORY }],
+          tools: [],
+          outputSchemaName: "S",
+          metadata: { gameId: "game-abc", roundId: "round-xyz", userId: "user-123" },
+        } as any);
+        session.startIteration("final-structured", [{ _getType: () => "system", content: "S" }]);
+        session.recordResponse({ content: SECRET_MESSAGE, tokenUsage: { input: 1, output: 2 } });
+        session.close({ finalStatus: "success", totalTokens: { input: 1, output: 2 } });
+
+        const found = await waitForFile(tmp, 2000);
+        expect(found).toBeTruthy();
+        const fs = await import("fs/promises");
+        const raw = await fs.readFile(found!, "utf8");
+        return { raw, json: JSON.parse(raw) };
+      }
+
+      it("redacts userMessage, history content and policy systemPrompts; raw secret appears nowhere", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-redact-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        process.env.ASSISTANT_DUMP_LLM_REDACT = "true";
+
+        const { raw, json } = await writeDump(tmp);
+
+        expect(json.inputs.inputParams.userMessage).toBe("[REDACTED]");
+        expect(json.inputs.history[0].content).toBe("[REDACTED]");
+        // policy prompt redacted, ordinary one kept
+        expect(json.inputs.systemPrompts[0]).toBe("ordinary system prompt");
+        expect(json.inputs.systemPrompts[1]).toBe("[REDACTED]");
+        // iteration response.content redacted
+        expect(json.iterations[0].response.content).toBe("[REDACTED]");
+        // the raw secret text must appear NOWHERE in the file
+        expect(raw).not.toContain(SECRET_MESSAGE);
+        expect(raw).not.toContain(SECRET_HISTORY);
+        // non-secret field preserved
+        expect(json.inputs.inputParams.locale).toBe("en");
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
+
+      it("keeps dot-paths listed in ASSISTANT_DUMP_LLM_KEEP_FIELDS but still redacts others", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-keep-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        process.env.ASSISTANT_DUMP_LLM_REDACT = "true";
+        process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS = "metadata.gameId,metadata.roundId";
+
+        const { json } = await writeDump(tmp);
+
+        expect(json.inputs.metadata.gameId).toBe("game-abc");
+        expect(json.inputs.metadata.roundId).toBe("round-xyz");
+        // userId not in keep-list -> redacted
+        expect(json.inputs.metadata.userId).toBe("[REDACTED]");
+        // userMessage still redacted regardless of keep-list
+        expect(json.inputs.inputParams.userMessage).toBe("[REDACTED]");
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
+
+      it("does NOT redact when ASSISTANT_DUMP_LLM_REDACT is unset (default off)", async () => {
+        const path = await import("path");
+        const fs = await import("fs/promises");
+        const tmp = path.join(process.cwd(), `.tmp-dumper-noredact-${Date.now()}`);
+        process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = tmp;
+        delete process.env.ASSISTANT_DUMP_LLM_REDACT;
+
+        const { raw, json } = await writeDump(tmp);
+
+        expect(json.inputs.inputParams.userMessage).toBe(SECRET_MESSAGE);
+        expect(json.inputs.history[0].content).toBe(SECRET_HISTORY);
+        expect(json.iterations[0].response.content).toBe(SECRET_MESSAGE);
+        expect(raw).toContain(SECRET_MESSAGE);
+
+        await fs.rm(tmp, { recursive: true, force: true });
+      });
+    });
+
     it("close() does not throw when the disk write fails", async () => {
       const fs = await import("fs/promises");
       const path = await import("path");
@@ -222,6 +325,93 @@ describe("LLMCallDumper", () => {
       await new Promise((r) => setTimeout(r, 100));
 
       await fs.rm(blocker, { force: true });
+    });
+  });
+
+  describe("websocket emit (flag on)", () => {
+    function makeStartParams() {
+      return { model: "m", provider: "p", metadata: { nodeName: "direct", agentName: "game" } };
+    }
+
+    it("emits a reply-focused llm:dump to the resolved user on close", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const cls = {
+        has: (k: string) => k === "userId",
+        get: (k: string) => (k === "userId" ? "user-1" : undefined),
+      } as any;
+      const dumper = new LLMCallDumper(cls, ws);
+
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({
+        content: "",
+        toolCalls: [{ id: "1", name: "direct_scene", args: { lead: "Mara" } }],
+        tokenUsage: { input: 3, output: 4 },
+        finishReason: "tool_calls",
+      });
+      session.close({ finalStatus: "success", totalTokens: { input: 3, output: 4 } });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({ uid: "user-1", ev: "llm:dump" });
+      expect(sent[0].data).toMatchObject({
+        nodeName: "direct",
+        agentName: "game",
+        finalStatus: "success",
+        totalTokens: { input: 3, output: 4 },
+        reply: { content: "", toolCalls: [{ name: "direct_scene", args: { lead: "Mara" } }] },
+      });
+    });
+
+    it("includes cached tokens in the dump event and passes them to costFn", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const cls = {
+        has: (k: string) => k === "userId",
+        get: (k: string) => (k === "userId" ? "user-1" : undefined),
+      } as any;
+      const dumper = new LLMCallDumper(cls, ws);
+
+      const costFn = vi.fn().mockReturnValue(0.001);
+      const session = dumper.startSession({ ...makeStartParams(), costFn });
+      session.startIteration("final-structured", []);
+      session.recordResponse({ content: "{}", tokenUsage: { input: 1000, output: 200 } });
+      session.close({
+        finalStatus: "success",
+        totalTokens: { input: 1000, output: 200, cached: 300 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+
+      expect(costFn).toHaveBeenCalledWith({ input: 1000, output: 200, cached: 300 });
+      expect(sent).toHaveLength(1);
+      const event = sent[0].data;
+      expect(event.totalTokens.cached).toBe(300);
+      expect(event.cost).toBe(0.001);
+    });
+
+    it("does not emit when there is no userId in CLS", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const sent: any[] = [];
+      const ws = { sendMessageToUser: (uid: string, ev: string, data: any) => sent.push({ uid, ev, data }) } as any;
+      const dumper = new LLMCallDumper({ has: () => false, get: () => undefined } as any, ws);
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({ content: "x" });
+      session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 } });
+      expect(sent).toHaveLength(0);
+    });
+
+    it("does not emit (and does not throw) when no websocket is provided", () => {
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      const cls = { has: (k: string) => k === "userId", get: () => "user-1" } as any;
+      const dumper = new LLMCallDumper(cls);
+      const session = dumper.startSession(makeStartParams());
+      session.startIteration("tool-loop", []);
+      session.recordResponse({ content: "x" });
+      expect(() => session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 } })).not.toThrow();
     });
   });
 });

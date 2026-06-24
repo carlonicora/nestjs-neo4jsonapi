@@ -100,7 +100,9 @@ describe("SearchEntitiesTool", () => {
     expect(out.items).toHaveLength(2);
     expect(out.matchMode).toBe("none");
     expect(out.hasMore).toBe(true);
-    expect(out.note).toBe('Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.');
+    expect(out.note).toBe(
+      'Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
+    );
   });
 
   it("omits hasMore and note when the result fits within the limit", async () => {

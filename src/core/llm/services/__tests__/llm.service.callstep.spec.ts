@@ -147,7 +147,7 @@ describe("LLMService.callStep", () => {
     expect(sentMessages[2]).toBe(userMessage);
   });
 
-  it("maps usage metadata to tokens and accounts them into the session exactly once", async () => {
+  it("maps usage metadata to the returned token usage", async () => {
     const tool = makeTool("do_thing");
     const { svc } = makeService(response);
 
@@ -158,12 +158,6 @@ describe("LLMService.callStep", () => {
     });
 
     expect(out.tokenUsage).toEqual({ input: 100, output: 40 });
-    expect(svc.getSessionUsage()).toEqual({
-      input: 100,
-      output: 40,
-      total: 140,
-      callCount: 1,
-    });
   });
 
   it("invokes the dumper hooks when enabled", async () => {
@@ -222,8 +216,5 @@ describe("LLMService.callStep", () => {
     expect(session.close).toHaveBeenCalledWith(
       expect.objectContaining({ finalStatus: "error", errorMessage: expect.stringContaining("model exploded") }),
     );
-
-    // No tokens accounted on failure
-    expect(svc.getSessionUsage()).toEqual({ input: 0, output: 0, total: 0, callCount: 0 });
   });
 });

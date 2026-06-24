@@ -1,6 +1,6 @@
 {
   "name": "@carlonicora/nestjs-neo4jsonapi",
-  "version": "1.84.0",
+  "version": "1.97.0",
   "description": "NestJS foundation package with JSON:API, Neo4j, Redis, LangChain agents, and common utilities",
   "author": "Carlo Nicora",
   "license": "GPL-3.0-or-later",
@@ -75,6 +75,7 @@
     "@langchain/langgraph-checkpoint-redis": "^1.0.7",
     "@langchain/openai": "^1.4.7",
     "@langchain/textsplitters": "^1.0.1",
+    "langsmith": "^0.7.5",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
     "@opentelemetry/instrumentation-http": "^0.218.0",

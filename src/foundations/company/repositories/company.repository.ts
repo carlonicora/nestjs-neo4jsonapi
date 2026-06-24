@@ -380,6 +380,9 @@ export class CompanyRepository implements OnModuleInit {
   async useTokens(params: { input: number; output: number; companyId?: string }): Promise<void> {
     const tokens = params.input + params.output;
 
+    // Nothing consumed — skip the read/write entirely.
+    if (tokens <= 0) return;
+
     const companyQuery = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
     companyQuery.queryParams = {
       companyId: params.companyId ?? this.clsService.get("companyId"),
@@ -413,6 +416,15 @@ export class CompanyRepository implements OnModuleInit {
       MATCH (company:Company {id: $companyId})
       SET company.availableMonthlyTokens = $availableMonthlyTokens,
           company.availableExtraTokens = $availableExtraTokens,
+          company.updatedAt = datetime()
+    `;
+    } else {
+      // Monthly allowance exhausted — deduct entirely from extra tokens.
+      query.queryParams.availableExtraTokens = availableExtraTokens - tokens;
+
+      query.query = `
+      MATCH (company:Company {id: $companyId})
+      SET company.availableExtraTokens = $availableExtraTokens,
           company.updatedAt = datetime()
     `;
     }

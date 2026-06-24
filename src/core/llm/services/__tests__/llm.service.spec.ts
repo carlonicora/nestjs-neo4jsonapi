@@ -1,11 +1,14 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as z from "zod";
 import { LLMService } from "../llm.service";
 import { ModelService } from "../model.service";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 import { LLMCallDumper } from "../llm-call-dumper.service";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
+import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
 
 // Mock LangChain modules
 vi.mock("@langchain/core/messages", () => {
@@ -67,7 +70,36 @@ vi.mock("@langchain/core/prompts", () => {
 });
 
 vi.mock("@langchain/core/tools", () => ({
-  DynamicStructuredTool: vi.fn(),
+  DynamicStructuredTool: class {
+    constructor(opts: any) {
+      Object.assign(this, opts);
+    }
+  },
+}));
+
+// Vercel AI SDK — controlled per-test via the exported mocks below. We spread the
+// real module so LangSmith's `wrapAISDK(ai)` (which reads generateText/generateObject
+// at wrap time) initialises cleanly; only the two streaming fns are stubbed.
+const streamObjectMock = vi.fn();
+const streamTextMock = vi.fn();
+vi.mock("ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("ai")>();
+  return {
+    ...actual,
+    streamObject: (...args: any[]) => streamObjectMock(...args),
+    streamText: (...args: any[]) => streamTextMock(...args),
+  };
+});
+
+vi.mock("@ai-sdk/openai-compatible", () => ({
+  createOpenAICompatible: vi.fn().mockReturnValue({
+    chatModel: vi.fn().mockReturnValue({ id: "mock-model" }),
+  }),
+}));
+
+vi.mock("../openrouter-fetch", () => ({
+  injectOpenRouterProvider: vi.fn(),
+  openRouterEscalatingFetch: vi.fn(),
 }));
 
 describe("LLMService", () => {
@@ -97,6 +129,11 @@ describe("LLMService", () => {
     startSession: startSessionMock,
   };
 
+  const recordTokenUsageMock = vi.fn().mockResolvedValue(undefined);
+  const mockTokenUsageService = {
+    recordTokenUsage: recordTokenUsageMock,
+  };
+
   const TEST_AI_CONFIG = {
     ai: {
       provider: "openrouter",
@@ -109,6 +146,7 @@ describe("LLMService", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     startSessionMock.mockReturnValue(mockSession);
+    recordTokenUsageMock.mockResolvedValue(undefined);
 
     // Create mock structured LLM that returns parsed output
     mockStructuredLLM = {
@@ -163,6 +201,10 @@ describe("LLMService", () => {
           provide: LLMCallDumper,
           useValue: mockDumper,
         },
+        {
+          provide: TokenUsageService,
+          useValue: mockTokenUsageService,
+        },
       ],
     }).compile();
 
@@ -171,17 +213,6 @@ describe("LLMService", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  describe("constructor", () => {
-    it("should initialize with empty session tokens", () => {
-      const usage = service.getSessionUsage();
-
-      expect(usage.input).toBe(0);
-      expect(usage.output).toBe(0);
-      expect(usage.total).toBe(0);
-      expect(usage.callCount).toBe(0);
-    });
   });
 
   describe("call", () => {
@@ -201,38 +232,6 @@ describe("LLMService", () => {
       expect(result.response).toBe("test response");
       expect(result.tokenUsage.input).toBe(100);
       expect(result.tokenUsage.output).toBe(50);
-    });
-
-    it("should track session token usage", async () => {
-      await service.call({
-        inputParams: { message: "Hello" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      const usage = service.getSessionUsage();
-      expect(usage.input).toBe(100);
-      expect(usage.output).toBe(50);
-      expect(usage.total).toBe(150);
-      expect(usage.callCount).toBe(1);
-    });
-
-    it("should accumulate token usage across multiple calls", async () => {
-      await service.call({
-        inputParams: { message: "Hello" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      await service.call({
-        inputParams: { message: "Hi again" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      const usage = service.getSessionUsage();
-      expect(usage.callCount).toBe(2);
-      expect(usage.total).toBe(300);
     });
 
     it("should pass temperature to model service", async () => {
@@ -526,47 +525,6 @@ describe("LLMService", () => {
     });
   });
 
-  describe("getSessionUsage", () => {
-    it("should return a copy of session tokens", async () => {
-      const outputSchema = z.object({ response: z.string() });
-
-      await service.call({
-        inputParams: { message: "Hello" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      const usage1 = service.getSessionUsage();
-      const usage2 = service.getSessionUsage();
-
-      // Should be equal values but different object references
-      expect(usage1).toEqual(usage2);
-      expect(usage1).not.toBe(usage2);
-    });
-  });
-
-  describe("resetSession", () => {
-    it("should reset all session token counters", async () => {
-      const outputSchema = z.object({ response: z.string() });
-
-      await service.call({
-        inputParams: { message: "Hello" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      expect(service.getSessionUsage().callCount).toBe(1);
-
-      service.resetSession();
-
-      const usage = service.getSessionUsage();
-      expect(usage.input).toBe(0);
-      expect(usage.output).toBe(0);
-      expect(usage.total).toBe(0);
-      expect(usage.callCount).toBe(0);
-    });
-  });
-
   describe("Gemini schema sanitization", () => {
     it("should sanitize schema for Gemini models via Requesty", async () => {
       // Update config to use Gemini model via Requesty
@@ -681,6 +639,155 @@ describe("LLMService", () => {
 
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("High token usage detected"));
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe("token usage persistence", () => {
+    const outputSchema = z.object({ response: z.string() });
+
+    it("call() persists usage with the given type and the attributed relationship", async () => {
+      await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        tokenUsageType: "custom_node",
+        relationshipId: "round-1",
+        relationshipType: "Round",
+        metadata: { nodeName: "narrator", agentName: "narrator" },
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 100, output: 50, cached: 0 });
+      expect(arg.type).toBe("custom_node");
+      expect(arg.relationshipId).toBe("round-1");
+      expect(arg.relationshipType).toBe("Round");
+    });
+
+    it("call() defaults the type to TextGeneration when none is given", async () => {
+      await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        relationshipId: "round-1",
+        relationshipType: "Round",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].type).toBe(TokenUsageType.TextGeneration);
+    });
+
+    it("call() does NOT persist when no relationship is given (package stays domain-agnostic)", async () => {
+      await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+      });
+
+      expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("call() does NOT throw when recordTokenUsage rejects", async () => {
+      recordTokenUsageMock.mockRejectedValueOnce(new Error("db down"));
+
+      const result = await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        relationshipId: "round-1",
+        relationshipType: "Round",
+      });
+
+      expect(result.response).toBe("test response");
+    });
+  });
+
+  describe("extractViaTool token tracking", () => {
+    const toolSchema = z.object({ value: z.string() });
+
+    beforeEach(() => {
+      // bindTools returns an object whose invoke yields a tool call + real usage.
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          tool_calls: [{ name: "extract", args: { value: "ok" } }],
+          content: "",
+          usage_metadata: { input_tokens: 250, output_tokens: 80 },
+        }),
+      });
+    });
+
+    it("persists real tokens from usage_metadata (not 0/0) and forwards the type", async () => {
+      await service.extractViaTool({
+        systemPrompts: ["sys"],
+        prompt: "extract this",
+        tool: { name: "extract", description: "d", schema: toolSchema },
+        tokenUsageType: "custom_extract",
+        relationshipId: "g1",
+        relationshipType: "Game",
+        metadata: { nodeName: "extractor", agentName: "extractor" },
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 250, output: 80, cached: 0 });
+      expect(arg.type).toBe("custom_extract");
+    });
+  });
+
+  describe("streamText observability", () => {
+    function makeStreamResult(opts: { text?: Promise<string> | string; usage?: any; fail?: Error }) {
+      const usage = opts.usage ?? { inputTokens: 30, outputTokens: 12 };
+      return {
+        text: opts.fail ? Promise.reject(opts.fail) : Promise.resolve(opts.text ?? "hello"),
+        reasoningText: Promise.resolve(""),
+        usage: Promise.resolve(usage),
+        finishReason: Promise.resolve("stop"),
+        fullStream: (async function* () {
+          if (opts.fail) throw opts.fail;
+          yield { type: "text-delta", text: "hello" };
+        })(),
+      };
+    }
+
+    it("persists usage with context after the stream completes", async () => {
+      streamTextMock.mockReturnValue(makeStreamResult({ usage: { inputTokens: 30, outputTokens: 12 } }));
+
+      const { result } = await service.streamText({
+        systemPrompts: ["sys"],
+        prompt: "go",
+        tokenUsageType: "custom_narrate",
+        relationshipId: "r7",
+        relationshipType: "Round",
+        metadata: { nodeName: "narrator", agentName: "narrator" },
+      });
+
+      await result;
+
+      // streamText passes an abortSignal to the SDK.
+      expect(streamTextMock.mock.calls[0][0].abortSignal).toBeInstanceOf(AbortSignal);
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 30, output: 12, cached: 0 });
+      expect(arg.type).toBe("custom_narrate");
+      expect(arg.relationshipId).toBe("r7");
+      expect(arg.relationshipType).toBe("Round");
+    });
+
+    it("logs a WARN (does not swallow) when the underlying result rejects", async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      streamTextMock.mockReturnValue(makeStreamResult({ fail: new Error("upstream boom") }));
+
+      const { result } = await service.streamText({
+        systemPrompts: ["sys"],
+        prompt: "go",
+      });
+
+      await expect(result).rejects.toThrow(/upstream boom/);
+      // Let the attached .catch handler run.
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(warnSpy.mock.calls.some((c) => /streamText result rejected/.test(String(c[0])))).toBe(true);
+      warnSpy.mockRestore();
     });
   });
 });

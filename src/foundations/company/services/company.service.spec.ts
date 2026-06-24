@@ -207,6 +207,24 @@ describe("CompanyService", () => {
     });
   });
 
+  describe("handleTokenUsageRecorded", () => {
+    it("deducts the recorded tokens from the company balance", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+      mockRepository.useTokens.mockResolvedValue();
+
+      await service.handleTokenUsageRecorded({ input: 100, output: 50 });
+
+      expect(mockRepository.useTokens).toHaveBeenCalledWith({ input: 100, output: 50 });
+    });
+
+    it("does not throw when deduction fails (best-effort)", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+      mockRepository.useTokens.mockRejectedValue(new Error("boom"));
+
+      await expect(service.handleTokenUsageRecorded({ input: 100, output: 50 })).resolves.toBeUndefined();
+    });
+  });
+
   describe("create", () => {
     it("should create a company with all parameters", async () => {
       const postData = {
