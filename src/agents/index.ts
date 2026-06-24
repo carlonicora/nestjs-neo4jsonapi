@@ -50,3 +50,31 @@ export {
 } from "./graph/services/graph.search.service";
 export { GraphDescriptorRegistry } from "./graph/services/descriptor.source";
 export { UserModulesRepository } from "./graph/repositories/user-modules.repository";
+
+// Operator
+export { OperatorModule } from "./operator/operator.module";
+export { operatorMeta } from "./operator/entities/operator.meta";
+export { OperatorController } from "./operator/controllers/operator.controller";
+export { OperatorService } from "./operator/services/operator.service";
+export type { OperatorRunResult } from "./operator/services/operator.service";
+export { OperatorContext } from "./operator/contexts/operator.context";
+export type { OperatorCitation, OperatorContextState, OperatorFinalAnswer } from "./operator/contexts/operator.context";
+export { defaultOperatorSystemPrompt } from "./operator/prompts/operator.system.prompt";
+export {
+  OperatorCheckpointerService,
+  OPERATOR_DEFAULT_APPROVAL_TTL_DAYS,
+} from "./operator/services/operator.checkpointer.service";
+
+// Operator (tool layer)
+export { OPERATOR_TOOLS } from "./operator/interfaces/operator.tool.interface";
+export type {
+  OperatorChunkCitation,
+  OperatorRetrievalContext,
+  OperatorToolCallRecord,
+  OperatorToolContribution,
+  OperatorToolDefinition,
+} from "./operator/interfaces/operator.tool.interface";
+export { SearchDocumentsTool } from "./operator/tools/search-documents.tool";
+export { SearchCommunitiesTool } from "./operator/tools/search-communities.tool";
+export { OperatorTestActionTool } from "./operator/tools/operator-test-action.tool";
+export { OperatorToolRegistry } from "./operator/tools/operator.tool.registry";

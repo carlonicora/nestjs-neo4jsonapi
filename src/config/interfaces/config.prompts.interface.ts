@@ -9,6 +9,7 @@ export interface ConfigPromptsInterface {
     chunkVector?: string;
   };
   responder?: string;
+  operator?: string;
   summariser?: {
     map?: string;
     combine?: string;

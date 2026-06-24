@@ -2,6 +2,7 @@ import { BaseConfigInterface } from "./interfaces/base.config.interface";
 import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
 import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
+import { ConfigOperatorInterface } from "./interfaces/config.operator.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
 import { AiTierConfig } from "./interfaces/config.ai.interface";
 
@@ -50,6 +51,12 @@ export interface BaseConfigOptions {
    * All prompts are optional - the library includes working defaults.
    */
   prompts?: ConfigPromptsInterface;
+
+  /**
+   * Operator agent configuration (approval gates).
+   * Optional - `approvalTtlDays` defaults to 7 when omitted.
+   */
+  operator?: ConfigOperatorInterface;
 
   /**
    * Additional queue IDs for chunk processing.
@@ -307,6 +314,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       pendingTtl: parseInt(process.env.TWO_FACTOR_PENDING_TTL || "300", 10),
     },
     prompts: options?.prompts ?? {},
+    operator: options?.operator ?? {},
     chunkQueues: options?.chunkQueues ?? { queueIds: [] },
     contentTypes: options?.contentTypes ?? { types: [] },
     jobNames: options?.jobNames ?? { process: {}, notifications: {} },

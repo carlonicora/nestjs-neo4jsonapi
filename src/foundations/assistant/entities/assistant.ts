@@ -10,6 +10,7 @@ import { assistantMeta } from "./assistant.meta";
 
 export type Assistant = Entity & {
   title: string;
+  engine?: string;
   messages?: AssistantMessage[];
   company: Company;
   owner?: User;
@@ -21,6 +22,7 @@ export const AssistantDescriptor = defineEntity<Assistant>()({
   isCompanyScoped: true,
   fields: {
     title: { type: "string", required: true },
+    engine: { type: "string" },
   },
   relationships: {
     owner: {

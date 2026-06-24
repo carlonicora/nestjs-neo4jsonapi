@@ -16,6 +16,7 @@ import { ConfigJwtInterface } from "./config.jwt.interface";
 import { ConfigLoggingInterface } from "./config.logging.interface";
 import { ConfigNeo4jInterface } from "./config.neo4j.interface";
 import { ConfigOAuthInterface } from "./config.oauth.interface";
+import { ConfigOperatorInterface } from "./config.operator.interface";
 import { ConfigPromptsInterface } from "./config.prompts.interface";
 import { ConfigRateLimitInterface } from "./config.ratelimit.interface";
 import { ConfigRedisInterface } from "./config.redis.interface";
@@ -45,6 +46,7 @@ export interface BaseConfigInterface {
   encryption: ConfigEncryptionInterface;
   stripe: ConfigStripeInterface;
   prompts: ConfigPromptsInterface;
+  operator?: ConfigOperatorInterface;
   chunkQueues: ConfigChunkQueuesInterface;
   contentTypes: ConfigContentTypesInterface;
   jobNames: ConfigJobNamesInterface;

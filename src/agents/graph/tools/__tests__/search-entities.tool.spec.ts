@@ -79,7 +79,40 @@ describe("SearchEntitiesTool", () => {
     await tool.invoke({ type: "accounts", limit: 5000 }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
-    expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 }));
+    // Clamped to 50, then probes one extra record to detect truncation.
+    expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 51 }));
+  });
+
+  it("fetches limit+1, slices to limit, and flags hasMore + note when more records exist", async () => {
+    const svc = {
+      findRecords: vi.fn(async () => [
+        { id: "a1", name: "one", status: "active" },
+        { id: "a2", name: "two", status: "active" },
+        { id: "a3", name: "three", status: "active" },
+      ]),
+    };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const out: any = await tool.invoke({ type: "accounts", limit: 2 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 3 }));
+    expect(out.items).toHaveLength(2);
+    expect(out.matchMode).toBe("none");
+    expect(out.hasMore).toBe(true);
+    expect(out.note).toBe('Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.');
+  });
+
+  it("omits hasMore and note when the result fits within the limit", async () => {
+    const svc = { findRecords: vi.fn(async () => [{ id: "a1", name: "one", status: "active" }]) };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const out: any = await tool.invoke({ type: "accounts", limit: 2 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items).toHaveLength(1);
+    expect("hasMore" in out).toBe(false);
+    expect("note" in out).toBe(false);
   });
 
   it("returns matchMode='none' and per-item score=null for filter-only queries", async () => {

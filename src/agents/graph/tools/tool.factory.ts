@@ -60,9 +60,24 @@ export class ToolFactory {
     const suggestion = this.findClosest(type, accessible);
 
     if (suggestion) {
+      // Trivial variants (case, punctuation, singular/plural-s, one-char typo)
+      // are resolved transparently — small models reliably relay even
+      // imperative "retry" errors to the user instead of retrying, so the
+      // correction must be deterministic, not prompted.
+      const trivial = levenshtein(normaliseTypeName(type), normaliseTypeName(suggestion)) <= 1;
+      if (trivial) {
+        const corrected = this.catalog.getEntityDetail(suggestion, ctx.userModuleIds);
+        if (corrected) {
+          this.logger.log(`tool.factory: auto-corrected entity type "${type}" -> "${suggestion}"`);
+          return corrected;
+        }
+      }
+
       this.logger.log(`tool.factory: unknownType="${type}" suggested="${suggestion}"`);
       return {
-        error: `Entity type "${type}" is not available. Did you mean "${suggestion}"?`,
+        // Imperative phrasing: question-shaped errors ("Did you mean…?") get
+        // relayed verbatim to the user by smaller models instead of retried.
+        error: `Entity type "${type}" is not available. Retry this call now with type "${suggestion}".`,
         suggestion,
       };
     }
@@ -71,7 +86,7 @@ export class ToolFactory {
 
     return {
       error: accessible.length
-        ? `Entity type "${type}" is not available. Available types include: ${accessible.slice(0, 5).join(", ")}.`
+        ? `Entity type "${type}" is not available. The available types are: ${accessible.join(", ")}.`
         : `Entity type "${type}" is not available.`,
     };
   }

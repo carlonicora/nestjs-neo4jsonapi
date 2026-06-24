@@ -61,10 +61,10 @@ describe("DescribeEntityTool", () => {
     expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
   });
 
-  it("propagates a Did-you-mean suggestion verbatim from the factory error object", async () => {
+  it("propagates a retry suggestion verbatim from the factory error object", async () => {
     const suggestionFactory: any = {
       resolveEntity: (_t: string, _c: any) => ({
-        error: 'Entity type "bom" is not available. Did you mean "boms"?',
+        error: 'Entity type "bom" is not available. Retry this call now with type "boms".',
         suggestion: "boms",
       }),
       capture: async (_r: any, fn: any, rec: any[]) => {
@@ -79,7 +79,7 @@ describe("DescribeEntityTool", () => {
       { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
       [],
     );
-    expect(out.error).toMatch(/Did you mean "boms"\?/);
+    expect(out.error).toMatch(/Retry this call now with type "boms"\./);
     expect(out.suggestion).toBe("boms");
   });
 

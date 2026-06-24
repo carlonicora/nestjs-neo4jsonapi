@@ -1,6 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { ConflictException, Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { OPERATOR_DEFAULT_APPROVAL_TTL_DAYS } from "../../../agents/operator/services/operator.checkpointer.service";
+import { OperatorRunResult, OperatorService } from "../../../agents/operator/services/operator.service";
 import { ResponderService } from "../../../agents/responder/services/responder.service";
 import { GraphCatalogService } from "../../../agents/graph/services/graph.catalog.service";
 import { UserModulesRepository } from "../../../agents/graph/repositories/user-modules.repository";
@@ -10,8 +13,14 @@ import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigOperatorInterface } from "../../../config/interfaces/config.operator.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
+import { AssistantAction, AssistantActionStatus } from "../../assistant-action/entities/assistant-action";
+import { AssistantActionRepository } from "../../assistant-action/repositories/assistant-action.repository";
+import { AssistantActionService } from "../../assistant-action/services/assistant-action.service";
 import { AssistantMessage, AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
 import { assistantMessageMeta } from "../../assistant-message/entities/assistant-message.meta";
 import { AssistantMessageRepository } from "../../assistant-message/repositories/assistant-message.repository";
@@ -73,6 +82,11 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     private readonly assistantMessageRepo: AssistantMessageRepository,
     private readonly graphCatalog: GraphCatalogService,
     private readonly entityServices: EntityServiceRegistry,
+    private readonly operator: OperatorService,
+    private readonly assistantActions: AssistantActionService,
+    private readonly assistantActionRepo: AssistantActionRepository,
+    private readonly webSocketService: WebSocketService,
+    private readonly configService: ConfigService<BaseConfigInterface>,
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
@@ -278,6 +292,453 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     );
 
     return { userMessage, assistantMessage, toolCalls: turn.toolCalls };
+  }
+
+  /**
+   * Operator variant of `createWithFirstMessage`: same persistence lifecycle
+   * (assistant node, user message at position 0, assistant turn at position 1)
+   * but the turn runs on the checkpointed OperatorService instead of the
+   * stateless responder. A `pending_approval` outcome freezes the run and
+   * materialises an AssistantAction + an `approval-request` assistant message.
+   */
+  async createWithFirstMessageOperator(params: {
+    companyId: string;
+    userId: string;
+    firstMessage: string;
+    title?: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
+  }): Promise<{
+    assistant: Assistant;
+    userMessage: AssistantMessage;
+    assistantMessage: AssistantMessage;
+    toolCalls: ToolCallRecord[];
+    action?: AssistantAction;
+  }> {
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+    const title = params.title?.trim() || this.autoTitle(params.firstMessage);
+
+    const assistantId = randomUUID();
+    const userMessageId = randomUUID();
+
+    // Persist the engine marker so clients can route follow-up turns to the
+    // operator endpoints after a reload — absence means responder semantics.
+    await this.createFromDTO({
+      data: {
+        type: assistantMeta.type,
+        id: assistantId,
+        attributes: { title, engine: "operator" },
+      },
+    });
+
+    await this.assistantMessages.createFromDTO({
+      data: {
+        type: assistantMessageMeta.type,
+        id: userMessageId,
+        attributes: {
+          role: "user",
+          content: params.firstMessage,
+          position: 0,
+        },
+        relationships: {
+          assistant: { data: { type: assistantMeta.type, id: assistantId } },
+        },
+      },
+    });
+    const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+
+    const threadId = `${assistantId}:${userMessageId}`;
+    const contentScope = await this.resolveContentScope(assistantId);
+    const result = await this.runOperatorTurn({
+      companyId: params.companyId,
+      userId: params.userId,
+      userModuleIds,
+      priorMessages: [],
+      question: params.firstMessage,
+      assistantId,
+      threadId,
+      contentScope,
+    });
+
+    const outcome = await this.persistOperatorOutcome({
+      assistantId,
+      threadId,
+      userModuleIds,
+      contentScope,
+      result,
+      position: 1,
+    });
+
+    this.assistantLogger.log(
+      `createWithFirstMessageOperator: id=${assistantId} userId=${params.userId} companyId=${params.companyId} outcome=${result.kind}`,
+    );
+
+    const assistant = await this.repository.findById({ id: assistantId });
+    return { assistant, userMessage, ...outcome };
+  }
+
+  /**
+   * Operator variant of `appendMessage`: identical hydration, history trim and
+   * persistence shape, but the turn runs on the checkpointed OperatorService.
+   */
+  async appendMessageOperator(params: {
+    assistantId: string;
+    companyId: string;
+    userId: string;
+    newMessage: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
+  }): Promise<{
+    userMessage: AssistantMessage;
+    assistantMessage: AssistantMessage;
+    toolCalls: ToolCallRecord[];
+    action?: AssistantAction;
+  }> {
+    // Verify ownership via the owner-RBAC-enforcing findById.
+    await this.repository.findById({ id: params.assistantId });
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+
+    const priorMessages = await this.loadRecentMessages({
+      assistantId: params.assistantId,
+      limit: MAX_MESSAGES_TO_LLM,
+    });
+
+    const nextPosition = await this.assistantMessageRepo.getNextPosition({
+      assistantId: params.assistantId,
+    });
+
+    const userMessageId = randomUUID();
+
+    await this.assistantMessages.createFromDTO({
+      data: {
+        type: assistantMessageMeta.type,
+        id: userMessageId,
+        attributes: {
+          role: "user",
+          content: params.newMessage,
+          position: nextPosition,
+        },
+        relationships: {
+          assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
+        },
+      },
+    });
+    const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+
+    const threadId = `${params.assistantId}:${userMessageId}`;
+    const contentScope = await this.resolveContentScope(params.assistantId);
+    const result = await this.runOperatorTurn({
+      companyId: params.companyId,
+      userId: params.userId,
+      userModuleIds,
+      priorMessages,
+      question: params.newMessage,
+      assistantId: params.assistantId,
+      threadId,
+      contentScope,
+    });
+
+    const outcome = await this.persistOperatorOutcome({
+      assistantId: params.assistantId,
+      threadId,
+      userModuleIds,
+      contentScope,
+      result,
+      position: nextPosition + 1,
+    });
+
+    this.assistantLogger.log(
+      `appendMessageOperator: id=${params.assistantId} userId=${params.userId} newPos=${nextPosition}-${nextPosition + 1} outcome=${result.kind}`,
+    );
+
+    return { userMessage, ...outcome };
+  }
+
+  /**
+   * Approve or deny a pending AssistantAction and resume the frozen operator
+   * run. The status transition is guarded atomically in Cypher
+   * (`resolveStatus`) BEFORE the resume so a double approve/deny loses with a
+   * 409 and never re-executes the tool. The final assistant message is
+   * appended at the current end of the thread (chatting may have continued)
+   * and pushed over the websocket so any open chat updates live.
+   */
+  async resolveAction(params: { actionId: string; approved: boolean }): Promise<{
+    assistantMessage: AssistantMessage;
+    action: AssistantAction;
+  }> {
+    const action = await this.assistantActionRepo.findById({ id: params.actionId });
+    const resolvedTo: AssistantActionStatus = params.approved ? "approved" : "denied";
+
+    const transitioned = await this.assistantActionRepo.resolveStatus({
+      id: params.actionId,
+      from: "pending",
+      to: resolvedTo,
+    });
+    if (!transitioned) {
+      throw new ConflictException("This action has already been resolved or has expired.");
+    }
+
+    const [assistantId] = action.threadId.split(":");
+    const userId = this.clsService.get("userId");
+    const companyId = action.company?.id ?? this.clsService.get("companyId");
+
+    // Stored fields are JSON strings persisted by us, but a corrupt value must
+    // not turn an approval into an unrecoverable 500 — default and proceed.
+    let userModuleIds: string[] = [];
+    try {
+      userModuleIds = action.userModuleIds ? JSON.parse(action.userModuleIds) : [];
+    } catch {
+      this.assistantLogger.warn(
+        `resolveAction: corrupt userModuleIds JSON on action=${params.actionId} — defaulting to []`,
+      );
+    }
+    let contentScope: { contentId?: string; contentType?: string } | undefined;
+    try {
+      contentScope = action.contentScope ? JSON.parse(action.contentScope) : undefined;
+    } catch {
+      this.assistantLogger.warn(
+        `resolveAction: corrupt contentScope JSON on action=${params.actionId} — proceeding without content scope`,
+      );
+    }
+
+    // Rebuild the resume context the same way appendMessageOperator builds the
+    // run context: the thread's recent messages, trimmed to MAX_MESSAGES_TO_LLM.
+    const priorMessages = await this.loadRecentMessages({ assistantId, limit: MAX_MESSAGES_TO_LLM });
+    const messages: MessageInterface[] = priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
+      type: this.roleToType(m.role),
+      content: m.content,
+    }));
+
+    let result: OperatorRunResult;
+    try {
+      result = await this.operator.resume({
+        threadId: action.threadId,
+        approved: params.approved,
+        companyId,
+        userId,
+        userModuleIds,
+        contentId: contentScope?.contentId,
+        contentType: contentScope?.contentType,
+        messages,
+      });
+    } catch (err) {
+      // Expired or missing checkpoint (or any resume failure): the action can
+      // never complete — mark it failed and surface a clear 409 (spec §4).
+      await this.assistantActionRepo.resolveStatus({ id: params.actionId, from: resolvedTo, to: "failed" });
+      this.assistantLogger.error(
+        `resolveAction: resume failed for action=${params.actionId} thread=${action.threadId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new ConflictException("Could not resume this action — please ask again.");
+    }
+
+    // Approved + resumed successfully → the destructive tool ran: executed.
+    // The truth of "executed" is the resume returning, NOT message persistence
+    // — transition immediately so the status never lies if persistence fails.
+    // Denied stays `denied` (set by the guard above).
+    if (params.approved) {
+      await this.assistantActionRepo.resolveStatus({ id: params.actionId, from: "approved", to: "executed" });
+    }
+
+    let outcome: { assistantMessage: AssistantMessage; toolCalls: ToolCallRecord[]; action?: AssistantAction };
+    try {
+      const nextPosition = await this.assistantMessageRepo.getNextPosition({ assistantId });
+      outcome = await this.persistOperatorOutcome({
+        assistantId,
+        threadId: action.threadId,
+        userModuleIds,
+        contentScope,
+        result,
+        position: nextPosition,
+      });
+    } catch (err) {
+      // The tool already ran and the action is correctly `executed`; the answer
+      // could not be persisted. Log the orphaned answer so it is recoverable.
+      this.assistantLogger.error(
+        `resolveAction: action=${params.actionId} executed but persisting the answer failed — orphaned operator result: ${JSON.stringify(result)}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+      throw err;
+    }
+    const updatedAction = await this.assistantActionRepo.findById({ id: params.actionId });
+
+    // Live update for any open chat on this thread — best-effort: a transport
+    // hiccup must not fail a request whose action executed and persisted.
+    try {
+      const document = await this.jsonApiService.buildSingle(
+        AssistantMessageDescriptor.model,
+        outcome.assistantMessage,
+      );
+      await this.webSocketService.sendMessageToUser(userId, "assistant:message", document);
+    } catch (err) {
+      this.assistantLogger.warn(
+        `resolveAction: websocket push failed for action=${params.actionId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    this.assistantLogger.log(
+      `resolveAction: action=${params.actionId} approved=${params.approved} outcome=${result.kind}`,
+    );
+
+    // A resumed run can freeze again on a further destructive call: the new
+    // pending action supersedes the (now executed) original in the response.
+    return { assistantMessage: outcome.assistantMessage, action: outcome.action ?? updatedAction };
+  }
+
+  /**
+   * Resolve the content scope from the assistant's BOUND_TO relationship if
+   * loaded. Mirrors the inline logic in `runAgentTurn`.
+   */
+  private async resolveContentScope(assistantId: string): Promise<{ contentId?: string; contentType?: string }> {
+    try {
+      const assistant = await this.repository.findById({ id: assistantId });
+      const c = (assistant as any).content;
+      return { contentId: c?.id, contentType: c?.type };
+    } catch {
+      // If load fails, proceed without content scope.
+      return {};
+    }
+  }
+
+  /**
+   * Runs a single operator turn. Builds the exact message list the responder
+   * path builds ([hydration system message?, ...trimmed priors, question])
+   * and invokes the checkpointed operator graph under `threadId`.
+   */
+  private async runOperatorTurn(params: {
+    companyId: string;
+    userId: string;
+    userModuleIds: string[];
+    priorMessages: AssistantMessage[];
+    question: string;
+    assistantId: string;
+    threadId: string;
+    contentScope: { contentId?: string; contentType?: string };
+  }): Promise<OperatorRunResult> {
+    const now = new Date();
+    this.clsService.set("assistantTurnContext", {
+      assistantId: params.assistantId,
+      turnStartedAt: now.toISOString().slice(0, 19).replace(/[T:]/g, "-"),
+    });
+
+    const hydrationContent = await this.buildHydrationMessage(params.priorMessages, params.userModuleIds);
+
+    const trimmed = params.priorMessages.slice(-MAX_MESSAGES_TO_LLM).map((m) => ({
+      type: this.roleToType(m.role),
+      content: m.content,
+    }));
+
+    const messages: MessageInterface[] = [
+      ...(hydrationContent ? [{ type: AgentMessageType.System, content: hydrationContent }] : []),
+      ...trimmed,
+      { type: AgentMessageType.User, content: params.question },
+    ];
+
+    return await this.operator.run({
+      companyId: params.companyId,
+      userId: params.userId,
+      userModuleIds: params.userModuleIds,
+      contentId: params.contentScope.contentId,
+      contentType: params.contentScope.contentType,
+      messages,
+      question: params.question,
+      threadId: params.threadId,
+    });
+  }
+
+  /**
+   * Persist the outcome of an operator turn (initial run or resume).
+   *
+   * - `completed` → assistant message + REFERENCES/CITES edges, exactly like
+   *   the responder path (the operator result carries no UnifiedTrace, so
+   *   `setTrace` is not called).
+   * - `pending_approval` → an `approval-request` assistant message carrying
+   *   the human-readable summary, plus a `pending` AssistantAction linked to
+   *   it, expiring after `operator.approvalTtlDays` from app config (default 7).
+   */
+  private async persistOperatorOutcome(params: {
+    assistantId: string;
+    threadId: string;
+    userModuleIds: string[];
+    contentScope?: { contentId?: string; contentType?: string };
+    result: OperatorRunResult;
+    position: number;
+  }): Promise<{ assistantMessage: AssistantMessage; toolCalls: ToolCallRecord[]; action?: AssistantAction }> {
+    const assistantMessageId = randomUUID();
+
+    if (params.result.kind === "completed") {
+      const { result } = params;
+      await this.assistantMessages.createFromDTO({
+        data: {
+          type: assistantMessageMeta.type,
+          id: assistantMessageId,
+          attributes: {
+            role: "assistant",
+            content: result.answer,
+            position: params.position,
+            suggestedQuestions: result.questions,
+            inputTokens: result.tokens.input,
+            outputTokens: result.tokens.output,
+          },
+          relationships: {
+            assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
+          },
+        },
+      });
+
+      if (result.references.length) {
+        await this.assistantMessageRepo.linkReferences({
+          messageId: assistantMessageId,
+          references: result.references,
+        });
+      }
+      if (result.citations.length) {
+        await this.assistantMessageRepo.linkCitations({
+          messageId: assistantMessageId,
+          citations: result.citations.map((c) => ({ chunkId: c.chunkId, relevance: c.relevance, reason: c.reason })),
+        });
+      }
+      const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
+      return { assistantMessage, toolCalls: result.toolCalls };
+    }
+
+    // pending_approval — freeze: approval-request message + pending action.
+    const { result } = params;
+    await this.assistantMessages.createFromDTO({
+      data: {
+        type: assistantMessageMeta.type,
+        id: assistantMessageId,
+        attributes: {
+          role: "assistant",
+          content: result.summary,
+          position: params.position,
+          messageType: "approval-request",
+        },
+        relationships: {
+          assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
+        },
+      },
+    });
+    const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
+
+    const ttlDays =
+      this.configService.get<ConfigOperatorInterface>("operator")?.approvalTtlDays ??
+      OPERATOR_DEFAULT_APPROVAL_TTL_DAYS;
+    const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
+    const hasContentScope = !!(params.contentScope?.contentId || params.contentScope?.contentType);
+
+    const action = await this.assistantActions.createPendingAction({
+      toolName: result.toolName,
+      toolArgs: JSON.stringify(result.toolArgs),
+      summary: result.summary,
+      threadId: params.threadId,
+      userModuleIds: JSON.stringify(params.userModuleIds),
+      ...(hasContentScope ? { contentScope: JSON.stringify(params.contentScope) } : {}),
+      expiresAt,
+      assistantId: params.assistantId,
+      messageId: assistantMessageId,
+    });
+
+    return { assistantMessage, toolCalls: [], action };
   }
 
   /**

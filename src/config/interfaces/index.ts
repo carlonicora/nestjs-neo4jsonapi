@@ -22,6 +22,7 @@ export * from "./config.jwt.interface";
 export * from "./config.logging.interface";
 export * from "./config.neo4j.interface";
 export * from "./config.oauth.interface";
+export * from "./config.operator.interface";
 export * from "./config.prompts.interface";
 export * from "./config.ratelimit.interface";
 export * from "./config.redis.interface";

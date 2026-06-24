@@ -6,6 +6,8 @@ import type { Assistant } from "../../assistant/entities/assistant";
 import { assistantMeta } from "../../assistant/entities/assistant.meta";
 import type { Chunk } from "../../chunk/entities/chunk.entity";
 import { chunkMeta } from "../../chunk/entities/chunk.meta";
+import type { AssistantAction } from "../../assistant-action/entities/assistant-action";
+import { assistantActionMeta } from "../../assistant-action/entities/assistant-action.meta";
 import { assistantMessageMeta } from "./assistant-message.meta";
 
 export type AssistantMessageRole = "user" | "assistant" | "system";
@@ -18,10 +20,12 @@ export type AssistantMessage = Entity & {
   inputTokens?: number;
   outputTokens?: number;
   trace?: string;
+  messageType?: string;
   company: Company;
   assistant: Assistant;
   references?: unknown[];
   citations?: Chunk[];
+  action?: AssistantAction;
 };
 
 export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
@@ -35,6 +39,7 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
     inputTokens: { type: "number" },
     outputTokens: { type: "number" },
     trace: { type: "string" },
+    messageType: { type: "string" },
   },
   relationships: {
     assistant: {
@@ -78,6 +83,15 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
         { name: "relevance", type: "number", required: true },
         { name: "reason", type: "string", required: false },
       ],
+    },
+    action: {
+      model: assistantActionMeta,
+      direction: "out", // (AssistantMessage)-[:REQUESTED_IN]->(AssistantAction) — mirror of AssistantAction.message
+      relationship: "REQUESTED_IN",
+      cardinality: "one",
+      required: false,
+      dtoKey: "action",
+      immutable: true,
     },
   },
 });

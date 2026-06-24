@@ -198,15 +198,25 @@ export class TraverseTool {
         // but findRelatedRecordsByEdge expects it from the target's (this-node)
         // perspective.
         const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
-        const records: any[] = await targetSvc.findRelatedRecordsByEdge({
+        // Probe one extra record so truncation is visible to the model:
+        // without this, a silently clipped list is reported as complete.
+        const fetched: any[] = await targetSvc.findRelatedRecordsByEdge({
           cypherLabel: rel.cypherLabel,
           cypherDirection: targetDirection,
           relatedLabel: source.labelName,
           relatedId: input.fromId,
           filters,
           orderByFields: sort,
-          limit,
+          limit: limit + 1,
         });
+        const hasMore = fetched.length > limit;
+        const records = hasMore ? fetched.slice(0, limit) : fetched;
+        const truncation = hasMore
+          ? {
+              hasMore: true,
+              note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+            }
+          : {};
 
         const baseItems = records.map((r) => ({
           id: r.id,
@@ -216,7 +226,7 @@ export class TraverseTool {
         }));
 
         if (!target.bridge) {
-          return { items: baseItems };
+          return { items: baseItems, ...truncation };
         }
 
         // Bridge fanout: each item gets its `materialiseTo` relationships inlined.
@@ -231,7 +241,7 @@ export class TraverseTool {
             }),
           ),
         );
-        return { items };
+        return { items, ...truncation };
       },
       recorder,
     );

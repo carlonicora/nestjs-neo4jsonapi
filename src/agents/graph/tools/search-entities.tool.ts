@@ -103,13 +103,24 @@ export class SearchEntitiesTool {
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
 
-        const records = await svc.findRecords({
+        // Probe one extra record so truncation is visible to the model:
+        // without this, a silently clipped list is reported as complete.
+        const fetched = await svc.findRecords({
           filters,
           orderByFields: sort,
-          limit,
+          limit: limit + 1,
         });
+        const hasMore = fetched.length > limit;
+        const records = hasMore ? fetched.slice(0, limit) : fetched;
 
-        return await this.buildOutput(entity, records, ctx, localMaterialised);
+        const output = await this.buildOutput(entity, records, ctx, localMaterialised);
+        return hasMore
+          ? {
+              ...output,
+              hasMore: true,
+              note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+            }
+          : output;
       },
       recorder,
     );

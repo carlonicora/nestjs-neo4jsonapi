@@ -76,10 +76,39 @@ describe("TraverseTool", () => {
         relatedId: "a1",
         filters: [{ field: "total", op: "gte", value: 50 }],
         orderByFields: [{ field: "createdAt", direction: "desc" }],
-        limit: 1,
+        limit: 2, // probes one extra record beyond the requested limit of 1
       }),
     );
     expect(out.items[0]).toMatchObject({ id: "o1", type: "orders", summary: "#o1" });
+  });
+
+  it("fetches limit+1, slices to limit, and flags hasMore + note when more records exist", async () => {
+    targetSvc.findRelatedRecordsByEdge.mockClear();
+    targetSvc.findRelatedRecordsByEdge.mockResolvedValueOnce([
+      { id: "o1", total: 100, createdAt: "2026-04-01" },
+      { id: "o2", total: 200, createdAt: "2026-04-02" },
+      { id: "o3", total: 300, createdAt: "2026-04-03" },
+    ]);
+    const tool = new TraverseTool(factory, {} as any, {} as any);
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 2 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(targetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(expect.objectContaining({ limit: 3 }));
+    expect(out.items).toHaveLength(2);
+    expect(out.hasMore).toBe(true);
+    expect(out.note).toBe('Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.');
+  });
+
+  it("omits hasMore and note when the result fits within the limit", async () => {
+    targetSvc.findRelatedRecordsByEdge.mockClear();
+    targetSvc.findRelatedRecordsByEdge.mockResolvedValueOnce([{ id: "o1", total: 100, createdAt: "2026-04-01" }]);
+    const tool = new TraverseTool(factory, {} as any, {} as any);
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders", limit: 2 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items).toHaveLength(1);
+    expect("hasMore" in out).toBe(false);
+    expect("note" in out).toBe(false);
   });
 
   it("rejects unknown relationship", async () => {
@@ -248,6 +277,26 @@ describe("TraverseTool", () => {
     });
     expect(out.items[0].item).toMatchObject({ id: "it-1", type: "items" });
     expect(out.items[1].item).toMatchObject({ id: "it-2", type: "items" });
+    expect("hasMore" in out).toBe(false);
+    expect("note" in out).toBe(false);
+
+    // Bridge return site also reports truncation when more records exist.
+    targetSvcEntries.findRelatedRecordsByEdge.mockResolvedValueOnce([
+      { id: "be-1", position: 1 },
+      { id: "be-2", position: 2 },
+    ]);
+    const truncated: any = await tool.invoke(
+      { fromType: "boms", fromId: "bom-1", relationship: "bomEntries", limit: 1 },
+      { ...ctx, userModuleIds: [moduleId] },
+      [{ tool: "describe_entity", input: { type: "boms" }, durationMs: 0 }],
+    );
+    expect(targetSvcEntries.findRelatedRecordsByEdge).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 2 }));
+    expect(truncated.items).toHaveLength(1);
+    expect(truncated.items[0]).toMatchObject({ id: "be-1", __materialised: ["item"] });
+    expect(truncated.hasMore).toBe(true);
+    expect(truncated.note).toBe(
+      'Only the first 1 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
+    );
   });
 
   it("walks a forward asymmetric relationship (target descriptor lacks the key)", async () => {

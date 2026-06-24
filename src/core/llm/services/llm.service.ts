@@ -1192,6 +1192,119 @@ export class LLMService {
   }
 
   /**
+   * Single-step model invocation with tools bound — the durable-checkpointing
+   * counterpart to {@link call}'s internal tool loop. Performs exactly ONE
+   * model invocation (no tool execution, no loop, no retries, no structured
+   * output) and returns the raw AIMessage with any `tool_calls` untouched, so
+   * the caller (e.g. the operator agent) can checkpoint state and execute the
+   * tool calls itself.
+   *
+   * Reuses {@link call}'s model construction (`modelService.getLLM` +
+   * `bindTools`), session token accounting (`_sessionTokens`), and
+   * `LLMCallDumper` hooks.
+   *
+   * @param params.systemPrompts - System prompts, prepended (in order) as
+   *                               SystemMessages before `messages`
+   * @param params.messages - Conversation messages sent verbatim to the model
+   * @param params.tools - Tools to bind (NOT executed by this method)
+   * @param params.temperature - Optional temperature override
+   * @param params.metadata - Optional metadata for dump-session tracking
+   *
+   * @returns The raw AIMessage (tool_calls intact) plus this call's token usage
+   */
+  async callStep(params: {
+    systemPrompts: string[];
+    messages: BaseMessage[];
+    tools: DynamicStructuredTool[];
+    temperature?: number;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ message: AIMessage; tokenUsage: { input: number; output: number } }> {
+    const modelWeight = ModelWeight.Normal;
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
+    const session: DumpSession = this.dumper.startSession({
+      metadata: params.metadata as DumpSessionStartParams["metadata"],
+      model: aiConfig.model,
+      provider: aiConfig.provider,
+      temperature: params.temperature,
+    });
+
+    session.recordInputs({
+      systemPrompts: params.systemPrompts,
+      instructions: "",
+      inputParams: {},
+      history: [],
+      tools: params.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        schema: (t as any).schema,
+      })),
+      outputSchemaName: "callStep",
+    });
+
+    try {
+      const baseModel = this.modelService.getLLM({
+        temperature: params.temperature,
+        modelWeight,
+      });
+      const modelWithTools = params.tools.length > 0 ? baseModel.bindTools(params.tools) : baseModel;
+
+      const conversationMessages: BaseMessage[] = [
+        ...params.systemPrompts.map((p) => new SystemMessage(p)),
+        ...params.messages,
+      ];
+
+      session.startIteration("tool-loop", conversationMessages);
+
+      const response = (await (params.metadata
+        ? modelWithTools.invoke(conversationMessages, { metadata: params.metadata })
+        : modelWithTools.invoke(conversationMessages))) as AIMessage;
+
+      const raw = response as unknown as LLMRawResponse;
+      const input = raw.usage_metadata?.input_tokens ?? 0;
+      const output = raw.usage_metadata?.output_tokens ?? 0;
+
+      session.recordResponse({
+        content: typeof (response as any).content === "string" ? (response as any).content : "",
+        toolCalls: (response.tool_calls ?? []).map((c) => ({
+          id: c.id ?? "",
+          name: c.name,
+          args: c.args,
+        })),
+        tokenUsage: { input, output },
+        finishReason: raw.response_metadata?.finish_reason,
+      });
+
+      // Update session tracking (exactly once per step)
+      this._sessionTokens.input += input;
+      this._sessionTokens.output += output;
+      this._sessionTokens.total += input + output;
+      this._sessionTokens.callCount += 1;
+
+      session.close({
+        finalStatus: "success",
+        totalTokens: { input, output },
+        warnings: [],
+        parseFallbacks: [],
+      });
+
+      return { message: response, tokenUsage: { input, output } };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+      session.close({
+        finalStatus: "error",
+        errorMessage: message,
+        errorStack: stack,
+        totalTokens: { input: 0, output: 0 },
+        warnings: [],
+        parseFallbacks: [],
+      });
+      console.error("[LLMService.callStep] Error:", error);
+      throw error instanceof Error ? error : new Error(message);
+    }
+  }
+
+  /**
    * Get session-level token usage statistics
    *
    * @returns Session usage data including total tokens and call count
