@@ -1,3 +1,9 @@
+## [1.99.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.98.0...v1.99.0) (2026-06-25)
+
+### 🚀 Features
+
+* **corpus-pilot:** adapt engine for corpus + read neo4j db from app config ([897e6ff](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/897e6ff975cecbd811a7cdf0aa8008e7c4fd317c))
+
 ## [1.98.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.97.0...v1.98.0) (2026-06-24)
 
 ### 🚀 Features
