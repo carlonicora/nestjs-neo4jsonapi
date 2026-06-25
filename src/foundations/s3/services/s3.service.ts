@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -6,7 +7,9 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from "stream";
 import {
   BlobSASPermissions,
   BlobServiceClient,
@@ -623,5 +626,304 @@ export class S3Service {
       console.error(`Failed to get Azure object content for key ${params.key}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Single-page list for streaming consumers. Unlike listObjects (which accumulates every page
+   * into one array), this returns one page plus the continuation token so the caller can resume
+   * on demand. StartAfter lets a caller resume after a known key; it is ignored when
+   * ContinuationToken is set.
+   */
+  async listObjectsPage(params: {
+    prefix: string;
+    startAfter?: string;
+    continuationToken?: string;
+    maxKeys?: number;
+  }): Promise<{ objects: { key: string; size: number }[]; nextContinuationToken?: string }> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return { objects: [] };
+    if (this._storageType === "azure") {
+      throw new Error("listObjectsPage is not supported for azure storage");
+    }
+
+    const listResponse = await this.s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: this._bucket,
+        Prefix: params.prefix,
+        StartAfter: params.continuationToken ? undefined : params.startAfter,
+        ContinuationToken: params.continuationToken,
+        MaxKeys: params.maxKeys,
+      }),
+    );
+
+    const objects: { key: string; size: number }[] = [];
+    for (const obj of listResponse.Contents ?? []) {
+      if (obj.Key && obj.Size !== undefined) objects.push({ key: obj.Key, size: obj.Size });
+    }
+    return { objects, nextContinuationToken: listResponse.NextContinuationToken };
+  }
+
+  /**
+   * Download a file from S3/Azure and return both its buffer and the response Content-Type.
+   * Used by workers that hash + re-upload while preserving the original content type.
+   */
+  async downloadFileBuffer(params: { key: string }): Promise<{ buffer: Buffer; contentType?: string }> {
+    await this._loadConfiguration();
+    if (!this._endpoint) {
+      throw new Error("S3 not configured");
+    }
+
+    if (this._storageType === "azure") {
+      const blobClient = this.containerClient.getBlobClient(params.key);
+      const downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) {
+        throw new Error(`Azure blob not found: ${params.key}`);
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of downloadResponse.readableStreamBody) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return {
+        buffer: Buffer.concat(chunks),
+        contentType: downloadResponse.contentType ?? undefined,
+      };
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: this._bucket,
+      Key: params.key,
+    });
+    const response = await this.s3Client.send(command);
+    if (!response.Body) {
+      throw new Error(`S3 object not found: ${params.key}`);
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: response.ContentType,
+    };
+  }
+
+  /**
+   * Upload a readable stream with an exact key using multipart upload.
+   * Unlike uploadBufferWithKey, this streams data without holding the full content in memory.
+   */
+  async uploadStream(params: { key: string; contentType: string; stream: Readable }): Promise<void> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return;
+
+    if (this._storageType === "azure") {
+      const blobClient = this.containerClient.getBlockBlobClient(params.key);
+      await blobClient.uploadStream(params.stream, 8 * 1024 * 1024, 4, {
+        blobHTTPHeaders: { blobContentType: params.contentType },
+      });
+      return;
+    }
+
+    // S3-compatible storage — multipart upload via @aws-sdk/lib-storage
+    const upload = new Upload({
+      client: this.s3Client,
+      params: {
+        Bucket: this._bucket,
+        Key: params.key,
+        Body: params.stream,
+        ContentType: params.contentType,
+      },
+      partSize: 10 * 1024 * 1024,
+      queueSize: 4,
+    });
+
+    await upload.done();
+  }
+
+  /**
+   * Copy a file from one location to another within the same bucket/container.
+   * Supports both S3-compatible storage and Azure Blob Storage.
+   */
+  async copyFile(params: { sourceKey: string; destinationKey: string }): Promise<void> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return;
+
+    if (this._storageType === "azure") {
+      const sourceBlobClient = this.containerClient.getBlobClient(params.sourceKey);
+      const destBlobClient = this.containerClient.getBlobClient(params.destinationKey);
+      const copyPoller = await destBlobClient.beginCopyFromURL(sourceBlobClient.url);
+      await copyPoller.pollUntilDone();
+      return;
+    }
+
+    // S3-compatible storage (AWS, DigitalOcean, Hetzner, MinIO)
+    const command = new CopyObjectCommand({
+      Bucket: this._bucket,
+      CopySource: `${this._bucket}/${params.sourceKey}`,
+      Key: params.destinationKey,
+    });
+
+    await this.s3Client.send(command);
+  }
+
+  /**
+   * List all objects under a given prefix.
+   * Handles pagination for S3-compatible storage and Azure.
+   */
+  async listObjects(params: { prefix: string }): Promise<{ key: string; size: number }[]> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return [];
+
+    if (this._storageType === "azure") return await this._listAzureObjects(params);
+
+    const results: { key: string; size: number }[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const listResponse = await this.s3Client.send(
+        new ListObjectsV2Command({
+          Bucket: this._bucket,
+          Prefix: params.prefix,
+          ContinuationToken: continuationToken,
+        }),
+      );
+
+      if (listResponse.Contents) {
+        for (const obj of listResponse.Contents) {
+          if (obj.Key && obj.Size !== undefined) {
+            results.push({ key: obj.Key, size: obj.Size });
+          }
+        }
+      }
+
+      continuationToken = listResponse.NextContinuationToken;
+    } while (continuationToken);
+
+    return results;
+  }
+
+  private async _listAzureObjects(params: { prefix: string }): Promise<{ key: string; size: number }[]> {
+    const results: { key: string; size: number }[] = [];
+    const blobs = this.containerClient.listBlobsFlat({ prefix: params.prefix });
+
+    for await (const blob of blobs) {
+      results.push({
+        key: blob.name,
+        size: blob.properties.contentLength ?? 0,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Download a file from S3/Azure and return its content as a string.
+   * Useful for reading JSON or HTML content stored in object storage.
+   */
+  async downloadFileAsString(params: { key: string }): Promise<string | null> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return null;
+
+    if (this._storageType === "azure") {
+      return await this._downloadAzureFileAsString(params);
+    }
+
+    try {
+      const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+      if (response.Body) {
+        return await response.Body.transformToString();
+      }
+      return null;
+    } catch (error) {
+      console.error(`Failed to download file ${params.key}:`, error);
+      return null;
+    }
+  }
+
+  private async _downloadAzureFileAsString(params: { key: string }): Promise<string | null> {
+    try {
+      const blobClient = this.containerClient.getBlobClient(params.key);
+      const downloadResponse = await blobClient.download();
+      if (downloadResponse.readableStreamBody) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of downloadResponse.readableStreamBody) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks).toString("utf-8");
+      }
+      return null;
+    } catch (error) {
+      console.error(`Failed to download Azure file ${params.key}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Download a file from S3/Azure and return its content as a Buffer.
+   * Useful for reading binary files like attachments.
+   */
+  async downloadFileAsBuffer(params: { key: string }): Promise<Buffer | null> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return null;
+
+    if (this._storageType === "azure") {
+      return await this._downloadAzureFileAsBuffer(params);
+    }
+
+    try {
+      const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+      if (response.Body) {
+        const byteArray = await response.Body.transformToByteArray();
+        return Buffer.from(byteArray);
+      }
+      return null;
+    } catch (error) {
+      console.error(`Failed to download file as buffer ${params.key}:`, error);
+      return null;
+    }
+  }
+
+  private async _downloadAzureFileAsBuffer(params: { key: string }): Promise<Buffer | null> {
+    try {
+      const blobClient = this.containerClient.getBlobClient(params.key);
+      const downloadResponse = await blobClient.download();
+      if (downloadResponse.readableStreamBody) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of downloadResponse.readableStreamBody) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        return Buffer.concat(chunks);
+      }
+      return null;
+    } catch (error) {
+      console.error(`Failed to download Azure file as buffer ${params.key}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Upload a buffer with an exact key — NO extension appending.
+   * Unlike uploadFile (which adds .pdf, .zip, etc.), this method
+   * preserves the key exactly as provided.
+   */
+  async uploadBufferWithKey(params: { buffer: Buffer; key: string; contentType: string }): Promise<void> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return;
+
+    if (this._storageType === "azure") {
+      const blobClient = this.containerClient.getBlockBlobClient(params.key);
+      await blobClient.upload(params.buffer, params.buffer.length, {
+        blobHTTPHeaders: { blobContentType: params.contentType },
+      });
+      return;
+    }
+
+    await this.s3Client.send(
+      new PutObjectCommand({
+        Bucket: this._bucket,
+        Key: params.key,
+        Body: params.buffer,
+        ContentType: params.contentType,
+      }),
+    );
   }
 }

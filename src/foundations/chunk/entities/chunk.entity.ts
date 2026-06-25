@@ -11,6 +11,7 @@ export type Chunk = Entity & {
   nodeId?: string;
   nodeType?: string;
   aiStatus?: string;
+  embedding?: number[];
   source?: unknown;
 };
 
@@ -25,6 +26,7 @@ export const ChunkDescriptor = defineEntity<Chunk>()({
     nodeId: { type: "string", meta: true },
     nodeType: { type: "string", meta: true },
     aiStatus: { type: "string" },
+    embedding: { type: "number[]", excludeFromJsonApi: true },
     imagePath: {
       type: "string",
       transform: async (data, services) => {

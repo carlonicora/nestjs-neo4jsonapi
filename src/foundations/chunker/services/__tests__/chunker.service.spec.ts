@@ -7,6 +7,7 @@ import { DocXService } from "../types/docx.service";
 import { PptxService } from "../types/pptx.service";
 import { PdfService } from "../types/pdf.service";
 import { XlsxService } from "../types/xlsx.service";
+import { EmailParserService } from "../types/email.service";
 import { S3Service } from "../../../s3/services/s3.service";
 import { ModelService } from "../../../../core/llm/services/model.service";
 
@@ -127,6 +128,7 @@ describe("ChunkerService", () => {
         { provide: PptxService, useValue: mockPptxService },
         { provide: PdfService, useValue: mockPdfService },
         { provide: XlsxService, useValue: mockXlsxService },
+        { provide: EmailParserService, useValue: { parseEml: vi.fn(), parseMsg: vi.fn() } },
         { provide: S3Service, useValue: mockS3Service },
         { provide: ModelService, useValue: mockModelService },
       ],

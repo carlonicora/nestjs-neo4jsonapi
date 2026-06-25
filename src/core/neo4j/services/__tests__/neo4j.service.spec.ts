@@ -1,6 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { BadRequestException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ConfigService } from "@nestjs/config";
 
 // Mock neo4j-driver
 const mockTxRun = vi.fn();
@@ -103,6 +104,13 @@ describe("Neo4jService", () => {
     const mockEntityFactory = createMockEntityFactory();
     const mockClsService = createMockClsService();
     const mockLogger = createMockLogger();
+    const mockConfigService = {
+      get: vi.fn((key: string) =>
+        key === "neo4j"
+          ? { uri: "bolt://localhost:7687", username: "neo4j", password: "password", database: "neo4j" }
+          : undefined,
+      ),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -110,6 +118,7 @@ describe("Neo4jService", () => {
         { provide: EntityFactory, useValue: mockEntityFactory },
         { provide: ClsService, useValue: mockClsService },
         { provide: AppLoggingService, useValue: mockLogger },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 

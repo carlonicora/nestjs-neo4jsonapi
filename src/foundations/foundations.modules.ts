@@ -1,4 +1,4 @@
-import { DynamicModule, Module } from "@nestjs/common";
+import { DynamicModule, Module, Type } from "@nestjs/common";
 import { AssistantModule } from "./assistant/assistant.module";
 import { AtomicFactModule } from "./atomicfact/atomicfact.module";
 import { AuditModule } from "./audit/audit.module";
@@ -43,6 +43,11 @@ export interface FoundationsModuleConfig {
   contentExtension?: ContentExtensionConfig;
   /** Optional configuration for the referral feature module */
   referral?: ReferralModuleConfig;
+  /**
+   * Foundation module classes to exclude from registration.
+   * Default [] keeps all modules registered (neural-erp behavior unchanged).
+   */
+  exclude?: Type<any>[];
 }
 
 /**
@@ -119,14 +124,12 @@ export class FoundationsModule {
    * @returns DynamicModule with all foundation modules configured
    */
   static forRoot(config?: FoundationsModuleConfig): DynamicModule {
+    const excluded = new Set<Type<any>>(config?.exclude ?? []);
+    const modules = STATIC_FOUNDATION_MODULES.filter((m) => !excluded.has(m));
     return {
       module: FoundationsModule,
-      imports: [
-        ...STATIC_FOUNDATION_MODULES,
-        ContentModule.forRoot(config?.contentExtension),
-        ReferralModule.forRoot(config?.referral),
-      ],
-      exports: [...STATIC_FOUNDATION_MODULES, ContentModule, ReferralModule],
+      imports: [...modules, ContentModule.forRoot(config?.contentExtension), ReferralModule.forRoot(config?.referral)],
+      exports: [...modules, ContentModule, ReferralModule],
     };
   }
 }

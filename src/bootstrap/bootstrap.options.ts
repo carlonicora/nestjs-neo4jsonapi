@@ -1,5 +1,6 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { EntityDescriptor, RelationshipDef } from "../common/interfaces/entity.schema.interface";
+import { SecurityService } from "../core/security/services/security.service";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
 import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
@@ -101,6 +102,50 @@ export interface BootstrapOptions {
    * on application bootstrap. See docs for `defineRbac()`.
    */
   rbac?: RbacMatrix;
+
+  /**
+   * Optional custom SecurityService subclass to inject into the package engine.
+   * The subclass must extend the package SecurityService.
+   * Default undefined uses the base SecurityService (neural-erp behavior unchanged).
+   */
+  securityService?: Type<SecurityService>;
+
+  /**
+   * Configuration for foundation module exclusions.
+   * Default undefined keeps all foundation modules registered.
+   */
+  foundations?: {
+    /**
+     * Foundation module classes to exclude from registration.
+     * Default [] keeps all modules registered (neural-erp behavior unchanged).
+     */
+    exclude?: Type<any>[];
+  };
+
+  /**
+   * Worker mode configuration.
+   * Default undefined — no health server started (neural-erp behavior unchanged).
+   */
+  worker?: {
+    /**
+     * Port for the worker health-check HTTP server.
+     * When set, a minimal HTTP server responds with { status: "ok" } on this port.
+     */
+    healthCheckPort?: number;
+  };
+
+  /**
+   * Security headers configuration for API mode.
+   * Default undefined — no helmet registered (neural-erp behavior unchanged).
+   */
+  security?: {
+    /**
+     * @fastify/helmet options object.
+     * When set, helmet is registered in API mode with these options.
+     * Pass `false` to explicitly disable (same as omitting).
+     */
+    helmet?: Record<string, any> | false;
+  };
 }
 
 /**

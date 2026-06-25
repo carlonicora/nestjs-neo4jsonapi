@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { EventEmitter } from "stream";
 
 import { HttpExceptionFilter } from "../common/filters/http-exception.filter";
+import { ThrottlerExceptionFilter } from "../common/filters/throttler-exception.filter";
 import { OpenApiService } from "../openapi/module/openapi.service";
 import { BaseConfigInterface, ConfigApiInterface, ConfigRateLimitInterface } from "../config";
 import { AppMode, AppModeConfig } from "../core/appmode/constants/app.mode.constant";
@@ -63,7 +64,7 @@ export async function bootstrap(options: BootstrapOptions): Promise<void> {
 
   try {
     if (mode === AppMode.WORKER) {
-      await bootstrapWorker(AppModule, modeConfig);
+      await bootstrapWorker(AppModule, modeConfig, options);
     } else {
       await bootstrapAPI(AppModule, modeConfig, options);
     }
@@ -89,6 +90,11 @@ async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: 
   // Setup raw body capture for webhook routes (MUST be before route registration)
   await setupRawBodyCapture(app);
 
+  // Register security headers via @fastify/helmet (opt-in; default off — neural-erp unchanged)
+  if (options.security?.helmet) {
+    await app.register(require("@fastify/helmet"), options.security.helmet);
+  }
+
   // Register multipart for file uploads
   await app.register(require("@fastify/multipart"), defaultMultipartOptions);
 
@@ -104,8 +110,9 @@ async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: 
   app.useLogger(loggingService);
   setupFastifyLoggingHook(app, loggingService);
 
-  // Global exception filter
-  app.useGlobalFilters(new HttpExceptionFilter(loggingService));
+  // Global exception filters — HttpExceptionFilter catches all; ThrottlerExceptionFilter
+  // catches ThrottlerException specifically (benign for neural-erp: fires only on rate-limit hits)
+  app.useGlobalFilters(new HttpExceptionFilter(loggingService), new ThrottlerExceptionFilter());
 
   // Global validation pipe
   app.useGlobalPipes(
@@ -151,7 +158,7 @@ async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: 
 /**
  * Bootstrap the application in Worker mode (background job processing)
  */
-async function bootstrapWorker(AppModule: any, modeConfig: AppModeConfig): Promise<void> {
+async function bootstrapWorker(AppModule: any, modeConfig: AppModeConfig, options: BootstrapOptions): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule.forRoot(modeConfig), {
     logger: ["error", "warn"],
   });
@@ -162,7 +169,20 @@ async function bootstrapWorker(AppModule: any, modeConfig: AppModeConfig): Promi
   console.info("Worker process started");
   loggingService.log("Worker process started");
 
-  setupGracefulShutdown(app);
+  // Opt-in worker health-check HTTP server (default off — neural-erp unchanged)
+  let healthServer: any;
+  const healthPort = options.worker?.healthCheckPort;
+  if (healthPort) {
+    healthServer = require("http").createServer((_req: any, res: any) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok" }));
+    });
+    healthServer.listen(healthPort, "0.0.0.0", () => {
+      loggingService.log(`Worker health check on port ${healthPort}`);
+    });
+  }
+
+  setupGracefulShutdown(app, healthServer);
 }
 
 /**
@@ -309,11 +329,17 @@ async function setupOpenApiDocs(
 }
 
 /**
- * Setup graceful shutdown handlers for SIGTERM and SIGINT
+ * Setup graceful shutdown handlers for SIGTERM and SIGINT.
+ *
+ * @param app - NestJS application or application context
+ * @param healthServer - Optional Node.js http.Server to close on shutdown (worker health check)
  */
-function setupGracefulShutdown(app: any): void {
+function setupGracefulShutdown(app: any, healthServer?: any): void {
   const shutdown = async (signal: string) => {
     try {
+      if (healthServer) {
+        await new Promise<void>((resolve) => healthServer.close(() => resolve()));
+      }
       await app.close();
       process.exit(0);
     } catch (error) {

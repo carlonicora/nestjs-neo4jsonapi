@@ -9,6 +9,7 @@ import * as fs from "fs/promises";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { isImageFile } from "../../chunker/constants/file.types";
 import { DocXService } from "../../chunker/services/types/docx.service";
+import { AttachmentContent, EmailParserService, ParsedEmail } from "../../chunker/services/types/email.service";
 import { PdfService } from "../../chunker/services/types/pdf.service";
 import { PptxService } from "../../chunker/services/types/pptx.service";
 import { SemanticSplitterService } from "../../chunker/services/types/semanticsplitter.service";
@@ -27,6 +28,7 @@ export class ChunkerService {
     private readonly pptxService: PptxService,
     private readonly pdfService: PdfService,
     private readonly xlsxService: XlsxService,
+    private readonly emailParserService: EmailParserService,
     private readonly s3Service: S3Service,
     private readonly modelService: ModelService,
   ) {}
@@ -53,6 +55,15 @@ export class ChunkerService {
       url: params.filePath,
       extension: params.fileType,
     });
+
+    // Email files need special handling (attachment extraction)
+    if (params.fileType.toLowerCase() === "eml" || params.fileType.toLowerCase() === "msg") {
+      return this._createFromEmail({
+        filePath: params.filePath,
+        localFilePath,
+        fileType: params.fileType.toLowerCase(),
+      });
+    }
 
     let response: Document[] = [];
 
@@ -350,6 +361,140 @@ export class ChunkerService {
     }
 
     return response;
+  }
+
+  private async _createFromEmail(params: {
+    filePath: string;
+    localFilePath: string;
+    fileType: string;
+  }): Promise<Document[]> {
+    try {
+      const buffer = await fs.readFile(params.localFilePath);
+
+      const parsed: ParsedEmail =
+        params.fileType === "eml"
+          ? await this.emailParserService.parseEml(buffer)
+          : await this.emailParserService.parseMsg(buffer);
+
+      const attachmentContents: AttachmentContent[] = [];
+
+      for (const att of parsed.attachments) {
+        try {
+          const content = await this._extractAttachmentContent(att);
+          if (content) {
+            attachmentContents.push({ filename: att.filename, content });
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to extract content from attachment ${att.filename}:`, error);
+        }
+      }
+
+      const markdown = this.emailParserService.assembleMarkdown({
+        ...parsed,
+        attachmentContents,
+      });
+
+      if (markdown && markdown.trim()) {
+        const splitter = new MarkdownTextSplitter({
+          chunkSize: 1500,
+          chunkOverlap: 200,
+        });
+        return await splitter.createDocuments([markdown]);
+      }
+
+      return [];
+    } catch (error) {
+      this.logger.error(`Email processing failed for ${params.fileType}:`, error);
+      return [];
+    }
+  }
+
+  private async _extractAttachmentContent(
+    attachment: { filename: string; contentType: string; content: Buffer },
+    depth: number = 0,
+  ): Promise<string | null> {
+    if (depth >= 3) {
+      this.logger.warn(`Max email nesting depth reached for ${attachment.filename}`);
+      return null;
+    }
+
+    const extension = attachment.filename.split(".").pop()?.toLowerCase() || "";
+
+    if (extension === "eml" || extension === "msg") {
+      const parsed: ParsedEmail =
+        extension === "eml"
+          ? await this.emailParserService.parseEml(attachment.content)
+          : await this.emailParserService.parseMsg(attachment.content);
+
+      const nestedAttContents: AttachmentContent[] = [];
+      for (const att of parsed.attachments) {
+        const content = await this._extractAttachmentContent(att, depth + 1);
+        if (content) nestedAttContents.push({ filename: att.filename, content });
+      }
+
+      return this.emailParserService.assembleMarkdown({ ...parsed, attachmentContents: nestedAttContents });
+    }
+
+    if (isImageFile(extension)) {
+      const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
+      await fs.writeFile(tempPath, attachment.content);
+      try {
+        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension });
+        return docs.map((d) => d.pageContent).join("\n\n");
+      } finally {
+        await fs.unlink(tempPath).catch(() => {});
+      }
+    }
+
+    const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
+    await fs.writeFile(tempPath, attachment.content);
+    try {
+      const docs = await this._processLocalFile({ localFilePath: tempPath, fileType: extension, filePath: tempPath });
+      return docs.map((d) => d.pageContent).join("\n\n");
+    } finally {
+      await fs.unlink(tempPath).catch(() => {});
+    }
+  }
+
+  private async _processLocalFile(params: {
+    localFilePath: string;
+    fileType: string;
+    filePath: string;
+  }): Promise<Document[]> {
+    switch (params.fileType.toLowerCase()) {
+      case "md":
+        return this._createFromMarkdown({ filePath: params.filePath, localFilePath: params.localFilePath });
+      case "docx":
+        return this._createFromDocX({ filePath: params.filePath, localFilePath: params.localFilePath });
+      case "pptx":
+      case "presentation":
+        return this._createFromPptx({ filePath: params.filePath, localFilePath: params.localFilePath });
+      case "xlsx":
+      case "spreadsheet":
+        return this._createFromXlsx({ filePath: params.filePath, localFilePath: params.localFilePath });
+      case "pdf":
+        return this._createFromPdf({ filePath: params.filePath, localFilePath: params.localFilePath });
+      default: {
+        let loader: BaseDocumentLoader;
+        switch (params.fileType.toLowerCase()) {
+          case "json":
+            loader = new JSONLoader(params.localFilePath, "/texts");
+            break;
+          case "jsonl":
+            loader = new JSONLinesLoader(params.localFilePath, "/html");
+            break;
+          case "csv":
+            loader = new CSVLoader(params.localFilePath, "text") as any;
+            break;
+          default:
+            loader = new TextLoader(params.localFilePath);
+            break;
+        }
+        const rawDocs = await loader.load();
+        const textSplitter = new TokenTextSplitter({ chunkSize: 1000, chunkOverlap: 200 });
+        return textSplitter.splitDocuments(rawDocs);
+      }
+    }
   }
 
   private async _createFromPdf(params: { filePath: string; localFilePath: string }): Promise<Document[]> {

@@ -1,4 +1,4 @@
-import { DynamicModule, Global, Module, Provider } from "@nestjs/common";
+import { DynamicModule, Global, Module, Provider, Type } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { DiscoveryModule } from "@nestjs/core";
 import { JwtModule } from "@nestjs/jwt";
@@ -21,6 +21,7 @@ import { Neo4JModule } from "./neo4j/neo4j.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
 import { SecurityModule } from "./security/security.module";
+import { SecurityService } from "./security/services/security.service";
 import { TracingModule } from "./tracing/tracing.module";
 import { VersionModule } from "./version/version.module";
 import { WebsocketModule } from "./websocket/websocket.module";
@@ -39,8 +40,9 @@ import { WebsocketModule } from "./websocket/websocket.module";
  * - Worker mode needs it to process jobs
  *
  * @param queueIds - Additional queue IDs to register (library's CHUNK queue is always included)
+ * @param securityService - Optional custom SecurityService subclass (see SecurityModule.forRoot)
  */
-function getCoreModules(queueIds: string[] = []) {
+function getCoreModules(queueIds: string[] = [], securityService?: Type<SecurityService>) {
   return [
     // Discovery module - required by EntityServiceRegistry to enumerate providers
     DiscoveryModule,
@@ -58,7 +60,7 @@ function getCoreModules(queueIds: string[] = []) {
     }),
     PassportModule,
     // 1. Config-dependent but no external connections
-    SecurityModule,
+    SecurityModule.forRoot(securityService),
     CorsModule.forRoot(),
     VersionModule.forRoot(),
     LoggingModule,
@@ -121,6 +123,12 @@ export interface CoreModuleOptions {
    * Pass additional queue IDs here for app-specific queues.
    */
   queueIds?: string[];
+  /**
+   * Optional custom SecurityService subclass.
+   * When provided, the DI token SecurityService resolves to this subclass.
+   * Default undefined keeps the base SecurityService (neural-erp behavior unchanged).
+   */
+  securityService?: Type<SecurityService>;
 }
 
 /**
@@ -151,7 +159,7 @@ export class CoreModule {
 
     return {
       module: CoreModule,
-      imports: getCoreModules(options?.queueIds ?? []),
+      imports: getCoreModules(options?.queueIds ?? [], options?.securityService),
       providers,
       exports: [...getCoreModuleExports(), EntityServiceRegistry],
       global: true,

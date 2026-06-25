@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { auth, driver, Driver, Session } from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
@@ -22,13 +23,18 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
   private activeConnections: number = 0;
   private readonly maxRetries: number = 3;
   private readonly retryDelay: number = 1000; // 1 second
-  private readonly neo4jConfig = baseConfig.neo4j;
+  private readonly neo4jConfig: { uri: string; username: string; password: string; database: string };
 
   constructor(
     private readonly entityFactory: EntityFactory,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
+    configService: ConfigService<any>,
   ) {
+    // Read the neo4j config from the injected (merged) app config so an app can
+    // override the database/uri (e.g. a second service like corpus reading its own
+    // database). Falls back to the package baseConfig (NEO4J_* env) when absent.
+    this.neo4jConfig = configService.get("neo4j") ?? baseConfig.neo4j;
     if (!this.neo4jConfig?.uri) {
       throw new Error("Neo4j configuration is required. Ensure NEO4J_URI is set in environment.");
     }
