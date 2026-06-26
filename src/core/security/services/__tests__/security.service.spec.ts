@@ -155,11 +155,56 @@ describe("SecurityService", () => {
     });
   });
 
+  describe("invitationSelectionTokenExpiration", () => {
+    it("should return a date 10 minutes from now", () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const expiration = service.invitationSelectionTokenExpiration;
+
+      const expectedTime = now + 10 * 60 * 1000;
+      expect(expiration.getTime()).toBe(expectedTime);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("signInvitationSelectionJwt", () => {
+    it("should sign a JWT with userId and invitation-selection scope", () => {
+      const result = service.signInvitationSelectionJwt({ userId: TEST_IDS.userId });
+
+      expect(result).toBe(TEST_JWT_TOKEN);
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        scope: "invitation-selection",
+        expiration: expect.any(Date),
+      });
+    });
+  });
+
   describe("isCurrentUserCompanyAdmin", () => {
-    it("should return true (hardcoded behavior)", () => {
+    it("should return true when companyConfigurations has CompanyAdministrator role", () => {
+      mockClsService.get.mockReturnValue({ hasRole: (role: string) => role === SystemRoles.CompanyAdministrator });
+
       const result = service.isCurrentUserCompanyAdmin();
 
       expect(result).toBe(true);
+    });
+
+    it("should return false when companyConfigurations does not have CompanyAdministrator role", () => {
+      mockClsService.get.mockReturnValue({ hasRole: () => false });
+
+      const result = service.isCurrentUserCompanyAdmin();
+
+      expect(result).toBe(false);
+    });
+
+    it("should return false when companyConfigurations is not set", () => {
+      mockClsService.get.mockReturnValue(undefined);
+
+      const result = service.isCurrentUserCompanyAdmin();
+
+      expect(result).toBe(false);
     });
   });
 
@@ -277,6 +322,7 @@ describe("SecurityService", () => {
 
   describe("userHasAccess", () => {
     it("should execute validator and return its result", () => {
+      mockClsService.get.mockReturnValue(undefined);
       const validator = vi.fn().mockReturnValue("access-granted");
 
       const result = service.userHasAccess({ validator });
@@ -285,7 +331,18 @@ describe("SecurityService", () => {
       expect(result).toBe("access-granted");
     });
 
+    it("should return empty string and skip validator when isAutomatedJob is true", () => {
+      mockClsService.get.mockReturnValue(true);
+      const validator = vi.fn();
+
+      const result = service.userHasAccess({ validator });
+
+      expect(validator).not.toHaveBeenCalled();
+      expect(result).toBe("");
+    });
+
     it("should pass through validator errors", () => {
+      mockClsService.get.mockReturnValue(undefined);
       const validator = vi.fn().mockImplementation(() => {
         throw new Error("Access denied");
       });

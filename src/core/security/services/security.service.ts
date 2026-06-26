@@ -4,6 +4,8 @@ import * as bcrypt from "bcryptjs";
 import { ClsService } from "nestjs-cls";
 import { SystemRoles } from "../../../common/constants/system.roles";
 
+type CompanyConfigurationsLike = { hasRole(role: string): boolean };
+
 export const hashPassword = async (password: string): Promise<string> => {
   const salt = await bcrypt.genSalt(10);
   const hash = await bcrypt.hash(password, salt);
@@ -46,10 +48,21 @@ export class SecurityService {
     });
   }
 
+  get invitationSelectionTokenExpiration(): Date {
+    return new Date(new Date().getTime() + 10 * 60 * 1000);
+  }
+
+  signInvitationSelectionJwt(params: { userId: string }): string {
+    return this.jwtService.sign({
+      userId: params.userId,
+      scope: "invitation-selection",
+      expiration: this.invitationSelectionTokenExpiration,
+    });
+  }
+
   isCurrentUserCompanyAdmin(): boolean {
-    return true;
-    // const configurations = this.clsService.get<AbstractCompanyConfigurations>("companyConfigurations");
-    // return configurations?.hasRole(SystemRoles.CompanyAdministrator) ?? false;
+    const configurations = this.clsService.get<CompanyConfigurationsLike>("companyConfigurations");
+    return configurations?.hasRole(SystemRoles.CompanyAdministrator) ?? false;
   }
 
   validateAdmin(params: { user: any }): void {
@@ -68,6 +81,8 @@ export class SecurityService {
   }
 
   userHasAccess(params: { validator: (params?: any) => string }): string {
+    const isAutomatedJob = this.clsService.get("isAutomatedJob");
+    if (isAutomatedJob) return "";
     return params.validator();
   }
 
