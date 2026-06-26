@@ -113,17 +113,24 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           CoreModule.forRoot({
             queueIds,
             securityService: options.securityService,
+            migrator: options.migrator,
           }),
 
           // Library's foundation/domain modules (queues configured via baseConfig.chunkQueues)
-          FoundationsModule.forRoot({
-            contentExtension: options.contentExtension,
-            referral: options.referral,
-            exclude: options.foundations?.exclude ?? [],
-          }),
+          // Apps that provide ALL their own foundations can disable the library set entirely
+          // (avoids transitive controller collisions, e.g. CompanyModule pulled in by agents/stripe).
+          ...(options.foundations?.disabled
+            ? []
+            : [
+                FoundationsModule.forRoot({
+                  contentExtension: options.contentExtension,
+                  referral: options.referral,
+                  exclude: options.foundations?.exclude ?? [],
+                }),
+              ]),
 
           // Library's AI agents (prompts configured via baseConfig.prompts)
-          AgentsModule,
+          ...(options.agents === false ? [] : [AgentsModule]),
 
           // OpenAPI module for Swagger/Redoc documentation
           OpenApiModule,

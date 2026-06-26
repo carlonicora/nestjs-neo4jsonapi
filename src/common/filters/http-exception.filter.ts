@@ -73,6 +73,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<FastifyReply>();
     const request = ctx.getRequest<FastifyRequest>();
 
+    // For health endpoints, return the Terminus health-check response directly
+    // (`{ status, info, error, details }`, 503 on failure) instead of wrapping
+    // it in a JSON:API error envelope.
+    if (request.url.startsWith("/health") && exception instanceof HttpException) {
+      const healthStatus = exception.getStatus();
+      const healthResponse = exception.getResponse();
+      response.status(healthStatus).send(healthResponse);
+      return;
+    }
+
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const message = exception instanceof HttpException ? exception.getResponse() : "Internal server error";
     const timestamp = new Date().toISOString();

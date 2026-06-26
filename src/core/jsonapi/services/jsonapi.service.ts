@@ -26,7 +26,11 @@ export class JsonApiService {
     return this.configService.get<ConfigApiInterface>("api");
   }
 
-  async buildSingle<T extends DataModelInterface<any>>(model: T, record: any): Promise<any> {
+  async buildSingle<T extends DataModelInterface<any>>(
+    model: T,
+    record: any,
+    paginator?: JsonApiPaginator,
+  ): Promise<any> {
     const builder = this.serialiserFactory.create(model) as any;
     if (!record) throw new HttpException(`not found`, HttpStatus.NOT_FOUND);
 
@@ -35,12 +39,14 @@ export class JsonApiService {
         record,
         builder.create(),
         `${this.apiConfig.url}${builder.endpoint}/${record[`${builder.id}`]}`,
+        paginator,
       );
 
     return await this.serialise(
       record,
       builder.create(),
       `${this.apiConfig.url}${builder.endpoint}/${record[`${builder.id}`]}`,
+      paginator,
     );
   }
 

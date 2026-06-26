@@ -8,7 +8,7 @@ import * as ai from "ai";
 import { wrapAISDK } from "langsmith/experimental/vercel";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
-import { BaseConfigInterface } from "../../../config/interfaces";
+import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { ModelWeight } from "../enums/model.weight";
@@ -20,6 +20,7 @@ import {
   formatFieldWithDescription,
   sanitizeSchemaForGemini,
 } from "../../llm/utils/schema.utils";
+import { mockFromZodSchema } from "../utils/mock-from-zod";
 import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
@@ -487,6 +488,14 @@ export class LLMService {
     params: LLMCallParams<T>,
   ): Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
+
+    // MOCK_AI short-circuit: return synthetic structured output derived from the
+    // output schema, with zero token usage and no provider call. Must run before
+    // the cache lookup and any provider invocation. ModelService.onModuleInit
+    // already guarantees MOCK_AI can never be on in production.
+    if (this.config.get<ConfigAiInterface>("ai").mock) {
+      return { ...mockFromZodSchema(params.outputSchema), tokenUsage: { input: 0, output: 0 }, modelWeight };
+    }
 
     // Cache lookup BEFORE any provider invocation. A hit returns the stored
     // result immediately, skipping the provider call AND token persistence — a

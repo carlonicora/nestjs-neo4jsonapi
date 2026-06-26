@@ -23,7 +23,17 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
   private activeConnections: number = 0;
   private readonly maxRetries: number = 3;
   private readonly retryDelay: number = 1000; // 1 second
-  private readonly neo4jConfig: { uri: string; username: string; password: string; database: string };
+  private readonly neo4jConfig: {
+    uri: string;
+    username: string;
+    password: string;
+    database: string;
+    computePaginationTotal?: boolean;
+  };
+  // When false, readMany skips the extra COUNT query for {CURSOR} pagination. Apps that paginate
+  // by cursor and never read meta.total set this to avoid expensive count-side projection traversals
+  // (the count query has no LIMIT, so it would run every OPTIONAL MATCH across all rows). Default true.
+  private readonly computePaginationTotal: boolean;
 
   constructor(
     private readonly entityFactory: EntityFactory,
@@ -38,6 +48,7 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     if (!this.neo4jConfig?.uri) {
       throw new Error("Neo4j configuration is required. Ensure NEO4J_URI is set in environment.");
     }
+    this.computePaginationTotal = this.neo4jConfig.computePaginationTotal !== false;
 
     this._database = this.neo4jConfig.database;
     this.driver = driver(this.neo4jConfig.uri, auth.basic(this.neo4jConfig.username, this.neo4jConfig.password), {
@@ -147,18 +158,19 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     params.query = params.query.replace(/^\s*$(?:\r\n?|\n)/gm, "");
     params.query = params.query.replace(/;\s*$/, "");
 
-    // Clear any previous query total
-    this.cls.set("queryTotal", undefined);
+    // Clear any previous query total (guard: no CLS context during startup/cron reads)
+    if (this.cls.isActive()) this.cls.set("queryTotal", undefined);
 
     if (params.query.includes("{CURSOR}")) {
       if (!params.fetchAll) {
         params.queryParams.cursor = params.cursor?.cursor;
         params.queryParams.take = params.cursor?.take ?? 26;
 
-        // Build count query if we have a serialiser with nodeName
-        const countQuery = params.serialiser?.nodeName
-          ? this.buildCountQuery(params.query, params.serialiser.nodeName)
-          : null;
+        // Build count query if enabled and we have a serialiser with nodeName
+        const countQuery =
+          this.computePaginationTotal && params.serialiser?.nodeName
+            ? this.buildCountQuery(params.query, params.serialiser.nodeName)
+            : null;
 
         // Replace cursor placeholder for data query
         let dataQuery: string;
@@ -178,7 +190,7 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
             if (countResult.records.length > 0) {
               const count = countResult.records[0].get("total");
               const total = count?.toNumber?.() ?? count ?? 0;
-              this.cls.set("queryTotal", total);
+              if (this.cls.isActive()) this.cls.set("queryTotal", total);
             }
 
             return this.entityFactory.createGraphList({

@@ -239,9 +239,27 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       region: process.env.S3_REGION || "us-east-1",
     },
     ai: {
+      // Fail-closed MOCK_AI safety gate. ModelService.onModuleInit throws if this
+      // is true while ENV === "production" — synthetic AI data must never reach prod.
+      mock: process.env.MOCK_AI === "true",
+      documentAi: {
+        enabled: process.env.DOCUMENT_AI_ENABLED === "true",
+        provider: process.env.DOCUMENT_AI_PROVIDER || "azure",
+        apiKey: process.env.DOCUMENT_AI_API_KEY || "",
+        model: process.env.DOCUMENT_AI_MODEL || "",
+        url: process.env.DOCUMENT_AI_URL || "",
+        apiVersion: process.env.DOCUMENT_AI_API_VERSION || "",
+      },
       ai: buildAiTier(""),
       aiLite: buildAiTier("_LITE"),
       aiLarge: buildAiTier("_LARGE"),
+      transcriber: {
+        provider: process.env.TRANSCRIBER_PROVIDER || "",
+        apiKey: process.env.TRANSCRIBER_API_KEY || "",
+        model: process.env.TRANSCRIBER_MODEL || "",
+        url: process.env.TRANSCRIBER_URL || "",
+        apiVersion: process.env.TRANSCRIBER_API_VERSION || "",
+      },
       vision: {
         provider: process.env.VISION_PROVIDER || process.env.AI_PROVIDER || "",
         apiKey: process.env.VISION_API_KEY || process.env.AI_API_KEY || "",
@@ -259,6 +277,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         ),
         googleCredentialsBase64:
           process.env.VISION_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
+        reasoningEffort: process.env.VISION_REASONING_EFFORT || "",
       },
       audio: {
         provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",
@@ -292,6 +311,16 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         dimensions: parseInt(process.env.EMBEDDER_DIMENSIONS || "0"),
         region: process.env.EMBEDDER_REGION || "",
         googleCredentialsBase64: process.env.EMBEDDER_GOOGLE_CREDENTIALS_BASE64 || "",
+        rateLimit: {
+          tpmLimit: parseInt(process.env.EMBEDDER_TPM_LIMIT || "1000000"),
+          safetyTokens: parseInt(process.env.EMBEDDER_TPM_SAFETY || "200000"),
+          maxBatchTokens: parseInt(process.env.EMBEDDER_MAX_BATCH_TOKENS || "100000"),
+          maxConcurrentRequests: parseInt(process.env.EMBEDDER_MAX_CONCURRENT_REQUESTS || "10"),
+          maxWaitMs: parseInt(process.env.EMBEDDER_MAX_WAIT_MS || "90000"),
+          maxAttempts: parseInt(process.env.EMBEDDER_MAX_ATTEMPTS || "3"),
+          charsPerToken: parseInt(process.env.EMBEDDER_CHARS_PER_TOKEN || "4"),
+          bucketKey: "embedder:tpm:bucket",
+        },
       },
     },
     rateLimit: {

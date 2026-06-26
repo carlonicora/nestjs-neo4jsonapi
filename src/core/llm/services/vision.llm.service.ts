@@ -32,6 +32,7 @@ interface VisionCallParams<T> {
 export class VisionLLMService {
   private readonly MAX_RETRIES = 5;
   private readonly INITIAL_DELAY_MS = 1000;
+  private readonly CALL_TIMEOUT_MS = 120000; // 120 second timeout for vision calls
 
   constructor(
     private readonly modelService: ModelService,
@@ -59,6 +60,16 @@ export class VisionLLMService {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Wrap a promise with a timeout
+   */
+  private withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${operation} timed out after ${ms}ms`)), ms)),
+    ]);
   }
 
   /**
@@ -117,6 +128,26 @@ export class VisionLLMService {
   }
 
   /**
+   * Checks if the configured vision model is an Azure OpenAI model.
+   * Azure benefits from pre-converted JSON Schema to avoid Zod-to-OpenAI conversion issues.
+   */
+  private isAzureVisionModel(): boolean {
+    const visionConfig = this.config.get<ConfigAiInterface>("ai").vision;
+    return visionConfig.provider === "azure";
+  }
+
+  /**
+   * Checks if the configured vision model is a GPT-5 model.
+   * GPT-5 models use OpenAI's Responses API and reject legacy parameters
+   * like temperature != 1.
+   */
+  private isGPT5VisionModel(): boolean {
+    const visionConfig = this.config.get<ConfigAiInterface>("ai").vision;
+    const modelLower = visionConfig.model.toLowerCase();
+    return modelLower.includes("gpt-5");
+  }
+
+  /**
    * Fallback method to call the LLM without structured output.
    * Used when structured output parsing fails.
    *
@@ -129,13 +160,19 @@ export class VisionLLMService {
     params: VisionCallParams<T>,
     message: HumanMessage,
   ): Promise<{ parsed: T; rawContent: string }> {
+    const isGPT5 = this.isGPT5VisionModel();
+    const effectiveTemperature = isGPT5 ? 1 : (params.temperature ?? 0.1);
     const baseModel = this.modelService.getVisionLLM({
-      temperature: params.temperature ?? 0.1,
+      temperature: effectiveTemperature,
     });
 
     try {
       // Call without structured output - the model will return raw text
-      const response = await baseModel.invoke([message]);
+      const response = await this.withTimeout(
+        baseModel.invoke([message]),
+        this.CALL_TIMEOUT_MS,
+        "Vision LLM fallback call",
+      );
       const rawContent = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
 
       // Extract JSON from response (handle markdown code blocks)
@@ -199,24 +236,34 @@ export class VisionLLMService {
           type: "image_url",
           image_url: {
             url: params.image,
+            detail: "high",
           },
         },
       ],
     });
 
     try {
+      const isGPT5 = this.isGPT5VisionModel();
+      const effectiveTemperature = isGPT5 ? 1 : (params.temperature ?? 0.1);
       const baseModel = this.modelService.getVisionLLM({
-        temperature: params.temperature ?? 0.1,
+        temperature: effectiveTemperature,
       });
 
-      // Check if Gemini model needs schema sanitization (remove $schema, $defs, etc.)
+      // Check if provider needs schema conversion/sanitization
       const needsGeminiSanitization = this.isGeminiVisionModel();
+      const isAzure = this.isAzureVisionModel();
 
       let structuredLlm;
       if (needsGeminiSanitization) {
         const jsonSchema = convertZodToJsonSchema(params.outputSchema);
         const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
         structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
+          includeRaw: true,
+        });
+      } else if (isAzure || isGPT5) {
+        // Azure/GPT-5: use pre-converted JSON Schema to avoid Zod-to-OpenAI conversion issues
+        const jsonSchema = convertZodToJsonSchema(params.outputSchema);
+        structuredLlm = baseModel.withStructuredOutput(jsonSchema, {
           includeRaw: true,
         });
       } else {
@@ -226,7 +273,11 @@ export class VisionLLMService {
       }
 
       const response = await this.withRetry(async () => {
-        return (await structuredLlm.invoke([message])) as unknown as StructuredOutputResponse<T>;
+        return (await this.withTimeout(
+          structuredLlm.invoke([message]),
+          this.CALL_TIMEOUT_MS,
+          "Vision LLM call",
+        )) as unknown as StructuredOutputResponse<T>;
       });
 
       // Handle null parsed response with fallback JSON parsing

@@ -109,6 +109,8 @@ export interface BootstrapOptions {
    * Default undefined uses the base SecurityService (neural-erp behavior unchanged).
    */
   securityService?: Type<SecurityService>;
+  /** Set false to skip the library Neo4j migrator (app provides its own). Default true. */
+  migrator?: boolean;
 
   /**
    * Configuration for foundation module exclusions.
@@ -120,7 +122,17 @@ export interface BootstrapOptions {
      * Default [] keeps all modules registered (neural-erp behavior unchanged).
      */
     exclude?: Type<any>[];
+    /**
+     * Set true to skip the library FoundationsModule entirely (app provides all its own
+     * foundations). Avoids transitive controller collisions. Default false.
+     */
+    disabled?: boolean;
   };
+
+  /**
+   * Set false to skip the library AgentsModule (app provides its own AI). Default true.
+   */
+  agents?: boolean;
 
   /**
    * Worker mode configuration.

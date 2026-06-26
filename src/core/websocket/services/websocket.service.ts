@@ -1,9 +1,10 @@
-import { Inject, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { Server, Socket } from "socket.io";
 import { APP_MODE_TOKEN, AppMode, AppModeConfig } from "../../appmode/constants/app.mode.constant";
+import { AppLoggingService } from "../../logging/services/logging.service";
 import { RedisClientStorageService } from "../../redis/services/redis.client.storage.service";
-import { RedisMessagingService } from "../../redis/services/redis.messaging.service";
+import { NotificationMessage, RedisMessagingService } from "../../redis/services/redis.messaging.service";
 
 /**
  * WebSocket Service
@@ -19,20 +20,22 @@ import { RedisMessagingService } from "../../redis/services/redis.messaging.serv
  * - Periodic cleanup of expired clients
  */
 @Injectable()
-export class WebSocketService implements OnModuleInit {
+export class WebSocketService implements OnModuleInit, OnModuleDestroy {
   private server: Server | null = null;
   private clients: Map<string, Socket[]> = new Map();
+  private cleanupInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly eventEmitter: EventEmitter2,
     @Inject(APP_MODE_TOKEN) private readonly appModeConfig: AppModeConfig,
+    private readonly logger: AppLoggingService,
     @Optional() private readonly redisClientStorage?: RedisClientStorageService,
     @Optional() private readonly redisMessaging?: RedisMessagingService,
   ) {}
 
   onModuleInit() {
     // Cleanup expired clients every 5 minutes
-    setInterval(
+    this.cleanupInterval = setInterval(
       () => {
         if (this.redisClientStorage?.cleanupExpiredClients) {
           this.redisClientStorage.cleanupExpiredClients();
@@ -40,6 +43,12 @@ export class WebSocketService implements OnModuleInit {
       },
       5 * 60 * 1000,
     );
+  }
+
+  onModuleDestroy() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
   }
 
   setServer(server: Server) {
@@ -145,7 +154,7 @@ export class WebSocketService implements OnModuleInit {
   }
 
   @OnEvent("redis.notification")
-  async handleRedisNotification(notification: any) {
+  async handleRedisNotification(notification: NotificationMessage) {
     switch (notification.type) {
       case "user":
         if (notification.targetId) {

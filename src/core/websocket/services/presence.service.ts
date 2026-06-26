@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { AppLoggingService } from "../../logging/services/logging.service";
 import { RedisClientStorageService } from "../../redis/services/redis.client.storage.service";
 
 export interface PresenceStatus {
@@ -27,14 +28,21 @@ export class PresenceService {
   private readonly ONLINE_THRESHOLD = 2 * 60 * 1000; // 2 minutes in milliseconds
   private readonly AWAY_THRESHOLD = 30 * 60 * 1000; // 30 minutes in milliseconds
 
-  constructor(@Optional() private readonly redisClientStorage?: RedisClientStorageService) {}
+  constructor(
+    private readonly logger: AppLoggingService,
+    @Optional() private readonly redisClientStorage?: RedisClientStorageService,
+  ) {}
 
   /**
    * Set user as online when they connect
    */
   async setUserOnline(userId: string, userName: string, socketId: string): Promise<void> {
     if (!this.redisClientStorage?.isConnected?.()) {
-      console.error(`Redis not connected - skipping setUserOnline for user ${userId}`);
+      this.logger.error(
+        `Redis not connected - skipping setUserOnline for user ${userId}`,
+        undefined,
+        "PresenceService",
+      );
       return;
     }
 
@@ -53,8 +61,8 @@ export class PresenceService {
       };
 
       await redis.setex(key, this.PRESENCE_TTL, JSON.stringify(presence));
-    } catch (error: any) {
-      console.error(`Error setting user online for ${userId}: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error setting user online for ${userId}`, error as Error, "PresenceService");
     }
   }
 
@@ -64,7 +72,11 @@ export class PresenceService {
    */
   async setUserOffline(userId: string, socketId: string): Promise<void> {
     if (!this.redisClientStorage?.isConnected?.()) {
-      console.error(`Redis not connected - skipping setUserOffline for user ${userId}`);
+      this.logger.error(
+        `Redis not connected - skipping setUserOffline for user ${userId}`,
+        undefined,
+        "PresenceService",
+      );
       return;
     }
 
@@ -89,8 +101,8 @@ export class PresenceService {
         // Still has other connections, keep as online/away
         await redis.setex(key, this.PRESENCE_TTL, JSON.stringify(presence));
       }
-    } catch (error: any) {
-      console.error(`Error setting user offline for ${userId}: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error setting user offline for ${userId}`, error as Error, "PresenceService");
     }
   }
 
@@ -115,7 +127,7 @@ export class PresenceService {
 
       await redis.setex(key, this.PRESENCE_TTL, JSON.stringify(presence));
     } catch (error) {
-      console.error(error);
+      this.logger.error("Error updating heartbeat", error as Error, "PresenceService");
       return;
     }
   }
@@ -165,8 +177,8 @@ export class PresenceService {
       }
 
       return presence;
-    } catch (error: any) {
-      console.error(`Error getting user status for ${userId}: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`Error getting user status for ${userId}`, error as Error, "PresenceService");
       return {
         status: "offline",
         lastActivity: new Date(),
@@ -246,16 +258,16 @@ export class PresenceService {
                 changedUsers.push(userId);
               }
             }
-          } catch (error: any) {
+          } catch (error) {
             // Continue processing other keys if one fails
-            console.error(`Error processing presence key ${key}: ${error.message}`);
+            this.logger.error(`Error processing presence key ${key}`, error as Error, "PresenceService");
           }
         }),
       );
 
       return changedUsers;
-    } catch (error: any) {
-      console.error(`Error marking idle users as away: ${error.message}`);
+    } catch (error) {
+      this.logger.error("Error marking idle users as away", error as Error, "PresenceService");
       return [];
     }
   }

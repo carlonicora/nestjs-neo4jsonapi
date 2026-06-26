@@ -1,17 +1,22 @@
-import { EmbeddingsInterface } from "@langchain/core/embeddings";
+import { Embeddings, EmbeddingsInterface } from "@langchain/core/embeddings";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { FakeListChatModel } from "@langchain/core/utils/testing";
 import { ChatVertexAI, VertexAIEmbeddings } from "@langchain/google-vertexai";
 import { AzureChatOpenAI, AzureOpenAIEmbeddings, ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ClsService } from "nestjs-cls";
+import OpenAI, { AzureOpenAI } from "openai";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { AppLoggingService } from "../../logging/services/logging.service";
 import { ModelWeight } from "../enums/model.weight";
+import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
+import { RateLimitedEmbedder } from "./rate-limited-embedder";
 
 /**
  * Tracks GCP credential temp files written this process so they can be removed
@@ -104,11 +109,33 @@ interface LLMParameters {
 }
 
 @Injectable()
-export class ModelService {
+export class ModelService implements OnModuleInit {
+  private cachedEmbedder?: EmbeddingsInterface;
+
   constructor(
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    // Optional so existing consumers / test harnesses that construct ModelService
+    // with only (cls, config) keep resolving. When absent (or when
+    // ai.embedder.rateLimit is unset), getEmbedder() returns the raw provider
+    // embedder — the rate-limit wrapper is purely additive.
+    @Optional() private readonly bucket?: EmbedderTokenBucketService,
+    @Optional() private readonly logger?: AppLoggingService,
   ) {}
+
+  /**
+   * Fail-closed MOCK_AI safety gate. MOCK_AI returns synthetic data (no provider
+   * call) for every model/embedder/structured call — invaluable for local dev and
+   * tests, catastrophic in production (it would write fake AI data into the graph).
+   * This refuses to start when MOCK_AI is on AND the environment is production.
+   * Reads `process.env.ENV` directly on purpose: a fail-closed safety gate must not
+   * depend on config wiring being correct.
+   */
+  onModuleInit(): void {
+    if (this.aiConfig.mock && process.env.ENV === "production") {
+      throw new Error("MOCK_AI must never run in production — refusing to start.");
+    }
+  }
 
   private get aiConfig(): ConfigAiInterface {
     return this.configService.get<ConfigAiInterface>("ai");
@@ -166,6 +193,10 @@ export class ModelService {
     modelWeight?: ModelWeight;
     disableThinking?: boolean;
   }): BaseChatModel {
+    if (this.aiConfig.mock) {
+      return new FakeListChatModel({ responses: ["mock summary"] }) as unknown as BaseChatModel;
+    }
+
     const temperature = params?.temperature ?? 0.2;
     const cfg = this.getResolvedConfig(params?.modelWeight);
     const maxOutputTokens = params?.maxOutputTokens ?? cfg.maxOutputTokens;
@@ -194,8 +225,25 @@ export class ModelService {
    * @throws {Error} If the configured LLM type is not supported
    */
   getVisionLLM(params?: { temperature?: number }): BaseChatModel {
+    if (this.aiConfig.mock) {
+      return new FakeListChatModel({ responses: ["mock summary"] }) as unknown as BaseChatModel;
+    }
+
     const temperature = params?.temperature ?? 0.1;
-    return this.buildChatModel(this.visionConfig, { temperature, credentialFileTag: "vision" });
+    const visionConfig = this.visionConfig;
+
+    // Reasoning models (gpt-5 / o-series) accept `reasoning_effort` on the chat-completions
+    // call. Lower effort = far fewer reasoning tokens = much faster. Passed via modelKwargs
+    // (raw param) because the LangChain `reasoning` object is rejected by Azure chat-completions
+    // deployments. Ignored for non-reasoning models.
+    const visionModelLower = (visionConfig.model || "").toLowerCase();
+    const isReasoningVisionModel = visionModelLower.includes("gpt-5") || /(^|\/)o\d/.test(visionModelLower);
+    const modelKwargs =
+      isReasoningVisionModel && visionConfig.reasoningEffort
+        ? { reasoning_effort: visionConfig.reasoningEffort }
+        : undefined;
+
+    return this.buildChatModel(visionConfig, { temperature, credentialFileTag: "vision", modelKwargs });
   }
 
   /**
@@ -237,6 +285,9 @@ export class ModelService {
       frequencyPenalty?: number;
       credentialFileTag: "llm" | "vision" | "audio";
       disableThinking?: boolean;
+      // Raw chat-completions modelKwargs (e.g. { reasoning_effort } for gpt-5 /
+      // o-series). Merged into the final ChatOpenAI / Azure params.
+      modelKwargs?: Record<string, unknown>;
     },
   ): BaseChatModel {
     const { temperature, maxOutputTokens, frequencyPenalty } = opts;
@@ -248,6 +299,7 @@ export class ModelService {
       configuration: {
         baseURL: cfg.url || "http://localhost:8033/v1",
       },
+      ...(opts.modelKwargs ? { modelKwargs: opts.modelKwargs } : {}),
     };
 
     switch (cfg.provider) {
@@ -319,6 +371,7 @@ export class ModelService {
           azureOpenAIApiVersion: cfg.apiVersion,
           temperature,
           ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
+          ...(llmConfig.modelKwargs ? { modelKwargs: llmConfig.modelKwargs } : {}),
         };
         return new AzureChatOpenAI(azureParameters);
       }
@@ -353,7 +406,39 @@ export class ModelService {
     });
   }
 
+  /**
+   * Returns the embedder used for vectorisation. Three layers, all additive over
+   * the raw provider embedder:
+   *   1. MOCK_AI → a zero-vector embedder (no provider call), sized to
+   *      `embedder.dimensions` so downstream vector writes still have the right shape.
+   *   2. When `embedder.rateLimit` is configured AND the token bucket is wired,
+   *      the provider embedder is wrapped in a RateLimitedEmbedder (distributed
+   *      token bucket + local concurrency gate + 429 handling) and CACHED on the
+   *      instance, so every caller shares one bucket/gate.
+   *   3. Otherwise the raw provider embedder is returned unchanged.
+   */
   getEmbedder(): EmbeddingsInterface {
+    if (this.aiConfig.mock) {
+      const dim = this.aiConfig.embedder.dimensions;
+      const zero = (): number[] => new Array(dim).fill(0);
+      return {
+        embedDocuments: async (texts: string[]) => texts.map(zero),
+        embedQuery: async () => zero(),
+      };
+    }
+
+    const rateLimit = this.aiConfig.embedder.rateLimit;
+    if (rateLimit && this.bucket && this.logger) {
+      if (this.cachedEmbedder) return this.cachedEmbedder;
+      const inner = this.buildInnerEmbedder() as Embeddings;
+      this.cachedEmbedder = new RateLimitedEmbedder(inner, this.bucket, rateLimit, this.logger);
+      return this.cachedEmbedder;
+    }
+
+    return this.buildInnerEmbedder();
+  }
+
+  private buildInnerEmbedder(): EmbeddingsInterface {
     let response: EmbeddingsInterface;
 
     switch (this.aiConfig.embedder.provider) {
@@ -425,5 +510,37 @@ export class ModelService {
 
   getEmbedderDimensions(): number {
     return this.aiConfig.embedder.dimensions;
+  }
+
+  /**
+   * Builds an OpenAI / Azure OpenAI SDK client for audio transcription. This is
+   * the SDK-based path (`audio.transcriptions.create`), distinct from
+   * AudioLLMService (chat-LLM / OpenAI-style /audio/transcriptions HTTP). Driven
+   * by the `transcriber` config block (TRANSCRIBER_* env vars).
+   */
+  getTranscriber(): OpenAI | AzureOpenAI {
+    const transcriber = this.aiConfig.transcriber;
+    switch (transcriber.provider) {
+      case "openai":
+        return new OpenAI({ apiKey: transcriber.apiKey });
+      case "azure":
+        return new AzureOpenAI({
+          apiKey: transcriber.apiKey,
+          apiVersion: transcriber.apiVersion,
+          endpoint: transcriber.url,
+          deployment: transcriber.model,
+        });
+      default:
+        throw new Error(`Unsupported transcriber provider: ${transcriber.provider}`);
+    }
+  }
+
+  async transcribeAudio(params: { filePath: string; prompt: string; language?: string }): Promise<unknown> {
+    return await this.getTranscriber().audio.transcriptions.create({
+      file: fs.createReadStream(params.filePath),
+      model: this.aiConfig.transcriber.model,
+      prompt: params.prompt,
+      response_format: "json",
+    });
   }
 }

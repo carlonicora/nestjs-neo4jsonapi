@@ -1,14 +1,25 @@
 import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
 import * as Handlebars from "handlebars";
 import * as nodemailer from "nodemailer";
 import { join } from "path";
-import { baseConfig } from "../../../config/base.config";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
+import { ConfigEmailInterface } from "../../../config/interfaces/config.email.interface";
+import { AppLoggingService } from "../../logging/services/logging.service";
 import sendGridMail = require("@sendgrid/mail");
+
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
 
 export interface EmailParams {
   to: string | string[];
   subject?: string;
+  attachments?: EmailAttachment[];
   [key: string]: any;
 }
 
@@ -21,10 +32,11 @@ type EmailAddress = {
 export class EmailService {
   private templateBasePath: string;
   private libraryTemplateBasePath: string;
-  private readonly emailConfig = baseConfig.email;
-  private readonly appConfig = baseConfig.app;
 
-  constructor() {
+  constructor(
+    private readonly config: ConfigService<BaseConfigInterface>,
+    private readonly logger: AppLoggingService,
+  ) {
     // App templates (overrides)
     this.templateBasePath = join(process.cwd(), "templates", "email");
 
@@ -34,6 +46,9 @@ export class EmailService {
     // Register eq helper for template conditionals
     Handlebars.registerHelper("eq", (a: any, b: any) => a === b);
 
+    // Register concat helper for templates (last arg is Handlebars options)
+    Handlebars.registerHelper("concat", (...args) => args.slice(0, -1).join(""));
+
     const headerPath = join(this.templateBasePath, "header.hbs");
     const footerPath = join(this.templateBasePath, "footer.hbs");
 
@@ -41,13 +56,13 @@ export class EmailService {
       const headerPartial = fs.readFileSync(headerPath, "utf8");
       Handlebars.registerPartial("header", headerPartial);
     } else {
-      console.error(`Partial header.hbs not found in ${this.templateBasePath}`);
+      this.logger.error(`Partial header.hbs not found in ${this.templateBasePath}`, undefined, "EmailService");
     }
     if (fs.existsSync(footerPath)) {
       const footerPartial = fs.readFileSync(footerPath, "utf8");
       Handlebars.registerPartial("footer", footerPartial);
     } else {
-      console.error(`Partial footer.hbs not found in ${this.templateBasePath}`);
+      this.logger.error(`Partial footer.hbs not found in ${this.templateBasePath}`, undefined, "EmailService");
     }
   }
 
@@ -95,14 +110,21 @@ export class EmailService {
 
   async sendEmail(templateId: string, emailParams: EmailParams, locale: string): Promise<void> {
     const templateContent = this.loadTemplate(templateId, locale);
-    if (!emailParams.url && this.appConfig) emailParams.url = this.appConfig.url;
+    const appConfig = this.config.get<ConfigAppInterface>("app");
+    if (!emailParams.url && appConfig) emailParams.url = appConfig.url;
+
+    // Capture attachments before template compilation — Handlebars must not
+    // see Buffer values. Clone to avoid mutating the caller's object.
+    const attachments = emailParams.attachments;
+    const templateParams = { ...emailParams };
+    delete templateParams.attachments;
 
     let html: string;
     try {
       const template = Handlebars.compile(templateContent);
-      html = template(emailParams);
+      html = template(templateParams);
     } catch (error) {
-      console.error("Error compiling Handlebars template:", error);
+      this.logger.error("Error compiling Handlebars template", error, "EmailService");
       throw new Error("Failed to compile email template");
     }
 
@@ -112,57 +134,77 @@ export class EmailService {
     const subject = emailParams.subject || extractedTitle;
 
     try {
-      if (this.emailConfig.emailProvider === "brevo") {
+      const emailConfig = this.config.get<ConfigEmailInterface>("email");
+      if (emailConfig.emailProvider === "brevo") {
         await this.sendEmailWithBrevo(to, subject, html);
-      } else if (this.emailConfig.emailProvider === "sendgrid") {
-        await this.sendEmailWithSendGrid(to, subject, html);
+      } else if (emailConfig.emailProvider === "sendgrid") {
+        await this.sendEmailWithSendGrid(to, subject, html, attachments);
       } else {
-        await this.sendEmailWithSmtp(to, subject, html);
+        await this.sendEmailWithSmtp(to, subject, html, attachments);
       }
     } catch (error) {
-      console.error("Error sending email:", error);
+      this.logger.error("Error sending email", error, "EmailService");
       throw error;
     }
   }
   private async sendEmailWithBrevo(to: string | string[], subject: string, html: string): Promise<void> {
+    const emailConfig = this.config.get<ConfigEmailInterface>("email");
     const { TransactionalEmailsApi, TransactionalEmailsApiApiKeys, SendSmtpEmail } = require("@getbrevo/brevo");
     const apiInstance = new TransactionalEmailsApi();
 
     // Brevo SDK v3 uses setApiKey method for authentication
-    apiInstance.setApiKey(TransactionalEmailsApiApiKeys.apiKey, this.emailConfig.emailApiKey);
+    apiInstance.setApiKey(TransactionalEmailsApiApiKeys.apiKey, emailConfig.emailApiKey);
 
     const sendSmtpEmail = new SendSmtpEmail();
 
     sendSmtpEmail.subject = subject;
     sendSmtpEmail.htmlContent = html;
-    sendSmtpEmail.sender = this.convertToEmailAddressArray(this.emailConfig.emailFrom)[0];
+    sendSmtpEmail.sender = this.convertToEmailAddressArray(emailConfig.emailFrom)[0];
     sendSmtpEmail.to = this.convertToEmailAddressArray(to);
 
     try {
       await apiInstance.sendTransacEmail(sendSmtpEmail);
     } catch (error) {
-      console.error(error);
+      this.logger.error("Error sending email via Brevo", error, "EmailService");
       throw error;
     }
   }
 
-  private async sendEmailWithSendGrid(to: string | string[], subject: string, html: string): Promise<void> {
-    if (!this.emailConfig.emailApiKey) {
+  private async sendEmailWithSendGrid(
+    to: string | string[],
+    subject: string,
+    html: string,
+    attachments?: EmailAttachment[],
+  ): Promise<void> {
+    const emailConfig = this.config.get<ConfigEmailInterface>("email");
+    if (!emailConfig.emailApiKey) {
       throw new Error("SendGrid API key is not configured");
     }
-    sendGridMail.setApiKey(this.emailConfig.emailApiKey);
-    const mailOptions = {
+    sendGridMail.setApiKey(emailConfig.emailApiKey);
+    const mailOptions: Parameters<typeof sendGridMail.send>[0] = {
       to: to,
-      from: this.emailConfig.emailFrom,
+      from: emailConfig.emailFrom,
       subject: subject,
       text: html,
       html: html,
+      ...(attachments && attachments.length > 0
+        ? {
+            attachments: attachments.map((a) => ({
+              content: a.content.toString("base64"),
+              filename: a.filename,
+              type: a.contentType,
+              disposition: "attachment",
+            })),
+          }
+        : {}),
     };
 
     try {
       await sendGridMail.send(mailOptions);
     } catch (error) {
-      console.error("Error sending email:", error);
+      this.logger.error("Error sending email via SendGrid", error, "EmailService", {
+        sendGridErrors: error.response?.body?.errors,
+      });
       throw error;
     }
   }
@@ -193,28 +235,43 @@ export class EmailService {
     }
   }
 
-  private async sendEmailWithSmtp(to: string | string[], subject: string, html: string): Promise<void> {
+  private async sendEmailWithSmtp(
+    to: string | string[],
+    subject: string,
+    html: string,
+    attachments?: EmailAttachment[],
+  ): Promise<void> {
+    const emailConfig = this.config.get<ConfigEmailInterface>("email");
     const transporter = nodemailer.createTransport({
-      host: this.emailConfig.emailHost,
-      port: this.emailConfig.emailPort,
-      secure: this.emailConfig.emailSecure,
+      host: emailConfig.emailHost,
+      port: emailConfig.emailPort,
+      secure: emailConfig.emailSecure,
       auth: {
-        user: this.emailConfig.emailUsername,
-        pass: this.emailConfig.emailPassword,
+        user: emailConfig.emailUsername,
+        pass: emailConfig.emailPassword,
       },
     });
 
-    const mailOptions = {
-      from: this.emailConfig.emailFrom,
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: emailConfig.emailFrom,
       to: to,
       subject: subject,
       html: html,
+      ...(attachments && attachments.length > 0
+        ? {
+            attachments: attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+            })),
+          }
+        : {}),
     };
 
     try {
       await transporter.sendMail(mailOptions);
     } catch (error) {
-      console.error("Error sending SMTP email:", error);
+      this.logger.error("Error sending SMTP email", error, "EmailService");
       throw error;
     }
   }

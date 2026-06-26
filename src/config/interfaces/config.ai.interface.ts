@@ -76,6 +76,26 @@ export interface AiTierConfig {
 }
 
 export interface ConfigAiInterface {
+  /**
+   * MOCK_AI fail-closed safety gate. When `true`, the LLM/model/embedder layer
+   * returns synthetic data instead of calling any provider (FakeListChatModel,
+   * zero-vector embedder, mockFromZodSchema structured output). MUST NEVER be
+   * `true` in production — ModelService.onModuleInit throws on
+   * `ENV === "production"` to enforce this. Driven by MOCK_AI=true.
+   */
+  mock: boolean;
+  /**
+   * Mistral Document AI (OCR) on Azure AI Foundry — see DocumentAiService.
+   * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION}.
+   */
+  documentAi: {
+    enabled: boolean;
+    provider: string;
+    apiKey: string;
+    model: string;
+    url: string;
+    apiVersion?: string;
+  };
   /** Normal tier — the default model. */
   ai: AiTierConfig;
   /**
@@ -101,6 +121,26 @@ export interface ConfigAiInterface {
     outputCostPer1MTokens: number;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
+    /**
+     * gpt-5 / o-series reasoning models only: "minimal" | "low" | "medium" | "high".
+     * Lower effort → faster, fewer reasoning tokens. Passed as a raw `reasoning_effort`
+     * modelKwarg (the LangChain `reasoning` object is rejected by Azure chat-completions
+     * deployments). Ignored for non-reasoning models. Set via VISION_REASONING_EFFORT.
+     */
+    reasoningEffort?: string;
+  };
+  /**
+   * SDK-based audio transcription (OpenAI / Azure OpenAI `audio.transcriptions`).
+   * Distinct from the `audio` block above (chat-LLM / OpenAI-style /audio/transcriptions
+   * HTTP path used by AudioLLMService): this drives ModelService.getTranscriber() /
+   * transcribeAudio() via the openai SDK. Driven by TRANSCRIBER_* env vars.
+   */
+  transcriber: {
+    provider: string;
+    apiKey: string;
+    model: string;
+    url?: string;
+    apiVersion?: string;
   };
   audio: {
     provider: string;
@@ -152,5 +192,32 @@ export interface ConfigAiInterface {
     region?: string;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
+    /**
+     * Distributed token-bucket rate limit for the embedder. When present,
+     * ModelService.getEmbedder() wraps the provider embedder in a
+     * RateLimitedEmbedder backed by a Redis token bucket (shared across all
+     * workers) plus a local concurrency gate. Sub-batches the input by
+     * estimated tokens, honours provider 429 Retry-After, and refunds the
+     * bucket on retry. Optional — when undefined, getEmbedder() returns the
+     * raw provider embedder. Driven by EMBEDDER_* env vars.
+     */
+    rateLimit?: {
+      /** Provider tokens-per-minute limit (EMBEDDER_TPM_LIMIT). */
+      tpmLimit: number;
+      /** Headroom subtracted from tpmLimit to absorb estimation error (EMBEDDER_TPM_SAFETY). */
+      safetyTokens: number;
+      /** Max estimated tokens per provider call; larger inputs are sub-batched (EMBEDDER_MAX_BATCH_TOKENS). */
+      maxBatchTokens: number;
+      /** Max concurrent in-flight provider calls across this process (EMBEDDER_MAX_CONCURRENT_REQUESTS). */
+      maxConcurrentRequests: number;
+      /** Max time to wait for bucket capacity before throwing EmbedderBucketStarvedError (EMBEDDER_MAX_WAIT_MS). */
+      maxWaitMs: number;
+      /** Max attempts on a 429 before giving up (EMBEDDER_MAX_ATTEMPTS). */
+      maxAttempts: number;
+      /** Heuristic chars→tokens divisor for the token estimate (EMBEDDER_CHARS_PER_TOKEN). */
+      charsPerToken: number;
+      /** Redis key suffix for the shared bucket (prefixed with the Redis queue namespace). */
+      bucketKey: string;
+    };
   };
 }

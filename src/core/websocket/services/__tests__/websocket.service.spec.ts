@@ -6,6 +6,7 @@ import { WebSocketService } from "../websocket.service";
 import { APP_MODE_TOKEN, AppMode, AppModeConfig } from "../../../../common/decorators/conditional-service.decorator";
 import { RedisClientStorageService } from "../../../redis/services/redis.client.storage.service";
 import { RedisMessagingService } from "../../../redis/services/redis.messaging.service";
+import { AppLoggingService } from "../../../logging/services/logging.service";
 
 describe("WebSocketService", () => {
   let service: WebSocketService;
@@ -57,6 +58,16 @@ describe("WebSocketService", () => {
     publishBroadcastNotification: vi.fn().mockResolvedValue(undefined),
   });
 
+  const createMockLogger = () => ({
+    error: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    verbose: vi.fn(),
+    fatal: vi.fn(),
+    trace: vi.fn(),
+  });
+
   beforeEach(async () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
@@ -73,6 +84,7 @@ describe("WebSocketService", () => {
         WebSocketService,
         { provide: EventEmitter2, useValue: mockEventEmitter },
         { provide: APP_MODE_TOKEN, useValue: createMockAppModeConfig(AppMode.API) },
+        { provide: AppLoggingService, useValue: createMockLogger() },
         { provide: RedisClientStorageService, useValue: mockRedisClientStorageValue },
         { provide: RedisMessagingService, useValue: mockRedisMessagingValue },
       ],
@@ -223,6 +235,7 @@ describe("WebSocketService", () => {
           WebSocketService,
           { provide: EventEmitter2, useValue: { emit: vi.fn() } },
           { provide: APP_MODE_TOKEN, useValue: createMockAppModeConfig(AppMode.WORKER) },
+          { provide: AppLoggingService, useValue: createMockLogger() },
           { provide: RedisClientStorageService, useValue: mockRedisClientStorageValue },
           { provide: RedisMessagingService, useValue: mockRedisMessagingValue },
         ],
@@ -267,6 +280,7 @@ describe("WebSocketService", () => {
           WebSocketService,
           { provide: EventEmitter2, useValue: { emit: vi.fn() } },
           { provide: APP_MODE_TOKEN, useValue: createMockAppModeConfig(AppMode.WORKER) },
+          { provide: AppLoggingService, useValue: createMockLogger() },
           { provide: RedisClientStorageService, useValue: mockRedisClientStorageValue },
           { provide: RedisMessagingService, useValue: mockRedisMessagingValue },
         ],
@@ -315,6 +329,7 @@ describe("WebSocketService", () => {
           WebSocketService,
           { provide: EventEmitter2, useValue: { emit: vi.fn() } },
           { provide: APP_MODE_TOKEN, useValue: createMockAppModeConfig(AppMode.WORKER) },
+          { provide: AppLoggingService, useValue: createMockLogger() },
           { provide: RedisClientStorageService, useValue: mockRedisClientStorageValue },
           { provide: RedisMessagingService, useValue: mockRedisMessagingValue },
         ],
@@ -438,6 +453,7 @@ describe("WebSocketService", () => {
           WebSocketService,
           { provide: EventEmitter2, useValue: { emit: vi.fn() } },
           { provide: APP_MODE_TOKEN, useValue: createMockAppModeConfig(AppMode.API) },
+          { provide: AppLoggingService, useValue: createMockLogger() },
         ],
       }).compile();
 

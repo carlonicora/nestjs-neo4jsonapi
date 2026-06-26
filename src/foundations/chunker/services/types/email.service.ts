@@ -9,10 +9,10 @@ export interface ParsedEmail {
   date: string;
   textBody: string;
   htmlBody?: string;
-  attachments: EmailAttachment[];
+  attachments: ParsedEmailAttachment[];
 }
 
-export interface EmailAttachment {
+export interface ParsedEmailAttachment {
   filename: string;
   contentType: string;
   content: Buffer;
@@ -87,7 +87,7 @@ export class EmailParserService {
     const senderEmail = msgData.senderEmail || "";
     const from = senderEmail ? (senderName ? `${senderName} <${senderEmail}>` : senderEmail) : senderName;
 
-    const attachments: EmailAttachment[] = [];
+    const attachments: ParsedEmailAttachment[] = [];
     if (msgData.attachments) {
       for (const attMeta of msgData.attachments) {
         const att = reader.getAttachment(attMeta);
@@ -119,7 +119,7 @@ export class EmailParserService {
     cc?: string;
     date: string;
     textBody: string;
-    attachments: EmailAttachment[];
+    attachments: ParsedEmailAttachment[];
     attachmentContents?: AttachmentContent[];
   }): string {
     const sections: string[] = [];

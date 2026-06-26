@@ -2,10 +2,12 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { PresenceService, PresenceStatus } from "../presence.service";
 import { RedisClientStorageService } from "../../../redis/services/redis.client.storage.service";
+import { AppLoggingService } from "../../../logging/services/logging.service";
 
 describe("PresenceService", () => {
   let service: PresenceService;
   let redisService: vi.Mocked<RedisClientStorageService>;
+  let logger: vi.Mocked<AppLoggingService>;
 
   const mockRedisClient = {
     get: vi.fn(),
@@ -25,14 +27,39 @@ describe("PresenceService", () => {
     getRedisClient: vi.fn().mockReturnValue(mockRedisClient),
   });
 
+  const createMockLogger = () => ({
+    log: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    verbose: vi.fn(),
+    fatal: vi.fn(),
+    trace: vi.fn(),
+    logWithContext: vi.fn(),
+    errorWithContext: vi.fn(),
+    setRequestContext: vi.fn(),
+    getRequestContext: vi.fn(),
+    clearRequestContext: vi.fn(),
+    createChildLogger: vi.fn(),
+    logHttpRequest: vi.fn(),
+    logHttpError: vi.fn(),
+    logBusinessEvent: vi.fn(),
+    logSecurityEvent: vi.fn(),
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
 
     const mockRedisServiceValue = createMockRedisService();
+    const mockLogger = createMockLogger();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PresenceService,
+        {
+          provide: AppLoggingService,
+          useValue: mockLogger,
+        },
         {
           provide: RedisClientStorageService,
           useValue: mockRedisServiceValue,
@@ -42,6 +69,7 @@ describe("PresenceService", () => {
 
     service = module.get<PresenceService>(PresenceService);
     redisService = module.get(RedisClientStorageService);
+    logger = module.get(AppLoggingService);
   });
 
   afterEach(() => {
@@ -89,23 +117,23 @@ describe("PresenceService", () => {
 
     it("should do nothing when Redis is not connected", async () => {
       redisService.isConnected.mockReturnValue(false);
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       await service.setUserOnline(TEST_IDS.userId, "Test User", TEST_IDS.socketId);
 
       expect(mockRedisClient.get).not.toHaveBeenCalled();
       expect(mockRedisClient.setex).not.toHaveBeenCalled();
-      consoleSpy.mockRestore();
     });
 
     it("should handle Redis errors gracefully", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.get.mockRejectedValue(new Error("Redis error"));
 
       await service.setUserOnline(TEST_IDS.userId, "Test User", TEST_IDS.socketId);
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Error setting user online"));
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Error setting user online"),
+        expect.anything(),
+        "PresenceService",
+      );
     });
   });
 
@@ -156,22 +184,22 @@ describe("PresenceService", () => {
 
     it("should do nothing when Redis is not connected", async () => {
       redisService.isConnected.mockReturnValue(false);
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       await service.setUserOffline(TEST_IDS.userId, TEST_IDS.socketId);
 
       expect(mockRedisClient.get).not.toHaveBeenCalled();
-      consoleSpy.mockRestore();
     });
 
     it("should handle Redis errors gracefully", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.get.mockRejectedValue(new Error("Redis error"));
 
       await service.setUserOffline(TEST_IDS.userId, TEST_IDS.socketId);
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Error setting user offline"));
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Error setting user offline"),
+        expect.anything(),
+        "PresenceService",
+      );
     });
   });
 
@@ -210,13 +238,11 @@ describe("PresenceService", () => {
     });
 
     it("should handle Redis errors gracefully", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.get.mockRejectedValue(new Error("Redis error"));
 
       await service.updateActivity(TEST_IDS.userId);
 
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 
@@ -300,14 +326,16 @@ describe("PresenceService", () => {
     });
 
     it("should handle Redis errors and return default offline status", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.get.mockRejectedValue(new Error("Redis error"));
 
       const result = await service.getUserStatus(TEST_IDS.userId);
 
       expect(result.status).toBe("offline");
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Error getting user status"));
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Error getting user status"),
+        expect.anything(),
+        "PresenceService",
+      );
     });
   });
 
@@ -429,14 +457,16 @@ describe("PresenceService", () => {
     });
 
     it("should handle Redis errors gracefully", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.keys.mockRejectedValue(new Error("Redis error"));
 
       const result = await service.markIdleUsersAsAway();
 
       expect(result).toEqual([]);
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Error marking idle users"));
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Error marking idle users"),
+        expect.anything(),
+        "PresenceService",
+      );
     });
 
     it("should continue processing other keys when one fails", async () => {
@@ -447,7 +477,6 @@ describe("PresenceService", () => {
         userName: "Test User",
       };
 
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       mockRedisClient.keys.mockResolvedValue([`presence:${TEST_IDS.userId}`, `presence:${TEST_IDS.userId2}`]);
       mockRedisClient.get
         .mockRejectedValueOnce(new Error("Redis error for user 1"))
@@ -458,38 +487,53 @@ describe("PresenceService", () => {
 
       // Should process second user even though first failed
       expect(changedUsers).toContain(TEST_IDS.userId2);
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Error processing presence key"));
-      consoleSpy.mockRestore();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Error processing presence key"),
+        expect.anything(),
+        "PresenceService",
+      );
     });
   });
 
   describe("when RedisClientStorageService is undefined", () => {
     let serviceWithoutRedis: PresenceService;
+    let loggerWithoutRedis: vi.Mocked<AppLoggingService>;
 
     beforeEach(async () => {
+      const mockLogger = createMockLogger();
+
       const module: TestingModule = await Test.createTestingModule({
-        providers: [PresenceService],
+        providers: [
+          PresenceService,
+          {
+            provide: AppLoggingService,
+            useValue: mockLogger,
+          },
+        ],
       }).compile();
 
       serviceWithoutRedis = module.get<PresenceService>(PresenceService);
+      loggerWithoutRedis = module.get(AppLoggingService);
     });
 
     it("setUserOnline should do nothing", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
       await serviceWithoutRedis.setUserOnline(TEST_IDS.userId, "Test User", TEST_IDS.socketId);
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Redis not connected"));
-      consoleSpy.mockRestore();
+      expect(loggerWithoutRedis.error).toHaveBeenCalledWith(
+        expect.stringContaining("Redis not connected"),
+        undefined,
+        "PresenceService",
+      );
     });
 
     it("setUserOffline should do nothing", async () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
       await serviceWithoutRedis.setUserOffline(TEST_IDS.userId, TEST_IDS.socketId);
 
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Redis not connected"));
-      consoleSpy.mockRestore();
+      expect(loggerWithoutRedis.error).toHaveBeenCalledWith(
+        expect.stringContaining("Redis not connected"),
+        undefined,
+        "PresenceService",
+      );
     });
 
     it("updateActivity should do nothing", async () => {

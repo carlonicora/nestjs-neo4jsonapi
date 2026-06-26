@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ConfigService } from "@nestjs/config";
 
 // Mock fs module
 vi.mock("fs", () => ({
@@ -14,24 +15,22 @@ vi.mock("nodemailer", () => ({
   })),
 }));
 
-// Mock baseConfig with default values
-vi.mock("../../../../config/base.config", () => ({
-  baseConfig: {
-    email: {
-      emailProvider: "smtp",
-      emailApiKey: "test-api-key",
-      emailFrom: "Test <test@example.com>",
-      emailHost: "smtp.example.com",
-      emailPort: 587,
-      emailSecure: false,
-      emailUsername: "user",
-      emailPassword: "pass",
-    },
-    app: {
-      url: "https://example.com",
-    },
-  },
-}));
+// Email config consumed via the injected ConfigService mock (this.config.get("email"))
+const emailConfig = {
+  emailProvider: "smtp",
+  emailApiKey: "test-api-key",
+  emailFrom: "Test <test@example.com>",
+  emailHost: "smtp.example.com",
+  emailPort: 587,
+  emailSecure: false,
+  emailUsername: "user",
+  emailPassword: "pass",
+};
+
+// App config consumed via the injected ConfigService mock (this.config.get("app"))
+const appConfig = {
+  url: "https://example.com",
+};
 
 // Mock Handlebars
 vi.mock("handlebars", () => ({
@@ -48,11 +47,12 @@ vi.mock("handlebars", () => ({
 import * as fs from "fs";
 import * as nodemailer from "nodemailer";
 import * as Handlebars from "handlebars";
-import { baseConfig } from "../../../../config/base.config";
+import { AppLoggingService } from "../../../logging/services/logging.service";
 import { EmailService } from "../email.service";
 
 describe("EmailService", () => {
   let service: EmailService;
+  let mockLogger: { error: ReturnType<typeof vi.fn>; log: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> };
 
   const mockTemplateContent = `
     <!DOCTYPE html>
@@ -81,12 +81,26 @@ describe("EmailService", () => {
       sendMail: mockSendMail,
     } as any);
 
-    // Reset baseConfig to defaults
-    (baseConfig.email as any).emailProvider = "smtp";
-    (baseConfig.email as any).emailApiKey = "test-api-key";
+    // Reset config to defaults
+    emailConfig.emailProvider = "smtp";
+    emailConfig.emailApiKey = "test-api-key";
+
+    mockLogger = { error: vi.fn(), log: vi.fn(), warn: vi.fn() };
+
+    const mockConfigService = {
+      get: vi.fn((key: string) => {
+        if (key === "email") return emailConfig;
+        if (key === "app") return appConfig;
+        return undefined;
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [EmailService],
+      providers: [
+        EmailService,
+        { provide: ConfigService, useValue: mockConfigService },
+        { provide: AppLoggingService, useValue: mockLogger },
+      ],
     }).compile();
 
     service = module.get<EmailService>(EmailService);
@@ -110,33 +124,47 @@ describe("EmailService", () => {
     });
 
     it("should log error when header partial not found", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(fs.existsSync).mockImplementation((path: any) => {
         if (String(path).includes("header.hbs")) return false;
         return true;
       });
 
+      const freshLogger = { error: vi.fn(), log: vi.fn(), warn: vi.fn() };
       await Test.createTestingModule({
-        providers: [EmailService],
+        providers: [
+          EmailService,
+          { provide: ConfigService, useValue: { get: vi.fn(() => emailConfig) } },
+          { provide: AppLoggingService, useValue: freshLogger },
+        ],
       }).compile();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Partial header.hbs not found"));
-      consoleErrorSpy.mockRestore();
+      expect(freshLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Partial header.hbs not found"),
+        undefined,
+        "EmailService",
+      );
     });
 
     it("should log error when footer partial not found", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(fs.existsSync).mockImplementation((path: any) => {
         if (String(path).includes("footer.hbs")) return false;
         return true;
       });
 
+      const freshLogger = { error: vi.fn(), log: vi.fn(), warn: vi.fn() };
       await Test.createTestingModule({
-        providers: [EmailService],
+        providers: [
+          EmailService,
+          { provide: ConfigService, useValue: { get: vi.fn(() => emailConfig) } },
+          { provide: AppLoggingService, useValue: freshLogger },
+        ],
       }).compile();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Partial footer.hbs not found"));
-      consoleErrorSpy.mockRestore();
+      expect(freshLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining("Partial footer.hbs not found"),
+        undefined,
+        "EmailService",
+      );
     });
   });
 
@@ -218,7 +246,6 @@ describe("EmailService", () => {
     });
 
     it("should throw error when template compilation fails", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(Handlebars.compile).mockImplementation(() => {
         throw new Error("Compilation error");
       });
@@ -226,20 +253,15 @@ describe("EmailService", () => {
       await expect(service.sendEmail("welcome", { to: "user@example.com" }, "en")).rejects.toThrow(
         "Failed to compile email template",
       );
-
-      consoleErrorSpy.mockRestore();
     });
 
     it("should throw error when sending fails", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const mockSendMail = vi.fn().mockRejectedValue(new Error("SMTP error"));
       vi.mocked(nodemailer.createTransport).mockReturnValue({
         sendMail: mockSendMail,
       } as any);
 
       await expect(service.sendEmail("welcome", { to: "user@example.com" }, "en")).rejects.toThrow("SMTP error");
-
-      consoleErrorSpy.mockRestore();
     });
 
     it("should handle array of recipients", async () => {
@@ -379,7 +401,6 @@ describe("EmailService", () => {
 
   describe("error handling", () => {
     it("should handle SMTP transport errors", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const mockSendMail = vi.fn().mockRejectedValue(new Error("Connection refused"));
       vi.mocked(nodemailer.createTransport).mockReturnValue({
         sendMail: mockSendMail,
@@ -389,12 +410,10 @@ describe("EmailService", () => {
         "Connection refused",
       );
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith("Error sending SMTP email:", expect.any(Error));
-      consoleErrorSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalledWith("Error sending SMTP email", expect.any(Error), "EmailService");
     });
 
     it("should log error when sending email fails", async () => {
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const mockSendMail = vi.fn().mockRejectedValue(new Error("Network error"));
       vi.mocked(nodemailer.createTransport).mockReturnValue({
         sendMail: mockSendMail,
@@ -402,8 +421,7 @@ describe("EmailService", () => {
 
       await expect(service.sendEmail("welcome", { to: "user@example.com" }, "en")).rejects.toThrow();
 
-      expect(consoleErrorSpy).toHaveBeenCalled();
-      consoleErrorSpy.mockRestore();
+      expect(mockLogger.error).toHaveBeenCalled();
     });
   });
 

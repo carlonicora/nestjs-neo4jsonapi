@@ -42,7 +42,7 @@ import { WebsocketModule } from "./websocket/websocket.module";
  * @param queueIds - Additional queue IDs to register (library's CHUNK queue is always included)
  * @param securityService - Optional custom SecurityService subclass (see SecurityModule.forRoot)
  */
-function getCoreModules(queueIds: string[] = [], securityService?: Type<SecurityService>) {
+function getCoreModules(queueIds: string[] = [], securityService?: Type<SecurityService>, includeMigrator = true) {
   return [
     // Discovery module - required by EntityServiceRegistry to enumerate providers
     DiscoveryModule,
@@ -80,7 +80,7 @@ function getCoreModules(queueIds: string[] = [], securityService?: Type<Security
     WebsocketModule,
     LLMModule,
     BlockNoteModule,
-    MigratorModule,
+    ...(includeMigrator ? [MigratorModule] : []),
     VersionModule,
   ];
 }
@@ -129,6 +129,8 @@ export interface CoreModuleOptions {
    * Default undefined keeps the base SecurityService (neural-erp behavior unchanged).
    */
   securityService?: Type<SecurityService>;
+  /** Set false to skip the library migrator (app provides its own). Default true. */
+  migrator?: boolean;
 }
 
 /**
@@ -159,7 +161,7 @@ export class CoreModule {
 
     return {
       module: CoreModule,
-      imports: getCoreModules(options?.queueIds ?? [], options?.securityService),
+      imports: getCoreModules(options?.queueIds ?? [], options?.securityService, options?.migrator ?? true),
       providers,
       exports: [...getCoreModuleExports(), EntityServiceRegistry],
       global: true,

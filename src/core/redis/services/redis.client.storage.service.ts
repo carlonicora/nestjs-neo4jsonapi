@@ -42,6 +42,36 @@ export class RedisClientStorageService implements OnModuleDestroy {
     return this.redis?.status === "ready" || this.redis?.status === "connect";
   }
 
+  /**
+   * Acquire a distributed lock using Redis SET NX PX.
+   * @param key The lock key
+   * @param ttlMs Time-to-live in milliseconds (auto-release)
+   * @returns Lock value if acquired, null if already locked
+   */
+  async acquireLock(key: string, ttlMs: number): Promise<string | null> {
+    const lockValue = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const result = await this.redis.set(key, lockValue, "PX", ttlMs, "NX");
+    return result === "OK" ? lockValue : null;
+  }
+
+  /**
+   * Release a distributed lock. Only releases if the lock value matches
+   * (prevents releasing another holder's lock). Atomic via Lua.
+   * @param key The lock key
+   * @param lockValue The value returned by acquireLock
+   */
+  async releaseLock(key: string, lockValue: string): Promise<boolean> {
+    const script = `
+      if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("DEL", KEYS[1])
+      else
+        return 0
+      end
+    `;
+    const result = await this.redis.eval(script, 1, key, lockValue);
+    return result === 1;
+  }
+
   async addClient(userId: string, companyId: string, socketId: string): Promise<void> {
     const clientInfo: ClientInfo = {
       userId,
