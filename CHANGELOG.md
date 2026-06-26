@@ -1,3 +1,9 @@
+## [1.100.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.99.0...v1.100.0) (2026-06-26)
+
+### 🚀 Features
+
+* adapt engine for a360 api migration ([0656d1b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0656d1bdeda97a84cda1ae1d6f13a6711cce4d6b))
+
 ## [1.99.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.98.0...v1.99.0) (2026-06-25)
 
 ### 🚀 Features
