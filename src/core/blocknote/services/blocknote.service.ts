@@ -373,4 +373,105 @@ export class BlockNoteService {
       .filter((content) => content.length > 0)
       .join("\n");
   }
+
+  /**
+   * Converts a BlockNoteJS/Prosemirror data structure into plain text (no markdown formatting).
+   */
+  convertToPlainText(params: { nodes: any[] }): string {
+    return params.nodes.map((node) => this.processNodeAsPlainText(node)).join("");
+  }
+
+  // Plain text conversion methods (no markdown formatting)
+  protected processNodeAsPlainText(node: any, indentLevel = 0): string {
+    switch (node.type) {
+      case "paragraph":
+        return this.processParagraphAsPlainText(node);
+      case "heading":
+        return this.processHeadingAsPlainText(node);
+      case "bulletListItem":
+        return this.processBulletListItemAsPlainText(node, indentLevel);
+      case "numberedListItem":
+        return this.processNumberedListItemAsPlainText(node, indentLevel);
+      case "checkListItem":
+        return this.processCheckListItemAsPlainText(node, indentLevel);
+      case "codeBlock":
+        return this.processCodeBlockAsPlainText(node);
+      default:
+        return "";
+    }
+  }
+
+  protected processParagraphAsPlainText(node: any): string {
+    const content = this.processContentAsPlainText(node.content);
+    return `${content}\n\n`;
+  }
+
+  protected processHeadingAsPlainText(node: any): string {
+    const content = this.processContentAsPlainText(node.content);
+    return `${content}\n\n`;
+  }
+
+  protected processBulletListItemAsPlainText(node: any, indentLevel: number): string {
+    const indent = "  ".repeat(indentLevel);
+    const content = this.processContentAsPlainText(node.content);
+    let text = `${indent}• ${content}\n`;
+
+    if (node.children && node.children.length > 0) {
+      node.children.forEach((child: any) => {
+        text += this.processNodeAsPlainText(child, indentLevel + 1);
+      });
+    }
+
+    return text;
+  }
+
+  protected processNumberedListItemAsPlainText(node: any, indentLevel: number): string {
+    const indent = "  ".repeat(indentLevel);
+    const content = this.processContentAsPlainText(node.content);
+    let text = `${indent}• ${content}\n`;
+
+    if (node.children && node.children.length > 0) {
+      node.children.forEach((child: any) => {
+        text += this.processNodeAsPlainText(child, indentLevel + 1);
+      });
+    }
+
+    return text;
+  }
+
+  protected processCheckListItemAsPlainText(node: any, indentLevel: number): string {
+    const indent = "  ".repeat(indentLevel);
+    const checked = node.props.checked ? "✓" : "○";
+    const content = this.processContentAsPlainText(node.content);
+    let text = `${indent}${checked} ${content}\n`;
+
+    if (node.children && node.children.length > 0) {
+      node.children.forEach((child: any) => {
+        text += this.processCheckListItemAsPlainText(child, indentLevel + 1);
+      });
+    }
+
+    return text;
+  }
+
+  protected processCodeBlockAsPlainText(node: any): string {
+    const content = this.processContentAsPlainText(node.content);
+    return `${content}\n\n`;
+  }
+
+  protected processContentAsPlainText(contentArray: any[]): string {
+    if (!contentArray) return "";
+    return contentArray
+      .map((contentNode) => {
+        if (contentNode.type === "text") {
+          return contentNode.text;
+        } else if (contentNode.type === "relationship") {
+          return contentNode.props?.alias || "";
+        } else if (contentNode.type === "mention") {
+          return contentNode.props?.alias || "";
+        }
+        return "";
+      })
+      .join("");
+  }
 }
