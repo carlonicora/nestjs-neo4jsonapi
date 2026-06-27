@@ -69,6 +69,7 @@ describe("Neo4jService", () => {
     has: vi.fn(),
     get: vi.fn(),
     set: vi.fn(),
+    isActive: vi.fn().mockReturnValue(true),
   });
 
   const createMockLogger = () => ({
