@@ -1,3 +1,9 @@
+## [1.102.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.101.0...v1.102.0) (2026-06-29)
+
+### 🚀 Features
+
+* add CustomThrottlerGuard + normalizeNeo4jTemporal helper ([ddf0647](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ddf064747557c5015a8d5d18a5e4b15446073aea))
+
 ## [1.101.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.100.0...v1.101.0) (2026-06-29)
 
 ### 🚀 Features
