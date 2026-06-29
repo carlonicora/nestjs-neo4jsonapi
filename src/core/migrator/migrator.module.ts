@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
 import { createWorkerProvider } from "../../common";
-import { S3Module } from "../../foundations/s3/s3.module";
+import { S3Service } from "../../foundations/s3/services/s3.service";
 import { MigratorService } from "./services/migrator.service";
 
 /**
@@ -28,8 +28,10 @@ import { MigratorService } from "./services/migrator.service";
  * ```
  */
 @Module({
-  imports: [S3Module],
-  providers: [createWorkerProvider(MigratorService)],
+  // Provide S3Service directly (not via S3Module) so the migrator gets the
+  // uploader without registering S3Module's /s3 controller — importing the
+  // module double-declares GET /s3 when the app already serves it.
+  providers: [createWorkerProvider(MigratorService), S3Service],
   exports: [],
 })
 export class MigratorModule {}
