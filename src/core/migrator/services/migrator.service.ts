@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
+import { S3Service } from "../../../foundations/s3/services/s3.service";
+import { MigrationInterface, MigrationStep } from "../interfaces/migration.interface";
 
 type Migration = {
   name: string;
@@ -36,6 +38,7 @@ type Migration = {
 export class MigratorService implements OnModuleInit {
   constructor(
     protected readonly neo4jService: Neo4jService,
+    protected readonly s3Service: S3Service,
     private readonly logger: AppLoggingService,
   ) {}
 
@@ -140,32 +143,60 @@ export class MigratorService implements OnModuleInit {
 
   private async executeMigrations(migrations: Migration[]) {
     for (const migration of migrations) {
-      const migrationQueries = await import(migration.path);
+      const migrationModule = await import(migration.path);
+      const steps = this._normaliseSteps(migrationModule["migration"]);
 
-      const queries: { query: string; params?: any }[] = [
-        ...migrationQueries["migration"].map((mq) => ({
-          query: mq.query,
-          params: mq.queryParams,
-        })),
-        {
-          query: `
-            CREATE (m:Migration {
-              version: $version,
-              versionDate: $versionDate,
-              versionIncrement: $versionIncrement,
-              appliedAt: datetime()
-            })
-          `,
-          params: {
-            version: migration.name,
-            versionDate: parseInt(migration.name.split("_")[0], 10),
-            versionIncrement: parseInt(migration.name.split("_")[1], 10),
-          },
+      const cypherBatch: { query: string; params?: any }[] = [];
+
+      for (const step of steps) {
+        if (step.kind === "s3-upload") {
+          const buffer = fs.readFileSync(step.localPath);
+          await this.s3Service.uploadBufferWithKey({
+            buffer,
+            key: step.s3Key,
+            contentType: step.contentType,
+          });
+          this.logger.log(`Uploaded ${step.localPath} to s3://${step.s3Key}`);
+        } else {
+          cypherBatch.push({ query: step.query, params: step.queryParams });
+        }
+      }
+
+      cypherBatch.push({
+        query: `
+          CREATE (m:Migration {
+            version: $version,
+            versionDate: $versionDate,
+            versionIncrement: $versionIncrement,
+            appliedAt: datetime()
+          })
+        `,
+        params: {
+          version: migration.name,
+          versionDate: parseInt(migration.name.split("_")[0], 10),
+          versionIncrement: parseInt(migration.name.split("_")[1], 10),
         },
-      ];
+      });
 
-      await this.neo4jService.executeInTransaction(queries);
+      await this.neo4jService.executeInTransaction(cypherBatch);
       this.logger.log(`Applied migration: ${migration.name}`);
     }
+  }
+
+  /**
+   * Normalise a migration's exported `migration` array to MigrationStep[].
+   * Legacy `MigrationInterface[]` (no `kind`) entries become `{ kind: "cypher" }`.
+   */
+  private _normaliseSteps(raw: Array<MigrationInterface | MigrationStep>): MigrationStep[] {
+    if (!raw || raw.length === 0) return [];
+
+    const isNewShape = "kind" in (raw[0] as object);
+    if (isNewShape) return raw as MigrationStep[];
+
+    return (raw as MigrationInterface[]).map((entry) => ({
+      kind: "cypher" as const,
+      query: entry.query,
+      queryParams: entry.queryParams,
+    }));
   }
 }

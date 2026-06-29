@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { createWorkerProvider } from "../../common";
+import { S3Module } from "../../foundations/s3/s3.module";
 import { MigratorService } from "./services/migrator.service";
 
 /**
@@ -27,6 +28,7 @@ import { MigratorService } from "./services/migrator.service";
  * ```
  */
 @Module({
+  imports: [S3Module],
   providers: [createWorkerProvider(MigratorService)],
   exports: [],
 })

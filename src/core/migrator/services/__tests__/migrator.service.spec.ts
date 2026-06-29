@@ -18,6 +18,7 @@ import * as path from "path";
 import { MigratorService } from "../migrator.service";
 import { Neo4jService } from "../../../neo4j/services/neo4j.service";
 import { AppLoggingService } from "../../../logging/services/logging.service";
+import { S3Service } from "../../../../foundations/s3/services/s3.service";
 
 describe("MigratorService", () => {
   let service: MigratorService;
@@ -66,6 +67,7 @@ describe("MigratorService", () => {
       providers: [
         MigratorService,
         { provide: Neo4jService, useValue: mockNeo4jService },
+        { provide: S3Service, useValue: { uploadBufferWithKey: vi.fn() } },
         { provide: AppLoggingService, useValue: mockLogger },
       ],
     }).compile();
