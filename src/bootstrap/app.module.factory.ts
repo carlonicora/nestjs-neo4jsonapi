@@ -1,5 +1,6 @@
 import { DynamicModule, Module, Type } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { APP_GUARD } from "@nestjs/core";
 import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerModule } from "@nestjs/throttler";
@@ -10,6 +11,7 @@ import { AcceptLanguageResolver, HeaderResolver, I18nModule, QueryResolver } fro
 import * as path from "path";
 
 import { AgentsModule } from "../agents/agents.modules";
+import { CustomThrottlerGuard } from "../common/guards/custom-throttler.guard";
 import { baseConfig, BaseConfigInterface, ConfigDiscordInterface, ConfigRateLimitInterface } from "../config";
 import { DiscordModule } from "../foundations/discord/discord.module";
 import { AppModeModule } from "../core/appmode/app.mode.module";
@@ -43,6 +45,11 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
       // Get app config for extracting queue IDs (needed at module definition time)
       const appConfig = options.config ? options.config() : {};
       const queueIds = appConfig.chunkQueues?.queueIds ?? [];
+
+      // Whether to enforce global rate limiting (decided at module-definition time,
+      // like queueIds). The ThrottlerModule below always configures the limits; the
+      // APP_GUARD that actually enforces them is only registered when enabled.
+      const rateLimitEnabled = ({ ...baseConfig, ...appConfig } as BaseConfigInterface).rateLimit?.enabled ?? false;
 
       // Merge baseConfig with optional custom config
       const configLoader = options.config ? () => ({ ...baseConfig, ...appConfig }) : () => baseConfig;
@@ -164,6 +171,11 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
         ],
         global: true,
         controllers: [],
+        providers: [
+          // Global rate-limit enforcement (adds X-RateLimit-* headers). Only
+          // registered when rateLimit.enabled — apps no longer wire this themselves.
+          ...(rateLimitEnabled ? [{ provide: APP_GUARD, useClass: CustomThrottlerGuard }] : []),
+        ],
       };
     }
   }
