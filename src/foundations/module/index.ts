@@ -1,5 +1,10 @@
 export { Module } from "./entities/module.entity";
+export { mapModule } from "./entities/module.map";
 export { moduleMeta } from "./entities/module.meta";
 export { ModuleModel } from "./entities/module.model";
+export { ModuleId } from "./enums/module.id";
+export { ModuleDTO, ModuleDataDTO, ModuleDataListDTO } from "./dtos/module.dto";
+export { ModuleSerialiser } from "./serialisers/module.serialiser";
+export { featureModuleQuery, adminModuleQuery, modulePermissionResolutionQuery } from "./queries/feature.module.query";
 export { ModuleModule } from "./module.module";
 export { ModuleRepository } from "./repositories/module.repository";
