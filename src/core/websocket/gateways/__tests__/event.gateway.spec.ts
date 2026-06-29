@@ -176,10 +176,7 @@ describe("EventsGateway", () => {
 
       onAnyCallback("message", { type: "chat", message: "hello" });
 
-      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
-        expect.stringMatching(/^ws:/),
-        expect.anything(),
-      );
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(expect.stringMatching(/^ws:/), expect.anything());
     });
 
     it("does NOT forward the built-in 'heartbeat' event", async () => {
@@ -193,10 +190,7 @@ describe("EventsGateway", () => {
 
       onAnyCallback("heartbeat", undefined);
 
-      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
-        expect.stringMatching(/^ws:/),
-        expect.anything(),
-      );
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(expect.stringMatching(/^ws:/), expect.anything());
     });
 
     it("does NOT register onAny when no token is present", async () => {
