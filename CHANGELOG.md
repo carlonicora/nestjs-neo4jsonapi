@@ -1,3 +1,20 @@
+## [1.101.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.100.0...v1.101.0) (2026-06-29)
+
+### 🚀 Features
+
+* **blocknote:** add convertToPlainText + plaintext helpers ([fccd264](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fccd264ca8e0206662a5bd2bce59f39ebe873e01))
+* **migrator:** support s3-upload migration steps ([45a0185](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/45a0185ad2c64cd0f5c801ac1e40dc2aa8a80efc))
+* **security:** upstream a360 SecurityService deltas ([df54e87](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/df54e870404c85b1655a723545553a7d1aa7342b))
+* **websocket:** forward app socket events + bundle presence cron ([4ffd4c2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4ffd4c2a2dab210ee5a204be8f6fbeeb7bd5cc69))
+
+### 🐛 Bug Fixes
+
+* **migrator:** provide S3Service directly instead of importing S3Module ([a5c02ea](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a5c02ea2125401de8e4f94c112e7c54e299eeb2e))
+
+### 📦 Code Refactoring
+
+* **tests:** simplify expect statements in EventsGateway tests ([7487d32](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7487d323bc5f07309cb5d2881f9901c5ea1a1489))
+
 ## [1.100.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.99.0...v1.100.0) (2026-06-26)
 
 ### 🚀 Features
