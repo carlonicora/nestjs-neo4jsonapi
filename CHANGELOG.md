@@ -1,3 +1,9 @@
+## [1.103.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.102.0...v1.103.0) (2026-06-29)
+
+### 🚀 Features
+
+* **foundations:** export module + push public API from barrels ([d712745](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d71274533c86e77cb3884689b23a35b3bdad42b4))
+
 ## [1.102.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.101.0...v1.102.0) (2026-06-29)
 
 ### 🚀 Features
