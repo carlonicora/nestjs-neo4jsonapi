@@ -18,6 +18,8 @@ import { Neo4jService } from "../../neo4j/services/neo4j.service";
 import { PresenceService } from "../services/presence.service";
 import { WebSocketService } from "../services/websocket.service";
 
+const WS_BUILTIN_EVENTS = new Set(["message", "heartbeat"]);
+
 @WebSocketGateway({
   path: "/socket.io",
   cors: {
@@ -70,6 +72,11 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
           status: "online",
         };
         await this.webSocketService.broadcast("user:presence", broadcastPayload);
+
+        client.onAny((event: string, eventPayload: unknown) => {
+          if (WS_BUILTIN_EVENTS.has(event)) return;
+          this.eventEmitter.emit(`ws:${event}`, { user: client.data.user, payload: eventPayload, client });
+        });
       } catch (err: any) {
         this.logger.error(`[PRESENCE] JWT verification failed for client: ${client.id}, error: ${err.message}`);
         client.data.user = { userId: null };

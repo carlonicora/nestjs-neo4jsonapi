@@ -1,12 +1,15 @@
 import { DynamicModule, Global, Module } from "@nestjs/common";
+import { createWorkerProvider } from "../../common";
 import { EventsGateway } from "./gateways/event.gateway";
 import { WsJwtGuard } from "./guards/ws.jwt.auth.guard";
+import { PresenceCronService } from "./services/presence.cron.service";
 import { PresenceService } from "./services/presence.service";
 import { WebSocketService } from "./services/websocket.service";
 
 const WEBSOCKET_SERVICES = [WebSocketService, PresenceService];
 const WEBSOCKET_GATEWAY = [EventsGateway];
 const WEBSOCKET_GUARDS = [WsJwtGuard];
+const WEBSOCKET_CRONS = [createWorkerProvider(PresenceCronService)];
 
 /**
  * WebSocket Module
@@ -30,14 +33,14 @@ const WEBSOCKET_GUARDS = [WsJwtGuard];
  */
 @Global()
 @Module({
-  providers: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GATEWAY, ...WEBSOCKET_GUARDS],
+  providers: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GATEWAY, ...WEBSOCKET_GUARDS, ...WEBSOCKET_CRONS],
   exports: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GUARDS],
 })
 export class WebsocketModule {
   static forRoot(): DynamicModule {
     return {
       module: WebsocketModule,
-      providers: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GATEWAY, ...WEBSOCKET_GUARDS],
+      providers: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GATEWAY, ...WEBSOCKET_GUARDS, ...WEBSOCKET_CRONS],
       exports: [...WEBSOCKET_SERVICES, ...WEBSOCKET_GUARDS],
       global: true,
     };
