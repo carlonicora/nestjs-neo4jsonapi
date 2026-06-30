@@ -342,25 +342,21 @@ export class ModelService implements OnModuleInit {
       }
 
       case "vertex": {
-        const previousCredsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        // Match the proven app-local behaviour (apps/api .../core/llm/services/model.service.ts):
+        // write the service-account creds to a temp file, point GOOGLE_APPLICATION_CREDENTIALS
+        // at it, and LEAVE it set. GoogleAuth resolves the project id lazily on the FIRST
+        // request, so the env var must still be present then — do NOT restore/delete it.
         if (cfg.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(cfg.googleCredentialsBase64, "base64").toString("utf-8");
           const credsPath = writeGcpCredentials(credentialsJson, opts.credentialFileTag);
           process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
         }
-        try {
-          // ChatVertexAI reads GOOGLE_APPLICATION_CREDENTIALS at construction,
-          // so restoring the env in `finally` is safe.
-          return new ChatVertexAI({
-            model: cfg.model,
-            temperature,
-            location: cfg.region,
-            ...(maxOutputTokens ? { maxOutputTokens } : {}),
-          });
-        } finally {
-          if (previousCredsEnv === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-          else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousCredsEnv;
-        }
+        return new ChatVertexAI({
+          model: cfg.model,
+          temperature,
+          location: cfg.region,
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
+        });
       }
 
       case "azure": {
@@ -479,28 +475,22 @@ export class ModelService implements OnModuleInit {
         });
         break;
       case "vertex": {
-        // Google Vertex AI Embeddings (uses embedder-specific credentials)
+        // Google Vertex AI Embeddings (uses embedder-specific credentials).
+        // Match app-local behaviour: set GOOGLE_APPLICATION_CREDENTIALS and LEAVE it set
+        // (the project id is resolved lazily at request time — do NOT restore/delete it).
         const embedderConfig = this.aiConfig.embedder;
 
-        const previousCredsEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS;
         if (embedderConfig.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(embedderConfig.googleCredentialsBase64, "base64").toString("utf-8");
           const credsPath = writeGcpCredentials(credentialsJson, "embedder");
           process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
         }
 
-        try {
-          // VertexAIEmbeddings reads GOOGLE_APPLICATION_CREDENTIALS at
-          // construction, so restoring the env in `finally` is safe.
-          response = new VertexAIEmbeddings({
-            model: embedderConfig.model,
-            location: embedderConfig.region,
-            dimensions: embedderConfig.dimensions,
-          });
-        } finally {
-          if (previousCredsEnv === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-          else process.env.GOOGLE_APPLICATION_CREDENTIALS = previousCredsEnv;
-        }
+        response = new VertexAIEmbeddings({
+          model: embedderConfig.model,
+          location: embedderConfig.region,
+          dimensions: embedderConfig.dimensions,
+        });
         break;
       }
     }

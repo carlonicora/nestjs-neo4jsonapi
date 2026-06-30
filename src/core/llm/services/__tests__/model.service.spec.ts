@@ -231,8 +231,8 @@ describe("writeGcpCredentials", () => {
   });
 });
 
-// === TASK 2: vertex env-restore contract =================================
-describe("ModelService vertex env restore contract", () => {
+// === TASK 2: vertex credentials env contract =============================
+describe("ModelService vertex credentials env contract", () => {
   let savedEnv: string | undefined;
 
   beforeEach(() => {
@@ -247,7 +247,7 @@ describe("ModelService vertex env restore contract", () => {
     else process.env.GOOGLE_APPLICATION_CREDENTIALS = savedEnv;
   });
 
-  it("restores GOOGLE_APPLICATION_CREDENTIALS to undefined after building a vertex model", () => {
+  it("sets GOOGLE_APPLICATION_CREDENTIALS to the written creds file and LEAVES it set after building a vertex model", () => {
     const svc = makeService({
       ai: tier({
         provider: "vertex",
@@ -258,9 +258,10 @@ describe("ModelService vertex env restore contract", () => {
       aiLite: tier(),
       aiLarge: tier(),
     });
-    // ChatVertexAI (mocked) reads creds at construction; the finally block must
-    // restore the env to its prior value (undefined here).
+    // GoogleAuth resolves the project id LAZILY on the first request, so the env
+    // var must remain set after construction — matching the app-local behaviour.
     svc.getLLM();
-    expect(process.env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(fsMock.writeFileSync).toHaveBeenCalled();
+    expect(process.env.GOOGLE_APPLICATION_CREDENTIALS).toBeDefined();
   });
 });
