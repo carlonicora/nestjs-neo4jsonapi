@@ -17,5 +17,9 @@ export interface ChunkAnalysisInterface {
     keyConcept: string;
     description: string;
   }[];
+  dates: {
+    date: string;
+    description: string;
+  }[];
   tokens: TokenUsageInterface;
 }

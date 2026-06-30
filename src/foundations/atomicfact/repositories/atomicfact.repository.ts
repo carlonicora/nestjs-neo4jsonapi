@@ -1,6 +1,6 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import { aiSourceQuery } from "../../../common/repositories/ai.source.query";
+import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
@@ -13,6 +13,7 @@ export class AtomicFactRepository implements OnModuleInit {
     private readonly neo4j: Neo4jService,
     private readonly securityService: SecurityService,
     private readonly clsService: ClsService,
+    @Inject(AI_SOURCE_QUERY) private readonly aiSourceQuery: AiSourceQueryProvider,
   ) {}
 
   async onModuleInit() {
@@ -27,74 +28,28 @@ export class AtomicFactRepository implements OnModuleInit {
     skipAtomicFactIds: string[];
     dataLimits: DataLimits;
   }): Promise<AtomicFact[]> {
-    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
-    // Dispatch to the private method so the bypass is visible and quarantined here.
-    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
-      return this.findAtomicFactsByKeyConceptsFromHowTos(params);
-    }
-
     const query = this.neo4j.initQuery({ serialiser: AtomicFactModel });
-
+    const scope = this.aiSourceQuery.build({
+      dataLimits: params.dataLimits,
+      currentUserId: this.clsService.get("userId"),
+      securityService: this.securityService,
+      returnsData: true,
+    });
     query.queryParams = {
       ...query.queryParams,
       keyConcepts: params.keyConcepts,
       skipChunkIds: params.skipChunkIds,
       skipAtomicFactIds: params.skipAtomicFactIds,
+      ...scope.params,
     };
-
     query.query += `
-        MATCH (data)-[:BELONGS_TO]->(company)
-        ${aiSourceQuery({
-          currentUserId: this.clsService.get("userId"),
-          securityService: this.securityService,
-          dataLimits: params.dataLimits,
-          returnsData: true,
-        })}
-        MATCH (keyconcept:KeyConcept)<-[:HAS_KEY_CONCEPT]-(atomicfact:AtomicFact)<-[:HAS_ATOMIC_FACT]-(atomicfact_chunk:Chunk)<-[:HAS_CHUNK]-(data)
-        WHERE keyconcept.value IN $keyConcepts
-        ${params.skipChunkIds.length > 0 ? `AND NOT atomicfact_chunk.id IN $skipChunkIds` : ""}
-        ${params.skipAtomicFactIds.length > 0 ? `AND NOT atomicfact.id IN $skipAtomicFactIds` : ""}
-        RETURN atomicfact, atomicfact_chunk
-    `;
-
-    return this.neo4j.readMany(query);
-  }
-
-  /**
-   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
-   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
-   * this repository; `findAtomicFactsByKeyConcepts` dispatches here based on
-   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
-   */
-  private async findAtomicFactsByKeyConceptsFromHowTos(params: {
-    keyConcepts: string[];
-    skipChunkIds: string[];
-    skipAtomicFactIds: string[];
-    dataLimits: DataLimits;
-  }): Promise<AtomicFact[]> {
-    const query = this.neo4j.initQuery({ serialiser: AtomicFactModel });
-
-    query.queryParams = {
-      ...query.queryParams,
-      keyConcepts: params.keyConcepts,
-      skipChunkIds: params.skipChunkIds,
-      skipAtomicFactIds: params.skipAtomicFactIds,
-      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
-    };
-
-    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
-
-    query.query += `
-        MATCH (data:HowTo)
-        ${limitClause}
-        WITH data
-        MATCH (keyconcept:KeyConcept)<-[:HAS_KEY_CONCEPT]-(atomicfact:AtomicFact)<-[:HAS_ATOMIC_FACT]-(atomicfact_chunk:Chunk)<-[:HAS_CHUNK]-(data)
-        WHERE keyconcept.value IN $keyConcepts
-        ${params.skipChunkIds.length > 0 ? `AND NOT atomicfact_chunk.id IN $skipChunkIds` : ""}
-        ${params.skipAtomicFactIds.length > 0 ? `AND NOT atomicfact.id IN $skipAtomicFactIds` : ""}
-        RETURN atomicfact, atomicfact_chunk
-    `;
-
+      ${scope.cypher}
+      MATCH (keyconcept:KeyConcept)<-[:HAS_KEY_CONCEPT]-(atomicfact:AtomicFact)<-[:HAS_ATOMIC_FACT]-(atomicfact_chunk:Chunk)<-[:HAS_CHUNK]-(data)
+      WHERE keyconcept.value IN $keyConcepts
+      ${params.skipChunkIds.length > 0 ? `AND NOT atomicfact_chunk.id IN $skipChunkIds` : ""}
+      ${params.skipAtomicFactIds.length > 0 ? `AND NOT atomicfact.id IN $skipAtomicFactIds` : ""}
+      RETURN atomicfact, atomicfact_chunk
+  `;
     return this.neo4j.readMany(query);
   }
 

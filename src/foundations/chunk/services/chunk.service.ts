@@ -10,6 +10,7 @@ import { GraphCreatorService } from "../../../agents/graph.creator/services/grap
 import { AiStatus } from "../../../common/enums/ai.status";
 import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.creator.interface";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigEmbeddingContextInterface } from "../../../config/interfaces/config.embedding.context.interface";
 import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -18,12 +19,18 @@ import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { AtomicFactService } from "../../atomicfact/services/atomicfact.service";
 import { Chunk, ChunkDescriptor } from "../../chunk/entities/chunk.entity";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
+import {
+  buildEmbeddingContext,
+  DEFAULT_TEMPORAL_CONTEXT_LABEL,
+  DEFAULT_TEMPORAL_REFERENCES_LABEL,
+} from "../../chunk/services/embedding-context";
 import { KeyConceptRepository } from "../../keyconcept/repositories/keyconcept.repository";
 import { KeyConceptService } from "../../keyconcept/services/keyconcept.service";
 
 @Injectable()
 export class ChunkService {
   private readonly jobNames: ConfigJobNamesInterface;
+  private readonly embeddingContext: ConfigEmbeddingContextInterface;
 
   constructor(
     private readonly logger: AppLoggingService,
@@ -39,6 +46,7 @@ export class ChunkService {
     configService: ConfigService<BaseConfigInterface>,
   ) {
     this.jobNames = configService.get("jobNames", { infer: true }) ?? { process: {}, notifications: {} };
+    this.embeddingContext = configService.get("embeddingContext", { infer: true }) ?? {};
   }
 
   private isDeadlockError(error: any): boolean {
@@ -56,6 +64,7 @@ export class ChunkService {
       atomicFacts: [],
       keyConceptsRelationships: [],
       keyConceptDescriptions: [],
+      dates: [],
       tokens: { input: 0, output: 0 },
     };
   }
@@ -279,12 +288,25 @@ export class ChunkService {
         1000,
         `graph creation for chunk ${params.chunkId}`,
       );
+
+      // Store extracted dates on the chunk
+      await this.chunkRepository.updateDates({
+        chunkId: params.chunkId,
+        dates: JSON.stringify(chunkAnalysis.dates || []),
+      });
     } else {
       this.logger.warn("Chunk analysis returned null - content was rejected by graph creator", "ChunkService", {
         chunkId: params.chunkId,
         contentLength: chunk.content?.length || 0,
         contentPreview: chunk.content?.substring(0, 200) || "",
         message: "Check GraphCreatorService logs for rejection reason",
+      });
+
+      // Store empty dates for rejected chunks so propagation can distinguish
+      // "no dates found" from "never analyzed"
+      await this.chunkRepository.updateDates({
+        chunkId: params.chunkId,
+        dates: JSON.stringify([]),
       });
     }
 
@@ -319,6 +341,88 @@ export class ChunkService {
       companyId: params.companyId,
       userId: params.userId,
     });
+  }
+
+  async propagateAndEmbedDates(params: { id: string; nodeType: string }): Promise<void> {
+    const temporalContextLabel = this.embeddingContext.temporalContextLabel ?? DEFAULT_TEMPORAL_CONTEXT_LABEL;
+    const temporalReferencesLabel = this.embeddingContext.temporalReferencesLabel ?? DEFAULT_TEMPORAL_REFERENCES_LABEL;
+
+    const chunks = await this.chunkRepository.findChunks({
+      id: params.id,
+      nodeType: params.nodeType,
+    });
+
+    const parentName = await this.chunkRepository.findParentName({ id: params.id, nodeType: params.nodeType });
+
+    let activeDates: { date: string; description: string }[] = [];
+    const items: { chunkId: string; enrichedContent: string; propagatedDates?: string }[] = [];
+
+    for (const chunk of chunks) {
+      // `chunk.dates` is persisted as a JSON-string blob but exposed parsed by the
+      // ChunkDescriptor `computed` field, so it is already a structured array here.
+      const chunkDates = chunk.dates || [];
+      let dateContext: string | undefined;
+      let propagatedDates: string | undefined;
+
+      if (chunkDates.length > 0) {
+        // Merge new dates into active context (avoid duplicates by date value)
+        const existingDateValues = new Set(activeDates.map((d) => d.date));
+        const newDates = chunkDates.filter((d) => !existingDateValues.has(d.date));
+        activeDates = [...activeDates, ...newDates];
+
+        // Show inherited context + chunk-specific dates
+        const contextDates = activeDates.filter((d) => !chunkDates.some((cd) => cd.date === d.date));
+        let prefix = "";
+        if (contextDates.length > 0) {
+          const contextEntries = contextDates
+            .map((d) => `${this._formatDateForDisplay(d.date)} - ${d.description}`)
+            .join("; ");
+          prefix += `[${temporalContextLabel}: ${contextEntries}]\n`;
+        }
+        const chunkEntries = chunkDates
+          .map((d) => `${this._formatDateForDisplay(d.date)} - ${d.description}`)
+          .join("; ");
+        prefix += `[${temporalReferencesLabel}: ${chunkEntries}]`;
+        dateContext = prefix;
+      } else if (activeDates.length > 0) {
+        // No dates in this chunk — inherit from context
+        propagatedDates = JSON.stringify(activeDates);
+        const dateEntries = activeDates
+          .map((d) => `${this._formatDateForDisplay(d.date)} - ${d.description}`)
+          .join("; ");
+        dateContext = `[${temporalContextLabel}: ${dateEntries}]`;
+      } else {
+        // No dates anywhere yet — no temporal prefix
+        dateContext = undefined;
+      }
+
+      const enrichedContent = buildEmbeddingContext({
+        typeLabel: params.nodeType,
+        parentName,
+        heading: chunk.heading,
+        dateContext,
+        content: chunk.content,
+      });
+
+      if (enrichedContent?.trim()) {
+        items.push({ chunkId: chunk.id, enrichedContent, propagatedDates });
+      }
+    }
+
+    // Single batched embed for the whole document — per-call Azure latency dominates batch
+    // size, so one round-trip for all chunks is far cheaper than one call per chunk.
+    await this.chunkRepository.enrichContentAndEmbedBatch(items);
+  }
+
+  /**
+   * Convert ISO date (YYYY-MM-DD) to display format (DD/MM/YYYY) for Italian context
+   */
+  private _formatDateForDisplay(isoDate: string): string {
+    const parts = isoDate.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return isoDate;
   }
 
   /**

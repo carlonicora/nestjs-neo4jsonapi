@@ -4,6 +4,7 @@ import { ClsService } from "nestjs-cls";
 import { AtomicFactRepository } from "../atomicfact.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
+import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { AtomicFact } from "../../entities/atomic.fact.entity";
 
 // Test IDs
@@ -75,6 +76,10 @@ describe("AtomicFactRepository", () => {
         { provide: Neo4jService, useValue: neo4jService },
         { provide: SecurityService, useValue: securityService },
         { provide: ClsService, useValue: clsService },
+        {
+          provide: AI_SOURCE_QUERY,
+          useValue: { build: () => ({ cypher: "MATCH (data)-[:BELONGS_TO]->(company) WITH data", params: {} }) },
+        },
       ],
     }).compile();
 

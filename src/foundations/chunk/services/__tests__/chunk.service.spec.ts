@@ -93,6 +93,7 @@ describe("ChunkService", () => {
     createChunk: vi.fn(),
     deleteChunksByNodeType: vi.fn(),
     updateStatus: vi.fn(),
+    updateDates: vi.fn(),
   });
 
   const createMockAtomicFactService = () => ({
@@ -459,6 +460,71 @@ describe("ChunkService", () => {
         id: TEST_IDS.contentId,
         companyId: TEST_IDS.companyId,
         userId: TEST_IDS.userId,
+      });
+    });
+
+    // The GraphCreator now emits a `dates` array (default `[]`). generateGraph
+    // persists it on the chunk via updateDates — preserved when present, `[]` when
+    // the analysis omits it. (Tests the in-scope manifestation of the GraphCreator
+    // `dates` default/preserved contract — see hand-off note.)
+    describe("extracted dates persistence", () => {
+      const baseAnalysis = {
+        atomicFacts: [{ content: "Fact", keyConcepts: ["concept1"] }],
+        keyConceptsRelationships: [],
+        keyConceptDescriptions: [],
+        tokens: { input: 1, output: 1 },
+      };
+
+      const arrange = (analysis: any) => {
+        const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+        chunkRepository.findChunkById.mockResolvedValue(mockChunk);
+        chunkRepository.updateStatus.mockResolvedValue(undefined);
+        chunkRepository.updateDates.mockResolvedValue(undefined);
+        graphCreatorService.generateGraph.mockResolvedValue(analysis);
+        keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
+        keyConceptRepository.updateKeyConceptDescriptions.mockResolvedValue(undefined);
+        atomicFactService.createAtomicFact.mockResolvedValue(undefined);
+        keyConceptService.addKeyConceptRelationships.mockResolvedValue(undefined);
+        clsService.get.mockReturnValue(TEST_IDS.companyId);
+        mockQueue.add.mockResolvedValue(undefined);
+      };
+
+      it("persists the extracted dates when the analysis carries them", async () => {
+        const dates = [
+          { date: "2024-01-01", description: "contract signed" },
+          { date: "2024-06-30", description: "delivery" },
+        ];
+        arrange({ ...baseAnalysis, dates });
+
+        await service.generateGraph({
+          companyId: TEST_IDS.companyId,
+          userId: TEST_IDS.userId,
+          chunkId: TEST_IDS.chunkId,
+          id: TEST_IDS.contentId,
+          type: "content",
+        });
+
+        expect(chunkRepository.updateDates).toHaveBeenCalledWith({
+          chunkId: TEST_IDS.chunkId,
+          dates: JSON.stringify(dates),
+        });
+      });
+
+      it("defaults to an empty dates array when the analysis omits dates", async () => {
+        arrange({ ...baseAnalysis }); // no `dates` key
+
+        await service.generateGraph({
+          companyId: TEST_IDS.companyId,
+          userId: TEST_IDS.userId,
+          chunkId: TEST_IDS.chunkId,
+          id: TEST_IDS.contentId,
+          type: "content",
+        });
+
+        expect(chunkRepository.updateDates).toHaveBeenCalledWith({
+          chunkId: TEST_IDS.chunkId,
+          dates: JSON.stringify([]),
+        });
       });
     });
 

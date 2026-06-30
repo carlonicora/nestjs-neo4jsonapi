@@ -1,7 +1,7 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { aiSourceQuery } from "../../../common/repositories/ai.source.query";
+import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
 import { EmbedderService, ModelService } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
@@ -18,6 +18,7 @@ export class KeyConceptRepository implements OnModuleInit {
     private readonly modelService: ModelService,
     private readonly securityService: SecurityService,
     private readonly clsService: ClsService,
+    @Inject(AI_SOURCE_QUERY) private readonly aiSourceQuery: AiSourceQueryProvider,
   ) {}
 
   async onModuleInit() {
@@ -43,87 +44,80 @@ export class KeyConceptRepository implements OnModuleInit {
     });
   }
 
-  async findNeighboursByKeyConcepts(params: { keyConcepts: string[]; dataLimits: DataLimits }): Promise<KeyConcept[]> {
-    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
-    // Dispatch to the private method so the bypass is visible and quarantined here.
-    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
-      return this.findNeighboursByKeyConceptsFromHowTos(params);
-    }
+  async recreateVectorIndex(): Promise<void> {
+    await this.neo4j.writeOne({
+      query: `DROP INDEX keyconcepts IF EXISTS`,
+    });
 
-    const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
+    const dimensions = this.modelService.getEmbedderDimensions();
+    await this.neo4j.writeOne({
+      query: `
+        CREATE VECTOR INDEX keyconcepts IF NOT EXISTS
+        FOR (keyconcept:KeyConcept)
+        ON keyconcept.embedding
+        OPTIONS { indexConfig: {
+        \`vector.dimensions\`: ${dimensions},
+        \`vector.similarity_function\`: 'cosine'
+        }};
+        `,
+    });
+  }
 
-    query.queryParams = {
-      ...query.queryParams,
-      keyConcepts: params.keyConcepts,
-    };
-
-    query.query += `
-      MATCH (startingKeyConcept:KeyConcept)<-[:RELATES_TO]-(keyConceptRelationship:KeyConceptRelationship)-[:RELATES_TO]->(keyconcept:KeyConcept)
-      WHERE startingKeyConcept.value IN $keyConcepts
-      AND NOT keyconcept.value IN $keyConcepts
-      AND NOT EXISTS {
-        MATCH (startingKeyConcept)<-[:HAS_KEY_CONCEPT]-()<-[:HAS_ATOMIC_FACT]-()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept)
-      }
-      MATCH (data)-[:BELONGS_TO]->(company)
-      ${aiSourceQuery({
-        currentUserId: this.clsService.get("userId"),
-        securityService: this.securityService,
-        dataLimits: params.dataLimits,
-        returnsKeyConcepts: true,
-      })}
-      WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
-
-      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
-      YIELD node AS candidateKeyConcept, score
-      WHERE candidateKeyConcept.id IN topicKeyConceptIds
-
-      RETURN candidateKeyConcept, score
-      ORDER BY score DESC
-      LIMIT 100
+  async findAllKeyConcepts(): Promise<KeyConcept[]> {
+    const query = this.neo4j.initQuery({ serialiser: KeyConceptModel, fetchAll: true });
+    query.query = `
+      MATCH (${keyConceptMeta.nodeName}:${keyConceptMeta.labelName})
+      RETURN ${keyConceptMeta.nodeName}
     `;
-
     return this.neo4j.readMany(query);
   }
 
-  /**
-   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
-   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
-   * this repository; `findNeighboursByKeyConcepts` dispatches here based on
-   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
-   */
-  private async findNeighboursByKeyConceptsFromHowTos(params: {
-    keyConcepts: string[];
-    dataLimits: DataLimits;
-  }): Promise<KeyConcept[]> {
+  async updateEmbedding(params: { keyConceptId: string; embedding: number[] }): Promise<void> {
+    await this.neo4j.writeOne({
+      query: `
+        MATCH (keyconcept:KeyConcept {id: $keyConceptId})
+        SET keyconcept.embedding = $embedding
+      `,
+      queryParams: {
+        keyConceptId: params.keyConceptId,
+        embedding: params.embedding,
+      },
+    });
+  }
+
+  async findNeighboursByKeyConcepts(params: { keyConcepts: string[]; dataLimits: DataLimits }): Promise<KeyConcept[]> {
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
+
+    // SECURITY: HowTo retrieval (global content) intentionally bypasses company
+    // filtering. The package surfaces that bypass through `howToMode`/`limitToHowToId`
+    // (the app's `howToId` maps to these via declaration-merge semantics).
+    const isCompanyIndependent = !!params.dataLimits.howToMode || !!params.dataLimits.limitToHowToId;
 
     query.queryParams = {
       ...query.queryParams,
       keyConcepts: params.keyConcepts,
-      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
+      isCompanyIndependent,
     };
 
-    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
-
     query.query += `
-      MATCH (data:HowTo)
-      ${limitClause}
-      WITH data
       MATCH (startingKeyConcept:KeyConcept)<-[:RELATES_TO]-(keyConceptRelationship:KeyConceptRelationship)-[:RELATES_TO]->(keyconcept:KeyConcept)
       WHERE startingKeyConcept.value IN $keyConcepts
       AND NOT keyconcept.value IN $keyConcepts
       AND NOT EXISTS {
         MATCH (startingKeyConcept)<-[:HAS_KEY_CONCEPT]-()<-[:HAS_ATOMIC_FACT]-()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept)
       }
-      WITH keyconcept
-      WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
-
-      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
-      YIELD node AS candidateKeyConcept, score
-      WHERE candidateKeyConcept.id IN topicKeyConceptIds
-
-      RETURN candidateKeyConcept, score
-      ORDER BY score DESC
+      // Company scoping: the neighbour is reachable only if the relationship that
+      // bridges to it belongs to the caller's company or is global (no company).
+      // The previous gate accepted a relationship owned by ANY company and relied on
+      // an unlinked aiSourceQuery data match, which leaked cross-company concepts.
+      AND (
+        $isCompanyIndependent = true
+        OR (keyConceptRelationship)-[:BELONGS_TO]->(:Company {id: $companyId})
+        OR NOT EXISTS { (keyConceptRelationship)-[:BELONGS_TO]->(:Company) }
+      )
+      WITH COLLECT(DISTINCT keyconcept) AS neighbors
+      UNWIND neighbors AS candidateKeyConcept
+      RETURN candidateKeyConcept
       LIMIT 100
     `;
 
@@ -131,70 +125,25 @@ export class KeyConceptRepository implements OnModuleInit {
   }
 
   async findPotentialKeyConcepts(params: { question: string; dataLimits: DataLimits }): Promise<KeyConcept[]> {
-    // SECURITY: HowTo retrieval intentionally bypasses company filtering.
-    // Dispatch to the private method so the bypass is visible and quarantined here.
-    if (params.dataLimits.howToMode || params.dataLimits.limitToHowToId) {
-      return this.findPotentialKeyConceptsFromHowTos(params);
-    }
-
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
 
     const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
 
-    query.queryParams = {
-      ...query.queryParams,
-      queryEmbedding,
-    };
-
-    query.query += `
-      MATCH (data)-[:BELONGS_TO]->(company)
-      ${aiSourceQuery({
-        currentUserId: this.clsService.get("userId"),
-        securityService: this.securityService,
-        dataLimits: params.dataLimits,
-        returnsData: true,
-      })}
-      MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
-      WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
-
-      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
-      YIELD node AS candidateKeyConcept, score
-      WHERE candidateKeyConcept.id IN topicKeyConceptIds
-
-      RETURN candidateKeyConcept as ${keyConceptMeta.nodeName}, score
-      ORDER BY score DESC
-      LIMIT 100
-    `;
-
-    return this.neo4j.readMany(query);
-  }
-
-  /**
-   * Help-content retrieval. Intentionally bypasses company filtering — `(data:HowTo)`
-   * nodes are global and have no `BELONGS_TO Company` edge. Only callable from inside
-   * this repository; `findPotentialKeyConcepts` dispatches here based on
-   * `dataLimits.howToMode` / `dataLimits.limitToHowToId`.
-   */
-  private async findPotentialKeyConceptsFromHowTos(params: {
-    question: string;
-    dataLimits: DataLimits;
-  }): Promise<KeyConcept[]> {
-    const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
-
-    const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
+    const scope = this.aiSourceQuery.build({
+      dataLimits: params.dataLimits,
+      currentUserId: this.clsService.get("userId"),
+      securityService: this.securityService,
+      returnsData: true,
+    });
 
     query.queryParams = {
       ...query.queryParams,
       queryEmbedding,
-      ...(params.dataLimits.limitToHowToId ? { limitToHowToId: params.dataLimits.limitToHowToId } : {}),
+      ...scope.params,
     };
 
-    const limitClause = params.dataLimits.limitToHowToId ? `WHERE data.id = $limitToHowToId` : "";
-
     query.query += `
-      MATCH (data:HowTo)
-      ${limitClause}
-      WITH data
+      ${scope.cypher}
       MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
       WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
 

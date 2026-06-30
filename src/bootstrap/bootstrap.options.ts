@@ -1,5 +1,6 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { EntityDescriptor, RelationshipDef } from "../common/interfaces/entity.schema.interface";
+import { AiSourceQueryProvider } from "../common/repositories/ai-source-query.provider";
 import { SecurityService } from "../core/security/services/security.service";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
 import type { RbacMatrix } from "../foundations/rbac/dsl/types";
@@ -109,6 +110,8 @@ export interface BootstrapOptions {
    * Default undefined uses the base SecurityService (neural-erp behavior unchanged).
    */
   securityService?: Type<SecurityService>;
+  /** Optional app source-scoping provider for AI retrieval (chunk/atomicfact/keyconcept). */
+  aiSourceQuery?: Type<AiSourceQueryProvider>;
   /** Set false to skip the library Neo4j migrator (app provides its own). Default true. */
   migrator?: boolean;
 

@@ -4,6 +4,8 @@ import { DiscoveryModule } from "@nestjs/core";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { EntityServiceRegistry } from "../common/registries/entity.service.registry";
+import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../common/repositories/ai-source-query.provider";
+import { DefaultAiSourceQueryProvider } from "../common/repositories/default.ai-source-query.provider";
 import { BaseConfigInterface, ConfigJwtInterface } from "../config/interfaces";
 
 // Import all core modules
@@ -129,6 +131,9 @@ export interface CoreModuleOptions {
    * Default undefined keeps the base SecurityService (neural-erp behavior unchanged).
    */
   securityService?: Type<SecurityService>;
+  /** Optional custom AiSourceQueryProvider. Default keeps the generic
+   *  company-scoped behavior (neural-erp/phlow unchanged). */
+  aiSourceQuery?: Type<AiSourceQueryProvider>;
   /** Set false to skip the library migrator (app provides its own). Default true. */
   migrator?: boolean;
 }
@@ -157,13 +162,16 @@ export class CoreModule {
    * Configure CoreModule with all core infrastructure modules
    */
   static forRoot(options?: CoreModuleOptions): DynamicModule {
-    const providers: Provider[] = [EntityServiceRegistry];
+    const providers: Provider[] = [
+      EntityServiceRegistry,
+      { provide: AI_SOURCE_QUERY, useClass: options?.aiSourceQuery ?? DefaultAiSourceQueryProvider },
+    ];
 
     return {
       module: CoreModule,
       imports: getCoreModules(options?.queueIds ?? [], options?.securityService, options?.migrator ?? true),
       providers,
-      exports: [...getCoreModuleExports(), EntityServiceRegistry],
+      exports: [...getCoreModuleExports(), EntityServiceRegistry, AI_SOURCE_QUERY],
       global: true,
     };
   }

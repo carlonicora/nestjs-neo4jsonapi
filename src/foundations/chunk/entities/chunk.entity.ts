@@ -4,6 +4,11 @@ import { modelRegistry } from "../../../common/registries/registry";
 import { S3Service } from "../../s3";
 import { chunkMeta } from "./chunk.meta";
 
+export interface ChunkDate {
+  date: string;
+  description: string;
+}
+
 export type Chunk = Entity & {
   content: string;
   position?: number;
@@ -13,6 +18,24 @@ export type Chunk = Entity & {
   aiStatus?: string;
   embedding?: number[];
   source?: unknown;
+  heading?: string;
+  /** Stored on the node as a JSON string; exposed here parsed via a computed field. */
+  dates?: ChunkDate[];
+  propagatedDates?: ChunkDate[];
+};
+
+/** Parse a `dates` / `propagatedDates` value that is persisted as a JSON-string blob. */
+const parseChunkDates = (raw: unknown): ChunkDate[] => {
+  if (Array.isArray(raw)) return raw as ChunkDate[];
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as ChunkDate[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 };
 
 export const ChunkDescriptor = defineEntity<Chunk>()({
@@ -26,6 +49,7 @@ export const ChunkDescriptor = defineEntity<Chunk>()({
     nodeId: { type: "string", meta: true },
     nodeType: { type: "string", meta: true },
     aiStatus: { type: "string" },
+    heading: { type: "string" },
     embedding: { type: "number[]", excludeFromJsonApi: true },
     imagePath: {
       type: "string",
@@ -37,6 +61,11 @@ export const ChunkDescriptor = defineEntity<Chunk>()({
         });
       },
     },
+  },
+
+  computed: {
+    dates: { compute: (params) => parseChunkDates(params.data?.dates) },
+    propagatedDates: { compute: (params) => parseChunkDates(params.data?.propagatedDates) },
   },
 
   relationships: {

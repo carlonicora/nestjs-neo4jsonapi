@@ -6,6 +6,7 @@ import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
+import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { KeyConcept } from "../../entities/key.concept.entity";
 
 // Test IDs
@@ -94,6 +95,10 @@ describe("KeyConceptRepository", () => {
         { provide: EmbedderService, useValue: embedderService },
         { provide: SecurityService, useValue: securityService },
         { provide: ClsService, useValue: clsService },
+        {
+          provide: AI_SOURCE_QUERY,
+          useValue: { build: () => ({ cypher: "MATCH (data)-[:BELONGS_TO]->(company) WITH data", params: {} }) },
+        },
       ],
     }).compile();
 
@@ -439,8 +444,12 @@ describe("KeyConceptRepository", () => {
     });
   });
 
+  // Hardened neighbour traversal (Task 6): the company gate lives on the
+  // KeyConceptRelationship BELONGS_TO edge (not on an unlinked aiSourceQuery data
+  // match), which is the cross-company leak fix. SECURITY: must not regress to the
+  // vector-based version.
   describe("findNeighboursByKeyConcepts", () => {
-    it("should find neighboring key concepts", async () => {
+    it("gates neighbours on the relationship-level company BELONGS_TO edge", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_KEY_CONCEPT]);
@@ -453,7 +462,36 @@ describe("KeyConceptRepository", () => {
       expect(mockQuery.queryParams.keyConcepts).toEqual(["Concept 1", "Concept 2"]);
       expect(mockQuery.query).toContain("KeyConceptRelationship");
       expect(mockQuery.query).toContain(":RELATES_TO");
+      // The relationship-level, parameterized company gate.
+      expect(mockQuery.query).toContain("(keyConceptRelationship)-[:BELONGS_TO]->(:Company {id: $companyId})");
       expect(result).toEqual([MOCK_KEY_CONCEPT]);
+    });
+
+    it("binds $isCompanyIndependent=false for company-scoped retrieval", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findNeighboursByKeyConcepts({
+        keyConcepts: ["Concept 1"],
+        dataLimits: {},
+      });
+
+      expect(mockQuery.query).toContain("$isCompanyIndependent");
+      expect(mockQuery.queryParams.isCompanyIndependent).toBe(false);
+    });
+
+    it("binds $isCompanyIndependent=true for HowTo (company-independent) retrieval", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findNeighboursByKeyConcepts({
+        keyConcepts: ["Concept 1"],
+        dataLimits: { howToMode: true },
+      });
+
+      expect(mockQuery.queryParams.isCompanyIndependent).toBe(true);
     });
   });
 

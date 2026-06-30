@@ -5,7 +5,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
-import { ChunkAnalysisInterface } from "../../graph.creator/interfaces/chunk.analysis.interface";
+import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.creator.interface";
 
 export const prompt = `
 You are an intelligent assistant that extracts structured knowledge from text.
@@ -214,6 +214,17 @@ const outputSchema = z.object({
       }),
     )
     .describe(`Descriptions for each unique key concept extracted from the atomic facts`),
+  dates: z
+    .array(
+      z.object({
+        date: z.string().describe(`A date referenced in the text (verbatim from the source)`),
+        description: z.string().describe(`Brief description of the significance of this date in the context`),
+      }),
+    )
+    .optional()
+    .describe(
+      `Optional list of significant dates extracted from the text. Only populated when the configured prompt requests date extraction; otherwise omitted.`,
+    ),
 });
 
 const inputSchema = z.object({
@@ -373,6 +384,7 @@ export class GraphCreatorService {
       atomicFacts: [],
       keyConceptsRelationships: [],
       keyConceptDescriptions: [],
+      dates: [],
       tokens: { input: 0, output: 0 },
     };
 
@@ -518,6 +530,13 @@ export class GraphCreatorService {
         return null;
       })
       .filter(Boolean);
+
+    // Dates default to [] — only populated when the configured prompt requests date extraction
+    // (the default prompt does not, keeping neural-erp/phlow behaviour unchanged).
+    response.dates = (llmResponse.dates ?? []).map((entry: { date: string; description: string }) => ({
+      date: (entry.date || "").trim(),
+      description: (entry.description || "").trim(),
+    }));
 
     response.tokens = llmResponse.tokenUsage;
 

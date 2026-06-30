@@ -121,6 +121,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
             queueIds,
             securityService: options.securityService,
             migrator: options.migrator,
+            aiSourceQuery: options.aiSourceQuery,
           }),
 
           // Library's foundation/domain modules (queues configured via baseConfig.chunkQueues)

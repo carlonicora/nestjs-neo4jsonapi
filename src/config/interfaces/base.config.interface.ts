@@ -8,6 +8,7 @@ import { ConfigChunkQueuesInterface } from "./config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./config.content.types.interface";
 import { ConfigCorsInterface } from "./config.cors.interface";
 import { ConfigDiscordInterface } from "./config.discord.interface";
+import { ConfigEmbeddingContextInterface } from "./config.embedding.context.interface";
 import { ConfigGoogleInterface } from "./config.google.interface";
 import { ConfigEmailInterface } from "./config.email.interface";
 import { ConfigEncryptionInterface } from "./config.encryption.interface";
@@ -56,4 +57,5 @@ export interface BaseConfigInterface {
   google: ConfigGoogleInterface;
   oauth: ConfigOAuthInterface;
   twoFactor?: ConfigTwoFactorInterface;
+  embeddingContext?: ConfigEmbeddingContextInterface;
 }

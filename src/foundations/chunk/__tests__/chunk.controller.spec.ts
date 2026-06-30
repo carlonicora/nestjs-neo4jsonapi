@@ -25,6 +25,9 @@ vi.mock("../services/chunk.service", () => ({
 }));
 
 import { Test, TestingModule } from "@nestjs/testing";
+import { getQueueToken } from "@nestjs/bullmq";
+import { ConfigService } from "@nestjs/config";
+import { ClsService } from "nestjs-cls";
 import { ChunkController } from "../controllers/chunk.controller";
 import { ChunkService } from "../services/chunk.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
@@ -44,7 +47,13 @@ describe("ChunkController", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ChunkController],
-      providers: [{ provide: ChunkService, useValue: mockChunkService }],
+      providers: [
+        { provide: ChunkService, useValue: mockChunkService },
+        { provide: ClsService, useValue: { get: vi.fn() } },
+        { provide: getQueueToken("embedding-chunks"), useValue: { add: vi.fn() } },
+        { provide: getQueueToken("embedding-keyconcepts"), useValue: { add: vi.fn() } },
+        { provide: ConfigService, useValue: { get: vi.fn().mockReturnValue({ process: {} }) } },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
