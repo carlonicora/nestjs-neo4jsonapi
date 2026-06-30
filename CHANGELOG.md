@@ -1,3 +1,9 @@
+## [1.104.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.103.0...v1.104.0) (2026-06-29)
+
+### 🚀 Features
+
+* **foundations:** export role public API; drop dead UserModule import from AuditModule ([e75327a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e75327a99c21316d376dd1b2d1c15b6b2740cfe8))
+
 ## [1.103.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.102.0...v1.103.0) (2026-06-29)
 
 ### 🚀 Features
