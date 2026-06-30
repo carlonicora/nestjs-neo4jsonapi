@@ -1,3 +1,9 @@
+## [1.106.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.105.0...v1.106.0) (2026-06-30)
+
+### 🚀 Features
+
+* **ai-foundations:** aiSourceQuery seam + chunk/keyconcept/atomicfact enrichment for app fork adoption ([3f6cc9d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3f6cc9daca5bc52127a38be68a1c69bcd5b4abe0))
+
 ## [1.105.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.104.0...v1.105.0) (2026-06-30)
 
 ### 🚀 Features
