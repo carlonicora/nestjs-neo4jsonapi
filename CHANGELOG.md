@@ -1,3 +1,13 @@
+## [1.105.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.104.0...v1.105.0) (2026-06-30)
+
+### 🚀 Features
+
+* **chunker,s3:** config-seam chunker port + s3 a360 deltas ([b1db9f4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b1db9f4442374500d1a56a22d5f05952a7294905))
+
+### 🐛 Bug Fixes
+
+* **llm:** keep GOOGLE_APPLICATION_CREDENTIALS set for Vertex ([2933d8e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2933d8e4902f1c81329eb56660683957d818fd58))
+
 ## [1.104.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.103.0...v1.104.0) (2026-06-29)
 
 ### 🚀 Features
