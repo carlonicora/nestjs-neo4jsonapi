@@ -1,5 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
+import { BaseConfigInterface } from "../../../../config/interfaces/base.config.interface";
+import { ConfigChunkerInterface } from "../../../../config/interfaces/config.chunker.interface";
 import { LayoutExtractor } from "./pdf/extractors/layout.extractor";
 import { TableExtractor } from "./pdf/extractors/table.extractor";
 import {
@@ -24,10 +27,12 @@ export class PdfService {
   private readonly layoutExtractor = new LayoutExtractor();
   private readonly tableExtractor = new TableExtractor();
 
+  constructor(private readonly config: ConfigService<BaseConfigInterface>) {}
+
   private defaultProcessingOptions: PdfProcessingOptions = {
     enableOCR: false, // Disabled by default for performance
     ocrConfidenceThreshold: 0.6, // Lowered for scanned documents (was 0.8)
-    ocrLanguage: "eng", // English by default
+    ocrLanguage: "eng", // English by default (overridden from config.chunker.ocrLanguage in extractPdfContent)
     ocrImagePreprocessing: false, // Disabled by default - damages clean scans
     detectTables: true,
     detectImages: true,
@@ -119,7 +124,11 @@ export class PdfService {
     this.logger.log(`## File: ${pdfPath}`);
     this.logger.log("##############################################################");
 
-    const processingOptions = { ...this.defaultProcessingOptions, ...options };
+    const processingOptions = {
+      ...this.defaultProcessingOptions,
+      ocrLanguage: this.config.get<ConfigChunkerInterface>("chunker")?.ocrLanguage ?? "eng",
+      ...options,
+    };
     this.logger.log("Processing options:");
     this.logger.log(`  - enableOCR: ${processingOptions.enableOCR}`);
     this.logger.log(`  - ocrImagePreprocessing: ${processingOptions.ocrImagePreprocessing}`);

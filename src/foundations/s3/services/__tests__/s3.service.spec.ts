@@ -67,6 +67,7 @@ import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { S3Service } from "../s3.service";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 describe("S3Service", () => {
@@ -130,6 +131,14 @@ describe("S3Service", () => {
     }),
   });
 
+  const createMockAppLoggingService = () => ({
+    error: vi.fn(),
+    log: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    verbose: vi.fn(),
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(getSignedUrl).mockResolvedValue("https://presigned-url.example.com");
@@ -140,6 +149,7 @@ describe("S3Service", () => {
         { provide: JsonApiService, useValue: createMockJsonApiService() },
         { provide: ClsService, useValue: createMockClsService() },
         { provide: ConfigService, useValue: createMockConfigService() },
+        { provide: AppLoggingService, useValue: createMockAppLoggingService() },
       ],
     }).compile();
 
@@ -199,6 +209,7 @@ describe("S3Service", () => {
           { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: configService },
+          { provide: AppLoggingService, useValue: createMockAppLoggingService() },
         ],
       }).compile();
 
@@ -291,6 +302,7 @@ describe("S3Service", () => {
           { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: createMockConfigService() },
+          { provide: AppLoggingService, useValue: createMockAppLoggingService() },
         ],
       }).compile();
 
@@ -402,6 +414,7 @@ describe("S3Service", () => {
           { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: createMockConfigService(MOCK_MINIO_CONFIG) },
+          { provide: AppLoggingService, useValue: createMockAppLoggingService() },
         ],
       }).compile();
 
@@ -426,6 +439,7 @@ describe("S3Service", () => {
           { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: createMockConfigService(MOCK_DO_CONFIG) },
+          { provide: AppLoggingService, useValue: createMockAppLoggingService() },
         ],
       }).compile();
 

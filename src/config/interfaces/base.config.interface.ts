@@ -3,6 +3,7 @@ import { ConfigApiInterface } from "./config.api.interface";
 import { ConfigAppInterface } from "./config.app.interface";
 import { ConfigAuthInterface } from "./config.auth.interface";
 import { ConfigCacheInterface } from "./config.cache.interface";
+import { ConfigChunkerInterface } from "./config.chunker.interface";
 import { ConfigChunkQueuesInterface } from "./config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./config.content.types.interface";
 import { ConfigCorsInterface } from "./config.cors.interface";
@@ -47,6 +48,7 @@ export interface BaseConfigInterface {
   stripe: ConfigStripeInterface;
   prompts: ConfigPromptsInterface;
   operator?: ConfigOperatorInterface;
+  chunker: ConfigChunkerInterface;
   chunkQueues: ConfigChunkQueuesInterface;
   contentTypes: ConfigContentTypesInterface;
   jobNames: ConfigJobNamesInterface;

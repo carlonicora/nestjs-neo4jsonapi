@@ -4,6 +4,7 @@ import { ChunkerService } from "./services/chunker.service";
 import { DocXService } from "./services/types/docx.service";
 import { EmailParserService } from "./services/types/email.service";
 import { ImageExtractorService } from "./services/types/imageextractor.service";
+import { MarkdownChunkingService } from "./services/types/markdownchunking.service";
 import { PdfService } from "./services/types/pdf.service";
 import { PptxService } from "./services/types/pptx.service";
 import { SemanticSplitterService } from "./services/types/semanticsplitter.service";
@@ -13,6 +14,7 @@ import { S3Module } from "../s3/s3.module";
 @Module({
   providers: [
     ChunkerService,
+    MarkdownChunkingService,
     SemanticSplitterService,
     ImageExtractorService,
     EmailParserService,

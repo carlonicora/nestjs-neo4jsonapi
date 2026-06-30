@@ -376,6 +376,11 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     },
     prompts: options?.prompts ?? {},
     operator: options?.operator ?? {},
+    chunker: {
+      strategy: (process.env.CHUNKER_STRATEGY as "markdown-structural" | "semantic") || "markdown-structural",
+      ocrLanguage: process.env.OCR_LANGUAGE || "eng",
+      targetChars: parseInt(process.env.CHUNKER_TARGET_CHARS || "1500"),
+    },
     chunkQueues: options?.chunkQueues ?? { queueIds: [] },
     contentTypes: options?.contentTypes ?? { types: [] },
     jobNames: options?.jobNames ?? { process: {}, notifications: {} },

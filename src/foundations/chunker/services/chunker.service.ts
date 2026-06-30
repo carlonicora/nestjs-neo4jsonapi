@@ -4,34 +4,66 @@ import { Document } from "@langchain/core/documents";
 import { HumanMessage } from "@langchain/core/messages";
 import { MarkdownTextSplitter, RecursiveCharacterTextSplitter, TokenTextSplitter } from "@langchain/textsplitters";
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigAiInterface } from "../../../config/interfaces/config.ai.interface";
+import { ConfigChunkerInterface } from "../../../config/interfaces/config.chunker.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
-import { isImageFile } from "../../chunker/constants/file.types";
-import { DocXService } from "../../chunker/services/types/docx.service";
-import { AttachmentContent, EmailParserService, ParsedEmail } from "../../chunker/services/types/email.service";
-import { PdfService } from "../../chunker/services/types/pdf.service";
-import { PptxService } from "../../chunker/services/types/pptx.service";
-import { SemanticSplitterService } from "../../chunker/services/types/semanticsplitter.service";
-import { XlsxService } from "../../chunker/services/types/xlsx.service";
 import { S3Service } from "../../s3/services/s3.service";
+import { isImageFile } from "../constants/file.types";
 import { JSONLinesLoader, JSONLoader } from "../loaders/json.loader";
 import { TextLoader } from "../loaders/text.loader";
+import { DocXService } from "./types/docx.service";
+import { EmailParserService } from "./types/email.service";
+import { MarkdownChunkingService } from "./types/markdownchunking.service";
+import { PdfService } from "./types/pdf.service";
+import { PptxService } from "./types/pptx.service";
+import { SemanticSplitterService } from "./types/semanticsplitter.service";
+import { XlsxService } from "./types/xlsx.service";
 
 @Injectable()
 export class ChunkerService {
   private logger: Logger = new Logger(ChunkerService.name);
 
+  private readonly splitter: { splitMarkdownToChunks(p: { content: string; title?: string }): Promise<Document[]> };
+  private readonly targetChars: number;
+
   constructor(
+    private readonly markdownChunkingService: MarkdownChunkingService,
     private readonly semanticSplitterService: SemanticSplitterService,
     private readonly docxService: DocXService,
     private readonly pptxService: PptxService,
     private readonly pdfService: PdfService,
     private readonly xlsxService: XlsxService,
-    private readonly emailParserService: EmailParserService,
-    private readonly s3Service: S3Service,
     private readonly modelService: ModelService,
-  ) {}
+    private readonly s3Service: S3Service,
+    private readonly emailParserService: EmailParserService,
+    private readonly config: ConfigService<BaseConfigInterface>,
+  ) {
+    const chunker = this.config.get<ConfigChunkerInterface>("chunker");
+    this.splitter = chunker?.strategy === "semantic" ? this.semanticSplitterService : this.markdownChunkingService;
+    this.targetChars = chunker?.targetChars ?? 1500;
+    // [CHUNKER-PORT] temporary validation log — confirms the active config seam at boot.
+    this.logger.log(
+      `[CHUNKER-PORT] active config → strategy=${chunker?.strategy ?? "(default)"} ` +
+        `splitter=${(this.splitter as object)?.constructor?.name} ` +
+        `targetChars=${this.targetChars} ocrLanguage=${chunker?.ocrLanguage ?? "(default)"}`,
+    );
+  }
+
+  // [CHUNKER-PORT] temporary validation log — summarises what the chunker produced for one file.
+  private _logChunkResult(fileType: string, docs: Document[]): void {
+    const methods = [...new Set(docs.map((d) => d.metadata?.split_method ?? d.metadata?.type ?? "?"))];
+    const sizes = docs.map((d) => d.pageContent.length);
+    const max = sizes.length ? Math.max(...sizes) : 0;
+    const min = sizes.length ? Math.min(...sizes) : 0;
+    this.logger.log(
+      `[CHUNKER-PORT] file=${fileType} chunks=${docs.length} ` +
+        `split_methods=[${methods.join(",")}] sizes(min/max)=${min}/${max} (targetChars=${this.targetChars})`,
+    );
+  }
 
   private async _downloadFileAsBuffer(params: { url: string; extension: string }): Promise<Buffer> {
     const response = await fetch(params.url);
@@ -49,6 +81,15 @@ export class ChunkerService {
   }
 
   async generateContentStructureFromFile(params: { fileType: string; filePath: string }): Promise<Document[]> {
+    if (this.config.get<ConfigAiInterface>("ai").mock) {
+      return [
+        new Document({
+          pageContent: "mock chunk content for smoke testing",
+          metadata: { source: params.filePath, mock: true },
+        }),
+      ];
+    }
+
     if (isImageFile(params.fileType)) return this._createChunksFromImage(params);
 
     const localFilePath = await this._downloadFile({
@@ -65,60 +106,162 @@ export class ChunkerService {
       });
     }
 
-    let response: Document[] = [];
+    const docs = await this._processLocalFile({
+      localFilePath,
+      fileType: params.fileType,
+      filePath: params.filePath,
+    });
+    this._logChunkResult(params.fileType, docs);
+    return docs;
+  }
 
+  private async _processLocalFile(params: {
+    localFilePath: string;
+    fileType: string;
+    filePath: string;
+  }): Promise<Document[]> {
     switch (params.fileType.toLowerCase()) {
       case "md":
-        response = await this._createFromMarkdown({ filePath: params.filePath, localFilePath });
-        break;
+        return this._createFromMarkdown({ filePath: params.filePath, localFilePath: params.localFilePath });
       case "docx":
-        response = await this._createFromDocX({ filePath: params.filePath, localFilePath });
-        break;
+        return this._createFromDocX({ filePath: params.filePath, localFilePath: params.localFilePath });
       case "pptx":
       case "presentation":
-        response = await this._createFromPptx({ filePath: params.filePath, localFilePath });
-        break;
+        return this._createFromPptx({ filePath: params.filePath, localFilePath: params.localFilePath });
       case "xlsx":
       case "spreadsheet":
-        response = await this._createFromXlsx({ filePath: params.filePath, localFilePath });
-        break;
+        return this._createFromXlsx({ filePath: params.filePath, localFilePath: params.localFilePath });
       case "pdf":
-        response = await this._createFromPdf({ filePath: params.filePath, localFilePath });
-        break;
-      default:
+        return this._createFromPdf({ filePath: params.filePath, localFilePath: params.localFilePath });
+      default: {
         let loader: BaseDocumentLoader;
         switch (params.fileType.toLowerCase()) {
           case "json":
-            loader = new JSONLoader(localFilePath, "/texts");
+            loader = new JSONLoader(params.localFilePath, "/texts");
             break;
           case "jsonl":
-            loader = new JSONLinesLoader(localFilePath, "/html");
+            loader = new JSONLinesLoader(params.localFilePath, "/html");
             break;
           case "csv":
-            loader = new CSVLoader(localFilePath, "text") as any;
+            loader = new CSVLoader(params.localFilePath, "text") as any;
             break;
           default:
-            loader = new TextLoader(localFilePath);
+            loader = new TextLoader(params.localFilePath);
             break;
         }
-
         const rawDocs = await loader.load();
-
         const textSplitter = new TokenTextSplitter({
           chunkSize: 1000,
           chunkOverlap: 200,
         });
+        return textSplitter.splitDocuments(rawDocs);
+      }
+    }
+  }
 
-        response = await textSplitter.splitDocuments(rawDocs);
-        break;
+  private async _createFromEmail(params: {
+    filePath: string;
+    localFilePath: string;
+    fileType: string;
+  }): Promise<Document[]> {
+    try {
+      const buffer = await fs.readFile(params.localFilePath);
+
+      const parsed =
+        params.fileType === "eml"
+          ? await this.emailParserService.parseEml(buffer)
+          : await this.emailParserService.parseMsg(buffer);
+
+      // Process attachments to extract their content
+      const attachmentContents: { filename: string; content: string }[] = [];
+
+      for (const att of parsed.attachments) {
+        try {
+          const content = await this._extractAttachmentContent(att);
+          if (content) {
+            attachmentContents.push({ filename: att.filename, content });
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to extract content from attachment ${att.filename}:`, error);
+        }
+      }
+
+      const markdown = this.emailParserService.assembleMarkdown({
+        ...parsed,
+        attachmentContents,
+      });
+
+      if (markdown && markdown.trim()) {
+        // Use MarkdownTextSplitter for emails instead of semantic splitter.
+        // The semantic splitter can produce oversized chunks that exceed the embedding model's
+        // 8192 token limit when email content lacks clear semantic shift points.
+        const splitter = new MarkdownTextSplitter({
+          chunkSize: this.targetChars,
+          chunkOverlap: 200,
+        });
+        return await splitter.createDocuments([markdown]);
+      }
+
+      return [];
+    } catch (error) {
+      this.logger.error(`Email processing failed for ${params.fileType}:`, error);
+      return [];
+    }
+  }
+
+  private async _extractAttachmentContent(
+    attachment: { filename: string; contentType: string; content: Buffer },
+    depth: number = 0,
+  ): Promise<string | null> {
+    if (depth >= 3) {
+      this.logger.warn(`Max email nesting depth reached for ${attachment.filename}`);
+      return null;
     }
 
-    return response;
+    const extension = attachment.filename.split(".").pop()?.toLowerCase() || "";
+
+    // For nested emails, parse recursively
+    if (extension === "eml" || extension === "msg") {
+      const parsed =
+        extension === "eml"
+          ? await this.emailParserService.parseEml(attachment.content)
+          : await this.emailParserService.parseMsg(attachment.content);
+
+      const nestedAttContents: { filename: string; content: string }[] = [];
+      for (const att of parsed.attachments) {
+        const content = await this._extractAttachmentContent(att, depth + 1);
+        if (content) nestedAttContents.push({ filename: att.filename, content });
+      }
+
+      return this.emailParserService.assembleMarkdown({ ...parsed, attachmentContents: nestedAttContents });
+    }
+
+    // For images, use the image chunker
+    if (isImageFile(extension)) {
+      const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
+      await fs.writeFile(tempPath, attachment.content);
+      try {
+        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension });
+        return docs.map((d) => d.pageContent).join("\n\n");
+      } finally {
+        await fs.unlink(tempPath).catch(() => {});
+      }
+    }
+
+    // For other file types, write to temp and delegate to existing handlers
+    const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
+    await fs.writeFile(tempPath, attachment.content);
+    try {
+      const docs = await this._processLocalFile({ localFilePath: tempPath, fileType: extension, filePath: tempPath });
+      return docs.map((d) => d.pageContent).join("\n\n");
+    } finally {
+      await fs.unlink(tempPath).catch(() => {});
+    }
   }
 
   async generateContentStructureFromMarkdown(params: { content: string; title?: string }): Promise<Document[]> {
     try {
-      const semanticChunks = await this.semanticSplitterService.splitMarkdownToChunks({
+      const semanticChunks = await this.splitter.splitMarkdownToChunks({
         content: params.content,
         title: params.title,
       });
@@ -131,7 +274,7 @@ export class ChunkerService {
     }
 
     const splitter = new MarkdownTextSplitter({
-      chunkSize: 1500,
+      chunkSize: this.targetChars,
       chunkOverlap: 200,
     });
     const response = await splitter.createDocuments([params.content]);
@@ -218,7 +361,7 @@ export class ChunkerService {
       if (imageDescription?.content) {
         // Create chunks from the image description
         const splitter = new RecursiveCharacterTextSplitter({
-          chunkSize: 1000,
+          chunkSize: this.targetChars,
           chunkOverlap: 200,
         });
         return await splitter.createDocuments([imageDescription.content.toString()]);
@@ -239,14 +382,14 @@ export class ChunkerService {
     const title = filename.replace(/\.md$/i, "");
 
     try {
-      return await this.semanticSplitterService.splitMarkdownToChunks({
+      return await this.splitter.splitMarkdownToChunks({
         content: markdown,
         title: title,
       });
     } catch (error) {
       this.logger.error("Semantic markdown splitting failed, falling back to markdown splitter:", error);
       const splitter = new MarkdownTextSplitter({
-        chunkSize: 1500,
+        chunkSize: this.targetChars,
         chunkOverlap: 200,
       });
       return await splitter.createDocuments([markdown]);
@@ -259,13 +402,13 @@ export class ChunkerService {
 
     if (markdownContent && markdownContent.trim()) {
       try {
-        return await this.semanticSplitterService.splitMarkdownToChunks({
+        return await this.splitter.splitMarkdownToChunks({
           content: markdownContent,
         });
       } catch (error) {
         this.logger.error("Semantic markdown splitting failed, falling back to markdown splitter:", error);
         const splitter = new MarkdownTextSplitter({
-          chunkSize: 1500,
+          chunkSize: this.targetChars,
           chunkOverlap: 200,
         });
         return await splitter.createDocuments([markdownContent]);
@@ -278,7 +421,7 @@ export class ChunkerService {
     for (const part of documentParts) {
       if (part.metadata?.type === "paragraphs") {
         const splitter = new RecursiveCharacterTextSplitter({
-          chunkSize: 500,
+          chunkSize: this.targetChars,
           chunkOverlap: 20,
         });
         const parts = await splitter.createDocuments([part.pageContent]);
@@ -299,14 +442,14 @@ export class ChunkerService {
 
     if (markdownContent && markdownContent.trim()) {
       try {
-        return await this.semanticSplitterService.splitMarkdownToChunks({
+        return await this.splitter.splitMarkdownToChunks({
           content: markdownContent,
           title: undefined,
         });
       } catch (error) {
         this.logger.error("Presentation processing failed:", error);
         const splitter = new MarkdownTextSplitter({
-          chunkSize: 1500,
+          chunkSize: this.targetChars,
           chunkOverlap: 200,
         });
         return await splitter.createDocuments([markdownContent]);
@@ -318,7 +461,7 @@ export class ChunkerService {
 
     for (const part of documentParts) {
       const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 800,
+        chunkSize: this.targetChars,
         chunkOverlap: 100,
       });
       const parts = await splitter.createDocuments([part.pageContent]);
@@ -353,7 +496,7 @@ export class ChunkerService {
 
     for (const part of documentParts) {
       const splitter = new RecursiveCharacterTextSplitter({
-        chunkSize: 1000,
+        chunkSize: this.targetChars,
         chunkOverlap: 100,
       });
       const parts = await splitter.createDocuments([part.pageContent]);
@@ -361,140 +504,6 @@ export class ChunkerService {
     }
 
     return response;
-  }
-
-  private async _createFromEmail(params: {
-    filePath: string;
-    localFilePath: string;
-    fileType: string;
-  }): Promise<Document[]> {
-    try {
-      const buffer = await fs.readFile(params.localFilePath);
-
-      const parsed: ParsedEmail =
-        params.fileType === "eml"
-          ? await this.emailParserService.parseEml(buffer)
-          : await this.emailParserService.parseMsg(buffer);
-
-      const attachmentContents: AttachmentContent[] = [];
-
-      for (const att of parsed.attachments) {
-        try {
-          const content = await this._extractAttachmentContent(att);
-          if (content) {
-            attachmentContents.push({ filename: att.filename, content });
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to extract content from attachment ${att.filename}:`, error);
-        }
-      }
-
-      const markdown = this.emailParserService.assembleMarkdown({
-        ...parsed,
-        attachmentContents,
-      });
-
-      if (markdown && markdown.trim()) {
-        const splitter = new MarkdownTextSplitter({
-          chunkSize: 1500,
-          chunkOverlap: 200,
-        });
-        return await splitter.createDocuments([markdown]);
-      }
-
-      return [];
-    } catch (error) {
-      this.logger.error(`Email processing failed for ${params.fileType}:`, error);
-      return [];
-    }
-  }
-
-  private async _extractAttachmentContent(
-    attachment: { filename: string; contentType: string; content: Buffer },
-    depth: number = 0,
-  ): Promise<string | null> {
-    if (depth >= 3) {
-      this.logger.warn(`Max email nesting depth reached for ${attachment.filename}`);
-      return null;
-    }
-
-    const extension = attachment.filename.split(".").pop()?.toLowerCase() || "";
-
-    if (extension === "eml" || extension === "msg") {
-      const parsed: ParsedEmail =
-        extension === "eml"
-          ? await this.emailParserService.parseEml(attachment.content)
-          : await this.emailParserService.parseMsg(attachment.content);
-
-      const nestedAttContents: AttachmentContent[] = [];
-      for (const att of parsed.attachments) {
-        const content = await this._extractAttachmentContent(att, depth + 1);
-        if (content) nestedAttContents.push({ filename: att.filename, content });
-      }
-
-      return this.emailParserService.assembleMarkdown({ ...parsed, attachmentContents: nestedAttContents });
-    }
-
-    if (isImageFile(extension)) {
-      const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
-      await fs.writeFile(tempPath, attachment.content);
-      try {
-        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension });
-        return docs.map((d) => d.pageContent).join("\n\n");
-      } finally {
-        await fs.unlink(tempPath).catch(() => {});
-      }
-    }
-
-    const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
-    await fs.writeFile(tempPath, attachment.content);
-    try {
-      const docs = await this._processLocalFile({ localFilePath: tempPath, fileType: extension, filePath: tempPath });
-      return docs.map((d) => d.pageContent).join("\n\n");
-    } finally {
-      await fs.unlink(tempPath).catch(() => {});
-    }
-  }
-
-  private async _processLocalFile(params: {
-    localFilePath: string;
-    fileType: string;
-    filePath: string;
-  }): Promise<Document[]> {
-    switch (params.fileType.toLowerCase()) {
-      case "md":
-        return this._createFromMarkdown({ filePath: params.filePath, localFilePath: params.localFilePath });
-      case "docx":
-        return this._createFromDocX({ filePath: params.filePath, localFilePath: params.localFilePath });
-      case "pptx":
-      case "presentation":
-        return this._createFromPptx({ filePath: params.filePath, localFilePath: params.localFilePath });
-      case "xlsx":
-      case "spreadsheet":
-        return this._createFromXlsx({ filePath: params.filePath, localFilePath: params.localFilePath });
-      case "pdf":
-        return this._createFromPdf({ filePath: params.filePath, localFilePath: params.localFilePath });
-      default: {
-        let loader: BaseDocumentLoader;
-        switch (params.fileType.toLowerCase()) {
-          case "json":
-            loader = new JSONLoader(params.localFilePath, "/texts");
-            break;
-          case "jsonl":
-            loader = new JSONLinesLoader(params.localFilePath, "/html");
-            break;
-          case "csv":
-            loader = new CSVLoader(params.localFilePath, "text") as any;
-            break;
-          default:
-            loader = new TextLoader(params.localFilePath);
-            break;
-        }
-        const rawDocs = await loader.load();
-        const textSplitter = new TokenTextSplitter({ chunkSize: 1000, chunkOverlap: 200 });
-        return textSplitter.splitDocuments(rawDocs);
-      }
-    }
   }
 
   private async _createFromPdf(params: { filePath: string; localFilePath: string }): Promise<Document[]> {
@@ -515,14 +524,14 @@ export class ChunkerService {
 
       if (markdownContent && markdownContent.trim()) {
         try {
-          return await this.semanticSplitterService.splitMarkdownToChunks({
+          return await this.splitter.splitMarkdownToChunks({
             content: markdownContent,
             title: undefined,
           });
         } catch (error) {
           this.logger.error("Presentation processing failed:", error);
           const splitter = new MarkdownTextSplitter({
-            chunkSize: 1500,
+            chunkSize: this.targetChars,
             chunkOverlap: 200,
           });
           return await splitter.createDocuments([markdownContent]);

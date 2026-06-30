@@ -25,6 +25,7 @@ import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigS3Interface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { S3Model } from "../../s3/entities/s3.model";
 
 @Injectable()
@@ -40,6 +41,7 @@ export class S3Service {
     private readonly builder: JsonApiService,
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    private readonly logger: AppLoggingService,
   ) {}
 
   private get s3Config(): ConfigS3Interface {
@@ -141,7 +143,7 @@ export class S3Service {
         });
 
     const signedUrl = await getSignedUrl(this.s3Client, command, {
-      expiresIn: 12 * 60 * 60,
+      expiresIn: 3600,
     });
 
     return signedUrl;
@@ -160,7 +162,7 @@ export class S3Service {
           blobName: params.key,
           permissions: BlobSASPermissions.parse("racw"), // Read, Add, Create, Write permissions
           startsOn: new Date(new Date().valueOf() - 15 * 60 * 1000), // Start 15 minutes ago to account for clock skew
-          expiresOn: new Date(new Date().valueOf() + 12 * 60 * 60 * 1000), // 12 hours from now
+          expiresOn: new Date(new Date().valueOf() + 3600 * 1000), // 1 hour from now
           protocol: SASProtocol.Https,
           contentType: params.contentType, // This helps Azure validate the content type
         },
@@ -238,7 +240,7 @@ export class S3Service {
         continuationToken = listResponse.NextContinuationToken;
       } while (continuationToken);
     } catch (error) {
-      console.error(`Failed to delete folder with prefix ${prefix}:`, error);
+      this.logger.error(`Failed to delete folder with prefix ${prefix}`, error);
     }
   }
 
@@ -253,7 +255,7 @@ export class S3Service {
         await blobClient.delete();
       }
     } catch (error) {
-      console.error(`Failed to delete Azure folder with prefix ${prefix}:`, error);
+      this.logger.error(`Failed to delete Azure folder with prefix ${prefix}`, error);
     }
   }
 
@@ -271,7 +273,7 @@ export class S3Service {
     try {
       await this.s3Client.send(command);
     } catch (error) {
-      console.error(`Failed to delete file with key ${params.key}:`, error);
+      this.logger.error(`Failed to delete file with key ${params.key}`, error);
     }
   }
 
@@ -280,7 +282,7 @@ export class S3Service {
       const blobClient = this.containerClient.getBlobClient(params.key);
       await blobClient.delete();
     } catch (error) {
-      console.error(`Failed to delete Azure file with key ${params.key}:`, error);
+      this.logger.error(`Failed to delete Azure file with key ${params.key}`, error);
     }
   }
 
@@ -314,7 +316,7 @@ export class S3Service {
         });
 
         const signedUrl = await getSignedUrl(this.s3Client, command, {
-          expiresIn: params.ttl ?? 12 * 60 * 60,
+          expiresIn: params.ttl ?? 3600,
         });
 
         return signedUrl;
@@ -341,7 +343,7 @@ export class S3Service {
               blobName: params.key,
               permissions: BlobSASPermissions.parse("r"), // Read permission
               startsOn: new Date(new Date().valueOf() - 15 * 60 * 1000), // Start 15 minutes ago to account for clock skew
-              expiresOn: new Date(new Date().valueOf() + (params.ttl ?? 12 * 60 * 60) * 1000),
+              expiresOn: new Date(new Date().valueOf() + (params.ttl ?? 3600) * 1000),
               protocol: SASProtocol.Https,
             },
             credential,
@@ -371,6 +373,9 @@ export class S3Service {
     const fileContentType =
       params.contentType || (await this.getContentType(params.buffer)) || "application/octet-stream";
 
+    // Strip parameters (e.g. "; charset=utf-8") for extension lookup
+    const baseContentType = fileContentType.split(";")[0].trim();
+
     // Map specific MIME types to preferred extensions.
     const extensionMapping: Record<string, string> = {
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
@@ -383,7 +388,7 @@ export class S3Service {
     };
 
     const extension =
-      extensionMapping[fileContentType] || (fileContentType.includes("/") ? fileContentType.split("/")[1] : "bin");
+      extensionMapping[baseContentType] || (baseContentType.includes("/") ? baseContentType.split("/")[1] : "bin");
 
     const finalKey = `${params.key}.${extension}`;
 
@@ -401,7 +406,7 @@ export class S3Service {
         },
       });
     } catch (error) {
-      console.error("File upload error:", error);
+      this.logger.error("File upload error", error);
       throw error;
     }
 
@@ -417,6 +422,9 @@ export class S3Service {
     const fileContentType =
       params.contentType || (await this.getContentType(params.buffer)) || "application/octet-stream";
 
+    // Strip parameters (e.g. "; charset=utf-8") for extension lookup
+    const baseContentType = fileContentType.split(";")[0].trim();
+
     // Map specific MIME types to preferred extensions.
     const extensionMapping: Record<string, string> = {
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
@@ -429,7 +437,7 @@ export class S3Service {
     };
 
     const extension =
-      extensionMapping[fileContentType] || (fileContentType.includes("/") ? fileContentType.split("/")[1] : "bin");
+      extensionMapping[baseContentType] || (baseContentType.includes("/") ? baseContentType.split("/")[1] : "bin");
 
     const finalKey = `${params.key}.${extension}`;
 
@@ -444,7 +452,7 @@ export class S3Service {
       const fileUrl = await this.generateSignedUrl({ key: finalKey });
       return { filePath: finalKey, fileUrl };
     } catch (error) {
-      console.error("Azure file upload error:", error);
+      this.logger.error("Azure file upload error", error);
       throw error;
     }
   }
@@ -476,7 +484,7 @@ export class S3Service {
         },
       });
     } catch (error) {
-      console.error(error);
+      this.logger.error("Image upload error", error);
     }
 
     const publicUrl = await this.generateSignedUrl({ key: finalKey });
@@ -505,7 +513,7 @@ export class S3Service {
       const publicUrl = await this.generateSignedUrl({ key: finalKey });
       return { imagePath: finalKey, imageUrl: publicUrl };
     } catch (error) {
-      console.error("Azure image upload error:", error);
+      this.logger.error("Azure image upload error", error);
       throw error;
     }
   }
@@ -557,7 +565,7 @@ export class S3Service {
       const fileUrl = await this.generateSignedUrl({ key: finalKey });
       return { filePath: finalKey, fileUrl };
     } catch (error) {
-      console.error("Azure direct upload error:", error);
+      this.logger.error("Azure direct upload error", error);
       throw error;
     }
   }
@@ -834,7 +842,7 @@ export class S3Service {
       }
       return null;
     } catch (error) {
-      console.error(`Failed to download file ${params.key}:`, error);
+      this.logger.error(`Failed to download file ${params.key}`, error);
       return null;
     }
   }
@@ -852,7 +860,7 @@ export class S3Service {
       }
       return null;
     } catch (error) {
-      console.error(`Failed to download Azure file ${params.key}:`, error);
+      this.logger.error(`Failed to download Azure file ${params.key}`, error);
       return null;
     }
   }
@@ -877,7 +885,7 @@ export class S3Service {
       }
       return null;
     } catch (error) {
-      console.error(`Failed to download file as buffer ${params.key}:`, error);
+      this.logger.error(`Failed to download file as buffer ${params.key}`, error);
       return null;
     }
   }
@@ -895,7 +903,51 @@ export class S3Service {
       }
       return null;
     } catch (error) {
-      console.error(`Failed to download Azure file as buffer ${params.key}:`, error);
+      this.logger.error(`Failed to download Azure file as buffer ${params.key}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Download a file from S3/Azure and return a readable stream.
+   * Memory-efficient for large files like ZIP archives.
+   */
+  async downloadFileAsStream(params: { key: string }): Promise<Readable | null> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return null;
+
+    if (this._storageType === "azure") {
+      return await this._downloadAzureFileAsStream(params);
+    }
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this._bucket,
+        Key: params.key,
+      });
+
+      const response = await this.s3Client.send(command);
+      if (response.Body) {
+        // AWS SDK v3 Body is SdkStream which extends Readable
+        return response.Body as Readable;
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to download file as stream ${params.key}`, error);
+      return null;
+    }
+  }
+
+  private async _downloadAzureFileAsStream(params: { key: string }): Promise<Readable | null> {
+    try {
+      const blobClient = this.containerClient.getBlobClient(params.key);
+      const downloadResponse = await blobClient.download();
+      if (downloadResponse.readableStreamBody) {
+        return downloadResponse.readableStreamBody as Readable;
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to download Azure file as stream ${params.key}`, error);
       return null;
     }
   }

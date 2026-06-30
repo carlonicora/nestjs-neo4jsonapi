@@ -210,3 +210,37 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLarge.allowFallbacks).toBe(true);
   });
 });
+
+describe("createBaseConfig — chunker", () => {
+  const KEYS = ["CHUNKER_STRATEGY", "OCR_LANGUAGE", "CHUNKER_TARGET_CHARS"];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("defaults to markdown-structural / eng / 1500", () => {
+    const c = createBaseConfig().chunker;
+    expect(c.strategy).toBe("markdown-structural");
+    expect(c.ocrLanguage).toBe("eng");
+    expect(c.targetChars).toBe(1500);
+  });
+
+  it("reads CHUNKER_STRATEGY, OCR_LANGUAGE, CHUNKER_TARGET_CHARS from env", () => {
+    process.env.CHUNKER_STRATEGY = "semantic";
+    process.env.OCR_LANGUAGE = "ita";
+    process.env.CHUNKER_TARGET_CHARS = "3000";
+    const c = createBaseConfig().chunker;
+    expect(c.strategy).toBe("semantic");
+    expect(c.ocrLanguage).toBe("ita");
+    expect(c.targetChars).toBe(3000);
+  });
+});

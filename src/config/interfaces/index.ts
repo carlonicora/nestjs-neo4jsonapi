@@ -8,6 +8,7 @@ export * from "./config.api.interface";
 export * from "./config.app.interface";
 export * from "./config.auth.interface";
 export * from "./config.cache.interface";
+export * from "./config.chunker.interface";
 export * from "./config.chunk.queues.interface";
 export * from "./config.content.types.interface";
 export * from "./config.cors.interface";
