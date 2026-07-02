@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ExecutionContext, Injectable } from "@nestjs/common";
 import { ThrottlerGuard, ThrottlerRequest } from "@nestjs/throttler";
 import { FastifyReply, FastifyRequest } from "fastify";
 
@@ -17,6 +17,21 @@ import { FastifyReply, FastifyRequest } from "fastify";
 export class CustomThrottlerGuard extends ThrottlerGuard {
   protected async getTracker(req: FastifyRequest): Promise<string> {
     return req.ip;
+  }
+
+  /**
+   * Skip throttling for non-HTTP execution contexts.
+   *
+   * This guard is registered globally (APP_GUARD), so NestJS also runs it on
+   * non-HTTP contexts such as necord Discord slash commands (context type
+   * "necord"). Those contexts have no HTTP response object, so calling
+   * `switchToHttp().getResponse().header(...)` in `handleRequest` throws
+   * `TypeError: response.header is not a function` and, inside a Discord event
+   * handler, crashes the worker with an unhandled 'error'. Rate-limit headers
+   * only make sense for HTTP, so we skip everything else.
+   */
+  protected async shouldSkip(context: ExecutionContext): Promise<boolean> {
+    return context.getType() !== "http";
   }
 
   protected async handleRequest(requestProps: ThrottlerRequest): Promise<boolean> {

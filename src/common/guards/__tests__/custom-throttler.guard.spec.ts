@@ -82,6 +82,34 @@ describe("CustomThrottlerGuard", () => {
     vi.clearAllMocks();
   });
 
+  describe("shouldSkip", () => {
+    it("should not skip HTTP contexts", async () => {
+      mockContext.getType.mockReturnValue("http");
+
+      const result = await (guard as any).shouldSkip(mockContext);
+
+      expect(result).toBe(false);
+    });
+
+    it("should skip non-HTTP contexts (e.g. Discord/necord commands)", async () => {
+      // necord dispatches slash commands with contextType "necord". Global
+      // guards run on these too, but there is no HTTP response to set headers on.
+      mockContext.getType.mockReturnValue("necord" as any);
+
+      const result = await (guard as any).shouldSkip(mockContext);
+
+      expect(result).toBe(true);
+    });
+
+    it("should skip rpc and ws contexts", async () => {
+      mockContext.getType.mockReturnValue("rpc");
+      expect(await (guard as any).shouldSkip(mockContext)).toBe(true);
+
+      mockContext.getType.mockReturnValue("ws");
+      expect(await (guard as any).shouldSkip(mockContext)).toBe(true);
+    });
+  });
+
   describe("getTracker", () => {
     it("should return the IP address from the request", async () => {
       const tracker = await (guard as any).getTracker(mockRequest);
