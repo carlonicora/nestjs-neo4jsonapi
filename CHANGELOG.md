@@ -1,3 +1,9 @@
+## [1.107.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.106.0...v1.107.0) (2026-07-02)
+
+### 🚀 Features
+
+* **throttler:** add shouldSkip method to handle non-HTTP contexts ([13798ed](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/13798ed5e4405f5558534144d88e2add7d3f5730))
+
 ## [1.106.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.105.0...v1.106.0) (2026-06-30)
 
 ### 🚀 Features
