@@ -169,9 +169,11 @@ describe("CompanyService", () => {
   });
 
   describe("useTokens", () => {
+    const MOCK_BALANCES = { availableMonthlyTokens: 4850, availableExtraTokens: 2000 };
+
     it("should call repository to use tokens", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue();
+      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
 
       await service.useTokens({ inputTokens: 100, outputTokens: 50 });
 
@@ -181,9 +183,9 @@ describe("CompanyService", () => {
       });
     });
 
-    it("should broadcast token update via websocket", async () => {
+    it("should broadcast token update via websocket with the new balances", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue();
+      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
 
       await service.useTokens({ inputTokens: 100, outputTokens: 50 });
 
@@ -193,15 +195,26 @@ describe("CompanyService", () => {
         {
           type: "company:tokens_updated",
           companyId: MOCK_COMPANY_ID,
+          availableMonthlyTokens: 4850,
+          availableExtraTokens: 2000,
         },
       );
     });
 
     it("should not broadcast if companyId is not set", async () => {
       mockClsService.get.mockReturnValue(undefined);
-      mockRepository.useTokens.mockResolvedValue();
+      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
 
       await service.useTokens({ inputTokens: 100, outputTokens: 50 });
+
+      expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
+    });
+
+    it("should not broadcast when nothing was consumed", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+      mockRepository.useTokens.mockResolvedValue(undefined);
+
+      await service.useTokens({ inputTokens: 0, outputTokens: 0 });
 
       expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
     });

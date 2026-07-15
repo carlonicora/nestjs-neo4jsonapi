@@ -377,11 +377,15 @@ export class CompanyRepository implements OnModuleInit {
     return response;
   }
 
-  async useTokens(params: { input: number; output: number; companyId?: string }): Promise<void> {
+  async useTokens(params: {
+    input: number;
+    output: number;
+    companyId?: string;
+  }): Promise<{ availableMonthlyTokens: number; availableExtraTokens: number } | undefined> {
     const tokens = params.input + params.output;
 
     // Nothing consumed — skip the read/write entirely.
-    if (tokens <= 0) return;
+    if (tokens <= 0) return undefined;
 
     const companyQuery = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
     companyQuery.queryParams = {
@@ -430,6 +434,11 @@ export class CompanyRepository implements OnModuleInit {
     }
 
     await this.neo4j.writeOne(query);
+
+    return {
+      availableMonthlyTokens: query.queryParams.availableMonthlyTokens ?? availableMonthlyTokens,
+      availableExtraTokens: query.queryParams.availableExtraTokens ?? availableExtraTokens,
+    };
   }
 
   async markSubscriptionStatus(params: { companyId: string; isActiveSubscription: boolean }): Promise<void> {

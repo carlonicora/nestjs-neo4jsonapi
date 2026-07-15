@@ -66,17 +66,23 @@ export class CompanyService {
   }
 
   async useTokens(params: { inputTokens: number; outputTokens: number }) {
-    await this.companyRepository.useTokens({
+    const balances = await this.companyRepository.useTokens({
       input: params.inputTokens,
       output: params.outputTokens,
     });
 
-    // Broadcast token update to all company users
+    // Nothing consumed — no balance change worth broadcasting.
+    if (!balances) return;
+
+    // Broadcast the new balances to all company users. Consumers patch these in
+    // directly; they must never need to refetch the user to read a token count.
     const companyId = this.cls.get("companyId");
     if (companyId) {
       await this.webSocketService.sendMessageToCompany(companyId, "company:tokens_updated", {
         type: "company:tokens_updated",
         companyId,
+        availableMonthlyTokens: balances.availableMonthlyTokens,
+        availableExtraTokens: balances.availableExtraTokens,
       });
     }
   }

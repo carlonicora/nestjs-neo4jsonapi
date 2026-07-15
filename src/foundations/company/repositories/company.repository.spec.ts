@@ -374,6 +374,56 @@ describe("CompanyRepository", () => {
       expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
       expect(mockNeo4jService.writeOne).not.toHaveBeenCalled();
     });
+
+    it("returns the new balances when deducting from monthly only", async () => {
+      mockNeo4jService.readOne.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyTokens: 5000,
+        availableExtraTokens: 200,
+      });
+      mockNeo4jService.writeOne.mockResolvedValue();
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useTokens({ input: 100, output: 50 });
+
+      expect(result).toEqual({ availableMonthlyTokens: 4850, availableExtraTokens: 200 });
+    });
+
+    it("returns the new balances when spilling from monthly into extra", async () => {
+      mockNeo4jService.readOne.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyTokens: 100,
+        availableExtraTokens: 500,
+      });
+      mockNeo4jService.writeOne.mockResolvedValue();
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useTokens({ input: 100, output: 50 });
+
+      expect(result).toEqual({ availableMonthlyTokens: 0, availableExtraTokens: 450 });
+    });
+
+    it("returns the new balances when deducting from extra only", async () => {
+      mockNeo4jService.readOne.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyTokens: 0,
+        availableExtraTokens: 1000,
+      });
+      mockNeo4jService.writeOne.mockResolvedValue();
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useTokens({ input: 100, output: 50 });
+
+      expect(result).toEqual({ availableMonthlyTokens: 0, availableExtraTokens: 850 });
+    });
+
+    it("returns undefined when zero tokens are consumed", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useTokens({ input: 0, output: 0 });
+
+      expect(result).toBeUndefined();
+    });
   });
 
   describe("markSubscriptionStatus", () => {
