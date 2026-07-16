@@ -1,3 +1,9 @@
+## [1.108.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.107.0...v1.108.0) (2026-07-16)
+
+### 🚀 Features
+
+* **tokens:** enhance useTokens method to return updated balances and update service logic ([9b42613](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9b4261308c942995924c4e0e589fbe4064a70eb1))
+
 ## [1.107.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.106.0...v1.107.0) (2026-07-02)
 
 ### 🚀 Features
