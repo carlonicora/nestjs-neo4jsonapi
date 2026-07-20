@@ -1,3 +1,9 @@
+## [1.109.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.108.0...v1.109.0) (2026-07-20)
+
+### 🚀 Features
+
+* **s3:** allow signing URLs with Content-Disposition: attachment ([71f7789](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/71f7789c9a8cf6a59eaf0b80f7211526024fe745))
+
 ## [1.108.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.107.0...v1.108.0) (2026-07-16)
 
 ### 🚀 Features
