@@ -24,10 +24,15 @@ export class S3Controller {
 
   @UseGuards(JwtAuthGuard)
   @Get(`sign`)
-  async getSignedUrl(@Query("key") key: string, @Query("isPublic") isPublic: boolean) {
+  async getSignedUrl(
+    @Query("key") key: string,
+    @Query("isPublic") isPublic: boolean,
+    @Query("filename") filename?: string,
+  ) {
     return await this.service.findSignedUrl({
       key: key,
       isPublic: isPublic,
+      filename: filename,
     });
   }
 

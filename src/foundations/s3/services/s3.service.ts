@@ -286,7 +286,18 @@ export class S3Service {
     }
   }
 
-  async findSignedUrl(params: { key: string; isPublic?: boolean }): Promise<JsonApiDataInterface> {
+  /**
+   * Builds an RFC 6266 `attachment` Content-Disposition value. The ASCII fallback strips
+   * characters that would break the header (quotes, path separators, control chars) while
+   * `filename*` carries the original UTF-8 name for browsers that support it.
+   */
+  private _contentDispositionAttachment(filename: string): string {
+    const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\/\r\n]/g, "_");
+
+    return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  }
+
+  async findSignedUrl(params: { key: string; isPublic?: boolean; filename?: string }): Promise<JsonApiDataInterface> {
     await this._loadConfiguration();
     const signedUrl = await this.generateSignedUrl(params);
 
@@ -300,7 +311,12 @@ export class S3Service {
     return this.builder.buildSingle(S3Model, data);
   }
 
-  async generateSignedUrl(params: { key: string; ttl?: number; isPublic?: boolean }): Promise<string> {
+  async generateSignedUrl(params: {
+    key: string;
+    ttl?: number;
+    isPublic?: boolean;
+    filename?: string;
+  }): Promise<string> {
     await this._loadConfiguration();
     if (!this._endpoint) return null;
 
@@ -313,6 +329,11 @@ export class S3Service {
         const command = new GetObjectCommand({
           Bucket: this._bucket,
           Key: params.key,
+          // When a filename is supplied the browser must save the file instead of
+          // rendering it inline (docx/pdf otherwise open in the browser viewer).
+          ...(params.filename
+            ? { ResponseContentDisposition: this._contentDispositionAttachment(params.filename) }
+            : {}),
         });
 
         const signedUrl = await getSignedUrl(this.s3Client, command, {
@@ -326,7 +347,12 @@ export class S3Service {
     }
   }
 
-  private async _generateAzureSignedUrl(params: { key: string; ttl?: number; isPublic?: boolean }): Promise<string> {
+  private async _generateAzureSignedUrl(params: {
+    key: string;
+    ttl?: number;
+    isPublic?: boolean;
+    filename?: string;
+  }): Promise<string> {
     try {
       const blobClient = this.containerClient.getBlobClient(params.key);
 
@@ -345,6 +371,7 @@ export class S3Service {
               startsOn: new Date(new Date().valueOf() - 15 * 60 * 1000), // Start 15 minutes ago to account for clock skew
               expiresOn: new Date(new Date().valueOf() + (params.ttl ?? 3600) * 1000),
               protocol: SASProtocol.Https,
+              ...(params.filename ? { contentDisposition: this._contentDispositionAttachment(params.filename) } : {}),
             },
             credential,
           );
