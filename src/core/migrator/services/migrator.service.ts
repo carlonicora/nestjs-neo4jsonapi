@@ -1,10 +1,11 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import * as fs from "fs";
+import { createRequire } from "module";
 import * as path from "path";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
 import { S3Service } from "../../../foundations/s3/services/s3.service";
-import { MigrationInterface, MigrationStep } from "../interfaces/migration.interface";
+import { MigrationInterface, MigrationModule, MigrationStep } from "../interfaces/migration.interface";
 
 type Migration = {
   name: string;
@@ -141,9 +142,28 @@ export class MigratorService implements OnModuleInit {
     return numA - numB;
   }
 
+  /**
+   * Loads a migration file. Under module: NodeNext the compiled dist keeps a
+   * NATIVE `import()`, which cannot load .ts migrations that use tsconfig
+   * path aliases (e.g. `src/...`) — those only resolve through the host app's
+   * CommonJS require chain (ts-node + tsconfig-paths in dev). Prefer require;
+   * fall back to native import() for genuine ESM migration files.
+   */
+  private async loadMigrationModule(migrationPath: string): Promise<MigrationModule> {
+    try {
+      const cjsRequire = createRequire(__filename);
+      return cjsRequire(migrationPath) as MigrationModule;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ERR_REQUIRE_ESM") {
+        return (await import(migrationPath)) as MigrationModule;
+      }
+      throw error;
+    }
+  }
+
   private async executeMigrations(migrations: Migration[]) {
     for (const migration of migrations) {
-      const migrationModule = await import(migration.path);
+      const migrationModule = await this.loadMigrationModule(migration.path);
       const steps = this._normaliseSteps(migrationModule["migration"]);
 
       const cypherBatch: { query: string; params?: any }[] = [];
