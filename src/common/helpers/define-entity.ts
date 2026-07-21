@@ -276,6 +276,7 @@ export function defineEntity<T>() {
         singleChildrenTokens.push(rel.model.nodeName);
         singleChildrenRelationships.push({
           nodeName: rel.model.nodeName,
+          type: rel.model.type,
           relationshipName: name,
           polymorphic: rel.polymorphic,
           direction: rel.direction,
@@ -287,6 +288,7 @@ export function defineEntity<T>() {
         childrenTokens.push(rel.model.nodeName);
         childrenRelationships.push({
           nodeName: rel.model.nodeName,
+          type: rel.model.type,
           relationshipName: name,
           polymorphic: rel.polymorphic,
           direction: rel.direction,

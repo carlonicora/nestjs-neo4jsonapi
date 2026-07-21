@@ -30,6 +30,7 @@ export type DataMeta = {
  */
 export type RelationshipInfo = {
   nodeName: string; // Model's nodeName for looking up in registry
+  type?: string; // Model's JSON:API type — UNIQUE registry key; nodeName can collide (e.g. proceedings vs portal-proceedings both use nodeName "proceeding")
   relationshipName: string; // Property name on entity (for Cypher column and assignment)
   polymorphic?: PolymorphicConfig;
   direction?: "in" | "out"; // Traversal direction — emits the OPTIONAL MATCH arrow for nested includes

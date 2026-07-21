@@ -113,7 +113,11 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
     const relationships: Record<string, any> = {};
     for (const [relName, relDef] of Object.entries(this.descriptor.relationships) as [string, RelationshipDef][]) {
       // Get the related model from registry using nodeName
-      const relatedModel = modelRegistry.get(relDef.model.nodeName);
+      // Resolve by JSON:API type first — it is the registry's UNIQUE key.
+      // nodeName collides across modules (e.g. proceedings vs portal-proceedings
+      // both use nodeName "proceeding"), and get(nodeName) returns whichever
+      // module registered last.
+      const relatedModel = modelRegistry.getByType(relDef.model.type) ?? modelRegistry.get(relDef.model.nodeName);
       if (relatedModel) {
         const relationship: any = {
           data: this.serialiserFactory.create(relatedModel),
@@ -125,7 +129,8 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
         // Register serializers for polymorphic candidate models and set up dynamic factory
         if (relDef.polymorphic) {
           for (const candidateMeta of relDef.polymorphic.candidates) {
-            const candidateModel = modelRegistry.get(candidateMeta.nodeName);
+            const candidateModel =
+              modelRegistry.getByType(candidateMeta.type) ?? modelRegistry.get(candidateMeta.nodeName);
             if (candidateModel) {
               this.serialiserFactory.create(candidateModel);
             }

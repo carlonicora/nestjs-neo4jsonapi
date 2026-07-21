@@ -246,7 +246,8 @@ export class EntityFactory {
     // Handle SINGLE relationships - prefer new relationship info if available
     if (model.singleChildrenRelationships && model.singleChildrenRelationships.length > 0) {
       for (const relInfo of model.singleChildrenRelationships) {
-        const childModel = modelRegistry.get(relInfo.nodeName);
+        const childModel =
+          (relInfo.type ? modelRegistry.getByType(relInfo.type) : undefined) ?? modelRegistry.get(relInfo.nodeName);
         if (!childModel) continue;
 
         // Use relationship name for Cypher column (matches buildReturnStatement)
@@ -287,7 +288,8 @@ export class EntityFactory {
     // Handle MANY relationships - prefer new relationship info if available
     if (model.childrenRelationships && model.childrenRelationships.length > 0) {
       for (const relInfo of model.childrenRelationships) {
-        const childModel = modelRegistry.get(relInfo.nodeName);
+        const childModel =
+          (relInfo.type ? modelRegistry.getByType(relInfo.type) : undefined) ?? modelRegistry.get(relInfo.nodeName);
         if (!childModel) continue;
 
         // Use relationship name for Cypher column (matches buildReturnStatement)
