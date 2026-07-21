@@ -53,9 +53,16 @@ export class LoggingInterceptor implements NestInterceptor {
     // Set context in ClsService for the entire request lifecycle
     this.loggingService.setRequestContext(logContext);
 
-    // Store full request URL for pagination links
-    if (this.apiConfig?.url && this.clsService) {
-      const apiUrl = this.apiConfig.url.replace(/\/$/, "");
+    // Store full request URL for pagination links. When this request was proxied
+    // from another service (e.g. api -> corpus), that caller forwards its own
+    // public base URL via `x-forwarded-base-url` so the generated pagination
+    // links point back through the caller (the URL the browser actually uses),
+    // not at this service's own (possibly internal/localhost) address. Falls
+    // back to this service's configured api url for direct, non-proxied calls.
+    const forwardedBaseUrl = request.headers["x-forwarded-base-url"] as string | undefined;
+    const paginationBaseUrl = forwardedBaseUrl || this.apiConfig?.url;
+    if (paginationBaseUrl && this.clsService) {
+      const apiUrl = paginationBaseUrl.replace(/\/$/, "");
       this.clsService.set("requestUrl", `${apiUrl}${requestPath}`);
     }
 
