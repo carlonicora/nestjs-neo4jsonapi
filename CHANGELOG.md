@@ -1,3 +1,9 @@
+## [1.110.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.109.0...v1.110.0) (2026-07-21)
+
+### 🚀 Features
+
+* **pagination:** honor x-forwarded-base-url for pagination link base ([0aa8571](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0aa85714515eacab0026ce170c6eb6c3e10b65af))
+
 ## [1.109.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.108.0...v1.109.0) (2026-07-20)
 
 ### 🚀 Features
