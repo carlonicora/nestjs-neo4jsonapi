@@ -1,3 +1,9 @@
+## [1.110.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.1...v1.110.2) (2026-07-23)
+
+### 🐛 Bug Fixes
+
+* **push:** upsert subscriptions and prune expired ones ([bfdf20c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/bfdf20cc2bfc20c67be241715a6ee89febe0319d))
+
 ## [1.110.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.0...v1.110.1) (2026-07-23)
 
 ### 🐛 Bug Fixes
