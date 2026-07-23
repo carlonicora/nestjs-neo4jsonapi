@@ -1,3 +1,10 @@
+## [1.110.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.0...v1.110.1) (2026-07-23)
+
+### 🐛 Bug Fixes
+
+* **jsonapi:** resolve related models by JSON:API type, not nodeName ([dc2f465](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/dc2f465ea6c51e88ae779968a59a33ede2aa987b))
+* **migrator:** load migrations via createRequire instead of native import() ([9e38fdd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9e38fdd3e12018baf98ff40c6aca994977515d1d))
+
 ## [1.110.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.109.0...v1.110.0) (2026-07-21)
 
 ### 🚀 Features
