@@ -50,7 +50,7 @@ describe("PushService", () => {
     create: vi.fn(),
     findByEndpoint: vi.fn(),
     findByUserId: vi.fn(),
-    delete: vi.fn(),
+    deleteByEndpoint: vi.fn(),
   });
 
   const createMockConfigService = (vapidConfig: any = MOCK_VAPID_CONFIG) => ({
@@ -250,6 +250,24 @@ describe("PushService", () => {
       // Act & Assert - should not throw
       await expect(service.sendNotification(notificationParams)).resolves.toBeUndefined();
       expect(consoleSpy).toHaveBeenCalledWith("Error sending push notification", expect.any(Error));
+      expect(pushRepository.deleteByEndpoint).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it.each([410, 404])("should prune the subscription (no error log) on a %i status code", async (statusCode) => {
+      // Arrange - 404/410 mean the subscription is permanently gone
+      vi.mocked(webPush).sendNotification.mockRejectedValue(
+        Object.assign(new Error("Gone"), { statusCode, endpoint: MOCK_PUSH_ENTITY.subscription.endpoint }),
+      );
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      // Act & Assert - should not throw, should delete, should NOT log
+      await expect(service.sendNotification(notificationParams)).resolves.toBeUndefined();
+      expect(pushRepository.deleteByEndpoint).toHaveBeenCalledWith({
+        endpoint: MOCK_PUSH_ENTITY.subscription.endpoint,
+      });
+      expect(consoleSpy).not.toHaveBeenCalled();
 
       consoleSpy.mockRestore();
     });

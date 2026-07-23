@@ -56,7 +56,14 @@ export class PushService {
         try {
           await webPush.sendNotification(pushSubscription.subscription, JSON.stringify(payload));
         } catch (error) {
-          console.error("Error sending push notification", error);
+          // 404/410 mean the subscription is permanently gone (unsubscribed or
+          // expired). Prune it so we stop retrying a dead endpoint on every send.
+          const statusCode = (error as webPush.WebPushError)?.statusCode;
+          if (statusCode === 404 || statusCode === 410) {
+            await this.pushRepository.deleteByEndpoint({ endpoint: pushSubscription.subscription.endpoint });
+          } else {
+            console.error("Error sending push notification", error);
+          }
         }
       }),
     );

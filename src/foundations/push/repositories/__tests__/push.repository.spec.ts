@@ -151,7 +151,7 @@ describe("PushRepository", () => {
   });
 
   describe("create", () => {
-    it("should create a new push subscription", async () => {
+    it("should upsert a push subscription idempotently (MERGE on endpoint, MERGE the per-user edge)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(undefined);
@@ -169,15 +169,17 @@ describe("PushRepository", () => {
       expect(mockQuery.queryParams.auth).toBe(params.auth);
       expect(mockQuery.queryParams.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       expect(mockQuery.query).toContain("MATCH (user:User {id: $currentUserId})");
-      expect(mockQuery.query).toContain("[:BELONGS_TO]->(company)");
-      expect(mockQuery.query).toContain("CREATE (push:PushSubscription");
-      expect(mockQuery.query).toContain("id: $id");
-      expect(mockQuery.query).toContain("endpoint: $endpoint");
-      expect(mockQuery.query).toContain("p256dh: $p256dh");
-      expect(mockQuery.query).toContain("auth: $auth");
-      expect(mockQuery.query).toContain("createdAt: datetime()");
-      expect(mockQuery.query).toContain("updatedAt: datetime()");
-      expect(mockQuery.query).toContain("(user)-[:HAS_PUSH]->(push)");
+      // A subscription is browser-scoped, not company-scoped: MERGE on endpoint
+      // (one node per endpoint) so re-registration/shared-browser logins never
+      // duplicate, and the id is set only ON CREATE so it stays stable.
+      expect(mockQuery.query).toContain("MERGE (push:PushSubscription {endpoint: $endpoint})");
+      expect(mockQuery.query).toContain("ON CREATE SET push.id = $id");
+      expect(mockQuery.query).toContain("push.createdAt = datetime()");
+      expect(mockQuery.query).toContain("push.p256dh = $p256dh");
+      expect(mockQuery.query).toContain("push.auth = $auth");
+      expect(mockQuery.query).toContain("push.updatedAt = datetime()");
+      expect(mockQuery.query).toContain("MERGE (user)-[:HAS_PUSH]->(push)");
+      expect(mockQuery.query).not.toContain("CREATE (push:PushSubscription");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });
 
@@ -211,6 +213,35 @@ describe("PushRepository", () => {
           auth: "test-auth",
         }),
       ).rejects.toThrow("Database error");
+    });
+  });
+
+  describe("deleteByEndpoint", () => {
+    it("should delete by endpoint globally, without user/company scoping", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      const endpoint = "https://fcm.googleapis.com/fcm/send/dead-endpoint";
+      await repository.deleteByEndpoint({ endpoint });
+
+      expect(mockQuery.queryParams.endpoint).toBe(endpoint);
+      expect(mockQuery.query).toContain("MATCH (push:PushSubscription {endpoint: $endpoint})");
+      expect(mockQuery.query).toContain("DETACH DELETE push");
+      // A 404/410 can arrive from a worker with no CLS user; scoping would no-op
+      // and leave the dead row, so the delete is intentionally unscoped.
+      expect(mockQuery.query).not.toContain("$currentUserId");
+      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
+    });
+
+    it("should handle errors from Neo4jService", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockRejectedValue(new Error("Database error"));
+
+      await expect(repository.deleteByEndpoint({ endpoint: "https://test-endpoint.com" })).rejects.toThrow(
+        "Database error",
+      );
     });
   });
 
