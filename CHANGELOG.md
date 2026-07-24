@@ -1,3 +1,9 @@
+## [1.110.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.2...v1.110.3) (2026-07-24)
+
+### 📦 Code Refactoring
+
+* **llm:** remove unhelpful high token usage warning ([1207d4b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1207d4bf37db722ed3029a1391f2601abebfcd2e))
+
 ## [1.110.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.1...v1.110.2) (2026-07-23)
 
 ### 🐛 Bug Fixes
