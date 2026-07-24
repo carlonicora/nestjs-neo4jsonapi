@@ -507,22 +507,6 @@ describe("LLMService", () => {
 
       expect(closeMock.mock.calls[0][0].parseFallbacks).toEqual(["tool_calls"]);
     });
-
-    it("records a warning when totalTokens > 8000", async () => {
-      mockStructuredLLM.invoke.mockResolvedValueOnce({
-        parsed: { response: "ok" },
-        raw: { usage_metadata: { input_tokens: 9000, output_tokens: 100 } },
-      });
-
-      await service.call({
-        systemPrompts: ["s"],
-        inputParams: { q: "x" },
-        outputSchema,
-      });
-
-      const warnings = closeMock.mock.calls[0][0].warnings ?? [];
-      expect(warnings.some((w: string) => /High token usage/.test(w))).toBe(true);
-    });
   });
 
   describe("Gemini schema sanitization", () => {
@@ -610,35 +594,6 @@ describe("LLMService", () => {
       });
 
       expect(mockModelService.getLLM).toHaveBeenCalled();
-    });
-  });
-
-  describe("high token usage warning", () => {
-    it("should log warning when token usage exceeds 8000", async () => {
-      const consoleSpy = vi.spyOn(console, "warn");
-
-      mockStructuredLLM.invoke.mockResolvedValueOnce({
-        parsed: { response: "test response" },
-        raw: {
-          usage_metadata: {
-            input_tokens: 5000,
-            output_tokens: 4000,
-          },
-          response_metadata: { finish_reason: "stop" },
-          content: '{"response": "test response"}',
-        },
-      });
-
-      const outputSchema = z.object({ response: z.string() });
-
-      await service.call({
-        inputParams: { message: "Hello" },
-        outputSchema,
-        systemPrompts: ["You are a helpful assistant"],
-      });
-
-      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("High token usage detected"));
-      consoleSpy.mockRestore();
     });
   });
 

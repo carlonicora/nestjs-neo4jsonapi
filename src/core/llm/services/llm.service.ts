@@ -804,14 +804,6 @@ export class LLMService {
     const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
     const cached = totalCachedTokens + (raw?.usage_metadata?.input_token_details?.cache_read ?? 0);
 
-    // Warn if high token usage
-    const totalTokens = input + output;
-    if (totalTokens > 8000) {
-      const msg = `High token usage detected: ${totalTokens} tokens in this call`;
-      console.warn(`[LLMService] ${msg}`);
-      addWarning(msg);
-    }
-
     // Enhanced error handling with detailed diagnostics
     if (!response.parsed) {
       const rawContent = raw?.content || "No content";
