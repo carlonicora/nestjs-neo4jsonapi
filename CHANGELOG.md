@@ -1,3 +1,9 @@
+## [1.111.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.3...v1.111.0) (2026-07-26)
+
+### 🚀 Features
+
+* **llm:** implement request timeout and watchdog for provider calls ([a1e5511](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a1e55113bea52caf377a5b26584db1f042556c9f))
+
 ## [1.110.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.2...v1.110.3) (2026-07-24)
 
 ### 📦 Code Refactoring
