@@ -242,6 +242,12 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       // Fail-closed MOCK_AI safety gate. ModelService.onModuleInit throws if this
       // is true while ENV === "production" — synthetic AI data must never reach prod.
       mock: process.env.MOCK_AI === "true",
+      // Every provider request is bounded (see ConfigAiInterface.requestTimeoutMs):
+      // without this the only backstop is the OpenAI SDK's 600s default, which
+      // turns a stalled provider into a ten-minute silent freeze.
+      requestTimeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS || "120000", 10),
+      requestDeadlineAttempts: parseInt(process.env.AI_REQUEST_DEADLINE_ATTEMPTS || "3", 10),
+      requestWatchdogMs: parseInt(process.env.AI_REQUEST_WATCHDOG_MS || "30000", 10),
       documentAi: {
         enabled: process.env.DOCUMENT_AI_ENABLED === "true",
         provider: process.env.DOCUMENT_AI_PROVIDER || "azure",

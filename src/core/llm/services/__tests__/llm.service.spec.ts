@@ -242,7 +242,11 @@ describe("LLMService", () => {
         temperature: 0.8,
       });
 
-      expect(mockModelService.getLLM).toHaveBeenCalledWith({ temperature: 0.8, modelWeight: undefined });
+      // objectContaining, not an exact match: every call now also carries its
+      // per-attempt request budget (`timeoutMs`), which this test isn't about.
+      expect(mockModelService.getLLM).toHaveBeenCalledWith(
+        expect.objectContaining({ temperature: 0.8, modelWeight: undefined }),
+      );
     });
 
     it("should handle conversation history", async () => {
