@@ -1,3 +1,9 @@
+## [1.112.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.1...v1.112.2) (2026-07-27)
+
+### 🚨 Tests
+
+* **logging:** add unit tests for LoggingInterceptor error handling ([f6bd942](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f6bd94254e882b8ab5011cfbcd4745583d39c79d))
+
 ## [1.112.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.0...v1.112.1) (2026-07-27)
 
 ### 🚨 Tests
