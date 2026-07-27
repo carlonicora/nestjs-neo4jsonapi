@@ -81,16 +81,33 @@ export class LoggingInterceptor implements NestInterceptor {
 
         // Only log non-validation errors here, as HttpExceptionFilter handles validation error logging with details
         if (!validationErrors) {
-          // Log error with structured logging (errors don't go through onSend hook)
-          this.loggingService.logHttpError(requestMethod, requestPath, error, responseTime, userIp);
+          if (statusCode >= 500) {
+            // Log error with structured logging (errors don't go through onSend hook)
+            this.loggingService.logHttpError(requestMethod, requestPath, error, responseTime, userIp);
 
-          // Enhanced error logging
-          this.loggingService.errorWithContext(`Request failed`, error, "HTTP_ERROR", {
-            responseTime,
-            statusCode,
-            errorCode: error.code,
-            errorType: error.constructor.name,
-          });
+            // Enhanced error logging
+            this.loggingService.errorWithContext(`Request failed`, error, "HTTP_ERROR", {
+              responseTime,
+              statusCode,
+              errorCode: error.code,
+              errorType: error.constructor.name,
+            });
+          } else {
+            // 4xx are client errors, not server faults: emit the access-log line
+            // for the failed request at warn level, without a stack trace. The
+            // error detail itself is logged (also at warn) by HttpExceptionFilter.
+            // Stacks here are pure noise — e.g. a spec-compliant `405` on
+            // `GET /mcp`, which stateless MCP servers are required to return.
+            this.loggingService.warn(`${requestMethod} ${requestPath} - ${statusCode} (${responseTime}ms)`, "HTTP", {
+              httpMethod: requestMethod,
+              httpUrl: requestPath,
+              httpStatusCode: statusCode,
+              responseTimeMs: responseTime,
+              clientIp: userIp,
+              errorCode: error.code,
+              errorType: error.constructor.name,
+            });
+          }
         }
 
         // Clear context after error
