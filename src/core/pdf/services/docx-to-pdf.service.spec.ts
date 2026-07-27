@@ -60,5 +60,9 @@ describeIfLibreOffice("DocxToPdfService", () => {
     expect(pdf).toBeInstanceOf(Buffer);
     // Every valid PDF starts with the "%PDF-" header
     expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
-  }, 30_000); // LibreOffice subprocess can take up to ~5 s; allow 30 s for CI
+    // LibreOffice takes ~3 s on an idle machine, but its cold start is CPU-bound
+    // and this spec runs while turbo saturates every core with the other suites,
+    // so allow a wide margin. A genuinely broken conversion rejects with an error
+    // rather than hanging, so the generous ceiling hides no real failure.
+  }, 180_000);
 });
