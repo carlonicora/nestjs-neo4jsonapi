@@ -1,3 +1,9 @@
+## [1.112.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.0...v1.112.1) (2026-07-27)
+
+### 🚨 Tests
+
+* **pdf:** widen docx-to-pdf timeout for parallel suite runs ([8dc5acf](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8dc5acf1c8703c3ece7b9eb0e6a703bd3bf1a6ff))
+
 ## [1.112.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.111.0...v1.112.0) (2026-07-27)
 
 ### 🚀 Features
