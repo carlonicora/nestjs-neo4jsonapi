@@ -1,3 +1,9 @@
+## [1.112.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.111.0...v1.112.0) (2026-07-27)
+
+### 🚀 Features
+
+* **mcp:** built-in MCP server — OAuth-secured, RBAC-gated agent access ([8c4be53](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8c4be5359b5fbd7cd3dca8d3733ebba87fb11353))
+
 ## [1.111.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.3...v1.111.0) (2026-07-26)
 
 ### 🚀 Features
