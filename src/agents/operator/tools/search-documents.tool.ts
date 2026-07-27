@@ -9,6 +9,8 @@ const inputSchema = z.object({
   question: z.string().describe("The natural-language question to answer from the company's documents."),
 });
 
+export { inputSchema as searchDocumentsInputSchema };
+
 const NO_INFORMATION_MESSAGE = "No information found in the company documents for this question.";
 
 @Injectable()

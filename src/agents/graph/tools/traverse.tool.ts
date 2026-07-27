@@ -22,6 +22,8 @@ const inputSchema = z.object({
   limit: z.number().int().optional(),
 });
 
+export { inputSchema as traverseInputSchema };
+
 export interface NormalisedSort {
   field: string;
   direction: "asc" | "desc";

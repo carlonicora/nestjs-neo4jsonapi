@@ -28,6 +28,9 @@ export const OAuth2Scopes = {
   /** Access to user profile information (name, email) */
   PROFILE: "profile",
 
+  /** Access to the MCP (Model Context Protocol) server */
+  MCP: "mcp",
+
   /** Administrative access - restricted to platform admins */
   ADMIN: "admin",
 } as const;
@@ -50,6 +53,7 @@ export const OAuthScopeNames: Record<OAuthScopeType, string> = {
   [OAuth2Scopes.ROLLS_READ]: "View Rolls",
   [OAuth2Scopes.ROLLS_WRITE]: "Manage Rolls",
   [OAuth2Scopes.PROFILE]: "View Profile",
+  [OAuth2Scopes.MCP]: "MCP Server Access",
   [OAuth2Scopes.ADMIN]: "Administrative Access",
 };
 
@@ -65,6 +69,7 @@ export const OAuthScopeDescriptions: Record<OAuthScopeType, string> = {
   [OAuth2Scopes.ROLLS_READ]: "View your rolls and albums",
   [OAuth2Scopes.ROLLS_WRITE]: "Create and modify rolls and albums",
   [OAuth2Scopes.PROFILE]: "View your profile information (name, email)",
+  [OAuth2Scopes.MCP]: "Let an AI assistant read and act on your data through the MCP server",
   [OAuth2Scopes.ADMIN]: "Administrative access to the platform",
 };
 

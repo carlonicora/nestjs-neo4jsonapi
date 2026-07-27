@@ -364,6 +364,15 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       requirePkceForPublicClients: process.env.OAUTH_REQUIRE_PKCE_FOR_PUBLIC_CLIENTS !== "false",
       rotateRefreshTokens: process.env.OAUTH_ROTATE_REFRESH_TOKENS !== "false",
     },
+    mcp: {
+      enabled: process.env.MCP_ENABLED === "true",
+      serverName: process.env.MCP_SERVER_NAME || "neural-erp",
+      instructions: process.env.MCP_INSTRUCTIONS || undefined,
+      promotedEntities: (process.env.MCP_PROMOTED_ENTITIES || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    },
     auth: {
       allowRegistration: process.env.ALLOW_REGISTRATION !== "false",
       registrationMode:

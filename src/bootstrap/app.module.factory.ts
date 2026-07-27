@@ -18,6 +18,7 @@ import { AppModeModule } from "../core/appmode/app.mode.module";
 import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
 import { FoundationsModule } from "../foundations/foundations.modules";
+import { McpModule } from "../mcp/mcp.module";
 import { OpenApiModule } from "../openapi/module/openapi.module";
 import { BootstrapOptions } from "./bootstrap.options";
 
@@ -139,6 +140,9 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
 
           // Library's AI agents (prompts configured via baseConfig.prompts)
           ...(options.agents === false ? [] : [AgentsModule]),
+
+          // MCP (Model Context Protocol) server (opt-in, default off)
+          ...(options.mcp === true ? [McpModule] : []),
 
           // OpenAPI module for Swagger/Redoc documentation
           OpenApiModule,

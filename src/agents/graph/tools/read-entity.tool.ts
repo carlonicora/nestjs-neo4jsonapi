@@ -13,6 +13,8 @@ const inputSchema = z.object({
   include: z.array(z.string()).optional().describe("Relationship names to pull one-hop related records."),
 });
 
+export { inputSchema as readEntityInputSchema };
+
 @Injectable()
 export class ReadEntityTool {
   constructor(

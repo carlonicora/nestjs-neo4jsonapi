@@ -16,6 +16,7 @@ import { ConfigEnvironmentInterface } from "./config.environment.interface";
 import { ConfigJobNamesInterface } from "./config.job.names.interface";
 import { ConfigJwtInterface } from "./config.jwt.interface";
 import { ConfigLoggingInterface } from "./config.logging.interface";
+import { ConfigMcpInterface } from "./config.mcp.interface";
 import { ConfigNeo4jInterface } from "./config.neo4j.interface";
 import { ConfigOAuthInterface } from "./config.oauth.interface";
 import { ConfigOperatorInterface } from "./config.operator.interface";
@@ -56,6 +57,7 @@ export interface BaseConfigInterface {
   discord: ConfigDiscordInterface;
   google: ConfigGoogleInterface;
   oauth: ConfigOAuthInterface;
+  mcp: ConfigMcpInterface;
   twoFactor?: ConfigTwoFactorInterface;
   embeddingContext?: ConfigEmbeddingContextInterface;
 }

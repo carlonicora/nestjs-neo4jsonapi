@@ -14,7 +14,8 @@ export interface CreateClientParams {
   isConfidential?: boolean;
   accessTokenLifetime?: number;
   refreshTokenLifetime?: number;
-  ownerId: string;
+  /** Owning user. Optional: dynamically registered clients (RFC 7591) have no owner. */
+  ownerId?: string;
   companyId?: string;
 }
 
