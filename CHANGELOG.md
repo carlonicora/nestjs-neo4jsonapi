@@ -1,3 +1,9 @@
+## [1.112.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.2...v1.112.3) (2026-07-28)
+
+### 🐛 Bug Fixes
+
+* **llm,jsonapi:** provider-correct per-call max tokens, visible failure modes ([0f90d8c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0f90d8c86dcb0a25c129d256094f156802be8c24))
+
 ## [1.112.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.1...v1.112.2) (2026-07-27)
 
 ### 🚨 Tests
