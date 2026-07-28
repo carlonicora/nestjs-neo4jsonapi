@@ -168,6 +168,22 @@ function toolArgCandidates(args: unknown): unknown[] {
 export class LLMService {
   private readonly logger = new Logger(LLMService.name);
 
+  /**
+   * LangChain's ChatModel.invoke crashes with `TypeError: Cannot read
+   * properties of undefined (reading 'message')` when the provider returns a
+   * response with no candidates (Gemini does this on malformed function calls
+   * and safety blocks). Convert that cryptic internal crash into a clear,
+   * retryable error; every other error passes through untouched.
+   */
+  private static normaliseEmptyResponseError(error: unknown): unknown {
+    if (error instanceof TypeError && /reading 'message'/.test(error.message)) {
+      return new Error(
+        "LLM provider returned an empty response (no candidates — likely a malformed function call or a safety block). Transient: retry the call.",
+      );
+    }
+    return error;
+  }
+
   constructor(
     private readonly modelService: ModelService,
     private readonly config: ConfigService<BaseConfigInterface>,
@@ -616,7 +632,14 @@ export class LLMService {
 
     // Build config options for the invocation
     const configOptions: Record<string, any> = {};
-    if (params.maxTokens) configOptions.maxTokens = params.maxTokens;
+    if (params.maxTokens) {
+      // Per-call output cap under BOTH provider conventions: LangChain's
+      // OpenAI-compatible clients honour `maxTokens` in call options, the
+      // Google/Vertex client only reads `maxOutputTokens` — passing one name
+      // silently no-ops on the other provider.
+      configOptions.maxTokens = params.maxTokens;
+      configOptions.maxOutputTokens = params.maxTokens;
+    }
     if (params.stopSequences) configOptions.stop = params.stopSequences;
     if (params.metadata) configOptions.metadata = params.metadata;
     if (params.timeout) configOptions.timeout = params.timeout;
@@ -663,10 +686,15 @@ export class LLMService {
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         session.startIteration("tool-loop", conversationMessages);
         // Call model with tools
-        const toolResponse =
-          Object.keys(configOptions).length > 0
-            ? await modelWithTools.invoke(conversationMessages, configOptions)
-            : await modelWithTools.invoke(conversationMessages);
+        let toolResponse: Awaited<ReturnType<typeof modelWithTools.invoke>>;
+        try {
+          toolResponse =
+            Object.keys(configOptions).length > 0
+              ? await modelWithTools.invoke(conversationMessages, configOptions)
+              : await modelWithTools.invoke(conversationMessages);
+        } catch (error) {
+          throw LLMService.normaliseEmptyResponseError(error);
+        }
 
         session.recordResponse({
           content: typeof (toolResponse as any).content === "string" ? (toolResponse as any).content : "",
@@ -707,13 +735,16 @@ export class LLMService {
 
           if (!tool) {
             console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
+            // Name the valid tools in the reply: a bare "not found" is too weak
+            // a signal for small models, which just retry the same wrong name.
+            const notFound = `Tool "${toolCall.name}" does not exist. Use EXACTLY one of: ${[...toolMap.keys()].join(", ")}`;
             conversationMessages.push(
               new ToolMessage({
-                content: `Tool "${toolCall.name}" not found`,
+                content: notFound,
                 tool_call_id: toolCall.id ?? "",
               }),
             );
-            session.recordToolResult(toolCall.id ?? "", toolCall.name, `Tool "${toolCall.name}" not found`);
+            session.recordToolResult(toolCall.id ?? "", toolCall.name, notFound);
             continue;
           }
 
@@ -784,10 +815,15 @@ export class LLMService {
 
     session.startIteration("final-structured", conversationMessages);
 
-    const response = (await structuredLlm.invoke(
-      conversationMessages,
-      Object.keys(configOptions).length > 0 ? configOptions : undefined,
-    )) as unknown as StructuredOutputResponse<T>;
+    let response: StructuredOutputResponse<T>;
+    try {
+      response = (await structuredLlm.invoke(
+        conversationMessages,
+        Object.keys(configOptions).length > 0 ? configOptions : undefined,
+      )) as unknown as StructuredOutputResponse<T>;
+    } catch (error) {
+      throw LLMService.normaliseEmptyResponseError(error);
+    }
 
     // Extract token usage with type guard (includes tool iteration tokens)
     const raw = isValidRaw(response.raw) ? response.raw : undefined;

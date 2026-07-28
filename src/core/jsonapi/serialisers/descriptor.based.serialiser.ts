@@ -155,6 +155,13 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
           }
         }
         relationships[relName] = relationship;
+      } else {
+        // A missing registry entry silently drops the whole relationship from
+        // every response — make the failure visible.
+        console.warn(
+          `[DescriptorBasedSerialiser] relationship "${relName}" of "${this.descriptor.model?.type ?? "?"}" dropped: ` +
+            `no model registered for type "${relDef.model.type}" / nodeName "${relDef.model.nodeName}"`,
+        );
       }
     }
     this.relationships = relationships;
