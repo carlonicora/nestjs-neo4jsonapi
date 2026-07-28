@@ -137,6 +137,9 @@ export interface BootstrapOptions {
    */
   agents?: boolean;
 
+  /** When true, mounts the MCP (Model Context Protocol) server module at POST /mcp. Default false. */
+  mcp?: boolean;
+
   /**
    * Worker mode configuration.
    * Default undefined — no health server started (neural-erp behavior unchanged).

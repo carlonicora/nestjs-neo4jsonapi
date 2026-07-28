@@ -106,6 +106,8 @@ interface LLMParameters {
     fetch?: typeof fetch;
   };
   modelKwargs?: Record<string, unknown>;
+  /** Per-attempt request budget handed to the OpenAI client (see `timeoutMs` below). */
+  timeout?: number;
 }
 
 @Injectable()
@@ -192,6 +194,8 @@ export class ModelService implements OnModuleInit {
     frequencyPenalty?: number;
     modelWeight?: ModelWeight;
     disableThinking?: boolean;
+    /** Per-attempt request budget in ms. Defaults to `ai.requestTimeoutMs`. */
+    timeoutMs?: number;
   }): BaseChatModel {
     if (this.aiConfig.mock) {
       return new FakeListChatModel({ responses: ["mock summary"] }) as unknown as BaseChatModel;
@@ -206,6 +210,7 @@ export class ModelService implements OnModuleInit {
       frequencyPenalty: params?.frequencyPenalty,
       credentialFileTag: "llm",
       disableThinking: params?.disableThinking,
+      timeoutMs: params?.timeoutMs ?? this.aiConfig.requestTimeoutMs,
     });
   }
 
@@ -288,9 +293,20 @@ export class ModelService implements OnModuleInit {
       // Raw chat-completions modelKwargs (e.g. { reasoning_effort } for gpt-5 /
       // o-series). Merged into the final ChatOpenAI / Azure params.
       modelKwargs?: Record<string, unknown>;
+      // Per-ATTEMPT request budget in ms. ChatOpenAI builds its OpenAI client
+      // with `maxRetries: 0` and retries through LangChain's AsyncCaller instead,
+      // so this bounds each attempt and the retry can still escalate the
+      // OpenRouter pin (openRouterEscalatingFetch) onto a healthy provider.
+      // Unset leaves the OpenAI SDK's own 600s default — the ten-minute silent
+      // stall this exists to prevent.
+      timeoutMs?: number;
     },
   ): BaseChatModel {
     const { temperature, maxOutputTokens, frequencyPenalty } = opts;
+    // Every model this factory builds is bounded, including the vision/audio
+    // tiers that never pass an explicit budget — an unbounded request is the
+    // silent-stall bug, whatever the modality.
+    const timeoutMs = opts.timeoutMs ?? this.aiConfig?.requestTimeoutMs;
 
     const llmConfig: LLMParameters = {
       apiKey: cfg.apiKey || "not-needed",
@@ -300,6 +316,7 @@ export class ModelService implements OnModuleInit {
         baseURL: cfg.url || "http://localhost:8033/v1",
       },
       ...(opts.modelKwargs ? { modelKwargs: opts.modelKwargs } : {}),
+      ...(timeoutMs ? { timeout: timeoutMs } : {}),
     };
 
     switch (cfg.provider) {
@@ -366,6 +383,7 @@ export class ModelService implements OnModuleInit {
           azureOpenAIApiDeploymentName: cfg.model,
           azureOpenAIApiVersion: cfg.apiVersion,
           temperature,
+          ...(timeoutMs ? { timeout: timeoutMs } : {}),
           ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
           ...(llmConfig.modelKwargs ? { modelKwargs: llmConfig.modelKwargs } : {}),
         };

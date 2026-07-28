@@ -58,7 +58,8 @@ export class OAuthRepository implements OnModuleInit {
     isConfidential: boolean;
     accessTokenLifetime?: number;
     refreshTokenLifetime?: number;
-    ownerId: string;
+    /** Owning user. Optional: dynamically registered clients (RFC 7591) have no owner. */
+    ownerId?: string;
     companyId?: string;
   }): Promise<{ client: OAuthClient; clientSecret?: string }> {
     const id = randomUUID();
@@ -86,15 +87,26 @@ export class OAuthRepository implements OnModuleInit {
       isActive: true,
       accessTokenLifetime: params.accessTokenLifetime ?? 3600,
       refreshTokenLifetime: params.refreshTokenLifetime ?? 604800,
-      ownerId: params.ownerId,
+      ownerId: params.ownerId ?? null,
       companyId: params.companyId ?? null,
     };
 
-    // Build query conditionally based on whether companyId is provided
+    // Build query conditionally: owner and company MATCHes/relationships only
+    // when the respective id is provided (ownerless = RFC 7591 dynamic registration;
+    // companyless = admin use case).
+    const matchClauses: string[] = [];
+    const relationshipClauses: string[] = [];
+    if (params.ownerId) {
+      matchClauses.push("MATCH (owner:User {id: $ownerId})");
+      relationshipClauses.push("CREATE (owner)-[:OWNS_CLIENT]->(oauthclient)");
+    }
     if (params.companyId) {
-      query.query = `
-        MATCH (owner:User {id: $ownerId})
-        MATCH (company:Company {id: $companyId})
+      matchClauses.push("MATCH (company:Company {id: $companyId})");
+      relationshipClauses.push("CREATE (company)-[:HAS_OAUTH_CLIENT]->(oauthclient)");
+    }
+
+    query.query = `
+        ${matchClauses.join("\n        ")}
         CREATE (oauthclient:OAuthClient {
           id: $id,
           clientId: $clientId,
@@ -113,36 +125,9 @@ export class OAuthRepository implements OnModuleInit {
           createdAt: datetime(),
           updatedAt: datetime()
         })
-        CREATE (owner)-[:OWNS_CLIENT]->(oauthclient)
-        CREATE (company)-[:HAS_OAUTH_CLIENT]->(oauthclient)
+        ${relationshipClauses.join("\n        ")}
         RETURN oauthclient
       `;
-    } else {
-      // No company - create OAuth client without company relationship (admin use case)
-      query.query = `
-        MATCH (owner:User {id: $ownerId})
-        CREATE (oauthclient:OAuthClient {
-          id: $id,
-          clientId: $clientId,
-          clientSecretHash: $clientSecretHash,
-          name: $name,
-          description: $description,
-          redirectUris: $redirectUris,
-          allowedScopes: $allowedScopes,
-          allowedGrantTypes: $allowedGrantTypes,
-          isConfidential: $isConfidential,
-          isActive: $isActive,
-          accessTokenLifetime: $accessTokenLifetime,
-          refreshTokenLifetime: $refreshTokenLifetime,
-          ownerId: $ownerId,
-          companyId: null,
-          createdAt: datetime(),
-          updatedAt: datetime()
-        })
-        CREATE (owner)-[:OWNS_CLIENT]->(oauthclient)
-        RETURN oauthclient
-      `;
-    }
 
     const client = await this.neo4j.writeOne(query);
     return { client, clientSecret };

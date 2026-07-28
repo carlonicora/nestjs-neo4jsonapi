@@ -42,6 +42,7 @@ export { OAuthTokenRequestDto, OAuthTokenResponseDto } from "./dtos/oauth.token.
 export { OAuthRevokeRequestDto } from "./dtos/oauth.revoke.dto";
 export { OAuthIntrospectRequestDto, OAuthIntrospectResponseDto } from "./dtos/oauth.introspect.dto";
 export { OAuthClientCreateDto, OAuthClientUpdateDto } from "./dtos/oauth.client.dto";
+export { OAuthRegisterDto } from "./dtos/oauth.register.dto";
 
 // Serializers
 export { OAuthClientSerialiser } from "./serialisers/oauth.client.serialiser";

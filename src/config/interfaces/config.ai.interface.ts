@@ -85,6 +85,35 @@ export interface ConfigAiInterface {
    */
   mock: boolean;
   /**
+   * Per-ATTEMPT wall-clock budget for one provider request, in milliseconds.
+   * Driven by AI_REQUEST_TIMEOUT_MS (default 120000).
+   *
+   * Without it the only bound is the OpenAI SDK's own 600s default, so a
+   * provider that accepts a request and never answers freezes the caller for
+   * ten minutes with no error, no log and no dump (the dump file is written on
+   * close). Callers that need a different bound pass `timeout` per call.
+   *
+   * This is the budget for ONE attempt: the LangChain retry layer may re-issue
+   * (on OpenRouter each retry escalates `allow_fallbacks`, so a stalled provider
+   * is rerouted rather than waited on again). {@link requestDeadlineAttempts}
+   * bounds the total.
+   */
+  requestTimeoutMs: number;
+  /**
+   * How many attempts the absolute deadline budgets for before it force-fails a
+   * call, so an adapter that ignores its own timeout still settles. Driven by
+   * AI_REQUEST_DEADLINE_ATTEMPTS (default 3 — matches LangChain's maxRetries: 2
+   * plus the first attempt).
+   */
+  requestDeadlineAttempts: number;
+  /**
+   * How often, in milliseconds, a still-pending provider request logs a warning.
+   * Driven by AI_REQUEST_WATCHDOG_MS (default 30000). A stall used to be
+   * completely silent until it resolved; this makes it visible while it happens.
+   * Set to 0 to disable.
+   */
+  requestWatchdogMs: number;
+  /**
    * Mistral Document AI (OCR) on Azure AI Foundry — see DocumentAiService.
    * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION}.
    */

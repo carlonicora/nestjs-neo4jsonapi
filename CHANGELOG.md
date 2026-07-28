@@ -1,3 +1,27 @@
+## [1.112.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.1...v1.112.2) (2026-07-27)
+
+### 🚨 Tests
+
+* **logging:** add unit tests for LoggingInterceptor error handling ([f6bd942](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f6bd94254e882b8ab5011cfbcd4745583d39c79d))
+
+## [1.112.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.112.0...v1.112.1) (2026-07-27)
+
+### 🚨 Tests
+
+* **pdf:** widen docx-to-pdf timeout for parallel suite runs ([8dc5acf](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8dc5acf1c8703c3ece7b9eb0e6a703bd3bf1a6ff))
+
+## [1.112.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.111.0...v1.112.0) (2026-07-27)
+
+### 🚀 Features
+
+* **mcp:** built-in MCP server — OAuth-secured, RBAC-gated agent access ([8c4be53](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8c4be5359b5fbd7cd3dca8d3733ebba87fb11353))
+
+## [1.111.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.3...v1.111.0) (2026-07-26)
+
+### 🚀 Features
+
+* **llm:** implement request timeout and watchdog for provider calls ([a1e5511](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a1e55113bea52caf377a5b26584db1f042556c9f))
+
 ## [1.110.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.110.2...v1.110.3) (2026-07-24)
 
 ### 📦 Code Refactoring

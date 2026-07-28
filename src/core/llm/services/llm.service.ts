@@ -37,6 +37,45 @@ const { streamText, streamObject } = wrapAISDK(ai);
 // Re-export for the existing test import path.
 export { injectOpenRouterProvider } from "./openrouter-fetch";
 
+/** Fallbacks used only when no `ai` config block is registered (test harnesses). */
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_REQUEST_WATCHDOG_MS = 30_000;
+const DEFAULT_REQUEST_DEADLINE_ATTEMPTS = 3;
+/** Grace on top of the budgeted attempts, covering backoff between retries. */
+const DEADLINE_SLACK_MS = 15_000;
+
+/**
+ * True for the abort a request timeout raises, whichever layer raised it — the
+ * OpenAI SDK's `APIConnectionTimeoutError`, undici's `TimeoutError`/
+ * `AbortError` DOMException, or a LangChain wrapper around either. Matched on
+ * name and message because the concrete class differs per transport.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  const name = (error as { name?: string })?.name ?? "";
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    name === "TimeoutError" ||
+    name === "AbortError" ||
+    name === "APIConnectionTimeoutError" ||
+    /aborted due to timeout|timed? ?out|Request was aborted/i.test(message)
+  );
+}
+
+/**
+ * Thrown when a provider call burns its whole deadline without settling.
+ * Distinguishable from a provider error so callers can treat a stall
+ * differently from a refusal if they choose — both are retryable.
+ */
+export class LLMTimeoutError extends Error {
+  constructor(
+    readonly label: string,
+    readonly deadlineMs: number,
+  ) {
+    super(`LLM call "${label}" exceeded its ${Math.round(deadlineMs / 1000)}s deadline`);
+    this.name = "LLMTimeoutError";
+  }
+}
+
 /**
  * Parameters for LLM service calls
  */
@@ -195,6 +234,82 @@ export class LLMService {
     // skip the cache and run normally.
     @Optional() private readonly cache?: LLMCacheService,
   ) {}
+
+  /**
+   * The per-ATTEMPT budget for one provider request. `params.timeout` wins;
+   * otherwise the configured default (`AI_REQUEST_TIMEOUT_MS`).
+   */
+  private attemptTimeoutMs(explicit?: number): number {
+    return explicit ?? this.config.get<ConfigAiInterface>("ai")?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+
+  /**
+   * Runs one provider call under a WATCHDOG and an ABSOLUTE DEADLINE.
+   *
+   * Why this exists (game e51493e4 r002, 2026-07-26): a plotter request was
+   * accepted by the provider and never answered. Nothing in the stack could
+   * interrupt it — no timeout was configured anywhere, the dump file is only
+   * written when the call closes, and the callers' retry/fallback wrappers catch
+   * ERRORS, not promises that never settle. The round froze for 639 seconds with
+   * no log, no dump and no error, and only unfroze because the OpenAI SDK's own
+   * 600s default finally fired. Three such stalls are on record (547s, 514s,
+   * 639s) across two tiers and two models, so this is a property of talking to a
+   * provider, not of one model.
+   *
+   * Two independent guarantees, because the first one can be ignored by an
+   * adapter that owns its own transport:
+   *  - the WATCHDOG logs every `requestWatchdogMs` while the call is pending, so
+   *    a stall is visible AS IT HAPPENS instead of after it resolves;
+   *  - the DEADLINE aborts the signal and rejects with {@link LLMTimeoutError}
+   *    once the call has burned its whole attempt budget, so the promise ALWAYS
+   *    settles and the caller's existing retry/fallback path gets to run.
+   *
+   * The deadline is deliberately the LAST line of defence: it budgets
+   * `requestDeadlineAttempts` attempts, so in normal operation the per-attempt
+   * timeout fires first and the retry escalates the OpenRouter pin onto a
+   * healthy provider — which is the outcome we actually want. Reaching the
+   * deadline means the adapter never honoured its own timeout.
+   */
+  private async runBounded<T>(
+    label: string,
+    attemptTimeoutMs: number,
+    controller: AbortController,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const aiConfig = this.config.get<ConfigAiInterface>("ai");
+    const watchdogMs = aiConfig?.requestWatchdogMs ?? DEFAULT_REQUEST_WATCHDOG_MS;
+    const attempts = aiConfig?.requestDeadlineAttempts ?? DEFAULT_REQUEST_DEADLINE_ATTEMPTS;
+    const deadlineMs = attemptTimeoutMs * Math.max(1, attempts) + DEADLINE_SLACK_MS;
+
+    const startedAt = Date.now();
+    const watchdog =
+      watchdogMs > 0
+        ? setInterval(() => {
+            this.logger.warn(
+              `[${label}] still pending after ${Math.round((Date.now() - startedAt) / 1000)}s ` +
+                `(attempt budget ${Math.round(attemptTimeoutMs / 1000)}s, hard deadline ${Math.round(deadlineMs / 1000)}s)`,
+            );
+          }, watchdogMs)
+        : undefined;
+    watchdog?.unref?.();
+
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        deadline = setTimeout(() => {
+          // Abort first so the in-flight socket is released, then reject — the
+          // caller must not be left waiting on a request nobody is reading.
+          controller.abort();
+          reject(new LLMTimeoutError(label, deadlineMs));
+        }, deadlineMs);
+        deadline.unref?.();
+        work().then(resolve, reject);
+      });
+    } finally {
+      if (watchdog) clearInterval(watchdog);
+      if (deadline) clearTimeout(deadline);
+    }
+  }
 
   /**
    * Records token usage for cost/observability attribution. Never throws —
@@ -545,17 +660,26 @@ export class LLMService {
     let totalCached = 0;
     const parseFallbacks: Array<"tool_calls" | "lenient" | "raw"> = [];
     const warnings: string[] = [];
+    // Bounded from here on: the request carries an abort signal, a watchdog
+    // reports it while it is still open, and the deadline guarantees this
+    // promise settles even if the provider never answers.
+    const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
+    const controller = new AbortController();
+    const label = `${(params.metadata?.nodeName as string) ?? "llm.call"}:${aiConfig.model}`;
     try {
-      const result = await this._invokeOriginal<T>(
-        params,
-        session,
-        (i, o, c) => {
-          totalInput += i;
-          totalOutput += o;
-          totalCached += c;
-        },
-        (kind) => parseFallbacks.push(kind),
-        (w) => warnings.push(w),
+      const result = await this.runBounded(label, attemptTimeoutMs, controller, () =>
+        this._invokeOriginal<T>(
+          params,
+          session,
+          (i, o, c) => {
+            totalInput += i;
+            totalOutput += o;
+            totalCached += c;
+          },
+          (kind) => parseFallbacks.push(kind),
+          (w) => warnings.push(w),
+          { attemptTimeoutMs, signal: controller.signal },
+        ),
       );
       session.close({
         finalStatus: "success",
@@ -598,6 +722,9 @@ export class LLMService {
     addTokens: (input: number, output: number, cached: number) => void,
     addParseFallback: (kind: "tool_calls" | "lenient" | "raw") => void,
     addWarning: (msg: string) => void,
+    // The per-attempt budget and the deadline's abort signal, supplied by
+    // `call()`. Optional so direct callers (tests) keep working unbounded.
+    bounds?: { attemptTimeoutMs?: number; signal?: AbortSignal },
   ): Promise<T & { tokenUsage: { input: number; output: number; cached?: number } }> {
     // Optional: Validate input parameters against schema
     if (params.inputSchema && params.validateInput) {
@@ -623,11 +750,15 @@ export class LLMService {
 
     const prompt = ChatPromptTemplate.fromMessages(template);
 
-    // Get base model
+    // Get base model. The per-attempt budget rides on the model itself: the
+    // OpenAI client is built with it, so each attempt aborts on schedule and the
+    // LangChain retry re-issues (escalating the OpenRouter pin) instead of the
+    // whole call sitting on one dead socket.
     const baseModel = this.modelService.getLLM({
       temperature: params.temperature,
       modelWeight: params.modelWeight,
       disableThinking: params.disableThinking,
+      timeoutMs: bounds?.attemptTimeoutMs ?? params.timeout,
     });
 
     // Build config options for the invocation
@@ -643,6 +774,9 @@ export class LLMService {
     if (params.stopSequences) configOptions.stop = params.stopSequences;
     if (params.metadata) configOptions.metadata = params.metadata;
     if (params.timeout) configOptions.timeout = params.timeout;
+    // The deadline's signal — aborting it releases the in-flight request rather
+    // than leaving an orphaned socket behind a rejected promise.
+    if (bounds?.signal) configOptions.signal = bounds.signal;
 
     // Track token usage across tool iterations
     let totalInputTokens = 0;
@@ -815,14 +949,42 @@ export class LLMService {
 
     session.startIteration("final-structured", conversationMessages);
 
+    // A timed-out attempt is RE-ISSUED ONCE on the same model instance, because
+    // that is what actually recovers a stall: the instance's
+    // `openRouterEscalatingFetch` closure escalates on its second request, so
+    // the retry allows fallbacks and OpenRouter reroutes off the provider that
+    // went quiet. (This is precisely how the 639s stall eventually resolved —
+    // the SDK's 600s abort, then a rerouted retry that answered in 39s. Here it
+    // happens after the attempt budget instead of after ten minutes.)
+    //
+    // A fresh call would NOT get this: `getLLM` builds a new instance per call,
+    // resetting the escalation, so a hard-pinned tier would retry straight back
+    // onto the stalled provider. An abort is the ONLY thing retried here —
+    // provider errors and parse failures stay the caller's business.
+    const invokeStructured = async (): Promise<StructuredOutputResponse<T>> => {
+      try {
+        return (await structuredLlm.invoke(
+          conversationMessages,
+          Object.keys(configOptions).length > 0 ? configOptions : undefined,
+        )) as unknown as StructuredOutputResponse<T>;
+      } catch (error) {
+        // Empty-candidates crash → clear retryable error; never a timeout, so
+        // the reroute logic below is unaffected.
+        throw LLMService.normaliseEmptyResponseError(error);
+      }
+    };
+
     let response: StructuredOutputResponse<T>;
     try {
-      response = (await structuredLlm.invoke(
-        conversationMessages,
-        Object.keys(configOptions).length > 0 ? configOptions : undefined,
-      )) as unknown as StructuredOutputResponse<T>;
+      response = await invokeStructured();
     } catch (error) {
-      throw LLMService.normaliseEmptyResponseError(error);
+      // The deadline's own abort is NOT a stall to reroute around — it means the
+      // whole call is over, so let it through.
+      if (!isTimeoutError(error) || bounds?.signal?.aborted) throw error;
+      const msg = `[LLMService] attempt timed out after ${Math.round((bounds?.attemptTimeoutMs ?? 0) / 1000)}s — re-issuing with provider fallbacks escalated`;
+      console.warn(msg);
+      addWarning(msg);
+      response = await invokeStructured();
     }
 
     // Extract token usage with type guard (includes tool iteration tokens)
@@ -1079,7 +1241,7 @@ export class LLMService {
     // the session open indefinitely. The AbortError surfaces as a rejection on
     // the awaited promises below (caught + logged).
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), params.timeout ?? 60_000);
+    const timeoutId = setTimeout(() => controller.abort(), this.attemptTimeoutMs(params.timeout));
 
     // Schema cast: `streamObject`'s typing is a conditional union over the
     // output mode (`object` / `enum` / `array` / `no-schema`). Our T is always
@@ -1260,7 +1422,7 @@ export class LLMService {
     // Abort the stream if the provider stalls (see streamCall). The AbortError
     // surfaces as a rejection on the awaited promises below (caught + logged).
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), params.timeout ?? 60_000);
+    const timeoutId = setTimeout(() => controller.abort(), this.attemptTimeoutMs(params.timeout));
 
     const streamResult = streamText({
       model,
@@ -1380,6 +1542,8 @@ export class LLMService {
      * systemPrompts/prompt). A hit returns early WITHOUT invoking the provider,
      * so it costs no tokens. Default: false. */
     cacheable?: boolean;
+    /** Per-attempt request budget in ms. Defaults to `ai.requestTimeoutMs`. */
+    timeout?: number;
   }): Promise<T> {
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
 
@@ -1415,6 +1579,7 @@ export class LLMService {
       outputSchemaName: params.tool.name,
     });
 
+    const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
     try {
       const model = this.modelService.getLLM({
         modelWeight,
@@ -1422,6 +1587,7 @@ export class LLMService {
         maxOutputTokens: params.maxOutputTokens,
         frequencyPenalty: params.frequencyPenalty,
         temperature: params.temperature,
+        timeoutMs: attemptTimeoutMs,
       });
       const tool = new DynamicStructuredTool({
         name: params.tool.name,
@@ -1499,7 +1665,19 @@ export class LLMService {
         return null;
       };
 
-      let response = (await bound.invoke(baseMessages)) as AIMessage;
+      // Each provider invocation is bounded independently — the nudge retry is a
+      // second request and gets its own budget, not the leftovers of the first.
+      const invokeBounded = async (messages: BaseMessage[], attempt: string): Promise<AIMessage> => {
+        const controller = new AbortController();
+        return (await this.runBounded(
+          `extractViaTool:${params.tool.name}:${attempt}`,
+          attemptTimeoutMs,
+          controller,
+          () => bound.invoke(messages, { signal: controller.signal }),
+        )) as AIMessage;
+      };
+
+      let response = await invokeBounded(baseMessages, "attempt-1");
       let parsed = tryExtract(response);
 
       // One retry with an explicit nudge — local models frequently comply on a
@@ -1509,7 +1687,7 @@ export class LLMService {
         const nudge = new HumanMessage(
           `You did NOT call the \`${params.tool.name}\` tool. Do not write prose, refusals, or explanations. Respond ONLY by calling \`${params.tool.name}\` with valid arguments now.`,
         );
-        response = (await bound.invoke([...baseMessages, nudge])) as AIMessage;
+        response = await invokeBounded([...baseMessages, nudge], "attempt-2");
         parsed = tryExtract(response);
         if (parsed === null) describe(response, "attempt-2");
       }

@@ -9,6 +9,8 @@ import { CompanyModule } from "../company/company.module";
 import { OAuthAuthorizeController } from "./controllers/oauth.authorize.controller";
 import { OAuthTokenController } from "./controllers/oauth.token.controller";
 import { OAuthManagementController } from "./controllers/oauth.management.controller";
+import { OAuthRegistrationController } from "./controllers/oauth.registration.controller";
+import { OAuthDiscoveryController } from "./controllers/oauth.discovery.controller";
 
 // Services
 import { OAuthService } from "./services/oauth.service";
@@ -33,7 +35,9 @@ import { OAuthRefreshTokenModel } from "./entities/oauth.refresh.token.model";
  *
  * Provides OAuth2 Authorization Server functionality.
  * Implements RFC 6749 (OAuth 2.0), RFC 7636 (PKCE),
- * RFC 7009 (Token Revocation), and RFC 7662 (Token Introspection).
+ * RFC 7009 (Token Revocation), RFC 7662 (Token Introspection),
+ * RFC 7591 (Dynamic Client Registration), RFC 8414 (Authorization
+ * Server Metadata), and RFC 9728 (Protected Resource Metadata).
  *
  * @example
  * // In your app module
@@ -45,7 +49,13 @@ import { OAuthRefreshTokenModel } from "./entities/oauth.refresh.token.model";
  * async getPhotographs() { ... }
  */
 @Module({
-  controllers: [OAuthAuthorizeController, OAuthTokenController, OAuthManagementController],
+  controllers: [
+    OAuthAuthorizeController,
+    OAuthTokenController,
+    OAuthManagementController,
+    OAuthRegistrationController,
+    OAuthDiscoveryController,
+  ],
   providers: [
     // Services
     OAuthService,

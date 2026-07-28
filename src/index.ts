@@ -21,6 +21,9 @@ export * from "./foundations";
 // Agent module exports
 export * from "./agents";
 
+// MCP (Model Context Protocol) module exports
+export * from "./mcp";
+
 // Bootstrap utilities
 export * from "./bootstrap";
 

@@ -19,6 +19,8 @@ const inputSchema = z
   })
   .strict();
 
+export { inputSchema as searchEntitiesInputSchema };
+
 const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
   string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
   number: new Set(["eq", "ne", "in", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),

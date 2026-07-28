@@ -7,6 +7,8 @@ const inputSchema = z.object({
   type: z.string().describe("Entity type name from the graph map."),
 });
 
+export { inputSchema as describeEntityInputSchema };
+
 @Injectable()
 export class DescribeEntityTool {
   constructor(private readonly factory: ToolFactory) {}

@@ -1,4 +1,8 @@
 export { RbacModule } from "./rbac.module";
+export { RbacPermissionModule } from "./rbac-permission.module";
+export { RbacPermissionService } from "./services/rbac-permission.service";
+export type { RbacAction } from "./services/rbac-permission.service";
+export { RbacPermissionRepository } from "./repositories/rbac-permission.repository";
 export { MODULE_USER_PATHS_TOKEN } from "./rbac.constants";
 export { permissionMappingMeta } from "./entities/permission-mapping.meta";
 export { modulePathsMeta } from "./entities/module-paths.meta";

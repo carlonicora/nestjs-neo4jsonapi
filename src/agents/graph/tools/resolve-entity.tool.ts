@@ -8,6 +8,8 @@ const inputSchema = z.object({
   text: z.string().min(1).describe("The user's literal phrase. Pass 'Faby and Carlo' verbatim, not split."),
 });
 
+export { inputSchema as resolveEntityInputSchema };
+
 @Injectable()
 export class ResolveEntityTool {
   constructor(
