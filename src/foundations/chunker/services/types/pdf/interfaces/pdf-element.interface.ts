@@ -95,12 +95,7 @@ export interface PdfListItem {
 }
 
 export type PdfElement =
-  | PdfTextElement
-  | PdfTableElement
-  | PdfImageElement
-  | PdfHeaderElement
-  | PdfParagraphElement
-  | PdfListElement;
+  PdfTextElement | PdfTableElement | PdfImageElement | PdfHeaderElement | PdfParagraphElement | PdfListElement;
 
 export interface PdfContent {
   type: "table" | "paragraphs" | "image" | "header" | "list";

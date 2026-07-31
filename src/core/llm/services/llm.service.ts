@@ -1268,7 +1268,7 @@ export class LLMService {
           const usage = await streamResult.usage;
           const input = usage?.inputTokens ?? 0;
           const output = usage?.outputTokens ?? 0;
-          const cached = usage?.cachedInputTokens ?? 0;
+          const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
           session.recordResponse({
             content: JSON.stringify(finalObject),
@@ -1446,7 +1446,7 @@ export class LLMService {
         const usage = await streamResult.usage;
         const input = usage?.inputTokens ?? 0;
         const output = usage?.outputTokens ?? 0;
-        const cached = usage?.cachedInputTokens ?? 0;
+        const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
         session.recordResponse({
           content: text,

@@ -11,8 +11,7 @@ export type Action = "read" | "create" | "update" | "delete";
  * (scope: true) so they have no module constraint.
  */
 export type PermToken<PathSet extends string = string> =
-  | { action: Action; scope: true }
-  | { action: Action; scope: PathSet };
+  { action: Action; scope: true } | { action: Action; scope: PathSet };
 
 /**
  * Permissions block for a single module in the matrix.

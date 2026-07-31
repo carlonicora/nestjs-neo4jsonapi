@@ -3,14 +3,7 @@ import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.e
 import { StripePrice } from "../../stripe-price/entities/stripe-price.entity";
 
 export type StripeSubscriptionStatus =
-  | "active"
-  | "past_due"
-  | "unpaid"
-  | "canceled"
-  | "incomplete"
-  | "incomplete_expired"
-  | "trialing"
-  | "paused";
+  "active" | "past_due" | "unpaid" | "canceled" | "incomplete" | "incomplete_expired" | "trialing" | "paused";
 
 export type StripeSubscription = Entity & {
   stripeSubscriptionId: string;

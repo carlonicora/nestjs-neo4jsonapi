@@ -382,8 +382,7 @@ export class OperatorService {
 
   private mapResult(finalState: OperatorContextState): OperatorRunResult {
     const interrupts = (finalState as unknown as Record<string, unknown>).__interrupt__ as
-      | Array<{ value?: Partial<OperatorInterruptPayload> }>
-      | undefined;
+      Array<{ value?: Partial<OperatorInterruptPayload> }> | undefined;
 
     if (interrupts && interrupts.length > 0) {
       const payload = interrupts[0]?.value ?? {};
