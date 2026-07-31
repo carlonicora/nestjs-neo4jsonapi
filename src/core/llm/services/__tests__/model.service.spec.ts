@@ -117,28 +117,46 @@ describe("ModelService.getLLM generic OpenAI-compatible providers", () => {
 });
 
 describe("ModelService.getLLM openrouter escalating pin", () => {
-  it("installs an escalating-fetch on the OpenAI client when a region is pinned (no static modelKwargs.provider)", () => {
+  /** Sends one request through the fetch the service installed, and returns the
+   *  body that actually reached the wire. */
+  async function bodySentBy(llm: any): Promise<any> {
+    const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
+    expect(typeof fetchFn).toBe("function");
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    try {
+      await fetchFn("https://x/v1/chat/completions", { method: "POST", body: JSON.stringify({ model: "m" }) });
+      return JSON.parse((spy.mock.calls[0][1] as any).body);
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("pins the provider through the installed fetch when a region is set (no static modelKwargs.provider)", async () => {
     const svc = makeService({
       ai: tier({ provider: "openrouter", region: "together", allowFallbacks: false }),
       aiLite: tier(),
       aiLarge: tier(),
     });
     const llm = svc.getLLM() as any;
-    const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
-    expect(typeof fetchFn).toBe("function");
-    // The provider routing is now injected by the fetch middleware, not via modelKwargs.
+    // The pin survives being wrapped by the unsupported-parameter middleware.
+    expect((await bodySentBy(llm)).provider).toEqual({
+      order: ["together"],
+      allow_fallbacks: false,
+      require_parameters: true,
+    });
+    // The provider routing is injected by the fetch middleware, not via modelKwargs.
     expect(llm.modelKwargs?.provider).toBeUndefined();
   });
 
-  it("does not install a fetch when no region is configured", () => {
+  it("does not pin the provider when no region is configured", async () => {
     const svc = makeService({
       ai: tier({ provider: "openrouter", region: undefined }),
       aiLite: tier(),
       aiLarge: tier(),
     });
-    const llm = svc.getLLM() as any;
-    const fetchFn = llm.clientConfig?.fetch ?? llm.configuration?.fetch;
-    expect(fetchFn).toBeUndefined();
+    // A fetch is ALWAYS installed now (the unsupported-parameter repair
+    // middleware); what must not happen without a region is the routing pin.
+    expect((await bodySentBy(svc.getLLM() as any)).provider).toBeUndefined();
   });
 });
 

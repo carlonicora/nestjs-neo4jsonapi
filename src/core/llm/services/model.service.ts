@@ -17,6 +17,7 @@ import { ModelWeight } from "../enums/model.weight";
 import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 import { RateLimitedEmbedder } from "./rate-limited-embedder";
+import { unsupportedParamFetch } from "./unsupported-param-fetch";
 
 /**
  * Tracks GCP credential temp files written this process so they can be removed
@@ -307,6 +308,10 @@ export class ModelService implements OnModuleInit {
     // tiers that never pass an explicit budget — an unbounded request is the
     // silent-stall bug, whatever the modality.
     const timeoutMs = opts.timeoutMs ?? this.aiConfig?.requestTimeoutMs;
+    // Identifies the deployment whose parameter verdicts we learn (see
+    // unsupportedParamFetch). Endpoint-qualified: the same model name behind two
+    // providers can accept two different parameter sets.
+    const modelKey = [cfg.provider, cfg.instance ?? cfg.url, cfg.model].filter(Boolean).join("|");
 
     const llmConfig: LLMParameters = {
       apiKey: cfg.apiKey || "not-needed",
@@ -382,10 +387,20 @@ export class ModelService implements OnModuleInit {
           azureOpenAIApiInstanceName: cfg.instance,
           azureOpenAIApiDeploymentName: cfg.model,
           azureOpenAIApiVersion: cfg.apiVersion,
+          // The deployment name builds the URL — it never reaches the parameter
+          // mapping. Without `model` LangChain falls back to its "gpt-3.5-turbo"
+          // default and picks the request shape from THAT, sending `max_tokens`
+          // to a gpt-5 deployment (400 — "Use 'max_completion_tokens' instead").
+          // Azure ignores the body's `model`, so this is purely a client-side
+          // signal about which model the deployment actually serves.
+          model: cfg.model,
           temperature,
           ...(timeoutMs ? { timeout: timeoutMs } : {}),
           ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
           ...(llmConfig.modelKwargs ? { modelKwargs: llmConfig.modelKwargs } : {}),
+          // ONLY `fetch` — a `baseURL` here would override the Azure endpoint
+          // that azureOpenAIApiInstanceName/DeploymentName build.
+          configuration: { fetch: unsupportedParamFetch(modelKey) },
         };
         return new AzureChatOpenAI(azureParameters);
       }
@@ -407,6 +422,12 @@ export class ModelService implements OnModuleInit {
 
     return new ChatOpenAI({
       ...llmConfig,
+      configuration: {
+        ...llmConfig.configuration,
+        // Wraps whatever the provider switch installed (the OpenRouter pin
+        // included) rather than replacing it.
+        fetch: unsupportedParamFetch(modelKey, llmConfig.configuration.fetch),
+      },
       // 1 hard attempt + 2 soft retries. Retries escalate the OpenRouter pin
       // (see openRouterEscalatingFetch) so a transient provider error can reroute.
       maxRetries: 2,
