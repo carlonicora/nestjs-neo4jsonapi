@@ -64,11 +64,7 @@ describe("unsupportedParamFetch", () => {
 
   it("repairs several rejected parameters across successive round-trips", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const inner = fakeFetch([
-      rejection("temperature", "unsupported_value"),
-      rejection("frequency_penalty"),
-      ok(),
-    ]);
+    const inner = fakeFetch([rejection("temperature", "unsupported_value"), rejection("frequency_penalty"), ok()]);
 
     const res = await unsupportedParamFetch("azure|a|gpt-5-nano", inner.fn)("u", {
       body: JSON.stringify({ temperature: 0.2, frequency_penalty: 0.1, model: "gpt-5-nano" }),
