@@ -183,6 +183,7 @@ describe("LLMService", () => {
     mockModelService = {
       getLLM: vi.fn().mockReturnValue(mockLLM),
       getResolvedConfig: vi.fn().mockReturnValue(TEST_AI_CONFIG.ai),
+      supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
     } as any;
 
     mockConfigService = {

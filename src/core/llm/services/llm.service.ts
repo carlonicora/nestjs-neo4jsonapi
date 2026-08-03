@@ -12,13 +12,18 @@ import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfac
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { ModelWeight } from "../enums/model.weight";
+import { ReasoningEffort } from "../enums/reasoning.effort";
 import { LLMCacheService, buildCacheKey } from "./llm-cache.service";
 import { ModelService } from "../../llm/services/model.service";
 import {
+  convertZodToDraftJsonSchema,
   convertZodToJsonSchema,
   extractSchemaMetadata,
   formatFieldWithDescription,
+  isStrictStructuredOutputCompatible,
+  makeSchemaStrictCompatible,
   sanitizeSchemaForGemini,
+  stripSyntheticNulls,
 } from "../../llm/utils/schema.utils";
 import { mockFromZodSchema } from "../utils/mock-from-zod";
 import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
@@ -101,6 +106,7 @@ interface LLMCallParams<T> {
   relationshipType?: string; // Optional: Neo4j label of the attributed entity. Persistence is skipped unless both relationshipId and relationshipType are set.
   cacheable?: boolean; // Optional: when true, the response is read from / written to the Redis LLM cache keyed on generic params (modelWeight/temperature/systemPrompts/prompt). A hit returns early WITHOUT invoking the provider — and therefore costs no tokens. Default: false.
   disableThinking?: boolean; // Optional: turn off reasoning/"thinking" for this call (maps to reasoning_effort: "none"). Use for fast structured calls on reasoning-capable models. Default: false.
+  reasoningEffort?: ReasoningEffort; // Optional: how much hidden reasoning the model may spend. Overrides disableThinking and the tier default. Unset = provider default.
 }
 
 /**
@@ -678,7 +684,7 @@ export class LLMService {
           },
           (kind) => parseFallbacks.push(kind),
           (w) => warnings.push(w),
-          { attemptTimeoutMs, signal: controller.signal },
+          { attemptTimeoutMs, signal: controller.signal, label },
         ),
       );
       session.close({
@@ -724,8 +730,12 @@ export class LLMService {
     addWarning: (msg: string) => void,
     // The per-attempt budget and the deadline's abort signal, supplied by
     // `call()`. Optional so direct callers (tests) keep working unbounded.
-    bounds?: { attemptTimeoutMs?: number; signal?: AbortSignal },
+    // `label` is the SAME string the watchdog prints in `runBounded`, threaded
+    // in so a reader can tie an iteration line to the `still pending` lines of
+    // the very same call rather than guessing across two naming schemes.
+    bounds?: { attemptTimeoutMs?: number; signal?: AbortSignal; label?: string },
   ): Promise<T & { tokenUsage: { input: number; output: number; cached?: number } }> {
+    const label = bounds?.label ?? "llm.call";
     // Optional: Validate input parameters against schema
     if (params.inputSchema && params.validateInput) {
       try {
@@ -758,6 +768,7 @@ export class LLMService {
       temperature: params.temperature,
       modelWeight: params.modelWeight,
       disableThinking: params.disableThinking,
+      reasoningEffort: params.reasoningEffort,
       timeoutMs: bounds?.attemptTimeoutMs ?? params.timeout,
     });
 
@@ -782,6 +793,10 @@ export class LLMService {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalCachedTokens = 0;
+    // Declared at method scope so the end-of-call summary compiles — and reports
+    // an honest 0 — on the non-tool path too.
+    let iterationsUsed = 0;
+    let failedToolCalls = 0;
 
     // Build initial messages for the conversation
     const conversationMessages: BaseMessage[] = await prompt.formatMessages({
@@ -819,6 +834,8 @@ export class LLMService {
       // Tool calling loop
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         session.startIteration("tool-loop", conversationMessages);
+        iterationsUsed++;
+        const iterationStartedAt = Date.now();
         // Call model with tools
         let toolResponse: Awaited<ReturnType<typeof modelWithTools.invoke>>;
         try {
@@ -844,6 +861,19 @@ export class LLMService {
           finishReason: (toolResponse as unknown as LLMRawResponse).response_metadata?.finish_reason,
         });
 
+        // One line per iteration, so a slow agentic call is diagnosable from the
+        // log alone: which iteration burned the time, how much of its output was
+        // hidden reasoning, and which tools it asked for.
+        const iterationUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
+        const requestedTools = ((toolResponse as AIMessage).tool_calls ?? []).map((c) => c.name);
+        this.logger.log(
+          `[${label}] tool-loop iteration ${iteration + 1}/${maxIterations} ` +
+            `took ${Math.round((Date.now() - iterationStartedAt) / 1000)}s ` +
+            `in=${iterationUsage?.input_tokens ?? 0} out=${iterationUsage?.output_tokens ?? 0} ` +
+            `reasoning=${iterationUsage?.output_token_details?.reasoning ?? 0} ` +
+            `tools=[${requestedTools.join(",") || "none"}]`,
+        );
+
         // Track token usage
         const responseUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
         if (responseUsage) {
@@ -856,7 +886,16 @@ export class LLMService {
         const toolCalls = (toolResponse as AIMessage).tool_calls ?? [];
 
         if (toolCalls.length === 0) {
-          // No more tool calls - break to get final structured response
+          // No more tool calls — the model has answered in prose. That answer is
+          // already generated and already billed, so KEEP it: pushed into the
+          // conversation it becomes the draft the final structured call
+          // restructures, instead of context the model has to re-derive from the
+          // tool results alone.
+          //
+          // It used to be dropped here. Measured on a legal-research run, that
+          // discarded 20,943 output tokens across 8 iterations — every one of them
+          // a complete answer the next call then regenerated from scratch.
+          conversationMessages.push(toolResponse);
           break;
         }
 
@@ -893,6 +932,7 @@ export class LLMService {
             );
             session.recordToolResult(toolCall.id ?? "", toolCall.name, resultStr);
           } catch (error) {
+            failedToolCalls++;
             console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
             conversationMessages.push(
               new ToolMessage({
@@ -933,6 +973,10 @@ export class LLMService {
     const needsGeminiSanitization = aiConfig.provider === "requesty" && isGeminiModel;
 
     let structuredLlm;
+    // Set only when the schema had to be rewritten for strict mode. It is the schema
+    // BEFORE rewriting, and therefore the source of truth for which nulls the model was
+    // forced to emit — see `normaliseStrictOutput` below.
+    let originalJsonSchema: any | undefined;
     if (needsGeminiSanitization) {
       // Convert Zod to JSON Schema and remove Gemini-incompatible properties
       const jsonSchema = convertZodToJsonSchema(params.outputSchema);
@@ -940,11 +984,46 @@ export class LLMService {
       structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
         includeRaw: true,
       });
+    } else if (!this.modelService.supportsStrictStructuredOutput(params.modelWeight)) {
+      // This provider ignores `strict` (see ModelService.supportsStrictStructuredOutput).
+      // Rewriting would force a null for every optional field and buy no guarantee,
+      // so hand the Zod schema over untouched and let LangChain validate.
+      structuredLlm = baseModel.withStructuredOutput(params.outputSchema, { includeRaw: true });
     } else {
-      // All other providers: use Zod schema directly
-      structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
-        includeRaw: true,
-      });
+      // LangChain hands any Zod schema to `interopZodResponseFormat`, which hardcodes
+      // `strict: true` (passing `strict: false` is ignored). Strict mode demands that
+      // every property appear in `required`, which `.optional()` schemas — most of ours
+      // — do not satisfy, so the provider rejects the request outright.
+      //
+      // Strict mode is the only path that GUARANTEES the payload matches the schema:
+      // measured against live gpt-5-nano, the tool-calling alternative returned a bare
+      // string where the schema declared `assumptions: string[]` in about half of all
+      // runs. So satisfy strict rather than abandon it — but an open record (`z.record`)
+      // has no fixed properties to require and CANNOT be made strict-compatible. Those
+      // fall through to tool calling, which imposes no schema rules and still validates
+      // through Zod. All three branches are decided by the schema, never a model name.
+      const original = convertZodToDraftJsonSchema(params.outputSchema);
+      if (isStrictStructuredOutputCompatible(original)) {
+        // The Zod schema is handed to LangChain, whose zod-v4 interop converts it with
+        // `reused: "ref"`. CAUTION for schema authors: a field chaining metadata onto a
+        // wrapper — `.default(...).describe(...)`, describe LAST — makes that interop
+        // emit `{ $ref, default, description, title }`, which OpenAI strict mode
+        // rejects ("$ref cannot have keywords ...", observed live against Azure
+        // gpt-5-nano). Chain `.describe(...)` on the inner type BEFORE `.default(...)`
+        // and the conversion stays inline and valid.
+        structuredLlm = baseModel.withStructuredOutput(params.outputSchema, { includeRaw: true });
+      } else {
+        const rewritten = makeSchemaStrictCompatible(original);
+        if (isStrictStructuredOutputCompatible(rewritten)) {
+          originalJsonSchema = original;
+          structuredLlm = baseModel.withStructuredOutput(rewritten, { includeRaw: true, strict: true });
+        } else {
+          structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
+            includeRaw: true,
+            method: "functionCalling" as const,
+          });
+        }
+      }
     }
 
     session.startIteration("final-structured", conversationMessages);
@@ -990,6 +1069,15 @@ export class LLMService {
     // Extract token usage with type guard (includes tool iteration tokens)
     const raw = isValidRaw(response.raw) ? response.raw : undefined;
 
+    /**
+     * Undoes the strict-mode rewrite. Strict mode cannot omit a key, so every
+     * originally-optional field came back explicitly null; dropping those nulls
+     * restores absence, which is what `.optional()` expects and what `.default()`
+     * needs in order to apply. A no-op when the schema went through unrewritten.
+     */
+    const normaliseStrictOutput = (value: any): any =>
+      originalJsonSchema ? stripSyntheticNulls(value, originalJsonSchema) : value;
+
     session.recordResponse({
       content: typeof raw?.content === "string" ? raw.content : "",
       tokenUsage: {
@@ -1002,8 +1090,38 @@ export class LLMService {
     const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
     const cached = totalCachedTokens + (raw?.usage_metadata?.input_token_details?.cache_read ?? 0);
 
-    // Enhanced error handling with detailed diagnostics
-    if (!response.parsed) {
+    /**
+     * One summary line per completed call, emitted at EVERY return site — the
+     * degraded runs are the ones worth diagnosing, so a fallback-parsed call must
+     * not be the silent one. `outcome` names the path taken: "clean" is the
+     * provider honouring the structured-output contract, anything else means the
+     * declared schema came back unparseable and was salvaged.
+     */
+    const logCallSummary = (outcome: "clean" | "fallback:tool_calls" | "fallback:lenient" | "fallback:raw") => {
+      this.logger.log(
+        `[${label}] complete (${outcome}): ${iterationsUsed} tool iteration(s), ${failedToolCalls} failed tool call(s), ` +
+          `in=${input} out=${output} cached=${cached} ` +
+          `reasoning=${raw?.usage_metadata?.output_token_details?.reasoning ?? 0}`,
+      );
+    };
+
+    /**
+     * The salvage ladder — tool_calls → lenient tool_calls → raw content — run
+     * whenever the declared schema did not come back cleanly.
+     *
+     * Shared by BOTH failure paths on purpose. LangChain returning no parsed value
+     * is the obvious one; the subtler one is the rewritten-strict branch, where
+     * LangChain parses a raw JSON Schema with a lenient `JsonOutputParser` that
+     * happily "succeeds" on a truncated or markdown-fenced payload. Such a value is
+     * only rejected when it meets the caller's Zod schema, which happens AFTER the
+     * `response.parsed` check — so without this being reachable from there, a
+     * `finish_reason: "length"` truncation would throw a bare `ZodError`, skip every
+     * fallback, and still have been logged as a clean call.
+     *
+     * Neither `logCallSummary` nor `addTokens` runs before this: the outcome is not
+     * known until the ladder settles, and a degraded run must not be recorded as clean.
+     */
+    const salvageParse = (): T & { tokenUsage: { input: number; output: number; cached: number } } => {
       const rawContent = raw?.content || "No content";
       const finishReason = raw?.response_metadata?.finish_reason;
 
@@ -1020,10 +1138,11 @@ export class LLMService {
         addParseFallback("tool_calls");
         try {
           console.warn("[LLMService] Attempting fallback parsing from tool_calls args");
-          const validated = params.outputSchema.parse(toolCallArgs);
+          const validated = params.outputSchema.parse(normaliseStrictOutput(toolCallArgs));
 
           console.warn("[LLMService] Fallback tool_calls parsing succeeded");
 
+          logCallSummary("fallback:tool_calls");
           addTokens(input, output, cached);
           return {
             ...(validated as T),
@@ -1035,7 +1154,7 @@ export class LLMService {
           addParseFallback("lenient");
           try {
             console.warn("[LLMService] Attempting lenient tool_calls parsing (filtering invalid array entries)");
-            const cleanedArgs = { ...toolCallArgs };
+            const cleanedArgs = { ...normaliseStrictOutput(toolCallArgs) };
             const shape = (params.outputSchema as any)?.shape;
 
             if (shape) {
@@ -1065,6 +1184,7 @@ export class LLMService {
             const validated = params.outputSchema.parse(cleanedArgs);
             console.warn("[LLMService] Lenient tool_calls parsing succeeded");
 
+            logCallSummary("fallback:lenient");
             addTokens(input, output, cached);
             return {
               ...(validated as T),
@@ -1081,10 +1201,11 @@ export class LLMService {
       try {
         console.warn("[LLMService] Attempting fallback JSON parsing");
         const manualParse = JSON.parse(rawContent);
-        const validated = params.outputSchema.parse(manualParse);
+        const validated = params.outputSchema.parse(normaliseStrictOutput(manualParse));
 
         console.warn("[LLMService] Fallback parsing succeeded");
 
+        logCallSummary("fallback:raw");
         addTokens(input, output, cached);
         return {
           ...(validated as T),
@@ -1098,11 +1219,35 @@ export class LLMService {
             `Fallback parsing error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
         );
       }
+    };
+
+    // Enhanced error handling with detailed diagnostics
+    if (!response.parsed) return salvageParse();
+
+    let result: T;
+    try {
+      // A rewritten schema was sent as raw JSON Schema, so LangChain parsed it with a
+      // plain JSON parser and did NO Zod validation — strip the synthetic nulls and
+      // validate here, so this path returns exactly what the Zod-schema path returns.
+      result = originalJsonSchema
+        ? (params.outputSchema.parse(normaliseStrictOutput(response.parsed)) as T)
+        : (response.parsed as T);
+    } catch (strictValidationError) {
+      // A lenient parser said yes and the declared schema said no — a truncated or
+      // partial payload, not a clean call. Take the same ladder the no-parsed-value
+      // path takes, so the caller gets the descriptive diagnostic instead of a bare
+      // ZodError, and the summary line reports the outcome that actually happened.
+      console.warn(
+        `[LLMService] structured output parsed but failed schema validation — entering fallback ladder: ` +
+          `${strictValidationError instanceof Error ? strictValidationError.message : String(strictValidationError)}`,
+      );
+      return salvageParse();
     }
 
+    logCallSummary("clean");
     addTokens(input, output, cached);
     return {
-      ...(response.parsed as T),
+      ...result,
       tokenUsage: {
         input,
         output,
@@ -1532,6 +1677,9 @@ export class LLMService {
     relationshipId?: string;
     relationshipType?: string;
     disableThinking?: boolean;
+    /** Optional: how much hidden reasoning the model may spend. Overrides
+     * `disableThinking` and the tier default. Unset = provider default. */
+    reasoningEffort?: ReasoningEffort;
     maxOutputTokens?: number;
     frequencyPenalty?: number;
     /** Sampling temperature. Defaults to getLLM's 0.2 (near-greedy, good for
@@ -1584,6 +1732,7 @@ export class LLMService {
       const model = this.modelService.getLLM({
         modelWeight,
         disableThinking: params.disableThinking,
+        reasoningEffort: params.reasoningEffort,
         maxOutputTokens: params.maxOutputTokens,
         frequencyPenalty: params.frequencyPenalty,
         temperature: params.temperature,

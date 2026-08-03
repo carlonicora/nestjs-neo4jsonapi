@@ -63,6 +63,12 @@ export interface AiTierConfig {
   cachedInputCostPer1MTokens?: number;
   maxOutputTokens?: number;
   /**
+   * Default `reasoning_effort` for this tier, used when a call does not pass its
+   * own. Unset means nothing is sent and the provider default applies. Set per
+   * tier via `AI_REASONING_EFFORT{suffix}`. Mirrors `vision.reasoningEffort`.
+   */
+  reasoningEffort?: string;
+  /**
    * OpenRouter only: whether `region` (sent as `provider.order`) permits routing
    * to other providers on failure/load. `true` (default) makes the pin a mere
    * preference — OpenRouter may reroute to ANY provider, including ones with

@@ -23,7 +23,11 @@ describe("LLMService.call modelWeight", () => {
       }),
     };
     const getResolvedConfig = vi.fn().mockReturnValue({ model: "large-model", provider: "openrouter" });
-    const modelService: any = { getResolvedConfig, getLLM: vi.fn().mockReturnValue(fakeModel) };
+    const modelService: any = {
+      getResolvedConfig,
+      getLLM: vi.fn().mockReturnValue(fakeModel),
+      supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
+    };
 
     const session: any = {
       recordInputs: vi.fn(),
@@ -72,6 +76,7 @@ describe("LLMService.call modelWeight", () => {
     const modelService: any = {
       getResolvedConfig: vi.fn().mockReturnValue({ model: "m", provider: "openrouter" }),
       getLLM: vi.fn().mockReturnValue(fakeModel),
+      supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
     };
     const session: any = {
       recordInputs: vi.fn(),

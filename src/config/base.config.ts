@@ -57,6 +57,7 @@ const buildAiTier = (suffix: string): AiTierConfig => {
     outputCostPer1MTokens: parseFloat(env("AI_OUTPUT_COST_PER_1M_TOKENS") || "0"),
     ...(cachedInputCost ? { cachedInputCostPer1MTokens: parseFloat(cachedInputCost) } : {}),
     ...(maxOutputTokens ? { maxOutputTokens: parseInt(maxOutputTokens, 10) } : {}),
+    reasoningEffort: env("AI_REASONING_EFFORT"),
     allowFallbacks,
     googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),
   };

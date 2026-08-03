@@ -283,3 +283,115 @@ describe("ModelService vertex credentials env contract", () => {
     expect(process.env.GOOGLE_APPLICATION_CREDENTIALS).toBeDefined();
   });
 });
+
+// === TASK 1: reasoning effort + strict structured-output capability ======
+describe("ModelService reasoning effort", () => {
+  const svcWith = (over: any = {}) =>
+    makeService({ ai: tier({ provider: "openrouter", model: "m", ...over }), aiLite: tier(), aiLarge: tier() });
+
+  it("sends nothing when neither the call nor the tier asks for an effort", () => {
+    const llm = svcWith().getLLM() as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
+  });
+
+  it("uses the tier default when the call does not specify", () => {
+    const llm = svcWith({ reasoningEffort: "low" }).getLLM() as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("low");
+  });
+
+  it("lets the per-call value win over the tier default", () => {
+    const llm = svcWith({ reasoningEffort: "low" }).getLLM({ reasoningEffort: "high" }) as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("high");
+  });
+
+  it("lets a per-call disableThinking win over a tier default (per-call beats config)", () => {
+    const llm = svcWith({ reasoningEffort: "low" }).getLLM({ disableThinking: true }) as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("none");
+  });
+
+  it("keeps disableThinking working as an alias for none", () => {
+    const llm = svcWith().getLLM({ disableThinking: true }) as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("none");
+  });
+
+  it("lets an explicit reasoningEffort override disableThinking", () => {
+    const llm = svcWith().getLLM({ disableThinking: true, reasoningEffort: "medium" }) as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("medium");
+  });
+
+  it("ignores an unrecognised configured effort instead of putting it on the wire", () => {
+    // `AI_REASONING_EFFORT` arrives as a free-form string, so a typo would otherwise
+    // be cast straight through — costing a 400 the fetch middleware then remembers.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const llm = svcWith({ reasoningEffort: "lwo" }).getLLM() as any;
+
+    expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("unrecognised reasoning effort"));
+    warn.mockRestore();
+  });
+
+  it("does not warn when the tier simply has no configured effort", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    svcWith().getLLM();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("still honours a per-call effort when the tier default is unrecognised", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const llm = svcWith({ reasoningEffort: "lwo" }).getLLM({ reasoningEffort: "low" }) as any;
+    expect(llm.modelKwargs?.reasoning_effort).toBe("low");
+    // The per-call value short-circuits the `??` chain, so the bad config is never read.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("ModelService reasoning effort reaches EVERY provider branch", () => {
+  // Regression: the effort used to be spread into the generic `new ChatOpenAI({...})`
+  // at the bottom of buildChatModel, which the `azure` branch never reaches because it
+  // returns early. `reasoningEffort` was therefore silently dropped on Azure — the one
+  // provider this project runs — while every test here passed, because they all built
+  // an `openrouter` tier. Assert each branch explicitly.
+  const providers = [
+    { provider: "azure", instance: "inst", apiVersion: "2024-12-01-preview" },
+    { provider: "openrouter", url: "https://openrouter.ai/api/v1" },
+    { provider: "ollama", url: "http://localhost:11434/v1" },
+    { provider: "llamacpp", url: "http://localhost:8033/v1" },
+    { provider: "openai", url: "https://api.openai.com/v1" },
+  ];
+
+  for (const over of providers) {
+    it(`sends reasoning_effort on the "${over.provider}" branch`, () => {
+      const svc = makeService({ ai: tier(over), aiLite: tier(), aiLarge: tier() });
+      const llm = svc.getLLM({ reasoningEffort: "low" }) as any;
+      expect(llm.modelKwargs?.reasoning_effort).toBe("low");
+    });
+
+    it(`sends nothing on the "${over.provider}" branch when no effort is asked for`, () => {
+      const svc = makeService({ ai: tier(over), aiLite: tier(), aiLarge: tier() });
+      const llm = svc.getLLM() as any;
+      expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
+    });
+  }
+});
+
+describe("ModelService.supportsStrictStructuredOutput", () => {
+  it("is true for OpenAI-compatible providers", () => {
+    for (const provider of ["azure", "openrouter", "ollama", "llamacpp", "requesty", "openai"]) {
+      const svc = makeService({ ai: tier({ provider }), aiLite: tier(), aiLarge: tier() });
+      expect(svc.supportsStrictStructuredOutput()).toBe(true);
+    }
+  });
+
+  it("is false for vertex, which ignores the strict flag entirely", () => {
+    const svc = makeService({ ai: tier({ provider: "vertex" }), aiLite: tier(), aiLarge: tier() });
+    expect(svc.supportsStrictStructuredOutput()).toBe(false);
+  });
+
+  it("resolves per weight, so a vertex lite tier is reported independently", () => {
+    const svc = makeService({ ai: tier({ provider: "azure" }), aiLite: tier({ provider: "vertex" }), aiLarge: tier() });
+    expect(svc.supportsStrictStructuredOutput()).toBe(true);
+    expect(svc.supportsStrictStructuredOutput(ModelWeight.Lite)).toBe(false);
+  });
+});

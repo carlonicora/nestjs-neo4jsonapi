@@ -19,6 +19,17 @@
  * This middleware removes the named parameter, retries once per rejection, and
  * REMEMBERS the verdict per model for the rest of the process, so only the first
  * call to a given deployment pays the extra round-trip.
+ *
+ * The two codes are remembered at DIFFERENT scopes, because they say different
+ * things. `unsupported_parameter` means the deployment does not know the parameter
+ * at all, so it is dropped from every later request. `unsupported_value` means only
+ * the value sent was refused — the parameter itself is fine. Remembering the latter
+ * as a parameter-level drop is actively harmful: one call sending
+ * `reasoning_effort: "none"` to a deployment that only knows low/medium/high would
+ * otherwise strip `reasoning_effort` from EVERY later request, silently discarding
+ * the `"low"` latency win the triage/retrieval/citation-audit nodes depend on. So a
+ * value rejection is memoised against the (parameter, value) pair, and a later
+ * request carrying a different value for the same parameter is still sent.
  */
 
 /**
@@ -38,14 +49,30 @@ const MAX_REPAIRS = 6;
 
 const UNSUPPORTED_CODES = new Set(["unsupported_parameter", "unsupported_value"]);
 
+/** What the provider refused, and how widely that refusal generalises. */
+interface Verdict {
+  /** Rename target when the parameter has a documented successor, else null (drop). */
+  successor: string | null;
+  /**
+   * Set only for an `unsupported_value` rejection: the exact values (JSON-serialised)
+   * the deployment refused. The verdict then applies ONLY to a request carrying one
+   * of them. `undefined` means the rejection was parameter-level and applies to every
+   * value.
+   */
+  values?: Set<string>;
+}
+
+/** Canonical key for a parameter value, so `"none"` and `0.2` compare reliably. */
+const valueKey = (value: unknown): string => JSON.stringify(value ?? null);
+
 /**
  * Learned verdicts, keyed by model. Module-level on purpose: `ModelService`
  * builds a fresh chat model per call, so anything held on the instance would
  * re-learn (and re-pay the failed round-trip) on every request.
  *
- * model key → (rejected parameter → successor name, or null to drop it)
+ * model key → (rejected parameter → verdict)
  */
-const learned = new Map<string, Map<string, string | null>>();
+const learned = new Map<string, Map<string, Verdict>>();
 
 /** Test seam — clears everything learned so far. */
 export function resetLearnedUnsupportedParams(): void {
@@ -60,11 +87,14 @@ function applyLearned(bodyStr: string, modelKey: string): string {
   try {
     const body = JSON.parse(bodyStr);
     let changed = false;
-    for (const [param, successor] of verdicts) {
+    for (const [param, verdict] of verdicts) {
       if (!(param in body)) continue;
       const value = body[param];
+      // A value-scoped verdict must not touch a request carrying a value the
+      // deployment has never refused — that value may well be accepted.
+      if (verdict.values && !verdict.values.has(valueKey(value))) continue;
       delete body[param];
-      if (successor) body[successor] = value;
+      if (verdict.successor) body[verdict.successor] = value;
       changed = true;
     }
     return changed ? JSON.stringify(body) : bodyStr;
@@ -73,10 +103,31 @@ function applyLearned(bodyStr: string, modelKey: string): string {
   }
 }
 
+/** Records a verdict, widening an existing entry rather than narrowing it: a
+ *  parameter-level rejection always supersedes value-level ones, and a second
+ *  rejected value joins the set instead of replacing it. */
+function rememberVerdict(modelKey: string, param: string, verdict: Verdict): void {
+  const verdicts = learned.get(modelKey) ?? new Map<string, Verdict>();
+  const existing = verdicts.get(param);
+  if (existing && !verdict.values) {
+    // Parameter-level wins outright.
+    verdicts.set(param, verdict);
+  } else if (existing?.values && verdict.values) {
+    for (const value of verdict.values) existing.values.add(value);
+  } else if (!existing) {
+    verdicts.set(param, verdict);
+  }
+  // existing is parameter-level and the new verdict is value-level → already covered.
+  learned.set(modelKey, verdicts);
+}
+
 /** Reads the rejected-parameter verdict out of a 400 payload. Returns undefined
  *  when the error is anything other than a rejected top-level parameter that the
  *  request actually carried — we only repair what we can prove we caused. */
-function readVerdict(responseText: string, bodyStr: string): { param: string; successor: string | null } | undefined {
+function readVerdict(
+  responseText: string,
+  bodyStr: string,
+): { param: string; verdict: Verdict; rejectedValue: unknown } | undefined {
   let param: unknown;
   let code: unknown;
   try {
@@ -88,14 +139,23 @@ function readVerdict(responseText: string, bodyStr: string): { param: string; su
   }
   if (typeof param !== "string" || !param || typeof code !== "string" || !UNSUPPORTED_CODES.has(code)) return undefined;
 
+  let rejectedValue: unknown;
   try {
     const body = JSON.parse(bodyStr);
     if (!(param in body)) return undefined;
+    rejectedValue = body[param];
   } catch {
     return undefined;
   }
 
-  return { param, successor: PARAM_SUCCESSORS[param] ?? null };
+  // The successor rename applies to both codes: a rejected `max_tokens` value still
+  // means the cap belongs in `max_completion_tokens`, never that it should vanish.
+  const successor = PARAM_SUCCESSORS[param] ?? null;
+  return {
+    param,
+    rejectedValue,
+    verdict: code === "unsupported_value" ? { successor, values: new Set([valueKey(rejectedValue)]) } : { successor },
+  };
 }
 
 /**
@@ -134,12 +194,14 @@ export function unsupportedParamFetch(modelKey: string, inner?: typeof fetch): t
         });
       }
 
-      const verdicts = learned.get(modelKey) ?? new Map<string, string | null>();
-      verdicts.set(verdict.param, verdict.successor);
-      learned.set(modelKey, verdicts);
+      rememberVerdict(modelKey, verdict.param, verdict.verdict);
+      const scope = verdict.verdict.values
+        ? `'${verdict.param}: ${JSON.stringify(verdict.rejectedValue)}'`
+        : `'${verdict.param}'`;
       console.warn(
-        `[ModelService] "${modelKey}" rejected '${verdict.param}' — ` +
-          `${verdict.successor ? `sending '${verdict.successor}' instead` : "dropping it"} for this and later calls`,
+        `[ModelService] "${modelKey}" rejected ${scope} — ` +
+          `${verdict.verdict.successor ? `sending '${verdict.verdict.successor}' instead` : "dropping it"} ` +
+          `for this and later calls${verdict.verdict.values ? " that send the same value" : ""}`,
       );
 
       body = applyLearned(body, modelKey);

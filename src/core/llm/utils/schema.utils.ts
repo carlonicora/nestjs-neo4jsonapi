@@ -28,12 +28,53 @@ export interface SchemaMetadata {
  * @returns JSON Schema object
  */
 export function convertZodToJsonSchema(zodSchema: any): any {
-  // Use Zod 4's native JSON Schema conversion
-  return z.toJSONSchema(zodSchema, {
-    target: "openapi-3.0", // Use OpenAPI 3.0 format (compatible with OpenAI/Gemini)
-    cycles: "ref", // Handle cycles with $defs
-    unrepresentable: "any", // Unrepresentable types become {} instead of throwing
-  });
+  // JSON round-trip: strips the hidden `~standard` property Zod attaches to its
+  // output, which otherwise makes LangChain re-derive the schema instead of
+  // forwarding it — see convertZodToDraftJsonSchema below for the full account.
+  return JSON.parse(
+    JSON.stringify(
+      z.toJSONSchema(zodSchema, {
+        target: "openapi-3.0", // Use OpenAPI 3.0 format (compatible with OpenAI/Gemini)
+        cycles: "ref", // Handle cycles with $defs
+        unrepresentable: "any", // Unrepresentable types become {} instead of throwing
+      }),
+    ),
+  );
+}
+
+/**
+ * Converts a Zod schema to a draft 2020-12 JSON Schema — the dialect OpenAI's
+ * structured outputs expect.
+ *
+ * Distinct from {@link convertZodToJsonSchema}, which targets OpenAPI 3.0 for
+ * Gemini. The difference matters for strict mode: OpenAPI 3.0 expresses "may be
+ * null" as `nullable: true`, which OpenAI ignores, whereas draft 2020-12 uses a
+ * real `{ type: "null" }` branch — the form {@link makeSchemaStrictCompatible}
+ * produces.
+ *
+ * @param zodSchema - The Zod schema to convert
+ * @returns JSON Schema in draft 2020-12
+ */
+export function convertZodToDraftJsonSchema(zodSchema: any): any {
+  // The JSON round-trip is NOT cosmetic. Zod's `toJSONSchema` output carries a hidden
+  // non-enumerable `~standard` property (the Standard Schema V1 interface). When such
+  // an object reaches LangChain's `withStructuredOutput`, its `toJsonSchema` helper
+  // detects `~standard` and RE-DERIVES the schema via
+  // `schema["~standard"].jsonSchema.input({ target: "draft-07" })` — which demotes
+  // defaulted fields out of `required` and drops `additionalProperties: false`, so
+  // OpenAI strict mode rejects the request ("'additionalProperties' is required to be
+  // supplied and to be false", observed live against Azure gpt-5-nano). Serialising
+  // strips every non-JSON property, guaranteeing the schema LangChain forwards is
+  // byte-for-byte the schema this function returns.
+  return JSON.parse(
+    JSON.stringify(
+      z.toJSONSchema(zodSchema, {
+        target: "draft-2020-12",
+        cycles: "ref",
+        unrepresentable: "any",
+      }),
+    ),
+  );
 }
 
 /**
@@ -274,4 +315,184 @@ export function sanitizeSchemaForGemini(schema: any): any {
   }
 
   return sanitized;
+}
+
+/**
+ * Reports whether a schema can be sent through OpenAI's STRICT structured-output
+ * mode (`response_format: { type: "json_schema", strict: true }`).
+ *
+ * Strict mode has two rules that ordinary Zod schemas routinely break:
+ *   1. every key in `properties` must also appear in `required` — strict mode
+ *      cannot express an absent field, only a null one, so `.optional()` and
+ *      `.default()` both violate it;
+ *   2. `additionalProperties` must be `false` — so open records cannot qualify.
+ *
+ * This matters because LangChain hands any Zod schema to `interopZodResponseFormat`,
+ * which hardcodes `strict: true`; passing `strict: false` does nothing. A schema
+ * that fails these rules must therefore go through tool/function calling instead,
+ * which imposes neither rule AND keeps LangChain's Zod validation of the result.
+ *
+ * Deciding from the schema — rather than from a model or provider name — means no
+ * model taxonomy lives in this codebase, and any schema authored strict-clean later
+ * automatically earns the stronger guaranteed-conformance path.
+ *
+ * @param schema - JSON Schema object (typically from {@link convertZodToJsonSchema})
+ * @returns true when strict mode would accept the schema
+ */
+export function isStrictStructuredOutputCompatible(schema: any): boolean {
+  if (!schema || typeof schema !== "object") return true;
+
+  if (Array.isArray(schema)) return schema.every((entry) => isStrictStructuredOutputCompatible(entry));
+
+  // A `$ref` cannot be verified from here (nothing in this walk resolves it), and the
+  // rewrite in {@link makeSchemaStrictCompatible} does not follow refs either — so a
+  // ref-bearing schema must take the tool-calling path, not strict mode. This also
+  // matters because OpenAI strict mode rejects a `$ref` carrying ANY sibling keyword
+  // ("$ref cannot have keywords {...}", observed live against Azure gpt-5-nano), the
+  // exact shape `convertZodToDraftJsonSchema` emits for recursive schemas
+  // (`cycles: "ref"`).
+  if (typeof schema.$ref === "string") return false;
+
+  if (schema.type === "object") {
+    // Checked before `properties`, because an open record (`z.record`) produces an
+    // object node with NO `properties` at all — only `additionalProperties` — and
+    // strict mode still rejects it.
+    if (schema.additionalProperties !== false) return false;
+
+    const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    for (const key of Object.keys(schema.properties ?? {})) {
+      if (!required.has(key)) return false;
+    }
+  }
+
+  for (const key of ["properties", "$defs", "definitions"]) {
+    const node = schema[key];
+    if (node && typeof node === "object") {
+      if (!Object.values(node).every((value) => isStrictStructuredOutputCompatible(value))) return false;
+    }
+  }
+
+  for (const key of ["items", "additionalProperties", "not"]) {
+    if (schema[key] && typeof schema[key] === "object") {
+      if (!isStrictStructuredOutputCompatible(schema[key])) return false;
+    }
+  }
+
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
+    if (Array.isArray(schema[key])) {
+      if (!schema[key].every((entry: any) => isStrictStructuredOutputCompatible(entry))) return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Rewrites a JSON Schema so OpenAI's STRICT structured-output mode accepts it.
+ *
+ * Strict mode cannot express "this key may be absent" — only "this key may be
+ * null". So every property becomes required, and any property that was NOT
+ * originally required is widened to `anyOf: [<original>, { type: "null" }]`.
+ * `additionalProperties` is closed on every object.
+ *
+ * This is the request half of a pair: {@link stripSyntheticNulls} undoes it on the
+ * response, so the caller's original Zod schema still validates the result.
+ *
+ * Why bother, rather than routing non-strict schemas to tool calling: strict mode
+ * is the only path that GUARANTEES the payload matches the schema. Measured against
+ * a live gpt-5-nano deployment, tool calling returned a string where the schema
+ * declared `assumptions: string[]` in roughly half of all runs; strict mode cannot
+ * do that by construction.
+ *
+ * @param schema - JSON Schema object (draft 2020-12 shape)
+ * @returns A structurally equivalent schema that satisfies strict mode
+ */
+export function makeSchemaStrictCompatible(schema: any): any {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map((entry) => makeSchemaStrictCompatible(entry));
+
+  const strict = { ...schema };
+
+  for (const key of ["$defs", "definitions"]) {
+    if (strict[key] && typeof strict[key] === "object") {
+      strict[key] = Object.fromEntries(
+        Object.entries(strict[key]).map(([name, value]) => [name, makeSchemaStrictCompatible(value)]),
+      );
+    }
+  }
+
+  if (strict.items && typeof strict.items === "object") strict.items = makeSchemaStrictCompatible(strict.items);
+
+  for (const key of ["anyOf", "oneOf", "allOf"]) {
+    if (Array.isArray(strict[key])) strict[key] = strict[key].map((entry: any) => makeSchemaStrictCompatible(entry));
+  }
+
+  if (strict.properties && typeof strict.properties === "object") {
+    const wasRequired = new Set(Array.isArray(strict.required) ? strict.required : []);
+    strict.properties = Object.fromEntries(
+      Object.entries(strict.properties).map(([name, value]) => {
+        const child = makeSchemaStrictCompatible(value);
+        // Only widen what was optional — a field the author already declared
+        // nullable keeps its own shape.
+        return [name, wasRequired.has(name) ? child : { anyOf: [child, { type: "null" }] }];
+      }),
+    );
+    strict.required = Object.keys(strict.properties);
+    strict.additionalProperties = false;
+  }
+
+  return strict;
+}
+
+/**
+ * Removes the nulls that {@link makeSchemaStrictCompatible} forced the model to emit,
+ * so a value produced under strict mode validates against the ORIGINAL schema again.
+ *
+ * Only keys the transform actually widened are stripped: a key the author declared
+ * `.nullable()` was already required, so its null is meaningful and is preserved.
+ * Stripping restores absence, which is what `.optional()` expects and what `.default()`
+ * needs in order to apply its default.
+ *
+ * NOT HANDLED — four node kinds this walk never reaches, where an author-intended
+ * null could be dropped (or a synthetic one kept). None occur in this repo today, and
+ * each would need BOTH this function and {@link isStrictStructuredOutputCompatible}'s
+ * traversal extended before it could be trusted:
+ *
+ *   1. `.nullable().optional()` — the key is absent from `required`, so its null is
+ *      read as synthetic and stripped, even though the author declared null to be a
+ *      legitimate value. (`.nullable()` alone is safe: it stays required.)
+ *   2. Nulls inside `anyOf` / `oneOf` branches — the walk descends only through
+ *      `properties` and `items`, so a null-bearing union branch is never visited and
+ *      its object properties are compared against no schema at all.
+ *   3. Nulls behind `$ref` / `$defs` — there is no ref resolution here, so a
+ *      referenced subschema contributes no `required` set and every null under it
+ *      survives, synthetic or not.
+ *   4. Tuples / `prefixItems` — only the single `items` schema is followed, so a
+ *      positional tuple's element schemas are never applied.
+ *
+ * @param value - The parsed model output
+ * @param originalSchema - The schema BEFORE strictification (the source of truth for
+ *   which keys were genuinely required)
+ */
+export function stripSyntheticNulls(value: any, originalSchema: any): any {
+  if (!originalSchema || typeof originalSchema !== "object" || value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    const items = originalSchema.items;
+    return items ? value.map((entry) => stripSyntheticNulls(entry, items)) : value;
+  }
+
+  if (typeof value !== "object") return value;
+
+  const properties = originalSchema.properties;
+  if (!properties || typeof properties !== "object") return value;
+
+  const wasRequired = new Set(Array.isArray(originalSchema.required) ? originalSchema.required : []);
+  const cleaned: Record<string, any> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    // Synthetically nullable AND null → the model is saying "absent".
+    if (entry === null && !wasRequired.has(key) && key in properties) continue;
+    cleaned[key] = key in properties ? stripSyntheticNulls(entry, properties[key]) : entry;
+  }
+  return cleaned;
 }

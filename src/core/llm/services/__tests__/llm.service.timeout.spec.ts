@@ -60,6 +60,7 @@ function harness(opts: { invoke: () => Promise<any>; ai?: Record<string, unknown
   const modelService = {
     getResolvedConfig: () => ({ model: "m", provider: "openrouter" }),
     getLLM: vi.fn().mockReturnValue(model),
+    supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
   } as any;
   const dumper = {
     startSession: () => ({

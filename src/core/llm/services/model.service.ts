@@ -14,6 +14,7 @@ import OpenAI, { AzureOpenAI } from "openai";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { ModelWeight } from "../enums/model.weight";
+import { ReasoningEffort } from "../enums/reasoning.effort";
 import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 import { RateLimitedEmbedder } from "./rate-limited-embedder";
@@ -97,6 +98,34 @@ export function validateAiUrl(url: string, provider: string): void {
   }
 }
 
+/** The complete set of values {@link ReasoningEffort} allows. */
+const REASONING_EFFORTS: ReadonlySet<string> = new Set<ReasoningEffort>(["none", "minimal", "low", "medium", "high"]);
+
+/**
+ * Narrows a CONFIG-sourced reasoning effort to the allowed set.
+ *
+ * `AI_REASONING_EFFORT` reaches this code as a free-form string, and a typo
+ * (`AI_REASONING_EFFORT=lwo`) would otherwise be cast straight onto the wire. The
+ * provider answers 400 `unsupported_value`, which `unsupportedParamFetch` then
+ * remembers for that (parameter, value) pair — one wasted round-trip per distinct
+ * typo, and an effort silently degraded to the provider default for the rest of the
+ * process. Rejecting it here keeps the misconfiguration visible and costs nothing.
+ *
+ * Per-call values are NOT routed through this: those are typed `ReasoningEffort` at
+ * the call site, so the compiler already guarantees them.
+ *
+ * @returns the effort when recognised, otherwise undefined (tier default unset).
+ */
+export function normaliseConfiguredReasoningEffort(value: unknown): ReasoningEffort | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "string" && REASONING_EFFORTS.has(value)) return value as ReasoningEffort;
+  console.warn(
+    `[ModelService] ignoring unrecognised reasoning effort ${JSON.stringify(value)} — ` +
+      `expected one of ${[...REASONING_EFFORTS].join(", ")}`,
+  );
+  return undefined;
+}
+
 interface LLMParameters {
   apiKey: string;
   temperature: number;
@@ -168,6 +197,24 @@ export class ModelService implements OnModuleInit {
   }
 
   /**
+   * Whether this tier's provider honours OpenAI's STRICT structured-output mode.
+   *
+   * Only the OpenAI-compatible chat-completions family enforces `strict`.
+   * `ChatGoogleBase.withStructuredOutput` ignores the flag outright, so on Vertex
+   * a strict-shaped schema costs the model an explicit null for every optional
+   * field and returns no guarantee in exchange — verified against a live
+   * gemini-2.5-flash-lite deployment, which accepts both shapes.
+   *
+   * Answered from the tier's PROVIDER, which this service already owns, rather
+   * than `instanceof ChatOpenAI`: `instanceof` fails silently when two copies of
+   * `@langchain/openai` resolve, which is exactly the dual-instance hazard the
+   * July 2026 dependency sweep removed.
+   */
+  supportsStrictStructuredOutput(weight?: ModelWeight): boolean {
+    return this.getResolvedConfig(weight).provider !== "vertex";
+  }
+
+  /**
    * Gets a configured LLM instance based on the current config.
    *
    * Supports multiple providers:
@@ -194,7 +241,12 @@ export class ModelService implements OnModuleInit {
     maxOutputTokens?: number;
     frequencyPenalty?: number;
     modelWeight?: ModelWeight;
+    /**
+     * @deprecated Use `reasoningEffort: "none"` instead. Kept as a working alias
+     * for backward compatibility — a published-library API is never removed.
+     */
     disableThinking?: boolean;
+    reasoningEffort?: ReasoningEffort;
     /** Per-attempt request budget in ms. Defaults to `ai.requestTimeoutMs`. */
     timeoutMs?: number;
   }): BaseChatModel {
@@ -205,12 +257,23 @@ export class ModelService implements OnModuleInit {
     const temperature = params?.temperature ?? 0.2;
     const cfg = this.getResolvedConfig(params?.modelWeight);
     const maxOutputTokens = params?.maxOutputTokens ?? cfg.maxOutputTokens;
+    // Precedence (Shared Contracts, plan 2026-07-31-llm-latency-and-structured-output):
+    // an explicit per-call `reasoningEffort` wins; failing that, the equally
+    // explicit per-call `disableThinking` (the older boolean spelling of "none")
+    // wins over the tier default — a per-call signal must never be silently
+    // overridden by config, matching `temperature`/`maxOutputTokens` elsewhere in
+    // this method. Only when the call passes neither does the tier default apply.
+    const resolvedReasoningEffort: ReasoningEffort | undefined =
+      params?.reasoningEffort ??
+      (params?.disableThinking ? "none" : undefined) ??
+      normaliseConfiguredReasoningEffort(cfg.reasoningEffort);
     return this.buildChatModel(cfg, {
       temperature,
       maxOutputTokens,
       frequencyPenalty: params?.frequencyPenalty,
       credentialFileTag: "llm",
       disableThinking: params?.disableThinking,
+      reasoningEffort: resolvedReasoningEffort,
       timeoutMs: params?.timeoutMs ?? this.aiConfig.requestTimeoutMs,
     });
   }
@@ -244,10 +307,10 @@ export class ModelService implements OnModuleInit {
     // deployments. Ignored for non-reasoning models.
     const visionModelLower = (visionConfig.model || "").toLowerCase();
     const isReasoningVisionModel = visionModelLower.includes("gpt-5") || /(^|\/)o\d/.test(visionModelLower);
-    const modelKwargs =
-      isReasoningVisionModel && visionConfig.reasoningEffort
-        ? { reasoning_effort: visionConfig.reasoningEffort }
-        : undefined;
+    // Config-sourced, so validated exactly like the chat tiers' effort — the vision
+    // block reads its own `VISION_REASONING_EFFORT` and is just as typo-prone.
+    const visionEffort = normaliseConfiguredReasoningEffort(visionConfig.reasoningEffort);
+    const modelKwargs = isReasoningVisionModel && visionEffort ? { reasoning_effort: visionEffort } : undefined;
 
     return this.buildChatModel(visionConfig, { temperature, credentialFileTag: "vision", modelKwargs });
   }
@@ -290,7 +353,13 @@ export class ModelService implements OnModuleInit {
       maxOutputTokens?: number;
       frequencyPenalty?: number;
       credentialFileTag: "llm" | "vision" | "audio";
+      /**
+       * @deprecated Use `reasoningEffort: "none"` instead. Kept as a working
+       * alias for backward compatibility — a published-library API is never
+       * removed.
+       */
       disableThinking?: boolean;
+      reasoningEffort?: ReasoningEffort;
       // Raw chat-completions modelKwargs (e.g. { reasoning_effort } for gpt-5 /
       // o-series). Merged into the final ChatOpenAI / Azure params.
       modelKwargs?: Record<string, unknown>;
@@ -313,6 +382,21 @@ export class ModelService implements OnModuleInit {
     // providers can accept two different parameter sets.
     const modelKey = [cfg.provider, cfg.instance ?? cfg.url, cfg.model].filter(Boolean).join("|");
 
+    // Resolved ONCE, into `llmConfig.modelKwargs`, so every provider branch below
+    // picks it up from the same place.
+    //
+    // It used to be spread into the generic `new ChatOpenAI({...})` at the bottom
+    // of this method — which the `azure` branch never reaches, because it returns
+    // early. The effect was that `reasoningEffort` was silently dropped on Azure,
+    // i.e. on the one provider this project actually runs, while the unit tests
+    // (which build an `openrouter` tier) all passed. Any per-request parameter
+    // added here must go into `llmConfig`, never into a single branch's return.
+    const effort = opts.reasoningEffort ?? (opts.disableThinking ? "none" : undefined);
+    const modelKwargs = {
+      ...(opts.modelKwargs ?? {}),
+      ...(effort ? { reasoning_effort: effort } : {}),
+    };
+
     const llmConfig: LLMParameters = {
       apiKey: cfg.apiKey || "not-needed",
       temperature,
@@ -320,7 +404,7 @@ export class ModelService implements OnModuleInit {
       configuration: {
         baseURL: cfg.url || "http://localhost:8033/v1",
       },
-      ...(opts.modelKwargs ? { modelKwargs: opts.modelKwargs } : {}),
+      ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
       ...(timeoutMs ? { timeout: timeoutMs } : {}),
     };
 
@@ -437,7 +521,6 @@ export class ModelService implements OnModuleInit {
       // memory extractor emitting `{op:"ADD",...}` endlessly). Maps to OpenAI's
       // `frequency_penalty`, honoured by the Ollama/llamacpp OpenAI-compatible APIs.
       ...(typeof frequencyPenalty === "number" ? { frequencyPenalty } : {}),
-      ...(opts.disableThinking ? { modelKwargs: { ...(llmConfig.modelKwargs ?? {}), reasoning_effort: "none" } } : {}),
     });
   }
 
