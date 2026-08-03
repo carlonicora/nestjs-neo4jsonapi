@@ -1,6 +1,7 @@
 import { BullModule } from "@nestjs/bullmq";
 import { forwardRef, Module, OnModuleInit } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
+import { AuthCompanyController } from "./controllers/auth.company.controller";
 import { AuthController } from "./controllers/auth.controller";
 
 import { modelRegistry } from "../../common/registries/registry";
@@ -26,7 +27,7 @@ import { PendingRegistrationService } from "./services/pending-registration.serv
 import { TrialQueueService } from "./services/trial-queue.service";
 
 @Module({
-  controllers: [AuthController, AuthDiscordController, AuthGoogleController],
+  controllers: [AuthCompanyController, AuthController, AuthDiscordController, AuthGoogleController],
   providers: [
     AuthService,
     AuthRepository,
