@@ -51,7 +51,7 @@ export const UserDescriptor = defineEntity<User>()({
     name: { type: "string" },
     title: { type: "string" },
     bio: { type: "string" },
-    password: { type: "string", excludeFromJsonApi: true },
+    password: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
     avatar: {
       type: "string",
       transform: async (data, services) => {
@@ -65,7 +65,8 @@ export const UserDescriptor = defineEntity<User>()({
     isActive: { type: "boolean", meta: true },
     lastLogin: { type: "datetime", meta: true },
     isDeleted: { type: "boolean", meta: true },
-    code: { type: "string" },
+    // one-time invitation/reset code — never serialised, never indexed
+    code: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
     codeExpiration: { type: "datetime", excludeFromJsonApi: true },
     termsAcceptedAt: { type: "datetime", excludeFromJsonApi: true },
     marketingConsent: { type: "boolean", excludeFromJsonApi: true },

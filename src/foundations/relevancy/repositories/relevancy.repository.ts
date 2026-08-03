@@ -32,8 +32,16 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
 
     query.query += `${contentQuery({})}
       WITH content as ${params.model.nodeName}, totalScore
-      WHERE ${params.model.nodeName}.id <> "${params.id}"
+      WHERE ${params.model.nodeName}.id <> $id
       AND totalScore > 20
+      ${query.queryParams.companyId ? `MATCH (company:Company {id: $companyId})` : ``}
+      ${
+        query.queryParams.currentUserId
+          ? query.queryParams.companyId
+            ? `MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company)`
+            : `MATCH (currentUser:User {id: $currentUserId})`
+          : ``
+      }
 
       ${this.securityService.userHasAccess({ validator: validator })}
       ${params.cypherService.returnStatement({ useTotalScore: true })}
@@ -62,6 +70,14 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
         WITH content as ${params.model.nodeName}, totalScore
         OPTIONAL MATCH (${params.model.nodeName})-[:AUTHORED_BY]->(${params.model.nodeName}_author:User)
         WHERE ${params.model.nodeName}_author.id <> $id
+        ${query.queryParams.companyId ? `MATCH (company:Company {id: $companyId})` : ``}
+        ${
+          query.queryParams.currentUserId
+            ? query.queryParams.companyId
+              ? `MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company)`
+              : `MATCH (currentUser:User {id: $currentUserId})`
+            : ``
+        }
 
         ${this.securityService.userHasAccess({ validator: validator })}
         ${params.cypherService.returnStatement({ useTotalScore: true })}

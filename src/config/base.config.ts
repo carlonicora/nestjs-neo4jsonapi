@@ -210,6 +210,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       emailSecure: process.env.EMAIL_SECURE === "true",
       emailUsername: process.env.EMAIL_USERNAME || "",
       emailPassword: process.env.EMAIL_PASSWORD || "",
+      defaultLocale: process.env.EMAIL_DEFAULT_LOCALE || "en",
     },
     logging: {
       loki: {

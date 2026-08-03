@@ -1,5 +1,5 @@
 import { Entity, defineEntity } from "../../../common";
-import type { Feature } from "../../feature/entities/feature.entity";
+import type { Feature } from "../../feature/entities/feature";
 import type { Module } from "../../module/entities/module.entity";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { moduleMeta } from "../../module/entities/module.meta";

@@ -43,7 +43,7 @@ describe("RelevancyRepository", () => {
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let securityService: ReturnType<typeof createMockSecurityService>;
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, any> } => ({
     query: "",
     queryParams: {},
   });
@@ -184,6 +184,58 @@ describe("RelevancyRepository", () => {
           validator: expect.any(Function),
         }),
       );
+    });
+
+    it("binds the id as a parameter and never interpolates it", async () => {
+      const mockQuery = createMockQuery();
+      const mockModel = createMockModel();
+      const mockCypherService = createMockCypherService();
+
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      mockCypherService.userHasAccess.mockReturnValue("");
+      mockCypherService.returnStatement.mockReturnValue("");
+      securityService.userHasAccess.mockReturnValue("");
+
+      await repository.findById({
+        model: mockModel,
+        cypherService: mockCypherService,
+        id: "abc-123",
+        cursor: MOCK_CURSOR,
+      });
+
+      const issued = neo4jService.readMany.mock.calls[0][0];
+      expect(issued.query).toContain("<> $id");
+      expect(issued.query).not.toContain("abc-123");
+      expect(issued.queryParams.id).toBe("abc-123");
+    });
+
+    it("re-binds the tenant guard when the query carries a company and a current user", async () => {
+      const mockQuery = createMockQuery();
+      const mockModel = createMockModel();
+      const mockCypherService = createMockCypherService();
+
+      mockQuery.queryParams = {
+        companyId: TEST_IDS.companyId,
+        currentUserId: TEST_IDS.userId,
+      };
+
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      mockCypherService.userHasAccess.mockReturnValue("");
+      mockCypherService.returnStatement.mockReturnValue("");
+      securityService.userHasAccess.mockReturnValue("");
+
+      await repository.findById({
+        model: mockModel,
+        cypherService: mockCypherService,
+        id: TEST_IDS.contentId,
+        cursor: MOCK_CURSOR,
+      });
+
+      const issued = neo4jService.readMany.mock.calls[0][0];
+      expect(issued.query).toContain("MATCH (company:Company {id: $companyId})");
+      expect(issued.query).toContain("MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company)");
     });
   });
 
