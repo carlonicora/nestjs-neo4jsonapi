@@ -361,7 +361,7 @@ export class AuthService {
 
     const password = await hashPassword(params.data.attributes.password);
 
-    const user = await this.users.create({
+    const user = await this.users.createUser({
       userId: params.data.id,
       email: params.data.attributes.email,
       name: params.data.attributes.name,

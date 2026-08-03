@@ -1,29 +1,50 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { EmailService } from "../../../core/email/services/email.service";
 import { RoleId } from "../../../common/constants/system.roles";
+import { EmailService } from "../../../core/email/services/email.service";
 import { hashPassword } from "../../../core/security/services/security.service";
 import { UserPostDataDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDataDTO } from "../../user/dtos/user.put.dto";
 
 import { randomUUID } from "crypto";
+import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { UserPatchAvatarDataDTO } from "../../user/dtos/user.patch.avatar.dto";
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
 
+/**
+ * User service.
+ *
+ * Extends `AbstractService` so an application can subclass it and have BOTH the
+ * inherited generic methods AND every method declared here serialise with the
+ * *extended* model. Model resolution is by subclass polymorphism — a subclass
+ * re-declares `descriptor` and `model` as initialised class fields — never by a
+ * registry lookup (Nest constructs providers before `onModuleInit`, where models
+ * are registered).
+ *
+ * The three domain methods whose names collide with the abstract's generic CRUD
+ * (`create` / `put` / `delete`) are named `createUser` / `putUser` /
+ * `deleteUser` so the inherited descriptor-driven CRUD stays reachable.
+ */
 @Injectable()
-export class UserService {
+export class UserService extends AbstractService<User, typeof UserDescriptor.relationships> {
+  protected readonly descriptor = UserDescriptor;
+
   constructor(
-    private readonly builder: JsonApiService,
-    private readonly db: UserRepository,
-    private readonly emailService: EmailService,
-    private readonly configService: ConfigService<BaseConfigInterface>,
-  ) {}
+    jsonApiService: JsonApiService,
+    protected readonly userRepository: UserRepository,
+    protected readonly emailService: EmailService,
+    protected readonly configService: ConfigService<BaseConfigInterface>,
+    clsService: ClsService,
+  ) {
+    super(jsonApiService, userRepository, clsService, UserDescriptor.model);
+  }
 
   private get appConfig(): ConfigAppInterface {
     return this.configService.get<ConfigAppInterface>("app");
@@ -41,7 +62,7 @@ export class UserService {
   }
 
   async expectNotExists(params: { email: string }): Promise<void> {
-    const user = await this.db.findByEmail({ email: params.email });
+    const user = await this.userRepository.findByEmail({ email: params.email });
 
     if (user) throw new HttpException("A user with the given email already exists", HttpStatus.CONFLICT);
   }
@@ -55,9 +76,9 @@ export class UserService {
   }): Promise<JsonApiDataInterface> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
-    return this.builder.buildList(
-      UserDescriptor.model,
-      await this.db.findMany({
+    return this.jsonApiService.buildList(
+      this.model,
+      await this.userRepository.findMany({
         term: params.term,
         cursor: paginator.generateCursor(),
         includeDeleted: params.includeDeleted ?? false,
@@ -74,9 +95,9 @@ export class UserService {
   }): Promise<JsonApiDataInterface> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
-    return this.builder.buildList(
-      UserDescriptor.model,
-      await this.db.findManyByContentIds({
+    return this.jsonApiService.buildList(
+      this.model,
+      await this.userRepository.findManyByContentIds({
         contentIds: params.contentIds,
         includeDeleted: params.includeDeleted ?? false,
         term: params.term,
@@ -95,9 +116,9 @@ export class UserService {
   }): Promise<JsonApiDataInterface> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
-    return this.builder.buildList(
-      UserDescriptor.model,
-      await this.db.findManyByCompany({
+    return this.jsonApiService.buildList(
+      this.model,
+      await this.userRepository.findManyByCompany({
         companyId: params.companyId,
         term: params.term,
         cursor: paginator.generateCursor(),
@@ -116,9 +137,9 @@ export class UserService {
   }): Promise<JsonApiDataInterface> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
-    return this.builder.buildList(
-      UserDescriptor.model,
-      await this.db.findInRole({
+    return this.jsonApiService.buildList(
+      this.model,
+      await this.userRepository.findInRole({
         roleId: params.roleId,
         term: params.term,
         cursor: paginator.generateCursor(),
@@ -135,9 +156,9 @@ export class UserService {
   }): Promise<JsonApiDataInterface> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
-    return this.builder.buildList(
-      UserDescriptor.model,
-      await this.db.findNotInRole({
+    return this.jsonApiService.buildList(
+      this.model,
+      await this.userRepository.findNotInRole({
         roleId: params.roleId,
         term: params.term,
         cursor: paginator.generateCursor(),
@@ -147,21 +168,31 @@ export class UserService {
   }
 
   async findByUserId(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserDescriptor.model, await this.db.findByUserId({ userId: params.userId }));
-  }
-
-  async findOneForAdmin(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserDescriptor.model, await this.db.findOneForAdmin({ userId: params.userId }));
-  }
-
-  async findByUserIdCompanyId(params: { userId: string; companyId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(
-      UserDescriptor.model,
-      await this.db.findByUserId({ userId: params.userId, companyId: params.companyId }),
+    return this.jsonApiService.buildSingle(
+      this.model,
+      await this.userRepository.findByUserId({ userId: params.userId }),
     );
   }
 
-  async put(params: { data: UserPutDataDTO; isAdmin: boolean; isCurrentUser: boolean }): Promise<JsonApiDataInterface> {
+  async findOneForAdmin(params: { userId: string }): Promise<JsonApiDataInterface> {
+    return this.jsonApiService.buildSingle(
+      this.model,
+      await this.userRepository.findOneForAdmin({ userId: params.userId }),
+    );
+  }
+
+  async findByUserIdCompanyId(params: { userId: string; companyId: string }): Promise<JsonApiDataInterface> {
+    return this.jsonApiService.buildSingle(
+      this.model,
+      await this.userRepository.findByUserId({ userId: params.userId, companyId: params.companyId }),
+    );
+  }
+
+  async putUser(params: {
+    data: UserPutDataDTO;
+    isAdmin: boolean;
+    isCurrentUser: boolean;
+  }): Promise<JsonApiDataInterface> {
     if (params.data.attributes.password || params.data.attributes.name) {
       if (params.data.attributes.password)
         params.data.attributes.password = await hashPassword(params.data.attributes.password);
@@ -172,7 +203,7 @@ export class UserService {
           : undefined
         : undefined;
 
-      await this.db.put({
+      await this.userRepository.putUser({
         isAdmin: params.isAdmin,
         userId: params.data.id,
         email: params.data.attributes.email,
@@ -187,7 +218,10 @@ export class UserService {
     }
 
     if (params.isCurrentUser)
-      return this.builder.buildSingle(UserDescriptor.model, await this.db.findFullUser({ userId: params.data.id }));
+      return this.jsonApiService.buildSingle(
+        this.model,
+        await this.userRepository.findFullUser({ userId: params.data.id }),
+      );
 
     return this.findByUserId({
       userId: params.data.id,
@@ -195,11 +229,14 @@ export class UserService {
   }
 
   async findFullUser(params: { userId: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserDescriptor.model, await this.db.findFullUser({ userId: params.userId }));
+    return this.jsonApiService.buildSingle(
+      this.model,
+      await this.userRepository.findFullUser({ userId: params.userId }),
+    );
   }
 
   async reactivate(params: { userId: string }): Promise<JsonApiDataInterface> {
-    await this.db.reactivate({
+    await this.userRepository.reactivate({
       userId: params.userId,
     });
 
@@ -209,7 +246,7 @@ export class UserService {
   }
 
   async patchAvatar(params: { data: UserPatchAvatarDataDTO }): Promise<JsonApiDataInterface> {
-    await this.db.patchAvatar({
+    await this.userRepository.patchAvatar({
       userId: params.data.id,
       avatar: params.data.attributes.avatar,
     });
@@ -220,7 +257,7 @@ export class UserService {
   }
 
   async patchRate(params: { data: UserPatchRateDataDTO }): Promise<JsonApiDataInterface> {
-    await this.db.patchRate({
+    await this.userRepository.patchRate({
       userId: params.data.id,
       rate: params.data.attributes.rate,
     });
@@ -231,7 +268,7 @@ export class UserService {
   }
 
   async sendInvitationEmail(params: { userId: string }): Promise<void> {
-    const user = await this.db.resetCode({ userId: params.userId });
+    const user = await this.userRepository.resetCode({ userId: params.userId });
 
     const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
 
@@ -249,10 +286,10 @@ export class UserService {
   }
 
   async findByEmail(params: { email: string }): Promise<JsonApiDataInterface> {
-    return this.builder.buildSingle(UserDescriptor.model, await this.db.findByEmail({ email: params.email }));
+    return this.jsonApiService.buildSingle(this.model, await this.userRepository.findByEmail({ email: params.email }));
   }
 
-  async create(params: {
+  async createUser(params: {
     data: UserPostDataDTO;
     forceCompanyAdmin?: boolean;
     language: string;
@@ -261,7 +298,7 @@ export class UserService {
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
 
-    const user: User = await this.db.create({
+    const user: User = await this.userRepository.createUser({
       userId: params.data.id,
       name: params.data.attributes.name,
       email: params.data.attributes.email,
@@ -276,7 +313,7 @@ export class UserService {
     // Company-scoped: the CompanyAdministrator role is granted on the membership for the
     // company this user was just created in, never as a global user→role edge.
     if (params.forceCompanyAdmin)
-      await this.db.makeCompanyAdmin({
+      await this.userRepository.makeCompanyAdmin({
         userId: params.data.id,
         companyId: params.data.relationships.company.data.id,
       });
@@ -308,7 +345,7 @@ export class UserService {
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
 
-    const user: User = await this.db.create({
+    const user: User = await this.userRepository.createUser({
       userId: params.data.id,
       name: params.data.attributes.name,
       email: params.data.attributes.email,
@@ -339,12 +376,12 @@ export class UserService {
     });
   }
 
-  async delete(params: { userId: string }): Promise<void> {
-    await this.db.delete({ userId: params.userId });
+  async deleteUser(params: { userId: string }): Promise<void> {
+    await this.userRepository.deleteUser({ userId: params.userId });
   }
 
   async addUserToRole(params: { userId: string; roleId: string; returnsFull: boolean }): Promise<JsonApiDataInterface> {
-    await this.db.addUserToRole({ userId: params.userId, roleId: params.roleId });
+    await this.userRepository.addUserToRole({ userId: params.userId, roleId: params.roleId });
 
     return this.findByUserId({ userId: params.userId });
   }
@@ -354,7 +391,7 @@ export class UserService {
     userId: string;
     returnsFull: boolean;
   }): Promise<JsonApiDataInterface> {
-    await this.db.removeUserFromRole({
+    await this.userRepository.removeUserFromRole({
       roleId: params.roleId,
       userId: params.userId,
     });

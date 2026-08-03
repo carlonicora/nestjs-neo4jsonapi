@@ -32,7 +32,7 @@ export class GoogleUserService {
       name: `${params.userDetails.name}`,
     });
 
-    await this.userRepository.create({
+    await this.userRepository.createUser({
       userId: params.userId,
       email: params.userDetails.email ?? params.userDetails.id,
       name: params.userDetails.name,

@@ -141,7 +141,7 @@ describe("AuthService", () => {
   });
 
   const createMockUserRepository = () => ({
-    create: vi.fn(),
+    createUser: vi.fn(),
     findByEmail: vi.fn(),
     findByCode: vi.fn(),
     findByUserId: vi.fn(),
@@ -649,7 +649,7 @@ describe("AuthService", () => {
       // Arrange
       userService.expectNotExists.mockResolvedValue(undefined);
       companyRepository.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "New Company" });
-      userRepository.create.mockResolvedValue({
+      userRepository.createUser.mockResolvedValue({
         ...MOCK_USER,
         email: registerData.attributes.email,
         company: { id: TEST_IDS.companyId, name: "New Company" },
@@ -663,7 +663,7 @@ describe("AuthService", () => {
       expect(userService.expectNotExists).toHaveBeenCalledWith({ email: registerData.attributes.email });
       expect(companyRepository.createByName).toHaveBeenCalledWith({ name: registerData.attributes.companyName });
       expect(hashPassword).toHaveBeenCalledWith(registerData.attributes.password);
-      expect(userRepository.create).toHaveBeenCalled();
+      expect(userRepository.createUser).toHaveBeenCalled();
       expect(emailService.sendEmail).toHaveBeenCalledWith(
         "activationEmail",
         expect.objectContaining({
@@ -695,7 +695,7 @@ describe("AuthService", () => {
       };
       userService.expectNotExists.mockResolvedValue(undefined);
       companyRepository.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "New User" });
-      userRepository.create.mockResolvedValue(MOCK_USER);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
       emailService.sendEmail.mockResolvedValue(undefined);
 
       // Act

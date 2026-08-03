@@ -128,7 +128,7 @@ describe("AuthService - 2FA Integration", () => {
       findByResetCode: vi.fn(),
       updatePassword: vi.fn(),
       update: vi.fn(),
-      create: vi.fn(),
+      createUser: vi.fn(),
     } as any;
 
     mockCompanyRepository = {

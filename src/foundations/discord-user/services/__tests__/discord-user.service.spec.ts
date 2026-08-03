@@ -44,7 +44,7 @@ describe("DiscordUserService", () => {
   });
 
   const createMockUserRepository = () => ({
-    create: vi.fn(),
+    createUser: vi.fn(),
     findById: vi.fn(),
     findByEmail: vi.fn(),
     update: vi.fn(),
@@ -100,7 +100,7 @@ describe("DiscordUserService", () => {
     it("should set companyId and userId in CLS service", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -118,7 +118,7 @@ describe("DiscordUserService", () => {
     it("should create company with username as name", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -138,7 +138,7 @@ describe("DiscordUserService", () => {
     it("should create user with discord details", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -152,7 +152,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith({
+      expect(userRepository.createUser).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
         email: "test@example.com",
         name: "testuser",
@@ -171,7 +171,7 @@ describe("DiscordUserService", () => {
       // Arrange
       const discordUserWithoutEmail = { ...MOCK_DISCORD_USER, email: undefined };
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -182,7 +182,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           email: TEST_IDS.discordId,
         }),
@@ -192,7 +192,7 @@ describe("DiscordUserService", () => {
     it("should create discord user record", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -214,7 +214,7 @@ describe("DiscordUserService", () => {
     it("should handle undefined marketingConsentAt", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -226,7 +226,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           marketingConsentAt: undefined,
         }),
@@ -250,7 +250,7 @@ describe("DiscordUserService", () => {
     it("should propagate errors from user repository", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockRejectedValue(new Error("User creation failed"));
+      userRepository.createUser.mockRejectedValue(new Error("User creation failed"));
 
       // Act & Assert
       await expect(
@@ -265,7 +265,7 @@ describe("DiscordUserService", () => {
     it("should propagate errors from discord user repository", async () => {
       // Arrange
       companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockRejectedValue(new Error("Discord user creation failed"));
 
       // Act & Assert

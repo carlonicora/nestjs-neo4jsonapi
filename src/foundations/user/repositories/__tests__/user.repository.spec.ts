@@ -3,13 +3,15 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { UserRepository } from "../user.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../../core/security/services/security.service";
 import { UserCypherService } from "../../services/user.cypher.service";
-import { User } from "../../entities/user";
+import { User, UserDescriptor } from "../../entities/user";
 import { RoleId } from "../../../../common/constants/system.roles";
 
 describe("UserRepository", () => {
   let repository: UserRepository;
   let mockNeo4jService: vi.Mocked<Neo4jService>;
+  let mockSecurityService: vi.Mocked<SecurityService>;
   let mockClsService: vi.Mocked<ClsService>;
   let mockUserCypherService: vi.Mocked<UserCypherService>;
 
@@ -41,9 +43,14 @@ describe("UserRepository", () => {
       read: vi.fn(),
     } as any;
 
+    mockSecurityService = {
+      userHasAccess: vi.fn().mockResolvedValue(true),
+    } as any;
+
     mockClsService = {
       get: vi.fn(),
       set: vi.fn(),
+      has: vi.fn().mockReturnValue(false),
     } as any;
 
     mockUserCypherService = {
@@ -54,6 +61,7 @@ describe("UserRepository", () => {
       providers: [
         UserRepository,
         { provide: Neo4jService, useValue: mockNeo4jService },
+        { provide: SecurityService, useValue: mockSecurityService },
         { provide: ClsService, useValue: mockClsService },
         { provide: UserCypherService, useValue: mockUserCypherService },
       ],
@@ -161,6 +169,94 @@ describe("UserRepository", () => {
       expect(capturedQuery.query).toContain("HAS_MEMBERSHIP");
       expect(capturedQuery.query).toContain("IN_COMPANY");
       expect(capturedQuery.query).toContain("HAS_ROLE");
+    });
+  });
+
+  describe("model resolution", () => {
+    it("should expose the package descriptor as the inherited AbstractRepository member", () => {
+      expect(repository["descriptor"]).toBe(UserDescriptor);
+    });
+
+    it("should pass this.descriptor.model as the serialiser", async () => {
+      mockNeo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findMany({});
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serialiser: UserDescriptor.model,
+        }),
+      );
+    });
+
+    it("should resolve the model on every read path, not only findMany", async () => {
+      mockNeo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAdminsByCompanyId({ companyId: TEST_IDS.companyId });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serialiser: UserDescriptor.model,
+          fetchAll: true,
+        }),
+      );
+    });
+
+    it("should let a subclass override the model that every package-own method uses", async () => {
+      const EXTENDED_DESCRIPTOR = {
+        ...UserDescriptor,
+        model: { ...UserDescriptor.model, isExtended: true },
+      } as any;
+
+      // Mirrors what an application's ExtendedUserRepository writes: an
+      // initialised class-field re-declaration of `descriptor`.
+      class ExtendedUserRepository extends UserRepository {
+        protected readonly descriptor = EXTENDED_DESCRIPTOR;
+      }
+
+      const extended = new ExtendedUserRepository(
+        mockNeo4jService as any,
+        mockSecurityService as any,
+        mockClsService as any,
+        mockUserCypherService as any,
+      );
+
+      mockNeo4jService.readMany.mockResolvedValue([]);
+
+      await extended.findMany({});
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serialiser: EXTENDED_DESCRIPTOR.model,
+        }),
+      );
+    });
+  });
+
+  describe("onModuleInit", () => {
+    it("should create the descriptor constraints/indexes and the user_email constraint", async () => {
+      mockNeo4jService.read.mockResolvedValue({ records: [] } as any);
+
+      await repository.onModuleInit();
+
+      const queries = mockNeo4jService.writeOne.mock.calls.map((call: any[]) => call[0].query);
+
+      expect(
+        queries.some((q: string) =>
+          q.includes("CREATE CONSTRAINT user_id IF NOT EXISTS FOR (user:User) REQUIRE user.id IS UNIQUE"),
+        ),
+      ).toBe(true);
+      expect(
+        queries.some((q: string) =>
+          q.includes("CREATE CONSTRAINT user_email IF NOT EXISTS FOR (user:User) REQUIRE user.email IS UNIQUE"),
+        ),
+      ).toBe(true);
+
+      const fulltext = queries.find((q: string) => q.includes("CREATE FULLTEXT INDEX"));
+      expect(fulltext).toBeDefined();
+      expect(fulltext).not.toContain("n.`password`");
+      expect(fulltext).not.toContain("n.`code`");
+      expect(fulltext).toContain("n.`email`");
     });
   });
 });

@@ -2,15 +2,25 @@ import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "v
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { HttpException, HttpStatus } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import { UserService } from "../user.service";
 import { UserRepository } from "../../repositories/user.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { EmailService } from "../../../../core/email/services/email.service";
+import { UserDescriptor } from "../../entities/user";
 
 // Mock hashPassword to avoid crypto dependencies
-vi.mock("../../../../core/security/services/security.service", () => ({
-  hashPassword: vi.fn().mockResolvedValue("hashed_password"),
-}));
+// `SecurityService` must be re-exported here: UserService imports UserRepository,
+// which now extends AbstractRepository and pulls SecurityService into the module
+// graph. A mock factory that omits it fails the whole module load.
+vi.mock("../../../../core/security/services/security.service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../core/security/services/security.service")>();
+
+  return {
+    ...actual,
+    hashPassword: vi.fn().mockResolvedValue("hashed_password"),
+  };
+});
 
 describe("UserService", () => {
   let service: UserService;
@@ -61,9 +71,9 @@ describe("UserService", () => {
     findByUserId: vi.fn(),
     findOneForAdmin: vi.fn(),
     findFullUser: vi.fn(),
-    put: vi.fn(),
-    create: vi.fn(),
-    delete: vi.fn(),
+    putUser: vi.fn(),
+    createUser: vi.fn(),
+    deleteUser: vi.fn(),
     reactivate: vi.fn(),
     patchRate: vi.fn(),
     resetCode: vi.fn(),
@@ -94,6 +104,12 @@ describe("UserService", () => {
     }),
   });
 
+  const createMockClsService = () => ({
+    get: vi.fn(),
+    set: vi.fn(),
+    has: vi.fn().mockReturnValue(false),
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
 
@@ -101,6 +117,7 @@ describe("UserService", () => {
     const mockJsonApiService = createMockJsonApiService();
     const mockEmailService = createMockEmailService();
     const mockConfigService = createMockConfigService();
+    const mockClsService = createMockClsService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -109,6 +126,7 @@ describe("UserService", () => {
         { provide: JsonApiService, useValue: mockJsonApiService },
         { provide: EmailService, useValue: mockEmailService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
 
@@ -359,11 +377,11 @@ describe("UserService", () => {
 
   describe("put", () => {
     it("should update user with password", async () => {
-      userRepository.put.mockResolvedValue(undefined);
+      userRepository.putUser.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      const result = await service.put({
+      const result = await service.putUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -377,7 +395,7 @@ describe("UserService", () => {
         isCurrentUser: false,
       });
 
-      expect(userRepository.put).toHaveBeenCalledWith(
+      expect(userRepository.putUser).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: TEST_IDS.userId,
           name: "Updated Name",
@@ -388,11 +406,11 @@ describe("UserService", () => {
     });
 
     it("should update user name without password", async () => {
-      userRepository.put.mockResolvedValue(undefined);
+      userRepository.putUser.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      await service.put({
+      await service.putUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -405,7 +423,7 @@ describe("UserService", () => {
         isCurrentUser: false,
       });
 
-      expect(userRepository.put).toHaveBeenCalledWith(
+      expect(userRepository.putUser).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: TEST_IDS.userId,
           name: "Updated Name",
@@ -415,11 +433,11 @@ describe("UserService", () => {
     });
 
     it("should return full user when isCurrentUser is true", async () => {
-      userRepository.put.mockResolvedValue(undefined);
+      userRepository.putUser.mockResolvedValue(undefined);
       userRepository.findFullUser.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      await service.put({
+      await service.putUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -439,7 +457,7 @@ describe("UserService", () => {
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      await service.put({
+      await service.putUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -451,15 +469,15 @@ describe("UserService", () => {
         isCurrentUser: false,
       });
 
-      expect(userRepository.put).not.toHaveBeenCalled();
+      expect(userRepository.putUser).not.toHaveBeenCalled();
     });
 
     it("should handle roles update for admin", async () => {
-      userRepository.put.mockResolvedValue(undefined);
+      userRepository.putUser.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      await service.put({
+      await service.putUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -477,7 +495,7 @@ describe("UserService", () => {
         isCurrentUser: false,
       });
 
-      expect(userRepository.put).toHaveBeenCalledWith(
+      expect(userRepository.putUser).toHaveBeenCalledWith(
         expect.objectContaining({
           roles: [TEST_IDS.roleId],
         }),
@@ -544,11 +562,11 @@ describe("UserService", () => {
 
   describe("create", () => {
     it("should create user with password", async () => {
-      userRepository.create.mockResolvedValue(MOCK_USER);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
-      const result = await service.create({
+      const result = await service.createUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -567,7 +585,7 @@ describe("UserService", () => {
         language: "en",
       });
 
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: TEST_IDS.userId,
           name: "New User",
@@ -580,10 +598,10 @@ describe("UserService", () => {
     });
 
     it("should create user and send invitation email", async () => {
-      userRepository.create.mockResolvedValue(MOCK_USER);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
       emailService.sendEmail.mockResolvedValue(undefined);
 
-      await service.create({
+      await service.createUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -611,10 +629,10 @@ describe("UserService", () => {
     });
 
     it("should make company admin when forceCompanyAdmin is true", async () => {
-      userRepository.create.mockResolvedValue(MOCK_USER);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
       userRepository.makeCompanyAdmin.mockResolvedValue(undefined);
 
-      await service.create({
+      await service.createUser({
         data: {
           id: TEST_IDS.userId,
           type: "users",
@@ -641,7 +659,7 @@ describe("UserService", () => {
 
   describe("createForCompany", () => {
     it("should create user for company", async () => {
-      userRepository.create.mockResolvedValue(MOCK_USER);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
       jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
 
@@ -658,7 +676,7 @@ describe("UserService", () => {
         language: "en",
       });
 
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           companyId: TEST_IDS.companyId,
         }),
@@ -669,11 +687,11 @@ describe("UserService", () => {
 
   describe("delete", () => {
     it("should delete user", async () => {
-      userRepository.delete.mockResolvedValue(undefined);
+      userRepository.deleteUser.mockResolvedValue(undefined);
 
-      await service.delete({ userId: TEST_IDS.userId });
+      await service.deleteUser({ userId: TEST_IDS.userId });
 
-      expect(userRepository.delete).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userRepository.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
     });
   });
 
@@ -714,6 +732,59 @@ describe("UserService", () => {
         userId: TEST_IDS.userId,
       });
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+  });
+
+  describe("model resolution", () => {
+    it("should expose the package descriptor and its model as the inherited AbstractService members", () => {
+      expect(service["descriptor"]).toBe(UserDescriptor);
+      expect(service["model"]).toBe(UserDescriptor.model);
+    });
+
+    it("should build single responses with this.model", async () => {
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+
+      await service.findByUserId({ userId: TEST_IDS.userId });
+
+      expect(jsonApiService.buildSingle).toHaveBeenCalledWith(UserDescriptor.model, MOCK_USER);
+    });
+
+    it("should build list responses with this.model", async () => {
+      userRepository.findMany.mockResolvedValue([MOCK_USER]);
+      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE as any);
+
+      await service.findMany({ query: {}, isAdmin: false });
+
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(UserDescriptor.model, [MOCK_USER], expect.anything());
+    });
+
+    it("should let a subclass override the model that every package-own method serialises with", async () => {
+      const EXTENDED_USER_MODEL = { ...UserDescriptor.model, isExtended: true } as any;
+
+      // Mirrors what an application's ExtendedUserService writes: initialised
+      // class-field re-declarations of `descriptor` and `model`. The field
+      // initialisers run after super(...) returns, so they win over the base
+      // constructor-parameter-property assignment.
+      class ExtendedUserService extends UserService {
+        protected readonly descriptor = { ...UserDescriptor, model: EXTENDED_USER_MODEL } as any;
+        protected readonly model = EXTENDED_USER_MODEL;
+      }
+
+      const extended = new ExtendedUserService(
+        jsonApiService as any,
+        userRepository as any,
+        emailService as any,
+        configService as any,
+        { get: vi.fn(), set: vi.fn(), has: vi.fn() } as any,
+      );
+
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+
+      await extended.findByUserId({ userId: TEST_IDS.userId });
+
+      expect(jsonApiService.buildSingle).toHaveBeenCalledWith(EXTENDED_USER_MODEL, MOCK_USER);
     });
   });
 

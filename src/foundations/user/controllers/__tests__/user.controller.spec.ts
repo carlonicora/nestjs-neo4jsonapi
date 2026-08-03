@@ -123,12 +123,12 @@ describe("UserController", () => {
       findByEmail: vi.fn(),
       findManyByCompany: vi.fn(),
       expectNotExists: vi.fn(),
-      create: vi.fn(),
-      put: vi.fn(),
+      createUser: vi.fn(),
+      putUser: vi.fn(),
       reactivate: vi.fn(),
       patchRate: vi.fn(),
       sendInvitationEmail: vi.fn(),
-      delete: vi.fn(),
+      deleteUser: vi.fn(),
       findInRole: vi.fn(),
       findNotInRole: vi.fn(),
       addUserToRole: vi.fn(),
@@ -341,13 +341,13 @@ describe("UserController", () => {
       const req = createMockRequest();
       userService.expectNotExists.mockResolvedValue(undefined);
       companyService.validate.mockResolvedValue(undefined);
-      userService.create.mockResolvedValue(MOCK_USER_RESPONSE);
+      userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.createUser(req, createBody as any, mockReply, "en");
 
       expect(userService.expectNotExists).toHaveBeenCalledWith({ email: "new@example.com" });
       expect(companyService.validate).toHaveBeenCalledWith({ companyId: TEST_IDS.companyId });
-      expect(userService.create).toHaveBeenCalledWith({
+      expect(userService.createUser).toHaveBeenCalledWith({
         data: createBody.data,
         forceCompanyAdmin: false,
         language: "en",
@@ -364,12 +364,12 @@ describe("UserController", () => {
       };
       userService.expectNotExists.mockResolvedValue(undefined);
       companyService.create.mockResolvedValue(undefined);
-      userService.create.mockResolvedValue(MOCK_USER_RESPONSE);
+      userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.createUser(req, bodyWithCompany as any, mockReply, undefined);
 
       expect(companyService.create).toHaveBeenCalled();
-      expect(userService.create).toHaveBeenCalledWith({
+      expect(userService.createUser).toHaveBeenCalledWith({
         data: bodyWithCompany.data,
         forceCompanyAdmin: true,
         language: "en",
@@ -402,12 +402,12 @@ describe("UserController", () => {
     it("should update own user without admin check", async () => {
       const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
       securityService.isUserInRoles.mockReturnValue(false);
-      userService.put.mockResolvedValue(MOCK_USER_RESPONSE);
+      userService.putUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.put(req, TEST_IDS.userId, updateBody as any, mockReply);
 
       expect(securityService.validateAdmin).not.toHaveBeenCalled();
-      expect(userService.put).toHaveBeenCalledWith({
+      expect(userService.putUser).toHaveBeenCalledWith({
         data: updateBody.data,
         isAdmin: false,
         isCurrentUser: true,
@@ -418,7 +418,7 @@ describe("UserController", () => {
     it("should require admin to update other users", async () => {
       const req = createMockRequest(TEST_IDS.adminUserId);
       securityService.isUserInRoles.mockReturnValue(true);
-      userService.put.mockResolvedValue(MOCK_USER_RESPONSE);
+      userService.putUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.put(req, TEST_IDS.userId, updateBody as any, mockReply);
 
@@ -474,11 +474,11 @@ describe("UserController", () => {
   describe("DELETE /users/:userId", () => {
     it("should delete user", async () => {
       const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
-      userService.delete.mockResolvedValue(undefined);
+      userService.deleteUser.mockResolvedValue(undefined);
 
       await controller.delete(req, TEST_IDS.userId);
 
-      expect(userService.delete).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userService.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
     });
   });
