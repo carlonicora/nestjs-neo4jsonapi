@@ -234,8 +234,12 @@ export function defineEntity<T>() {
     const fieldEntries = Object.entries(fields) as [string, FieldDef][];
     const fieldNames = fieldEntries.map(([name]) => name);
 
-    // String fields for FULLTEXT index
-    const stringFields = fieldEntries.filter(([, def]) => def.type === "string").map(([name]) => name);
+    // String fields for FULLTEXT index. `excludeFromSearch` opts a field out —
+    // see FieldDef — so machine-readable strings (JSON blobs, UUIDs, tokens) do
+    // not become searchable text. Absent the flag, derivation is unchanged.
+    const stringFields = fieldEntries
+      .filter(([, def]) => def.type === "string" && !def.excludeFromSearch)
+      .map(([name]) => name);
 
     // Required fields
     const requiredFields = fieldEntries.filter(([, def]) => def.required === true).map(([name]) => name);

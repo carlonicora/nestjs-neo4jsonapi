@@ -48,6 +48,25 @@ export interface FieldDef {
   /** If true, field is excluded from JSONAPI serialization entirely (default: false) */
   excludeFromJsonApi?: boolean;
   /**
+   * If true, a `type: "string"` field is kept out of the entity's auto-derived
+   * FULLTEXT index (default: false — every string field is indexed).
+   *
+   * Set this on machine-readable strings: serialised JSON config, UUID
+   * references, status enums, auth tokens. Their contents would otherwise be
+   * searchable text, so a term matching inside a config blob returns an entity
+   * whose name has nothing to do with the query.
+   *
+   * Storage, validation and serialisation are unaffected — this only narrows
+   * the index. Excluding every string field leaves `fulltextIndexName` empty,
+   * which the search guards already treat as "no index".
+   *
+   * NOTE: changing this on an existing entity does not rebuild the live index.
+   * `AbstractRepository` issues `CREATE ... IF NOT EXISTS`, which no-ops when an
+   * index of that name already exists, so the old properties persist until that
+   * index is dropped manually.
+   */
+  excludeFromSearch?: boolean;
+  /**
    * If false, field is suppressed from JSON:API output (attributes and meta).
    * Defaults to true. Used for storage-only fields (e.g. cents storage backing
    * a float computed) that must remain readable from Neo4j and addressable in
