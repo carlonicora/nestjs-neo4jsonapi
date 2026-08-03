@@ -57,8 +57,13 @@ export const modulePermissionResolutionQuery = `
 `;
 
 // For regular users: modules via Company → Features → Modules
+// The role read is the membershipRoleMatch expansion bound to the `company` alias the
+// caller already binds (this file exports plain strings, so the helper cannot be used
+// verbatim — see foundations/membership/queries/membership.query.ts).
 export const featureModuleQuery = `
-    OPTIONAL MATCH (user)-[:MEMBER_OF]->(role:Role)
+    OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(fm_ms:Membership)
+    WHERE (fm_ms)-[:IN_COMPANY]->(company) OR NOT (fm_ms)-[:IN_COMPANY]->(:Company)
+    OPTIONAL MATCH (fm_ms)-[:HAS_ROLE]->(role:Role)
     OPTIONAL MATCH (feature:Feature)
       WHERE exists((company)-[:HAS_FEATURE]->(feature))
          OR feature.isCore = true
@@ -67,9 +72,12 @@ export const featureModuleQuery = `
     ${modulePermissionResolutionQuery}
 `;
 
-// For Administrator users: modules via Role → HAS_PERMISSIONS → Module
+// For Administrator users: modules via the PLATFORM membership (no IN_COMPANY edge)
+// → Role → HAS_PERMISSIONS → Module
 export const adminModuleQuery = `
-    MATCH (user:User {id: $searchValue})-[:MEMBER_OF]->(role:Role)
+    MATCH (user:User {id: $searchValue})-[:HAS_MEMBERSHIP]->(am_ms:Membership)
+    WHERE NOT (am_ms)-[:IN_COMPANY]->(:Company)
+    MATCH (am_ms)-[:HAS_ROLE]->(role:Role)
     MATCH (role)-[perm:HAS_PERMISSIONS]->(m:Module)
     ${modulePermissionResolutionQuery}
 `;

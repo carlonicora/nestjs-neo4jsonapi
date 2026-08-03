@@ -96,11 +96,16 @@ export class RoleRepository implements OnModuleInit {
 
     query.query += `
       MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
-      MATCH (user)-[:MEMBER_OF]->(role:Role)
+      // Required (MATCH) variant of membershipRoleMatch bound to the company alias
+      // already matched above — see membership.query.ts. Company roles + platform roles.
+      MATCH (user)-[:HAS_MEMBERSHIP]->(role_ms:Membership)
+      WHERE (role_ms)-[:IN_COMPANY]->(company)
+         OR NOT (role_ms)-[:IN_COMPANY]->(:Company)
+      MATCH (role_ms)-[:HAS_ROLE]->(role:Role)
       WHERE role.id <> $administratorsId
       ${params.term ? "AND toLower(role.name) CONTAINS toLower($term)" : ""}
-      
-      WITH role
+
+      WITH DISTINCT role
       ORDER BY role.name ASC
       {CURSOR}
       
@@ -123,7 +128,13 @@ export class RoleRepository implements OnModuleInit {
     query.query += `
       MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
       MATCH (role:Role)
-      WHERE NOT (role)<-[:MEMBER_OF]-(user)
+      // Negated membership read (see membership.query.ts): the role must not be held
+      // through the company membership NOR through the platform membership.
+      WHERE NOT EXISTS {
+        MATCH (user)-[:HAS_MEMBERSHIP]->(nu_ms:Membership)-[:HAS_ROLE]->(role)
+        WHERE (nu_ms)-[:IN_COMPANY]->(company)
+           OR NOT (nu_ms)-[:IN_COMPANY]->(:Company)
+      }
       ${params.term ? "AND toLower(role.name) CONTAINS toLower($term)" : ""}
       AND role.id <> $administratorsId
       

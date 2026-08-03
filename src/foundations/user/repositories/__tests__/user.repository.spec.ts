@@ -158,7 +158,9 @@ describe("UserRepository", () => {
       await repository.findAdminsByCompanyId({ companyId: TEST_IDS.companyId });
 
       expect(capturedQuery.query).toContain("BELONGS_TO");
-      expect(capturedQuery.query).toContain("MEMBER_OF");
+      expect(capturedQuery.query).toContain("HAS_MEMBERSHIP");
+      expect(capturedQuery.query).toContain("IN_COMPANY");
+      expect(capturedQuery.query).toContain("HAS_ROLE");
     });
   });
 });

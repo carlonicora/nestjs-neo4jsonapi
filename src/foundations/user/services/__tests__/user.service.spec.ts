@@ -632,7 +632,10 @@ describe("UserService", () => {
         language: "en",
       });
 
-      expect(userRepository.makeCompanyAdmin).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userRepository.makeCompanyAdmin).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+      });
     });
   });
 

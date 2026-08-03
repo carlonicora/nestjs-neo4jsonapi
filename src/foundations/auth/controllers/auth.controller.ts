@@ -12,7 +12,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 
+import { AnyScopeAuthGuard } from "../../../common/guards/jwt.auth.any-scope.guard";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { companyMeta } from "../../company";
 import { AuthPostForgotDTO } from "../../auth/dtos/auth.post.forgot.dto";
 import { AuthPostLoginDTO } from "../../auth/dtos/auth.post.login.dto";
 import { AuthPostRegisterDTO } from "../../auth/dtos/auth.post.register.dto";
@@ -34,6 +36,24 @@ export class AuthController {
     return await this.service.refreshToken({
       refreshToken: refreshToken,
     });
+  }
+
+  // GET /auth/companies — the companies the caller may act for.
+  // AnyScopeAuthGuard because the caller may hold either a full session token
+  // (company switcher) or a short-lived company-selection token (login screen).
+  @UseGuards(AnyScopeAuthGuard)
+  @Get(companyMeta.endpoint)
+  async findCompanies() {
+    return await this.service.findCompanies();
+  }
+
+  // POST /auth/company-selection/:companyId — non-resource operation: exchanges the
+  // caller's token for one scoped to the chosen company. Path-param style mirrors
+  // POST auth/refreshtoken/:refreshToken above, so no DTO is needed.
+  @UseGuards(AnyScopeAuthGuard)
+  @Post("company-selection/:companyId")
+  async selectCompany(@Param("companyId") companyId: string) {
+    return await this.service.selectCompany({ companyId: companyId });
   }
 
   @UseGuards(JwtAuthGuard)

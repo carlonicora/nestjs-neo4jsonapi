@@ -81,10 +81,15 @@ export const UserDescriptor = defineEntity<User>()({
 
   // Relationship definitions
   relationships: {
+    // Serialisation-only: roles are hydrated through the Membership path
+    // (see foundations/membership/queries/membership.query.ts) — no single-hop
+    // (user)-[:HAS_MEMBERSHIP]->(role) edge exists. The serialiser maps by key +
+    // model, and no generic descriptor-driven writer touches this relationship
+    // (UserRepository/UserService do not extend AbstractRepository/AbstractService).
     role: {
       model: roleMeta,
       direction: "out",
-      relationship: "MEMBER_OF",
+      relationship: "HAS_MEMBERSHIP",
       cardinality: "many",
       dtoKey: "roles",
     },

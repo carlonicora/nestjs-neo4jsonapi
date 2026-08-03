@@ -113,9 +113,12 @@ describe("AuthService", () => {
   const createMockJsonApiService = () => ({
     buildSingle: vi.fn(),
     buildMany: vi.fn(),
+    buildList: vi.fn(),
   });
 
   const createMockAuthRepository = () => ({
+    countUserCompanies: vi.fn().mockResolvedValue(1),
+    findUserCompanies: vi.fn(),
     create: vi.fn(),
     findByToken: vi.fn(),
     findByRefreshToken: vi.fn(),
@@ -154,6 +157,8 @@ describe("AuthService", () => {
 
   const createMockSecurityService = () => ({
     signJwt: vi.fn().mockReturnValue("jwt-token"),
+    signCompanySelectionJwt: vi.fn().mockReturnValue("selection-token"),
+    decodeJwt: vi.fn().mockReturnValue({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
     refreshTokenExpiration: new Date(Date.now() + 3600000),
   });
 
@@ -430,10 +435,33 @@ describe("AuthService", () => {
 
       // Assert
       expect(authRepository.findByRefreshToken).toHaveBeenCalledWith({ authId: TEST_IDS.authId });
-      expect(authRepository.findUserById).toHaveBeenCalledWith({ userId: MOCK_USER.id });
+      expect(securityService.decodeJwt).toHaveBeenCalledWith(MOCK_AUTH.token);
+      expect(authRepository.findUserById).toHaveBeenCalledWith({
+        userId: MOCK_USER.id,
+        companyId: TEST_IDS.companyId,
+      });
       expect(authRepository.refreshToken).toHaveBeenCalled();
       expect(authRepository.deleteExpiredAuths).toHaveBeenCalledWith({ userId: MOCK_USER.id });
       expect(result).toEqual({ data: { type: "auths" } });
+    });
+
+    it("should re-derive roles without a company when the expiring token carried none", async () => {
+      // Arrange
+      (securityService.decodeJwt as any).mockReturnValue({ userId: MOCK_USER.id });
+      authRepository.findByRefreshToken.mockResolvedValue(MOCK_AUTH);
+      authRepository.findUserById.mockResolvedValue(MOCK_USER);
+      authRepository.refreshToken.mockResolvedValue(MOCK_AUTH);
+      authRepository.deleteExpiredAuths.mockResolvedValue(undefined);
+      jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
+
+      // Act
+      await service.refreshToken({ refreshToken: TEST_IDS.authId });
+
+      // Assert
+      expect(authRepository.findUserById).toHaveBeenCalledWith({
+        userId: MOCK_USER.id,
+        companyId: undefined,
+      });
     });
 
     it("should throw UNAUTHORIZED when refresh token not found", async () => {
@@ -523,6 +551,83 @@ describe("AuthService", () => {
       await expect(service.login({ data: loginData as any })).rejects.toThrow(
         new HttpException("The email or password you entered is incorrect.", HttpStatus.UNAUTHORIZED),
       );
+    });
+
+    it("should ask for a company selection, and create no session, when the user has more than one company", async () => {
+      // Arrange
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+      vi.mocked(checkPassword).mockResolvedValue(true);
+      authRepository.countUserCompanies.mockResolvedValue(2);
+      const mockResponse = { data: { attributes: { requiresCompanySelection: true } } };
+      jsonApiService.buildSingle.mockResolvedValue(mockResponse);
+
+      // Act
+      const result = await service.login({ data: loginData as any });
+
+      // Assert
+      expect(securityService.signCompanySelectionJwt).toHaveBeenCalledWith({ userId: MOCK_USER.id });
+      expect(jsonApiService.buildSingle).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ requiresCompanySelection: true, selectionToken: "selection-token" }),
+      );
+      expect(authRepository.create).not.toHaveBeenCalled();
+      expect(authRepository.setLastLogin).not.toHaveBeenCalled();
+      expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe("findCompanies", () => {
+    it("should list the companies of the user in the token", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      const companies = [{ id: TEST_IDS.companyId }] as any;
+      authRepository.findUserCompanies.mockResolvedValue(companies);
+      const mockResponse = { data: companies };
+      jsonApiService.buildList.mockResolvedValue(mockResponse);
+
+      // Act
+      const result = await service.findCompanies();
+
+      // Assert
+      expect(authRepository.findUserCompanies).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(expect.anything(), companies, expect.anything());
+      expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe("selectCompany", () => {
+    it("should mint a company-scoped session for a company the user belongs to", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      authRepository.findUserById.mockResolvedValue(MOCK_USER);
+      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      const mockResponse = { data: { type: "auths" } };
+      jsonApiService.buildSingle.mockResolvedValue(mockResponse);
+
+      // Act
+      const result = await service.selectCompany({ companyId: TEST_IDS.companyId });
+
+      // Assert
+      expect(authRepository.findUserById).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+      });
+      expect(authRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it("should throw 403 when the user does not belong to the company", async () => {
+      // Arrange
+      clsService.get.mockReturnValue(TEST_IDS.userId);
+      authRepository.findUserById.mockResolvedValue({ ...MOCK_USER, company: undefined } as User);
+
+      // Act & Assert
+      await expect(service.selectCompany({ companyId: "another-company" })).rejects.toThrow(
+        new HttpException("User does not belong to this company", HttpStatus.FORBIDDEN),
+      );
+      expect(authRepository.create).not.toHaveBeenCalled();
     });
   });
 

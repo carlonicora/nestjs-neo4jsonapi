@@ -25,6 +25,7 @@ const createMockNeo4jService = () => ({
   writeOne: vi.fn(),
   readOne: vi.fn(),
   readMany: vi.fn(),
+  read: vi.fn(),
   initQuery: vi.fn(),
 });
 
@@ -198,7 +199,14 @@ describe("AuthRepository", () => {
       });
       expect(firstQuery.query).toContain("MATCH (auth:Auth {id: $authId})");
       expect(firstQuery.query).toContain("MATCH (auth)<-[:HAS_AUTH]-(auth_user:User)");
-      expect(firstQuery.query).toContain("OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)");
+      expect(firstQuery.query).toContain(
+        "OPTIONAL MATCH (auth_user)-[:HAS_MEMBERSHIP]->(auth_user_role_ms:Membership)",
+      );
+      // Alias-bound (NOT $companyId): the auth-code exchange runs unauthenticated,
+      // so the membership read is pinned to the company on the same row.
+      expect(firstQuery.query).toContain("(auth_user_role_ms)-[:IN_COMPANY]->(auth_user_company)");
+      expect(firstQuery.query).not.toContain("(auth_user_role_ms)-[:IN_COMPANY]->(:Company {id: $companyId})");
+      expect(firstQuery.query).toContain("OPTIONAL MATCH (auth_user_role_ms)-[:HAS_ROLE]->(auth_user_role:Role)");
       expect(result).toBeDefined();
     });
 
@@ -335,9 +343,35 @@ describe("AuthRepository", () => {
         userId: TEST_IDS.userId,
       });
       expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})");
-      expect(mockQuery.query).toContain("OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)");
+      expect(mockQuery.query).toContain("OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(user_role_ms:Membership)");
+      expect(mockQuery.query).toContain("OPTIONAL MATCH (user_role_ms)-[:HAS_ROLE]->(user_role:Role)");
       expect(mockQuery.query).toContain("OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)");
       expect(result).toEqual(MOCK_USER);
+    });
+
+    it("should resolve platform memberships alongside the active company's memberships", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_USER);
+
+      await repository.findUserById({ userId: TEST_IDS.userId });
+
+      expect(mockQuery.query).toContain("(user_role_ms)-[:IN_COMPANY]->(:Company {id: $companyId})");
+      expect(mockQuery.query).toContain("NOT (user_role_ms)-[:IN_COMPANY]->(:Company)");
+    });
+
+    it("should scope company and roles to an explicit companyId when provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_USER);
+
+      await repository.findUserById({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId });
+
+      expect(mockQuery.queryParams).toMatchObject({
+        userId: TEST_IDS.userId,
+        companyId: TEST_IDS.companyId,
+      });
+      expect(mockQuery.query).toContain("OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company {id: $companyId})");
     });
   });
 
@@ -499,6 +533,51 @@ describe("AuthRepository", () => {
       await repository.deleteByToken({ token: longToken });
 
       expect(mockQuery.queryParams.token).toBe(longToken);
+    });
+  });
+
+  describe("countUserCompanies", () => {
+    it("should count the companies the user belongs to", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({
+        records: [{ get: () => ({ toNumber: () => 2 }) }],
+      } as any);
+
+      const result = await repository.countUserCompanies({ userId: TEST_IDS.userId });
+
+      expect(result).toBe(2);
+      expect(mockQuery.queryParams.userId).toBe(TEST_IDS.userId);
+      expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company:Company)");
+      expect(mockQuery.query).toContain("count(DISTINCT company) AS total");
+    });
+
+    it("should return 0 when the user belongs to no company", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] } as any);
+
+      const result = await repository.countUserCompanies({ userId: TEST_IDS.userId });
+
+      expect(result).toBe(0);
+    });
+  });
+
+  describe("findUserCompanies", () => {
+    it("should list the companies the user belongs to, ordered by name", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([{ id: "company-a" }, { id: "company-b" }] as any);
+
+      const result = await repository.findUserCompanies({ userId: TEST_IDS.userId });
+
+      expect(neo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: expect.anything(), fetchAll: true }),
+      );
+      expect(mockQuery.queryParams.userId).toBe(TEST_IDS.userId);
+      expect(mockQuery.query).toContain("MATCH (:User {id: $userId})-[:BELONGS_TO]->(company:Company)");
+      expect(mockQuery.query).toContain("ORDER BY company.name");
+      expect(result).toHaveLength(2);
     });
   });
 

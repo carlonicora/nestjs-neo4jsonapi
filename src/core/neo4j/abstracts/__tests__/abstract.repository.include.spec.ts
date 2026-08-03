@@ -51,7 +51,7 @@ const npcModel = (): DataModelInterface<any> => ({
       nodeName: "faction",
       relationshipName: "faction",
       direction: "out",
-      relationship: "MEMBER_OF",
+      relationship: "BELONGS_TO_FACTION",
       cardinality: "one",
       required: false,
     },
@@ -139,7 +139,9 @@ describe("buildReturnStatement — nested include", () => {
   it("emits each segment of a multi-level path with correct labels", () => {
     const cypher = new RoundRepo(["npc.faction"]).exposedBuildReturnStatement();
     expect(cypher).toContain("OPTIONAL MATCH (round_turns)-[:PLAYED_BY]->(round_turns_npc:Npc)");
-    expect(cypher).toContain("OPTIONAL MATCH (round_turns_npc)-[:MEMBER_OF]->(round_turns_npc_faction:Faction)");
+    expect(cypher).toContain(
+      "OPTIONAL MATCH (round_turns_npc)-[:BELONGS_TO_FACTION]->(round_turns_npc_faction:Faction)",
+    );
     expect(cypher).toMatch(/RETURN[^]*round_turns_npc_faction/);
   });
 
@@ -147,7 +149,9 @@ describe("buildReturnStatement — nested include", () => {
     const cypher = new RoundRepo(["npc.faction", "npc"]).exposedBuildReturnStatement();
     const occurrences = cypher.split("OPTIONAL MATCH (round_turns)-[:PLAYED_BY]->(round_turns_npc:Npc)").length - 1;
     expect(occurrences).toBe(1);
-    expect(cypher).toContain("OPTIONAL MATCH (round_turns_npc)-[:MEMBER_OF]->(round_turns_npc_faction:Faction)");
+    expect(cypher).toContain(
+      "OPTIONAL MATCH (round_turns_npc)-[:BELONGS_TO_FACTION]->(round_turns_npc_faction:Faction)",
+    );
   });
 
   it("throws when an include segment cannot be resolved", () => {

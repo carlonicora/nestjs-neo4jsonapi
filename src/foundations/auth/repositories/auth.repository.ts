@@ -7,10 +7,12 @@ import { AuthCode } from "../../auth/entities/auth.code.entity";
 import { AuthCodeModel } from "../../auth/entities/auth.code.model";
 import { Auth } from "../../auth/entities/auth.entity";
 import { AuthModel } from "../../auth/entities/auth.model";
-import { companyMeta } from "../../company";
+import { Company, CompanyDescriptor, companyMeta } from "../../company";
 import { featureMeta } from "../../feature/entities/feature.meta";
+import { membershipRoleMatch } from "../../membership/queries/membership.query";
 import { ModuleModel } from "../../module/entities/module.model";
 import { featureModuleQuery } from "../../module/queries/feature.module.query";
+import { Role } from "../../role/entities/role";
 import { userMeta } from "../../user";
 import { User, UserDescriptor } from "../../user/entities/user";
 
@@ -64,24 +66,39 @@ export class AuthRepository implements OnModuleInit {
     let query = this.neo4j.initQuery({ serialiser: AuthModel });
 
     query.queryParams = {
+      ...query.queryParams,
       authId: params.authId,
     };
 
+    // Role hydration is bound to the `auth_user_company` ALIAS rather than to
+    // `$companyId` (the membershipRoleMatch helper): the auth-code exchange runs
+    // UNAUTHENTICATED, so CLS carries no companyId and `$companyId` would be null,
+    // which would silently reduce the session to platform-level roles only. The
+    // alias-bound form is the same shape the permission core uses
+    // (feature.module.query.ts) and keeps the returned roles consistent with the
+    // company returned on the very same row. Platform memberships (no IN_COMPANY
+    // edge) are still included, so the global Administrator keeps its roles.
     query.query = `
       MATCH (auth:Auth {id: $authId})
       MATCH (auth)<-[:HAS_AUTH]-(auth_user:User)
-      OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
-      OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_group:Group) 
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
+      OPTIONAL MATCH (auth_user)-[:HAS_MEMBERSHIP]->(auth_user_role_ms:Membership)
+      WHERE (auth_user_role_ms)-[:IN_COMPANY]->(auth_user_company)
+         OR NOT (auth_user_role_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (auth_user_role_ms)-[:HAS_ROLE]->(auth_user_role:Role)
       OPTIONAL MATCH (auth_user_company)-[:HAS_CONFIGURATION]->(auth_user_company_configuration:Configuration)
       OPTIONAL MATCH (auth_user_company)-[:HAS_FEATURE]->(auth_user_company_feature:Feature)
-      RETURN auth, auth_user, auth_user_role, auth_user_group, auth_user_company, auth_user_company_configuration, auth_user_company_feature
+      RETURN auth, auth_user, auth_user_role, auth_user_company, auth_user_company_configuration, auth_user_company_feature
     `;
 
     const auth = await this.neo4j.readOne(query);
 
     query = this.neo4j.initQuery({ serialiser: ModuleModel });
+    // Spread first: initQuery() keeps the prefix MATCH on `$currentUserId` whenever CLS
+    // carries a userId, so that parameter must survive — the company-selection flow is
+    // the first caller that reaches here with a userId but no companyId in CLS.
     query.queryParams = {
+      ...query.queryParams,
       companyId: auth.user.company.id,
       userId: auth.user.id,
     };
@@ -203,17 +220,28 @@ export class AuthRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async findUserById(params: { userId: string }): Promise<User> {
+  /**
+   * Reads the user together with the roles effective in a single company.
+   *
+   * `companyId` scopes BOTH the company hydration and the membership role read to
+   * one explicit company (login/company-switch/refresh); platform memberships (no
+   * IN_COMPANY edge) always resolve regardless. When omitted, `$companyId` keeps
+   * the CLS value injected by `initQuery()` — identical to the previous behaviour.
+   */
+  async findUserById(params: { userId: string; companyId?: string }): Promise<User> {
     const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
 
     query.queryParams = {
+      ...query.queryParams,
       userId: params.userId,
     };
 
+    if (params.companyId) query.queryParams.companyId = params.companyId;
+
     query.query = `
-      MATCH (user:User {id: $userId}) 
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
-      OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
+      MATCH (user:User {id: $userId})
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
+      OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company${params.companyId ? ` {id: $companyId}` : ``})
       MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
       WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
       OR EXISTS {((${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
@@ -224,25 +252,92 @@ export class AuthRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async create(params: { authId: string; userId: string; token: string; expiration: Date }): Promise<Auth> {
-    const user = await this.findUserById({ userId: params.userId });
+  async countUserCompanies(params: { userId: string }): Promise<number> {
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+    };
+
+    query.query = `
+      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company:Company)
+      RETURN count(DISTINCT company) AS total
+    `;
+
+    // Scalar aggregate read (a count, not an entity fetch); mirrors the sanctioned
+    // getCompanyAdminGuard pattern in UserRepository. Company scope is derived
+    // graph-side from the user, so buildDefaultMatch does not apply: this runs
+    // pre-session, when CLS holds no companyId at all.
+    const result = await this.neo4j.read(query.query, query.queryParams); // nja-lint-ignore raw-neo4j-query — scalar COUNT, justified above
+    const total = result.records[0]?.get("total");
+
+    return total?.toNumber?.() ?? Number(total ?? 0);
+  }
+
+  /**
+   * The companies the user belongs to — the list rendered by the company-selection
+   * screen and the company switcher.
+   */
+  async findUserCompanies(params: { userId: string }): Promise<Company[]> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model, fetchAll: true });
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+    };
+
+    query.query = `
+      MATCH (:User {id: $userId})-[:BELONGS_TO]->(${companyMeta.nodeName}:${companyMeta.labelName})
+      RETURN ${companyMeta.nodeName}
+      ORDER BY ${companyMeta.nodeName}.name
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * `companyId` pins the session being created to one company: the roles baked
+   * into the JWT (signed by AuthService from the same user object) and the roles
+   * hydrated onto the returned Auth payload must describe the SAME company, or a
+   * user who belongs to more than one company would get a session whose company
+   * and roles disagree.
+   */
+  async create(params: {
+    authId: string;
+    userId: string;
+    token: string;
+    expiration: Date;
+    companyId?: string;
+  }): Promise<Auth> {
+    const user = await this.findUserById({ userId: params.userId, companyId: params.companyId });
 
     let query = this.neo4j.initQuery({ serialiser: AuthModel });
     query.queryParams = {
+      ...query.queryParams,
       authId: params.authId,
       userId: params.userId,
       token: params.token,
       expiration: params.expiration.toISOString(),
     };
 
-    if (user.role && user.role.length === 1 && user.role[0].id === RoleId.Administrator) {
+    // Login runs before CLS carries a companyId, so bind the membership role read to
+    // the company `findUserById` resolved for this user (sanctioned explicit-company
+    // pattern); platform memberships resolve regardless of the value.
+    if (user.company?.id) query.queryParams.companyId = user.company.id;
+
+    // Platform administrator: holds the Administrator role on a platform membership
+    // (no IN_COMPANY edge) and therefore has no company in scope. Previously
+    // expressed as "exactly one role and it is Administrator" — under the membership
+    // model an administrator may legitimately hold several platform roles.
+    if (user.role?.some((role: Role) => role.id === RoleId.Administrator) && !user.company) {
       query.query = `
         MATCH (auth_user:User {id: $userId})
         CREATE (auth:Auth {id: $authId, token: $token, expiration: $expiration, createdAt: datetime(), updatedAt: datetime()}) 
         CREATE (auth_user)-[:HAS_AUTH]->(auth)
 
         WITH auth, auth_user
-        OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
+        ${membershipRoleMatch({ userAlias: "auth_user", roleAlias: "auth_user_role" })}
         OPTIONAL MATCH (auth_user_role)-[perm:HAS_PERMISSIONS]->(module:Module)
         WITH auth, auth_user, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms, collect(perm) AS rolePerms
 
@@ -322,9 +417,9 @@ WITH auth, auth_user,  auth_user_role, module,
       CREATE (auth_user)-[:HAS_AUTH]->(auth)
 
       WITH auth, auth_user
-      OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
+      ${membershipRoleMatch({ userAlias: "auth_user", roleAlias: "auth_user_role" })}
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
-      
+
       MATCH (auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
       WHERE auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
       OR EXISTS {((auth_${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
@@ -355,13 +450,14 @@ WITH auth, auth_user,  auth_user_role, module,
   async findByToken(params: { token: string }): Promise<Auth> {
     let query = this.neo4j.initQuery({ serialiser: AuthModel });
     query.queryParams = {
+      ...query.queryParams,
       token: params.token,
     };
 
     query.query = `
       MATCH (auth:Auth {token: $token})<-[:HAS_AUTH]-(auth_user:User)
       WITH auth, auth_user
-      OPTIONAL MATCH (auth_user)-[:MEMBER_OF]->(auth_user_role:Role)
+      ${membershipRoleMatch({ userAlias: "auth_user", roleAlias: "auth_user_role" })}
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
       OPTIONAL MATCH (auth_user_company)-[:HAS_CONFIGURATION]->(auth_user_company_configuration:Configuration)
       OPTIONAL MATCH (auth_user_company)-[:HAS_FEATURE]->(auth_user_company_feature:Feature)

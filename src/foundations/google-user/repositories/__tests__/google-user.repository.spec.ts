@@ -230,7 +230,9 @@ describe("GoogleUserRepository", () => {
       expect(mockQuery.query).toContain("RETURN googleuser");
       expect(mockQuery.query).toContain("googleuser_company");
       expect(mockQuery.query).toContain("googleuser_user");
-      expect(mockQuery.query).toContain(":MEMBER_OF");
+      expect(mockQuery.query).toContain(":HAS_MEMBERSHIP");
+      expect(mockQuery.query).toContain(":IN_COMPANY");
+      expect(mockQuery.query).toContain(":HAS_ROLE");
     });
   });
 

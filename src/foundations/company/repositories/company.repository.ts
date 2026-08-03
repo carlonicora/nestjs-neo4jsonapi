@@ -76,38 +76,6 @@ export class CompanyRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  // async createCompanyAgents(params: { companyId: string }): Promise<void> {
-  // await this.neo4j.writeOne({
-  //   query: `
-  //       MATCH (c:Company { id: $companyId })
-  //       WITH c,
-  //         substring(c.id, 0, size(c.id) - 12) AS prefix,
-  //         apoc.text.lpad(toString(toInteger($id)), 12, '0') AS suffix
-  //       WITH c, prefix + suffix AS userId
-  //       MERGE (u:User {id: userId})
-  //       ON CREATE SET
-  //         u.name       = $name,
-  //         u.isActive   = true,
-  //         u.isDeleted  = false,
-  //         u.avatar     = $avatar,
-  //         u.createdAt  = datetime(),
-  //         u.updatedAt  = datetime()
-  //       MERGE (u)-[:BELONGS_TO]->(c)
-  //       WITH u
-  //       MATCH (r:Role)
-  //       WHERE r.id IN $roles
-  //       MERGE (u)-[:MEMBER_OF]->(r)
-  //     `,
-  //   queryParams: {
-  //     companyId: params.companyId,
-  //     id: 1,
-  //     name: "Support Operator",
-  //     avatar: "~/images/support_operator.webp",
-  //     roles: [RoleId.SupportAgent],
-  //   },
-  // });
-  // }
-
   async create(params: {
     companyId: string;
     name: string;
@@ -372,9 +340,7 @@ export class CompanyRepository implements OnModuleInit {
       }) RETURN company
     `;
 
-    const response = await this.neo4j.writeOne(query);
-    // await this.createCompanyAgents({ companyId: response.id });
-    return response;
+    return await this.neo4j.writeOne(query);
   }
 
   async useTokens(params: {
@@ -539,8 +505,14 @@ export class CompanyRepository implements OnModuleInit {
       companyId: params.companyId,
     };
 
+    // SC-3 invariant: an orphaned Membership whose company vanished would read as a
+    // PLATFORM membership (privilege escalation), so it must go with the company.
     query.query = `
       MATCH (company:Company {id: $companyId})
+      OPTIONAL MATCH (:User)-[:HAS_MEMBERSHIP]->(orphan_ms:Membership)-[:IN_COMPANY]->(company)
+      DETACH DELETE orphan_ms
+
+      WITH DISTINCT company
       DETACH DELETE company
     `;
 

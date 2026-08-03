@@ -240,7 +240,9 @@ describe("DiscordUserRepository", () => {
       expect(mockQuery.query).toContain("RETURN discorduser");
       expect(mockQuery.query).toContain("discorduser_company");
       expect(mockQuery.query).toContain("discorduser_user");
-      expect(mockQuery.query).toContain(":MEMBER_OF");
+      expect(mockQuery.query).toContain(":HAS_MEMBERSHIP");
+      expect(mockQuery.query).toContain(":IN_COMPANY");
+      expect(mockQuery.query).toContain(":HAS_ROLE");
     });
   });
 

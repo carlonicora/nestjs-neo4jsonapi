@@ -117,6 +117,8 @@ describe("AuthService - 2FA Integration", () => {
       deleteByRefreshToken: vi.fn(),
       findByCode: vi.fn(),
       setLastLogin: vi.fn().mockResolvedValue(undefined),
+      countUserCompanies: vi.fn().mockResolvedValue(1),
+      findUserCompanies: vi.fn().mockResolvedValue([]),
     } as any;
 
     mockUserRepository = {

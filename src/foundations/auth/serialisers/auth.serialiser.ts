@@ -27,6 +27,10 @@ export class AuthSerialiser extends AbstractJsonApiSerialiser implements JsonApi
       token: "token",
       refreshToken: "refreshToken",
       expiration: "expiration",
+      // Transient login-flow attributes: present only on the company-selection
+      // response, undefined (and therefore omitted from the JSON body) otherwise.
+      requiresCompanySelection: "requiresCompanySelection",
+      selectionToken: "selectionToken",
     };
 
     this.relationships = {

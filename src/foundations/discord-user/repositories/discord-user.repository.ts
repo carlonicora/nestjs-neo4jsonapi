@@ -16,7 +16,12 @@ export class DiscordUserRepository extends AbstractRepository<DiscordUser, typeo
     return `
       MATCH (discorduser:DiscordUser)-[:BELONGS_TO]->(discorduser_company:Company)
       MATCH (discorduser)<-[:HAS_DISCORD]-(discorduser_user:User)
-      OPTIONAL MATCH (discorduser_${userMeta.nodeName})-[:MEMBER_OF]->(discorduser_${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName}) 
+      // membershipRoleMatch bound to the matched company alias: findByDiscordId has no
+      // $companyId param. See foundations/membership/queries/membership.query.ts.
+      OPTIONAL MATCH (discorduser_${userMeta.nodeName})-[:HAS_MEMBERSHIP]->(discorduser_${userMeta.nodeName}_${roleMeta.nodeName}_ms:Membership)
+      WHERE (discorduser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(discorduser_company)
+         OR NOT (discorduser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (discorduser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:HAS_ROLE]->(discorduser_${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
 
       RETURN discorduser, discorduser_company, discorduser_user, discorduser_company as discorduser_user_company, discorduser_${userMeta.nodeName}_${roleMeta.nodeName}
     `;

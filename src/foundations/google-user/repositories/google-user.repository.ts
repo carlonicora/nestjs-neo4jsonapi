@@ -16,7 +16,12 @@ export class GoogleUserRepository extends AbstractRepository<GoogleUser, typeof 
     return `
       MATCH (googleuser:GoogleUser)-[:BELONGS_TO]->(googleuser_company:Company)
       MATCH (googleuser)<-[:HAS_GOOGLE]-(googleuser_user:User)
-      OPTIONAL MATCH (googleuser_${userMeta.nodeName})-[:MEMBER_OF]->(googleuser_${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
+      // membershipRoleMatch bound to the matched company alias: findByGoogleId has no
+      // $companyId param. See foundations/membership/queries/membership.query.ts.
+      OPTIONAL MATCH (googleuser_${userMeta.nodeName})-[:HAS_MEMBERSHIP]->(googleuser_${userMeta.nodeName}_${roleMeta.nodeName}_ms:Membership)
+      WHERE (googleuser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(googleuser_company)
+         OR NOT (googleuser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (googleuser_${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:HAS_ROLE]->(googleuser_${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
 
       RETURN googleuser, googleuser_company, googleuser_user, googleuser_company as googleuser_user_company, googleuser_${userMeta.nodeName}_${roleMeta.nodeName}
     `;

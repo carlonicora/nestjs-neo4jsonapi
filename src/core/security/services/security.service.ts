@@ -60,6 +60,22 @@ export class SecurityService {
     });
   }
 
+  get companySelectionTokenExpiration(): Date {
+    return new Date(new Date().getTime() + 10 * 60 * 1000);
+  }
+
+  signCompanySelectionJwt(params: { userId: string }): string {
+    return this.jwtService.sign({
+      userId: params.userId,
+      scope: "company-selection",
+      expiration: this.companySelectionTokenExpiration,
+    });
+  }
+
+  decodeJwt(token: string): any {
+    return this.jwtService.decode(token);
+  }
+
   isCurrentUserCompanyAdmin(): boolean {
     const configurations = this.clsService.get<CompanyConfigurationsLike>("companyConfigurations");
     return configurations?.hasRole(SystemRoles.CompanyAdministrator) ?? false;

@@ -222,7 +222,9 @@ describe("RoleRepository", () => {
       expect(mockQuery.queryParams.administratorsId).toBe(RoleId.Administrator);
       expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})");
       expect(mockQuery.query).toContain("[:BELONGS_TO]->(company)");
-      expect(mockQuery.query).toContain("(user)-[:MEMBER_OF]->(role:Role)");
+      expect(mockQuery.query).toContain("(user)-[:HAS_MEMBERSHIP]->(role_ms:Membership)");
+      expect(mockQuery.query).toContain("(role_ms)-[:IN_COMPANY]->(company)");
+      expect(mockQuery.query).toContain("(role_ms)-[:HAS_ROLE]->(role:Role)");
       expect(mockQuery.query).toContain("WHERE role.id <> $administratorsId");
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_ROLE]);
@@ -269,7 +271,9 @@ describe("RoleRepository", () => {
       expect(mockQuery.queryParams.userId).toBe(TEST_IDS.userId);
       expect(mockQuery.queryParams.administratorsId).toBe(RoleId.Administrator);
       expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})");
-      expect(mockQuery.query).toContain("WHERE NOT (role)<-[:MEMBER_OF]-(user)");
+      expect(mockQuery.query).toContain("WHERE NOT EXISTS {");
+      expect(mockQuery.query).toContain("(user)-[:HAS_MEMBERSHIP]->(nu_ms:Membership)-[:HAS_ROLE]->(role)");
+      expect(mockQuery.query).toContain("(nu_ms)-[:IN_COMPANY]->(company)");
       expect(mockQuery.query).toContain("AND role.id <> $administratorsId");
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_ROLE_2]);

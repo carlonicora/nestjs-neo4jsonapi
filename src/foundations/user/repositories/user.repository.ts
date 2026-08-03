@@ -6,6 +6,12 @@ import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { companyMeta } from "../../company/entities/company.meta";
 import { featureMeta } from "../../feature/entities/feature.meta";
+import {
+  grantCompanyRoles,
+  grantPlatformRole,
+  membershipRoleMatch,
+  membershipRoleMatchRequired,
+} from "../../membership/queries/membership.query";
 import { ModuleModel } from "../../module/entities/module.model";
 import { adminModuleQuery, featureModuleQuery } from "../../module/queries/feature.module.query";
 import { roleMeta } from "../../role/entities/role.meta";
@@ -39,18 +45,20 @@ export class UserRepository implements OnModuleInit {
     }
   }
 
-  async makeCompanyAdmin(params: { userId: string }) {
+  async makeCompanyAdmin(params: { userId: string; companyId: string }) {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
       userId: params.userId,
-      roleId: RoleId.CompanyAdministrator,
+      companyId: params.companyId,
+      membershipId: randomUUID(),
+      roleIds: [RoleId.CompanyAdministrator],
     };
 
     query.query = `
-      MATCH (role:Role {id: $roleId})
+      MATCH (company:Company {id: $companyId})
       MATCH (user:User {id: $userId})
-      MERGE (user)-[:MEMBER_OF]->(role)
+      ${grantCompanyRoles({ userAlias: "user", companyAlias: "company" })}
     `;
 
     await this.neo4j.writeOne(query);
@@ -66,8 +74,13 @@ export class UserRepository implements OnModuleInit {
     query.query = `
       MATCH (user:User {id: $userId})
 
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
+      // membershipRoleMatch bound to the matched company alias: this query has no
+      // $companyId param (it is not CLS-scoped). See membership.query.ts.
+      OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(user_role_ms:Membership)
+      WHERE (user_role_ms)-[:IN_COMPANY]->(user_company)
+         OR NOT (user_role_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (user_role_ms)-[:HAS_ROLE]->(user_role:Role)
       RETURN user, user_role, user_company
     `;
 
@@ -89,8 +102,13 @@ export class UserRepository implements OnModuleInit {
     query.query = `
       MATCH (${userMeta.nodeName}:User {id: $userId})
 
-      OPTIONAL MATCH (${userMeta.nodeName})-[:MEMBER_OF]->(${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
       OPTIONAL MATCH (${userMeta.nodeName})-[:BELONGS_TO]->(${userMeta.nodeName}_${companyMeta.nodeName}:${companyMeta.labelName})
+      // membershipRoleMatch bound to the matched company alias: this query deliberately
+      // does not depend on CLS/$companyId. See membership.query.ts.
+      OPTIONAL MATCH (${userMeta.nodeName})-[:HAS_MEMBERSHIP]->(${userMeta.nodeName}_${roleMeta.nodeName}_ms:Membership)
+      WHERE (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(${userMeta.nodeName}_${companyMeta.nodeName})
+         OR NOT (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(:${companyMeta.labelName})
+      OPTIONAL MATCH (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:HAS_ROLE]->(${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
 
       OPTIONAL MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
       WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true
@@ -116,7 +134,7 @@ export class UserRepository implements OnModuleInit {
     query.query += `
       ${this.userCypherService.default({ searchField: "id" })}
 
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
       OPTIONAL MATCH (user_company)-[:HAS_CONFIGURATION]->(user_company_configuration:Configuration)
       MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
@@ -172,7 +190,7 @@ export class UserRepository implements OnModuleInit {
     query.query = `
       MATCH (company:Company {id: $companyId})
       MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role) 
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
 
       MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
@@ -197,8 +215,13 @@ export class UserRepository implements OnModuleInit {
       WHERE toLower(${userMeta.nodeName}.email) = $email
       ${params.includeDeleted ? `` : `AND ${userMeta.nodeName}.isDeleted = false`}
       
-      OPTIONAL MATCH (${userMeta.nodeName})-[:MEMBER_OF]->(${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName}) 
       OPTIONAL MATCH (${userMeta.nodeName})-[:BELONGS_TO]->(${userMeta.nodeName}_${companyMeta.nodeName}:${companyMeta.labelName})
+      // membershipRoleMatch bound to the matched company alias: the login/lookup path
+      // has no $companyId param. See membership.query.ts.
+      OPTIONAL MATCH (${userMeta.nodeName})-[:HAS_MEMBERSHIP]->(${userMeta.nodeName}_${roleMeta.nodeName}_ms:Membership)
+      WHERE (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(${userMeta.nodeName}_${companyMeta.nodeName})
+         OR NOT (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:IN_COMPANY]->(:${companyMeta.labelName})
+      OPTIONAL MATCH (${userMeta.nodeName}_${roleMeta.nodeName}_ms)-[:HAS_ROLE]->(${userMeta.nodeName}_${roleMeta.nodeName}:${roleMeta.labelName})
 
       MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
       WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
@@ -220,10 +243,15 @@ export class UserRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (user:User {code: $code, isDeleted: false}) 
-      
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role) 
+      MATCH (user:User {code: $code, isDeleted: false})
+
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
+      // membershipRoleMatch bound to the matched company alias: the activation-code
+      // lookup has no $companyId param. See membership.query.ts.
+      OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(user_role_ms:Membership)
+      WHERE (user_role_ms)-[:IN_COMPANY]->(user_company)
+         OR NOT (user_role_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (user_role_ms)-[:HAS_ROLE]->(user_role:Role)
       RETURN user, user_role, user_company
     `;
 
@@ -261,7 +289,7 @@ export class UserRepository implements OnModuleInit {
     query.query += `
       {CURSOR}
 
-      OPTIONAL MATCH (${userMeta.nodeName})-[:MEMBER_OF]->(${userMeta.nodeName}_role:Role)
+      ${membershipRoleMatch({ userAlias: userMeta.nodeName, roleAlias: `${userMeta.nodeName}_role` })}
       RETURN ${userMeta.nodeName}, ${userMeta.nodeName}_role
     `;
 
@@ -314,7 +342,7 @@ export class UserRepository implements OnModuleInit {
       MATCH (company:Company {id: $companyId})<-[:BELONGS_TO]-(user:User)
       ${params.isDeleted ? `WHERE user.isDeleted = $isDeleted` : ``}
       ${params.term ? `${params.isDeleted ? `AND` : `WHERE`} toLower(user.name) CONTAINS toLower($term)` : ``}
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       RETURN user, user_role
     `;
 
@@ -333,13 +361,13 @@ export class UserRepository implements OnModuleInit {
     query.query += `
       MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
       ${params.term ? "WHERE toLower(user.name) CONTAINS toLower($term)" : ""}
-      MATCH (user)-[:MEMBER_OF]->(role:Role {id: $roleId})
-      
-      WITH user
+      ${membershipRoleMatchRequired({ userAlias: "user", roleAlias: "role" })}
+
+      WITH DISTINCT user
       ORDER BY user.name ASC
       {CURSOR}
-      
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role) 
+
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
       RETURN user, user_role, user_company
     `;
@@ -359,14 +387,18 @@ export class UserRepository implements OnModuleInit {
     query.query += `
       MATCH (referenceRole:Role {id: $roleId})
       MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
-      WHERE NOT (user)-[:MEMBER_OF]->(referenceRole)
-      ${params.term ? "WHERE toLower(user.name) CONTAINS toLower($term)" : ""}
-      
-      WITH user
+      WHERE NOT EXISTS {
+        MATCH (user)-[:HAS_MEMBERSHIP]->(nr_ms:Membership)-[:HAS_ROLE]->(referenceRole)
+        WHERE (nr_ms)-[:IN_COMPANY]->(:Company {id: $companyId})
+           OR NOT (nr_ms)-[:IN_COMPANY]->(:Company)
+      }
+      ${params.term ? "AND toLower(user.name) CONTAINS toLower($term)" : ""}
+
+      WITH DISTINCT user
       ORDER BY user.name ASC
       {CURSOR}
-      
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role) 
+
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company)
       RETURN user, user_role, user_company
     `;
@@ -406,7 +438,8 @@ export class UserRepository implements OnModuleInit {
       code: randomUUID(),
       codeExpiration: new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       companyId: params.companyId,
-      roleIds: params.roleIds,
+      roleIds: params.roleIds ?? [],
+      membershipId: randomUUID(),
       termsAcceptedAt: params.termsAcceptedAt ?? null,
       marketingConsent: params.marketingConsent ?? false,
       marketingConsentAt: params.marketingConsentAt ?? null,
@@ -433,16 +466,11 @@ export class UserRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })-[:BELONGS_TO]->(company)
-      ${
-        params.roleIds && params.roleIds.length > 0
-          ? `
-            WITH user, company
-            UNWIND $roleIds AS roleId
-            MATCH (role:Role {id: roleId})
-            CREATE (user)-[:MEMBER_OF]->(role)
-          `
-          : ""
-      }
+
+      // Always create the (user, company) Membership — the BELONGS_TO ⇄ Membership
+      // invariant holds even when the user starts with no roles.
+      WITH user, company
+      ${grantCompanyRoles({ userAlias: "user", companyAlias: "company" })}
     `;
 
     await this.neo4j.writeOne(query);
@@ -508,7 +536,8 @@ export class UserRepository implements OnModuleInit {
       bio: params.bio ?? null,
       password: params.password,
       avatar: params.avatar ?? null,
-      roleIds: params.roles,
+      roleIds: params.roles ?? [],
+      membershipId: randomUUID(),
       isActive: params.isActive,
       phone: params.phone ?? null,
     };
@@ -521,17 +550,16 @@ export class UserRepository implements OnModuleInit {
       ${
         params.isAdmin && params.roles !== undefined
           ? `
-            // Delete outdated MEMBER_OF relationships
-            WITH user
-            OPTIONAL MATCH (user)-[roleRel:MEMBER_OF]->(role:Role)
-            WHERE NOT role.id IN $roleIds
-            DELETE roleRel
+            // Drop the roles this user no longer holds IN THIS COMPANY.
+            // Platform memberships (no IN_COMPANY edge) are untouched here.
+            WITH user, company
+            OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(put_ms:Membership)-[:IN_COMPANY]->(company)
+            OPTIONAL MATCH (put_ms)-[stale:HAS_ROLE]->(stale_role:Role)
+            WHERE NOT stale_role.id IN $roleIds
+            DELETE stale
 
-            // Add new MEMBER_OF relationships
-            WITH user, $roleIds AS roleIds
-            UNWIND roleIds AS roleId
-            MATCH (role:Role {id: roleId})
-            MERGE (user)-[:MEMBER_OF]->(role)
+            WITH DISTINCT user, company
+            ${grantCompanyRoles({ userAlias: "user", companyAlias: "company" })}
           `
           : ``
       }
@@ -633,13 +661,23 @@ export class UserRepository implements OnModuleInit {
       ...query.queryParams,
       roleId: params.roleId,
       userId: params.userId,
+      membershipId: randomUUID(),
+      roleIds: [params.roleId],
     };
 
-    query.query += `
-      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
-      MATCH (role:Role {id: $roleId})
-      CREATE (user)-[:MEMBER_OF]->(role)
-    `;
+    // Administrator is a PLATFORM role: it lives on the membership with no IN_COMPANY
+    // edge. Every other role is granted on the CLS company's membership.
+    if (params.roleId === RoleId.Administrator) {
+      query.query += `
+        MATCH (user:User {id: $userId})
+        ${grantPlatformRole({ userAlias: "user" })}
+      `;
+    } else {
+      query.query += `
+        MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
+        ${grantCompanyRoles({ userAlias: "user", companyAlias: "company" })}
+      `;
+    }
 
     await this.neo4j.writeOne(query);
   }
@@ -651,12 +689,14 @@ export class UserRepository implements OnModuleInit {
       ...query.queryParams,
       roleId: params.roleId,
       userId: params.userId,
+      administratorRoleId: RoleId.Administrator,
     };
 
     query.query += `
-      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
-      MATCH (role:Role {id: $roleId})
-      MATCH (user)-[rel:MEMBER_OF]->(role)
+      MATCH (user:User {id: $userId})-[:HAS_MEMBERSHIP]->(rm_ms:Membership)
+      WHERE (rm_ms)-[:IN_COMPANY]->(:Company {id: $companyId})
+         OR ($roleId = $administratorRoleId AND NOT (rm_ms)-[:IN_COMPANY]->(:Company))
+      MATCH (rm_ms)-[rel:HAS_ROLE]->(:Role {id: $roleId})
       DELETE rel
     `;
 
@@ -675,8 +715,10 @@ export class UserRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (user:User {isDeleted: false})-[:MEMBER_OF]->(role:Role {id: $administratorRoleId})
-      RETURN user
+      MATCH (user:User {isDeleted: false})-[:HAS_MEMBERSHIP]->(pa_ms:Membership)
+      WHERE NOT (pa_ms)-[:IN_COMPANY]->(:Company)
+      MATCH (pa_ms)-[:HAS_ROLE]->(:Role {id: $administratorRoleId})
+      RETURN DISTINCT user
     `;
 
     return this.neo4j.readMany(query);
@@ -698,8 +740,14 @@ export class UserRepository implements OnModuleInit {
       MATCH (stripeCustomer:StripeCustomer {stripeCustomerId: $stripeCustomerId})
       MATCH (company:Company)<-[:BELONGS_TO]-(stripeCustomer)
       MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
-      MATCH (user)-[:MEMBER_OF]->(role:Role {id: $companyAdminRoleId})
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      MATCH (user)-[:HAS_MEMBERSHIP]->(ca_ms:Membership)-[:IN_COMPANY]->(company)
+      MATCH (ca_ms)-[:HAS_ROLE]->(:Role {id: $companyAdminRoleId})
+      // membershipRoleMatch bound to the matched company alias: this query has no
+      // $companyId param. See membership.query.ts.
+      OPTIONAL MATCH (user)-[:HAS_MEMBERSHIP]->(user_role_ms:Membership)
+      WHERE (user_role_ms)-[:IN_COMPANY]->(company)
+         OR NOT (user_role_ms)-[:IN_COMPANY]->(:Company)
+      OPTIONAL MATCH (user_role_ms)-[:HAS_ROLE]->(user_role:Role)
       RETURN user, user_role
     `;
 
@@ -721,8 +769,9 @@ export class UserRepository implements OnModuleInit {
     query.query = `
       MATCH (company:Company {id: $companyId})
       MATCH (user:User {isDeleted: false})-[:BELONGS_TO]->(company)
-      MATCH (user)-[:MEMBER_OF]->(role:Role {id: $companyAdminRoleId})
-      OPTIONAL MATCH (user)-[:MEMBER_OF]->(user_role:Role)
+      MATCH (user)-[:HAS_MEMBERSHIP]->(ca_ms:Membership)-[:IN_COMPANY]->(company)
+      MATCH (ca_ms)-[:HAS_ROLE]->(:Role {id: $companyAdminRoleId})
+      ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       RETURN user, user_role
     `;
 

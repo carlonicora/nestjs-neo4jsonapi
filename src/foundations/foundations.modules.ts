@@ -14,6 +14,7 @@ import { DiscordUserModule } from "./discord-user/discord-user.module";
 import { FeatureModule } from "./feature/feature.module";
 import { HowToModule } from "./how-to/how-to.module";
 import { KeyConceptModule } from "./keyconcept/keyconcept.module";
+import { MembershipModule } from "./membership/membership.module";
 import { ModuleModule } from "./module/module.module";
 import { NotificationModule } from "./notification/notification.module";
 import { OAuthModule } from "./oauth/oauth.module";
@@ -66,6 +67,7 @@ const STATIC_FOUNDATION_MODULES = [
   FeatureModule,
   HowToModule,
   KeyConceptModule,
+  MembershipModule,
   ModuleModule,
   NotificationModule,
   OAuthModule,

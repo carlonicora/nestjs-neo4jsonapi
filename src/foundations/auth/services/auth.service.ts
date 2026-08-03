@@ -10,6 +10,7 @@ import { AuthPostLoginDataDTO } from "../../auth/dtos/auth.post.login.dto";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface, ConfigAuthInterface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { AuthPostRegisterDataDTO } from "../../auth/dtos/auth.post.register.dto";
@@ -18,6 +19,7 @@ import { Auth } from "../../auth/entities/auth.entity";
 import { AuthModel } from "../../auth/entities/auth.model";
 import { PendingAuthModel } from "../../auth/entities/pending-auth.model";
 import { AuthRepository } from "../../auth/repositories/auth.repository";
+import { CompanyDescriptor } from "../../company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { DiscordUserService } from "../../discord-user/services/discord-user.service";
 import { GoogleUserService } from "../../google-user/services/google-user.service";
@@ -110,6 +112,10 @@ export class AuthService {
       authId: randomUUID(),
       userId: params.user.id,
       token: token,
+      // Pin the session to the same company whose roles were just signed into the
+      // JWT: a user who belongs to more than one company must not get a payload
+      // whose company and roles come from different memberships.
+      companyId: companyId,
       expiration: this.security.refreshTokenExpiration,
     });
 
@@ -153,8 +159,14 @@ export class AuthService {
 
     if (!auth) throw new HttpException("Invalid refresh token", HttpStatus.UNAUTHORIZED);
 
+    // Roles are company-scoped: re-derive them for the company the expiring token was
+    // issued for, otherwise a refresh would silently drop the active company's roles.
+    const previousPayload = this.security.decodeJwt(auth.token);
+    const companyId: string | undefined = previousPayload?.companyId ?? undefined;
+
     const user: User = await this.repository.findUserById({
       userId: auth.user.id,
+      companyId: companyId,
     });
 
     if (!user) throw new Error("User not found");
@@ -235,7 +247,51 @@ export class AuthService {
     }
 
     // No 2FA - proceed with normal login
+
+    // Roles are held per company, so a user who belongs to more than one company has
+    // no single "active" company at login: hand back a short-lived selection token
+    // instead of a session, and let POST auth/company-selection/:companyId mint the
+    // real, company-scoped one.
+    const companyCount = await this.repository.countUserCompanies({ userId: user.id });
+
+    if (companyCount > 1)
+      return await this.builder.buildSingle(AuthModel, {
+        id: randomUUID(),
+        requiresCompanySelection: true,
+        selectionToken: this.security.signCompanySelectionJwt({ userId: user.id }),
+      });
+
     await this.repository.setLastLogin({ userId: user.id });
+
+    return await this.createToken({ user: user });
+  }
+
+  /**
+   * The companies the authenticated (or company-selection scoped) user may act
+   * for. Backs the selection screen and the company switcher.
+   */
+  async findCompanies(): Promise<JsonApiDataInterface> {
+    const userId = this.clsService.get<string>("userId");
+
+    const companies = await this.repository.findUserCompanies({ userId: userId });
+
+    return await this.builder.buildList(CompanyDescriptor.model, companies, new JsonApiPaginator({}));
+  }
+
+  /**
+   * Exchanges a company-selection (or full) token for a session scoped to
+   * `companyId`, carrying that company's roles.
+   */
+  async selectCompany(params: { companyId: string }): Promise<JsonApiDataInterface> {
+    const userId = this.clsService.get<string>("userId");
+
+    const user: User = await this.repository.findUserById({
+      userId: userId,
+      companyId: params.companyId,
+    });
+
+    if (!user?.company?.id || user.company.id !== params.companyId)
+      throw new HttpException("User does not belong to this company", HttpStatus.FORBIDDEN);
 
     return await this.createToken({ user: user });
   }
@@ -254,6 +310,18 @@ export class AuthService {
     if (!user) throw new HttpException("User not found", HttpStatus.NOT_FOUND);
     if (user.isDeleted) throw new HttpException("The account has been deleted", HttpStatus.FORBIDDEN);
     if (!user.isActive) throw new HttpException("The account has not been activated yet", HttpStatus.FORBIDDEN);
+
+    // Same company-selection gate as password login: 2FA is complete at this point,
+    // so handing back a selection token here cannot bypass verification. Without
+    // this, a multi-company user would get a session pinned to an arbitrary company.
+    const companyCount = await this.repository.countUserCompanies({ userId: user.id });
+
+    if (companyCount > 1)
+      return await this.builder.buildSingle(AuthModel, {
+        id: randomUUID(),
+        requiresCompanySelection: true,
+        selectionToken: this.security.signCompanySelectionJwt({ userId: user.id }),
+      });
 
     await this.repository.setLastLogin({ userId: user.id });
 

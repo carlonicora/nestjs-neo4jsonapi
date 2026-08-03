@@ -22,6 +22,7 @@ describe("SecurityService", () => {
 
     mockJwtService = {
       sign: vi.fn().mockReturnValue(TEST_JWT_TOKEN),
+      decode: vi.fn(),
     } as any;
 
     mockClsService = {
@@ -179,6 +180,61 @@ describe("SecurityService", () => {
         scope: "invitation-selection",
         expiration: expect.any(Date),
       });
+    });
+  });
+
+  describe("companySelectionTokenExpiration", () => {
+    it("should return a date 10 minutes from now", () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const expiration = service.companySelectionTokenExpiration;
+
+      const expectedTime = now + 10 * 60 * 1000;
+      expect(expiration.getTime()).toBe(expectedTime);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("signCompanySelectionJwt", () => {
+    it("signs a company-selection token with the selection scope", () => {
+      service.signCompanySelectionJwt({ userId: "user-1" });
+
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "user-1", scope: "company-selection" }),
+      );
+    });
+
+    it("should sign a JWT with a ~10 minute expiration and return the token", () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const result = service.signCompanySelectionJwt({ userId: TEST_IDS.userId });
+
+      expect(result).toBe(TEST_JWT_TOKEN);
+      expect(mockJwtService.sign).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        scope: "company-selection",
+        expiration: expect.any(Date),
+      });
+      const payload = mockJwtService.sign.mock.calls[0][0] as { expiration: Date };
+      expect(payload.expiration.getTime()).toBe(now + 10 * 60 * 1000);
+
+      vi.useRealTimers();
+    });
+  });
+
+  describe("decodeJwt", () => {
+    it("should return the decoded payload of a signed token", () => {
+      const payload = { userId: TEST_IDS.userId, companyId: TEST_IDS.companyId, scope: "company-selection" };
+      mockJwtService.decode.mockReturnValue(payload);
+
+      const token = service.signCompanySelectionJwt({ userId: TEST_IDS.userId });
+      const result = service.decodeJwt(token);
+
+      expect(mockJwtService.decode).toHaveBeenCalledWith(TEST_JWT_TOKEN);
+      expect(result).toEqual(payload);
     });
   });
 

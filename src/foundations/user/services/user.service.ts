@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EmailService } from "../../../core/email/services/email.service";
+import { RoleId } from "../../../common/constants/system.roles";
 import { hashPassword } from "../../../core/security/services/security.service";
 import { UserPostDataDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDataDTO } from "../../user/dtos/user.put.dto";
@@ -26,6 +27,17 @@ export class UserService {
 
   private get appConfig(): ConfigAppInterface {
     return this.configService.get<ConfigAppInterface>("app");
+  }
+
+  /**
+   * Defence in depth: the global Administrator role is platform-level and may
+   * only be granted through the dedicated platform path (`addUserToRole`). A
+   * company-scoped write (create / put) that carried it would create a
+   * company Membership holding Administrator, which the JWT would then surface
+   * as platform-admin for that company.
+   */
+  private companyRoleIds(roleIds: string[]): string[] {
+    return roleIds.filter((roleId) => roleId !== RoleId.Administrator);
   }
 
   async expectNotExists(params: { email: string }): Promise<void> {
@@ -156,7 +168,7 @@ export class UserService {
 
       const roles = params.data.relationships?.roles
         ? params.isAdmin
-          ? (params.data.relationships?.roles?.data?.map((role) => role.id) ?? [])
+          ? this.companyRoleIds(params.data.relationships?.roles?.data?.map((role) => role.id) ?? [])
           : undefined
         : undefined;
 
@@ -258,10 +270,16 @@ export class UserService {
       password: password,
       avatar: params.data.attributes.avatar,
       companyId: params.data.relationships.company.data.id,
-      roleIds: params.data.relationships?.roles?.data?.map((role) => role.id) ?? [],
+      roleIds: this.companyRoleIds(params.data.relationships?.roles?.data?.map((role) => role.id) ?? []),
     });
 
-    if (params.forceCompanyAdmin) await this.db.makeCompanyAdmin({ userId: params.data.id });
+    // Company-scoped: the CompanyAdministrator role is granted on the membership for the
+    // company this user was just created in, never as a global user→role edge.
+    if (params.forceCompanyAdmin)
+      await this.db.makeCompanyAdmin({
+        userId: params.data.id,
+        companyId: params.data.relationships.company.data.id,
+      });
 
     if (params.data.attributes.sendInvitationEmail) {
       const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
@@ -297,7 +315,7 @@ export class UserService {
       password: password,
       avatar: params.data.attributes.avatar,
       companyId: params.companyId,
-      roleIds: params.data.relationships?.roles?.data?.map((role) => role.id) ?? [],
+      roleIds: this.companyRoleIds(params.data.relationships?.roles?.data?.map((role) => role.id) ?? []),
     });
 
     if (params.data.attributes.sendInvitationEmail) {
