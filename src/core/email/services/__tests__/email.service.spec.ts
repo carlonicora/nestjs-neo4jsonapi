@@ -15,6 +15,23 @@ vi.mock("nodemailer", () => ({
   })),
 }));
 
+// Mock the Brevo SDK
+const brevo = vi.hoisted(() => {
+  const sendTransacEmail = vi.fn();
+  const constructedWith = vi.fn();
+  class BrevoClient {
+    transactionalEmails = { sendTransacEmail };
+    constructor(options: unknown) {
+      constructedWith(options);
+    }
+  }
+  return { sendTransacEmail, constructedWith, BrevoClient };
+});
+
+vi.mock("@getbrevo/brevo", () => ({
+  BrevoClient: brevo.BrevoClient,
+}));
+
 // Email config consumed via the injected ConfigService mock (this.config.get("email"))
 const emailConfig = {
   emailProvider: "smtp",
@@ -294,6 +311,58 @@ describe("EmailService", () => {
           subject: "",
         }),
       );
+    });
+  });
+
+  describe("brevo provider", () => {
+    beforeEach(() => {
+      emailConfig.emailProvider = "brevo";
+      brevo.sendTransacEmail.mockResolvedValue({ messageId: "<123@brevo>" });
+    });
+
+    it("should authenticate the client with the configured api key", async () => {
+      await service.sendEmail("welcome", { to: "user@example.com" }, "en");
+
+      expect(brevo.constructedWith).toHaveBeenCalledWith({ apiKey: "test-api-key" });
+    });
+
+    it("should send the email through the transactional emails resource", async () => {
+      await service.sendEmail("welcome", { to: "John Doe <user@example.com>", name: "John" }, "en");
+
+      expect(brevo.sendTransacEmail).toHaveBeenCalledWith({
+        subject: "Test Subject",
+        htmlContent: expect.stringContaining("Hello John"),
+        sender: { name: "Test", email: "test@example.com" },
+        to: [{ name: "John Doe", email: "user@example.com" }],
+      });
+    });
+
+    it("should handle an array of recipients", async () => {
+      await service.sendEmail("welcome", { to: ["user1@example.com", "user2@example.com"] }, "en");
+
+      expect(brevo.sendTransacEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: [
+            { name: "user1@example.com", email: "user1@example.com" },
+            { name: "user2@example.com", email: "user2@example.com" },
+          ],
+        }),
+      );
+    });
+
+    it("should log and rethrow when Brevo rejects", async () => {
+      const brevoError = Object.assign(new Error("Brevo rejected"), {
+        statusCode: 400,
+        body: { message: "Invalid sender" },
+      });
+      brevo.sendTransacEmail.mockRejectedValue(brevoError);
+
+      await expect(service.sendEmail("welcome", { to: "user@example.com" }, "en")).rejects.toThrow("Brevo rejected");
+
+      expect(mockLogger.error).toHaveBeenCalledWith("Error sending email via Brevo", brevoError, "EmailService", {
+        brevoStatusCode: 400,
+        brevoBody: { message: "Invalid sender" },
+      });
     });
   });
 

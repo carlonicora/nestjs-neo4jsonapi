@@ -1,3 +1,4 @@
+import { BrevoClient } from "@getbrevo/brevo";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
@@ -149,23 +150,20 @@ export class EmailService {
   }
   private async sendEmailWithBrevo(to: string | string[], subject: string, html: string): Promise<void> {
     const emailConfig = this.config.get<ConfigEmailInterface>("email");
-    const { TransactionalEmailsApi, TransactionalEmailsApiApiKeys, SendSmtpEmail } = require("@getbrevo/brevo");
-    const apiInstance = new TransactionalEmailsApi();
-
-    // Brevo SDK v3 uses setApiKey method for authentication
-    apiInstance.setApiKey(TransactionalEmailsApiApiKeys.apiKey, emailConfig.emailApiKey);
-
-    const sendSmtpEmail = new SendSmtpEmail();
-
-    sendSmtpEmail.subject = subject;
-    sendSmtpEmail.htmlContent = html;
-    sendSmtpEmail.sender = this.convertToEmailAddressArray(emailConfig.emailFrom)[0];
-    sendSmtpEmail.to = this.convertToEmailAddressArray(to);
+    const client = new BrevoClient({ apiKey: emailConfig.emailApiKey });
 
     try {
-      await apiInstance.sendTransacEmail(sendSmtpEmail);
+      await client.transactionalEmails.sendTransacEmail({
+        subject: subject,
+        htmlContent: html,
+        sender: this.convertToEmailAddressArray(emailConfig.emailFrom)[0],
+        to: this.convertToEmailAddressArray(to),
+      });
     } catch (error) {
-      this.logger.error("Error sending email via Brevo", error, "EmailService");
+      this.logger.error("Error sending email via Brevo", error, "EmailService", {
+        brevoStatusCode: error?.statusCode,
+        brevoBody: error?.body,
+      });
       throw error;
     }
   }
