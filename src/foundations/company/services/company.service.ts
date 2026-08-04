@@ -9,6 +9,7 @@ import { QueueId } from "../../../config/enums/queue.id";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { VersionService } from "../../../core/version/services/version.service";
 import { CompanyPostDataDTO } from "../../company/dtos/company.post.dto";
@@ -19,8 +20,17 @@ import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
 
+/**
+ * Company service.
+ *
+ * Extends `AbstractService` so a consuming application can subclass it (see
+ * `ExtendedCompanyService`) and inherit both the generic descriptor-driven CRUD
+ * and every domain method declared here.
+ */
 @Injectable()
-export class CompanyService {
+export class CompanyService extends AbstractService<Company, typeof CompanyDescriptor.relationships> {
+  protected readonly descriptor = CompanyDescriptor;
+
   private readonly logger = new Logger(CompanyService.name);
 
   constructor(
@@ -35,7 +45,9 @@ export class CompanyService {
     @Optional()
     @Inject(COMPANY_DELETION_HANDLER)
     private readonly deletionHandler?: CompanyDeletionHandler,
-  ) {}
+  ) {
+    super(builder, companyRepository, cls, CompanyDescriptor.model);
+  }
 
   async validate(params: { companyId: string }) {
     const company = await this.companyRepository.findByCompanyId({
@@ -102,8 +114,16 @@ export class CompanyService {
     }
   }
 
-  async create(params: { data: CompanyPostDataDTO }): Promise<Company> {
-    return this.companyRepository.create({
+  /**
+   * Create a company from a DTO.
+   *
+   * RENAMED from `create` to `createCompanyFromDTO` (TS2416): the inherited
+   * `AbstractService.create()` takes descriptor-driven params and returns
+   * `Promise<JsonApiDataInterface>`, so this DTO-shaped creator cannot override it.
+   * The name mirrors the shipped a360ai reference implementation.
+   */
+  async createCompanyFromDTO(params: { data: CompanyPostDataDTO }): Promise<Company> {
+    return this.companyRepository.createCompanyNode({
       companyId: params.data.id,
       name: params.data.attributes.name,
       configurations: params.data.attributes.configurations,
@@ -125,7 +145,7 @@ export class CompanyService {
   }
 
   async createForController(params: { data: CompanyPostDataDTO }): Promise<JsonApiDataInterface> {
-    await this.companyRepository.create({
+    await this.companyRepository.createCompanyNode({
       companyId: params.data.id,
       name: params.data.attributes.name,
       configurations: params.data.attributes.configurations,
@@ -214,15 +234,23 @@ export class CompanyService {
     return this.companyRepository.findByCompanyId({ companyId: params.companyId });
   }
 
-  async delete(params: { companyId: string }): Promise<void> {
+  /**
+   * Queue-based async deletion. KEPT under the name `delete` (overriding
+   * `AbstractService.delete()`) because it has real extra logic — it queues a BullMQ
+   * job instead of deleting synchronously. The param was renamed from `companyId` to
+   * `id` to match `AbstractService.delete()`'s exact `{ id: string }` shape (required
+   * to satisfy `extends AbstractService`); this mirrors the shipped a360ai reference
+   * implementation.
+   */
+  async delete(params: { id: string }): Promise<void> {
     const queueElement: any = {
-      companyId: params.companyId,
+      companyId: params.id,
     };
     await this.queue.add("deleteCompany", queueElement);
   }
 
   async deleteFullCompany(params: { companyId: string }): Promise<void> {
-    await this.companyRepository.delete({ companyId: params.companyId });
+    await this.companyRepository.delete({ id: params.companyId });
   }
 
   /**
@@ -246,7 +274,7 @@ export class CompanyService {
         reason: "immediate_deletion",
       });
     } else {
-      await this.companyRepository.delete({ companyId: params.companyId });
+      await this.companyRepository.delete({ id: params.companyId });
     }
   }
 

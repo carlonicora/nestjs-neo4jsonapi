@@ -1,4 +1,4 @@
-import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
+import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { randomUUID } from "crypto";
@@ -9,15 +9,15 @@ import { AuthPostLoginDataDTO } from "../../auth/dtos/auth.post.login.dto";
 
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface, ConfigAuthInterface } from "../../../config/interfaces";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { AuthPostRegisterDataDTO } from "../../auth/dtos/auth.post.register.dto";
-import { AuthCode } from "../../auth/entities/auth.code.entity";
-import { Auth } from "../../auth/entities/auth.entity";
-import { AuthModel } from "../../auth/entities/auth.model";
-import { PendingAuthModel } from "../../auth/entities/pending-auth.model";
+import { AuthCode } from "../../auth/entities/auth.code";
+import { Auth, AuthDescriptor } from "../../auth/entities/auth";
+import { PendingAuthDescriptor } from "../../auth/entities/pending-auth";
 import { AuthRepository } from "../../auth/repositories/auth.repository";
 import { CompanyDescriptor } from "../../company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
@@ -33,30 +33,62 @@ import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/regi
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
 
+/**
+ * Every method here is a bespoke, non-CRUD auth flow (login, register,
+ * refresh, code exchange, password reset/activation) — none maps onto
+ * AbstractService's generic find/findById/create/put/patch/delete, and none
+ * of their names collide with it, so no renames were needed (see
+ * AuthRepository for the two that did). Extending AbstractService is for
+ * descriptor typing consistency; the inherited generic methods are simply
+ * unused.
+ *
+ * SATELLITE DEPENDENCIES: `twoFactorService`, `discordUserService`,
+ * `waitlistService` and `trialQueueService` are `@Optional()` so that an
+ * application can compose an auth module without the corresponding
+ * foundation modules. The package `AuthModule` still imports every one of
+ * them, so package consumers see no behavioural change; each guarded branch
+ * below documents what happens when the dependency is absent. They are typed
+ * `X | undefined` rather than `x?: X` because a `?` parameter cannot precede
+ * a required one and the constructor order is preserved verbatim. A union type
+ * makes TypeScript emit `Object` for `design:paramtypes`, so each one MUST also
+ * carry an explicit `@Inject(...)` token — without it Nest cannot resolve the
+ * provider and silently injects `undefined` even when the module supplies it.
+ */
 @Injectable()
-export class AuthService {
+export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.relationships> {
+  protected readonly descriptor = AuthDescriptor;
+
   private readonly logger: Logger = new Logger(AuthService.name);
 
   constructor(
-    private readonly builder: JsonApiService,
-    private readonly repository: AuthRepository,
+    jsonApiService: JsonApiService,
+    private readonly authRepository: AuthRepository,
     private readonly userService: UserService,
     private readonly users: UserRepository,
     private readonly companyRepository: CompanyRepository,
     private readonly emailService: EmailService,
     private readonly security: SecurityService,
-    private readonly clsService: ClsService,
+    clsService: ClsService,
     private readonly neo4j: Neo4jService,
     private readonly moduleRef: ModuleRef,
     private readonly configService: ConfigService<BaseConfigInterface>,
     private readonly pendingRegistrationService: PendingRegistrationService,
-    private readonly discordUserService: DiscordUserService,
+    @Optional()
+    @Inject(DiscordUserService)
+    private readonly discordUserService: DiscordUserService | undefined,
     private readonly googleUserService: GoogleUserService,
-    private readonly trialQueueService: TrialQueueService,
-    private readonly waitlistService: WaitlistService,
+    @Optional()
+    @Inject(TrialQueueService)
+    private readonly trialQueueService: TrialQueueService | undefined,
+    @Optional()
+    @Inject(WaitlistService)
+    private readonly waitlistService: WaitlistService | undefined,
+    @Optional()
     @Inject(forwardRef(() => TwoFactorService))
-    private readonly twoFactorService: TwoFactorService,
-  ) {}
+    private readonly twoFactorService: TwoFactorService | undefined,
+  ) {
+    super(jsonApiService, authRepository, clsService, AuthDescriptor.model);
+  }
 
   /**
    * Lazily resolves the registration hook from the module container.
@@ -80,10 +112,19 @@ export class AuthService {
     return this.configService.get<ConfigAuthInterface>("auth");
   }
 
+  /**
+   * Locale used for transactional emails and for the `<locale>/…` prefix of
+   * the links inside them. Defaults to "en", which is the value every existing
+   * consumer was hardcoded to.
+   */
+  private get emailLocale(): string {
+    return this.authConfig.emailLocale ?? "en";
+  }
+
   async findCurrentAuth(): Promise<JsonApiDataInterface> {
     const token = this.clsService.get("token");
 
-    const auth: Auth = await this.repository.findByToken({
+    const auth: Auth = await this.authRepository.findByToken({
       token: token,
     });
 
@@ -91,7 +132,7 @@ export class AuthService {
 
     (auth as any).refreshToken = auth.id;
 
-    return await this.builder.buildSingle(AuthModel, auth);
+    return await this.jsonApiService.buildSingle(this.descriptor.model, auth);
   }
 
   async createAuth(params: { user: User; refreshToken?: string }): Promise<Auth> {
@@ -108,7 +149,7 @@ export class AuthService {
       userName: params.user.name,
     });
 
-    const auth = await this.repository.create({
+    const auth = await this.authRepository.createSession({
       authId: randomUUID(),
       userId: params.user.id,
       token: token,
@@ -121,7 +162,7 @@ export class AuthService {
 
     (auth as any).refreshToken = auth.id;
 
-    await this.repository.setLastLogin({ userId: auth.user.id });
+    await this.authRepository.setLastLogin({ userId: auth.user.id });
 
     if (!!params.refreshToken) auth.user = undefined;
 
@@ -136,24 +177,24 @@ export class AuthService {
       this.clsService.set("userId", auth.user.id);
     }
 
-    return await this.builder.buildSingle(AuthModel, auth);
+    return await this.jsonApiService.buildSingle(this.descriptor.model, auth);
   }
 
   async createCode(params: { authCodeId: string; authId: string }): Promise<AuthCode> {
     const now = new Date();
     const expiration = new Date(now.getTime() + 5 * 60 * 1000);
 
-    await this.repository.createCode({
+    await this.authRepository.createCode({
       authCodeId: params.authCodeId,
       authId: params.authId,
       expiration: expiration,
     });
 
-    return await this.repository.findByCode({ code: params.authCodeId });
+    return await this.authRepository.findByCode({ code: params.authCodeId });
   }
 
   async refreshToken(params: { refreshToken: string }): Promise<any> {
-    let auth: Auth = await this.repository.findByRefreshToken({
+    let auth: Auth = await this.authRepository.findByRefreshToken({
       authId: params.refreshToken,
     });
 
@@ -164,7 +205,7 @@ export class AuthService {
     const previousPayload = this.security.decodeJwt(auth.token);
     const companyId: string | undefined = previousPayload?.companyId ?? undefined;
 
-    const user: User = await this.repository.findUserById({
+    const user: User = await this.authRepository.findUserById({
       userId: auth.user.id,
       companyId: companyId,
     });
@@ -183,12 +224,12 @@ export class AuthService {
       userName: user.name,
     });
 
-    auth = await this.repository.refreshToken({
+    auth = await this.authRepository.refreshToken({
       authId: params.refreshToken,
       token: token,
     });
 
-    await this.repository.deleteExpiredAuths({ userId: user.id });
+    await this.authRepository.deleteExpiredAuths({ userId: user.id });
 
     const newAuth: any = {
       authId: auth.id,
@@ -197,7 +238,7 @@ export class AuthService {
       expiration: auth.expiration,
     };
 
-    return this.builder.buildSingle(AuthModel, newAuth);
+    return this.jsonApiService.buildSingle(this.descriptor.model, newAuth);
   }
 
   async login(params: { data: AuthPostLoginDataDTO }): Promise<any> {
@@ -216,34 +257,39 @@ export class AuthService {
 
     if (!user.isActive) throw new HttpException("The account has not been activated yet", HttpStatus.FORBIDDEN);
 
-    // Check if user has 2FA enabled
-    const twoFactorConfig = await this.twoFactorService.getConfig(user.id);
+    // Check if user has 2FA enabled. Without TwoFactorModule there is no 2FA to
+    // check, so login proceeds straight to the normal flow below.
+    if (this.twoFactorService) {
+      const twoFactorConfig = await this.twoFactorService.getConfig(user.id);
 
-    if (twoFactorConfig?.isEnabled) {
-      // User has 2FA enabled - return pending auth response
-      const pendingSession = await this.twoFactorService.createPendingSession(user.id);
+      if (twoFactorConfig?.isEnabled) {
+        // User has 2FA enabled - return pending auth response
+        const pendingSession = await this.twoFactorService.createPendingSession(user.id);
 
-      const availableMethods = await this.twoFactorService.getAvailableMethods(user.id);
+        const availableMethods = await this.twoFactorService.getAvailableMethods(user.id);
 
-      // Generate a pending JWT with limited access
-      const pendingToken = this.security.signPendingJwt({
-        userId: user.id,
-        pendingId: pendingSession.pendingId,
-      });
+        // Generate a pending JWT with limited access
+        const pendingToken = this.security.signPendingJwt({
+          userId: user.id,
+          pendingId: pendingSession.pendingId,
+        });
 
-      const now = new Date();
+        const now = new Date();
 
-      // Return pending auth response requiring 2FA verification
-      const response = await this.builder.buildSingle(PendingAuthModel, {
-        id: pendingSession.pendingId, // ADD: id field required by JSON:API
-        createdAt: now, // ADD: for meta
-        updatedAt: now, // ADD: for meta
-        token: pendingToken,
-        expiration: pendingSession.expiration,
-        availableMethods: availableMethods,
-        preferredMethod: twoFactorConfig.preferredMethod,
-      });
-      return response;
+        // Return pending auth response requiring 2FA verification
+        const response = await this.jsonApiService.buildSingle(PendingAuthDescriptor.model, {
+          id: pendingSession.pendingId, // ADD: id field required by JSON:API
+          createdAt: now, // ADD: for meta
+          updatedAt: now, // ADD: for meta
+          // `pendingToken` / `expiresAt` are the wire attribute names — see
+          // entities/pending-auth.ts.
+          pendingToken: pendingToken,
+          expiresAt: pendingSession.expiration,
+          availableMethods: availableMethods,
+          preferredMethod: twoFactorConfig.preferredMethod,
+        });
+        return response;
+      }
     }
 
     // No 2FA - proceed with normal login
@@ -252,16 +298,16 @@ export class AuthService {
     // no single "active" company at login: hand back a short-lived selection token
     // instead of a session, and let POST auth/company-selection/:companyId mint the
     // real, company-scoped one.
-    const companyCount = await this.repository.countUserCompanies({ userId: user.id });
+    const companyCount = await this.authRepository.countUserCompanies({ userId: user.id });
 
     if (companyCount > 1)
-      return await this.builder.buildSingle(AuthModel, {
+      return await this.jsonApiService.buildSingle(this.descriptor.model, {
         id: randomUUID(),
         requiresCompanySelection: true,
         selectionToken: this.security.signCompanySelectionJwt({ userId: user.id }),
       });
 
-    await this.repository.setLastLogin({ userId: user.id });
+    await this.authRepository.setLastLogin({ userId: user.id });
 
     return await this.createToken({ user: user });
   }
@@ -273,9 +319,9 @@ export class AuthService {
   async findCompanies(): Promise<JsonApiDataInterface> {
     const userId = this.clsService.get<string>("userId");
 
-    const companies = await this.repository.findUserCompanies({ userId: userId });
+    const companies = await this.authRepository.findUserCompanies({ userId: userId });
 
-    return await this.builder.buildList(CompanyDescriptor.model, companies, new JsonApiPaginator({}));
+    return await this.jsonApiService.buildList(CompanyDescriptor.model, companies, new JsonApiPaginator({}));
   }
 
   /**
@@ -285,7 +331,7 @@ export class AuthService {
   async selectCompany(params: { companyId: string }): Promise<JsonApiDataInterface> {
     const userId = this.clsService.get<string>("userId");
 
-    const user: User = await this.repository.findUserById({
+    const user: User = await this.authRepository.findUserById({
       userId: userId,
       companyId: params.companyId,
     });
@@ -314,16 +360,16 @@ export class AuthService {
     // Same company-selection gate as password login: 2FA is complete at this point,
     // so handing back a selection token here cannot bypass verification. Without
     // this, a multi-company user would get a session pinned to an arbitrary company.
-    const companyCount = await this.repository.countUserCompanies({ userId: user.id });
+    const companyCount = await this.authRepository.countUserCompanies({ userId: user.id });
 
     if (companyCount > 1)
-      return await this.builder.buildSingle(AuthModel, {
+      return await this.jsonApiService.buildSingle(this.descriptor.model, {
         id: randomUUID(),
         requiresCompanySelection: true,
         selectionToken: this.security.signCompanySelectionJwt({ userId: user.id }),
       });
 
-    await this.repository.setLastLogin({ userId: user.id });
+    await this.authRepository.setLastLogin({ userId: user.id });
 
     return await this.createToken({ user: user });
   }
@@ -341,6 +387,12 @@ export class AuthService {
     }
 
     if (registrationMode === "waitlist") {
+      // Waitlist mode needs WaitlistModule; without it there is no way to
+      // validate an invite, so the flow is unavailable rather than open.
+      if (!this.waitlistService) {
+        throw new HttpException("Waitlist registration is not available", HttpStatus.NOT_IMPLEMENTED);
+      }
+
       // Require invite code for waitlist mode
       if (!params.data.attributes.inviteCode) {
         throw new HttpException("Registration requires an invitation. Please join the waitlist.", HttpStatus.FORBIDDEN);
@@ -361,7 +413,7 @@ export class AuthService {
 
     const password = await hashPassword(params.data.attributes.password);
 
-    const user = await this.users.create({
+    const user = await this.users.createUser({
       userId: params.data.id,
       email: params.data.attributes.email,
       name: params.data.attributes.name,
@@ -394,15 +446,19 @@ export class AuthService {
       }
     }
 
-    // After successful registration, mark waitlist entry as registered
+    // After successful registration, mark waitlist entry as registered.
+    // `?.` only for the type checker: waitlist mode already threw above when the
+    // service is absent, so this call always happens when it is reached.
     if (registrationMode === "waitlist" && params.data.attributes.inviteCode) {
-      await this.waitlistService.markAsRegistered({
+      await this.waitlistService?.markAsRegistered({
         inviteCode: params.data.attributes.inviteCode,
         userId: user.id,
       });
     }
 
-    const link: string = `${this.appConfig.url}en/activation/${user.code}`;
+    const locale = this.emailLocale;
+
+    const link: string = `${this.appConfig.url}${locale}/activation/${user.code}`;
 
     await this.emailService.sendEmail(
       "activationEmail",
@@ -413,12 +469,12 @@ export class AuthService {
         expirationTime: user.codeExpiration.toTimeString(),
         companyName: user.company.name,
       },
-      "en",
+      locale,
     );
   }
 
   async findAuthByCode(params: { code: string }): Promise<JsonApiDataInterface> {
-    const authCode: AuthCode = await this.repository.findByCode({
+    const authCode: AuthCode = await this.authRepository.findByCode({
       code: params.code,
     });
 
@@ -426,7 +482,7 @@ export class AuthService {
 
     if (authCode.expiration < new Date()) throw new HttpException("Code has expired", HttpStatus.NOT_FOUND);
 
-    const auth: Auth = await this.repository.findById({
+    const auth: Auth = await this.authRepository.findAuthById({
       authId: authCode.auth.id,
     });
 
@@ -434,11 +490,11 @@ export class AuthService {
 
     (auth as any).refreshToken = auth.id;
 
-    return await this.builder.buildSingle(AuthModel, auth);
+    return await this.jsonApiService.buildSingle(this.descriptor.model, auth);
   }
 
   async deleteByToken(params: { token: string }): Promise<void> {
-    await this.repository.deleteByToken(params);
+    await this.authRepository.deleteByToken(params);
   }
 
   async startResetPassword(email: string, lng?: string) {
@@ -448,9 +504,11 @@ export class AuthService {
 
     this.clsService.set("companyId", user.company.id);
 
-    user = await this.repository.startResetPassword({ userId: user.id });
+    user = await this.authRepository.startResetPassword({ userId: user.id });
 
-    const link: string = `${this.appConfig.url}en/reset/${user.code}`;
+    const locale = lng ?? this.emailLocale;
+
+    const link: string = `${this.appConfig.url}${locale}/reset/${user.code}`;
 
     await this.emailService.sendEmail(
       "resetEmail",
@@ -460,7 +518,7 @@ export class AuthService {
         expirationDate: user.codeExpiration.toDateString(),
         expirationTime: user.codeExpiration.toTimeString(),
       },
-      lng ?? "en",
+      locale,
     );
   }
 
@@ -481,7 +539,7 @@ export class AuthService {
 
     const newPassword = await hashPassword(password);
 
-    await this.repository.resetPassword({
+    await this.authRepository.resetPassword({
       userId: user.id,
       password: newPassword,
     });
@@ -496,7 +554,7 @@ export class AuthService {
 
     const newPassword = await hashPassword(password);
 
-    await this.repository.acceptInvitation({
+    await this.authRepository.acceptInvitation({
       userId: user.id,
       password: newPassword,
     });
@@ -509,10 +567,11 @@ export class AuthService {
 
     if (user.codeExpiration < new Date()) throw new HttpException("The code provided is expired", HttpStatus.NOT_FOUND);
 
-    await this.repository.activateAccount({ userId: user.id });
+    await this.authRepository.activateAccount({ userId: user.id });
 
-    // Queue trial creation now that account is activated
-    if (user.company?.id) {
+    // Queue trial creation now that account is activated. Without the trial
+    // queue there is nothing to queue and activation completes unchanged.
+    if (this.trialQueueService && user.company?.id) {
       await this.trialQueueService.queueTrialCreation({
         companyId: user.company.id,
         userId: user.id,
@@ -548,6 +607,11 @@ export class AuthService {
     }
 
     if (registrationMode === "waitlist") {
+      // Waitlist mode needs WaitlistModule - see register().
+      if (!this.waitlistService) {
+        throw new HttpException("Waitlist registration is not available", HttpStatus.NOT_IMPLEMENTED);
+      }
+
       // Require invite code for waitlist mode
       if (!pending.inviteCode) {
         throw new HttpException("Registration requires an invitation. Please join the waitlist.", HttpStatus.FORBIDDEN);
@@ -566,6 +630,10 @@ export class AuthService {
 
     // Create user based on provider
     if (pending.provider === "discord") {
+      if (!this.discordUserService) {
+        throw new HttpException("Waitlist registration is not available", HttpStatus.NOT_IMPLEMENTED);
+      }
+
       await this.discordUserService.create({
         userId,
         companyId,
@@ -618,15 +686,18 @@ export class AuthService {
       }
     }
 
-    // Queue trial creation (async, non-blocking)
-    await this.trialQueueService.queueTrialCreation({
-      companyId: companyId,
-      userId: userId,
-    });
+    // Queue trial creation (async, non-blocking) - see activateAccount()
+    if (this.trialQueueService) {
+      await this.trialQueueService.queueTrialCreation({
+        companyId: companyId,
+        userId: userId,
+      });
+    }
 
-    // After successful OAuth registration, mark waitlist entry as registered
+    // After successful OAuth registration, mark waitlist entry as registered.
+    // `?.` only for the type checker - see register().
     if (registrationMode === "waitlist" && pending.inviteCode) {
-      await this.waitlistService.markAsRegistered({
+      await this.waitlistService?.markAsRegistered({
         inviteCode: pending.inviteCode,
         userId: userId,
       });
@@ -665,7 +736,9 @@ export class AuthService {
         return;
       }
 
-      const dashboardLink = `${this.appConfig.url}en/administration`;
+      const locale = this.emailLocale;
+
+      const dashboardLink = `${this.appConfig.url}${locale}/administration`;
 
       for (const admin of platformAdmins) {
         try {
@@ -680,7 +753,7 @@ export class AuthService {
               activatedAt: new Date().toISOString(),
               dashboardLink,
             },
-            "en",
+            locale,
           );
         } catch (emailError) {
           this.logger.error(`Failed to send registration notification to admin ${admin.email}:`, emailError);

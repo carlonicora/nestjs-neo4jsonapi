@@ -58,6 +58,28 @@ export interface DumpRbacMatrixOptions {
    * cwd, or `"apps/api/src/rbac/permissions.ts"` from the monorepo root).
    */
   outputPath: string;
+
+  /**
+   * Import lines emitted verbatim, in order, at the head of the generated
+   * file. Supply these when your app's `RoleId` / `ModuleId` / module-paths
+   * map do not live where the package default expects them — otherwise the
+   * dump is not re-runnable, because a re-run would overwrite a hand-fixed
+   * header with imports that do not resolve in your app.
+   *
+   * Omit to keep the default header
+   * ({@link DEFAULT_IMPORT_LINES} in `serializer/matrix-to-ts`), which is the
+   * neural-erp convention and stays byte-identical.
+   *
+   * ```ts
+   * importLines: [
+   *   `import { RoleId } from "../config/enums/role.id";`,
+   *   `import { ModuleId } from "@your-org/shared";`,
+   *   `import { perm, defineRbac } from "@carlonicora/nestjs-neo4jsonapi";`,
+   *   `import { MODULE_USER_PATHS } from "../features/rbac/module-relationships.map";`,
+   * ]
+   * ```
+   */
+  importLines?: string[];
 }
 
 /**
@@ -79,9 +101,24 @@ export interface DumpRbacMatrixResult {
  * development). Do not expose this from a runtime endpoint — production
  * servers should never write source files.
  *
- * The emitted file imports `RoleId` / `ModuleId` from `@neural-erp/shared`
- * (or whichever package you've wired into `serializeMatrixToTs`), and
- * `perm` / `defineRbac` from `@carlonicora/nestjs-neo4jsonapi`.
+ * By default the emitted file imports `RoleId` / `ModuleId` from
+ * `@neural-erp/shared`, and `perm` / `defineRbac` from
+ * `@carlonicora/nestjs-neo4jsonapi`. Apps whose enums live elsewhere MUST
+ * pass {@link DumpRbacMatrixOptions.importLines} reproducing their own
+ * header, otherwise re-running the dump overwrites a hand-fixed header with
+ * imports that do not resolve — i.e. the dump is a one-shot instead of a
+ * repeatable command.
+ *
+ * **Import this function from the `/foundations/rbac` subpath, NOT from the
+ * package root barrel.** Loading the root barrel pulls in the whole package
+ * graph, which corrupts the TypeScript parser bundled with `prettier` (the
+ * serialiser formats its output with it) and makes the dump fail — a
+ * session-verified defect from the Wave 1 foundation migration. Note the
+ * `exports` map currently exposes subpaths via the `./foundations/*`
+ * wildcard (`./dist/foundations/*.js`), so the form that resolves today is
+ * `@carlonicora/nestjs-neo4jsonapi/foundations/rbac/index`; the bare
+ * `.../foundations/rbac` needs an explicit `"./foundations/rbac"` export
+ * entry.
  *
  * @example
  * ```ts
@@ -92,7 +129,9 @@ export interface DumpRbacMatrixResult {
  *
  * import neo4j from "neo4j-driver";
  * import { RoleId, ModuleId } from "@neural-erp/shared";
- * import { dumpRbacMatrix } from "@carlonicora/nestjs-neo4jsonapi";
+ * // Subpath import — the package ROOT barrel breaks prettier's bundled
+ * // TypeScript parser (see the note above).
+ * import { dumpRbacMatrix } from "@carlonicora/nestjs-neo4jsonapi/foundations/rbac/index";
  *
  * async function main() {
  *   const driver = neo4j.driver(
@@ -111,6 +150,12 @@ export interface DumpRbacMatrixResult {
  *       ),
  *       administratorRoleId: RoleId.Administrator,
  *       outputPath: path.resolve(__dirname, "../src/rbac/permissions.ts"),
+ *       // Reproduce YOUR app's header verbatim so the dump is re-runnable.
+ *       importLines: [
+ *         `import { RoleId, ModuleId } from "@neural-erp/shared";`,
+ *         `import { perm, defineRbac } from "@carlonicora/nestjs-neo4jsonapi";`,
+ *         `import { MODULE_USER_PATHS } from "../features/rbac/module-relationships.map";`,
+ *       ],
  *     });
  *     console.log(`Wrote ${result.bytesWritten} bytes to ${result.path}`);
  *   } finally {
@@ -163,6 +208,7 @@ export async function dumpRbacMatrix(opts: DumpRbacMatrixOptions): Promise<DumpR
     const source = await serializeMatrixToTs(matrix, {
       roleNames: opts.roleNames,
       moduleNames: opts.moduleNames,
+      ...(opts.importLines ? { importLines: opts.importLines } : {}),
     });
 
     const outPath = path.isAbsolute(opts.outputPath) ? opts.outputPath : path.resolve(process.cwd(), opts.outputPath);

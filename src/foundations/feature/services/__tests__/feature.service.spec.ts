@@ -1,7 +1,9 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { FeatureService } from "../feature.service";
 import { FeatureRepository } from "../../repositories/feature.repository";
+import { FeatureDescriptor } from "../../entities/feature";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 
 describe("FeatureService", () => {
@@ -16,13 +18,14 @@ describe("FeatureService", () => {
   };
 
   const MOCK_FEATURES = [
-    { id: TEST_IDS.featureId1, name: "Feature 1", enabled: true },
-    { id: TEST_IDS.featureId2, name: "Feature 2", enabled: false },
+    { id: TEST_IDS.featureId1, name: "Feature 1", isCore: true },
+    { id: TEST_IDS.featureId2, name: "Feature 2", isCore: false },
   ];
 
   const createMockFeatureRepository = () => ({
     find: vi.fn(),
     findByCompany: vi.fn(),
+    findByName: vi.fn(),
     findById: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -35,6 +38,11 @@ describe("FeatureService", () => {
     buildError: vi.fn(),
   });
 
+  const createMockClsService = () => ({
+    get: vi.fn().mockReturnValue(undefined),
+    set: vi.fn(),
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
 
@@ -43,6 +51,7 @@ describe("FeatureService", () => {
         FeatureService,
         { provide: FeatureRepository, useValue: createMockFeatureRepository() },
         { provide: JsonApiService, useValue: createMockJsonApiService() },
+        { provide: ClsService, useValue: createMockClsService() },
       ],
     }).compile();
 
@@ -62,7 +71,7 @@ describe("FeatureService", () => {
   });
 
   describe("find", () => {
-    it("should find features with pagination", async () => {
+    it("should find features with pagination and default to name ASC ordering", async () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_FEATURES };
       featureRepository.find.mockResolvedValue(MOCK_FEATURES);
@@ -73,10 +82,12 @@ describe("FeatureService", () => {
 
       // Assert
       expect(featureRepository.find).toHaveBeenCalledWith({
+        fetchAll: undefined,
         term: undefined,
+        orderBy: "name ASC",
         cursor: expect.anything(),
       });
-      expect(jsonApiService.buildList).toHaveBeenCalled();
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(FeatureDescriptor.model, MOCK_FEATURES, expect.anything());
       expect(result).toBe(mockJsonApiResponse);
     });
 
@@ -92,6 +103,38 @@ describe("FeatureService", () => {
       expect(featureRepository.find).toHaveBeenCalledWith(
         expect.objectContaining({
           term: "search term",
+        }),
+      );
+    });
+
+    it("should honour an explicit orderBy over the name ASC default", async () => {
+      // Arrange
+      featureRepository.find.mockResolvedValue([]);
+      jsonApiService.buildList.mockReturnValue({ data: [] });
+
+      // Act
+      await service.find({ query: {}, orderBy: "isCore DESC" });
+
+      // Assert
+      expect(featureRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: "isCore DESC",
+        }),
+      );
+    });
+
+    it("should pass fetchAll through to the repository", async () => {
+      // Arrange
+      featureRepository.find.mockResolvedValue([]);
+      jsonApiService.buildList.mockReturnValue({ data: [] });
+
+      // Act
+      await service.find({ query: {}, fetchAll: true });
+
+      // Assert
+      expect(featureRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fetchAll: true,
         }),
       );
     });
@@ -144,7 +187,7 @@ describe("FeatureService", () => {
       expect(featureRepository.findByCompany).toHaveBeenCalledWith({
         companyId: TEST_IDS.companyId,
       });
-      expect(jsonApiService.buildList).toHaveBeenCalled();
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(FeatureDescriptor.model, MOCK_FEATURES);
       expect(result).toBe(mockJsonApiResponse);
     });
 

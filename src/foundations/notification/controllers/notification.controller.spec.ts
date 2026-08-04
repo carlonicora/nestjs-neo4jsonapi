@@ -20,8 +20,8 @@ vi.mock("../entities/notification.meta", () => ({
 // Mock notification service to avoid complex dependency chain
 vi.mock("../services/notification.service", () => ({
   NotificationServices: vi.fn().mockImplementation(() => ({
-    find: vi.fn(),
-    findById: vi.fn(),
+    findForUser: vi.fn(),
+    findByIdForUser: vi.fn(),
     markAsRead: vi.fn(),
     archive: vi.fn(),
   })),
@@ -69,8 +69,8 @@ describe("NotificationController", () => {
 
   beforeEach(async () => {
     const mockNotificationService = {
-      find: vi.fn(),
-      findById: vi.fn(),
+      findForUser: vi.fn(),
+      findByIdForUser: vi.fn(),
       markAsRead: vi.fn(),
       archive: vi.fn(),
     };
@@ -103,11 +103,11 @@ describe("NotificationController", () => {
     const mockQuery = { page: { number: 1, size: 10 } };
 
     it("should find notifications without isArchived filter", async () => {
-      notificationService.find.mockResolvedValue(mockListResponse);
+      notificationService.findForUser.mockResolvedValue(mockListResponse);
 
       const result = await controller.findList(mockRequest, mockQuery);
 
-      expect(notificationService.find).toHaveBeenCalledWith({
+      expect(notificationService.findForUser).toHaveBeenCalledWith({
         query: mockQuery,
         userId: MOCK_USER_ID,
         isArchived: undefined,
@@ -116,11 +116,11 @@ describe("NotificationController", () => {
     });
 
     it("should find notifications with isArchived=true", async () => {
-      notificationService.find.mockResolvedValue(mockListResponse);
+      notificationService.findForUser.mockResolvedValue(mockListResponse);
 
       const result = await controller.findList(mockRequest, mockQuery, true);
 
-      expect(notificationService.find).toHaveBeenCalledWith({
+      expect(notificationService.findForUser).toHaveBeenCalledWith({
         query: mockQuery,
         userId: MOCK_USER_ID,
         isArchived: true,
@@ -129,11 +129,11 @@ describe("NotificationController", () => {
     });
 
     it("should find notifications with isArchived=false", async () => {
-      notificationService.find.mockResolvedValue(mockListResponse);
+      notificationService.findForUser.mockResolvedValue(mockListResponse);
 
       const result = await controller.findList(mockRequest, mockQuery, false);
 
-      expect(notificationService.find).toHaveBeenCalledWith({
+      expect(notificationService.findForUser).toHaveBeenCalledWith({
         query: mockQuery,
         userId: MOCK_USER_ID,
         isArchived: false,
@@ -143,11 +143,11 @@ describe("NotificationController", () => {
 
     it("should find notifications with empty query", async () => {
       const emptyQuery = {};
-      notificationService.find.mockResolvedValue(mockListResponse);
+      notificationService.findForUser.mockResolvedValue(mockListResponse);
 
       const result = await controller.findList(mockRequest, emptyQuery);
 
-      expect(notificationService.find).toHaveBeenCalledWith({
+      expect(notificationService.findForUser).toHaveBeenCalledWith({
         query: emptyQuery,
         userId: MOCK_USER_ID,
         isArchived: undefined,
@@ -157,16 +157,16 @@ describe("NotificationController", () => {
 
     it("should handle service errors", async () => {
       const serviceError = new Error("Service error");
-      notificationService.find.mockRejectedValue(serviceError);
+      notificationService.findForUser.mockRejectedValue(serviceError);
 
       await expect(controller.findList(mockRequest, mockQuery)).rejects.toThrow("Service error");
 
-      expect(notificationService.find).toHaveBeenCalled();
+      expect(notificationService.findForUser).toHaveBeenCalled();
     });
 
     it("should return empty results when no notifications found", async () => {
       const emptyResponse = { data: [], meta: { total: 0 } };
-      notificationService.find.mockResolvedValue(emptyResponse);
+      notificationService.findForUser.mockResolvedValue(emptyResponse);
 
       const result = await controller.findList(mockRequest, mockQuery);
 
@@ -176,11 +176,11 @@ describe("NotificationController", () => {
 
   describe("findById", () => {
     it("should find notification by ID", async () => {
-      notificationService.findById.mockResolvedValue(mockServiceResponse);
+      notificationService.findByIdForUser.mockResolvedValue(mockServiceResponse);
 
       const result = await controller.findById(mockRequest, MOCK_NOTIFICATION_ID);
 
-      expect(notificationService.findById).toHaveBeenCalledWith({
+      expect(notificationService.findByIdForUser).toHaveBeenCalledWith({
         notificationId: MOCK_NOTIFICATION_ID,
         userId: MOCK_USER_ID,
       });
@@ -189,15 +189,15 @@ describe("NotificationController", () => {
 
     it("should handle service errors", async () => {
       const serviceError = new Error("Notification not found");
-      notificationService.findById.mockRejectedValue(serviceError);
+      notificationService.findByIdForUser.mockRejectedValue(serviceError);
 
       await expect(controller.findById(mockRequest, MOCK_NOTIFICATION_ID)).rejects.toThrow("Notification not found");
 
-      expect(notificationService.findById).toHaveBeenCalled();
+      expect(notificationService.findByIdForUser).toHaveBeenCalled();
     });
 
     it("should handle non-existent notification", async () => {
-      notificationService.findById.mockResolvedValue(null);
+      notificationService.findByIdForUser.mockResolvedValue(null);
 
       const result = await controller.findById(mockRequest, "non-existent-id");
 

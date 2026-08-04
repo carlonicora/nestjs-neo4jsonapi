@@ -1,5 +1,5 @@
 // packages/nestjs-neo4jsonapi/src/foundations/rbac/serializer/__tests__/matrix-to-ts.spec.ts
-import { serializeMatrixToTs } from "../matrix-to-ts";
+import { DEFAULT_IMPORT_LINES, serializeMatrixToTs } from "../matrix-to-ts";
 import { perm } from "../../dsl/perm";
 import type { RbacMatrix } from "../../dsl/types";
 
@@ -57,5 +57,56 @@ describe("serializeMatrixToTs", () => {
     const src = await serializeMatrixToTs(m, { roleNames: ROLE_NAMES, moduleNames: MODULE_NAMES });
     expect(src).toContain("perm.full");
     expect(src).not.toContain("perm.read,");
+  });
+
+  describe("importLines", () => {
+    it("emits the default header verbatim when importLines is omitted", async () => {
+      const source = await serializeMatrixToTs(MATRIX, { roleNames: ROLE_NAMES, moduleNames: MODULE_NAMES });
+      for (const line of DEFAULT_IMPORT_LINES) {
+        expect(source).toContain(line);
+      }
+      expect(DEFAULT_IMPORT_LINES).toEqual([
+        `import { RoleId, ModuleId } from "@neural-erp/shared";`,
+        `import { perm, defineRbac } from "@carlonicora/nestjs-neo4jsonapi";`,
+        `import { MODULE_USER_PATHS } from "../features/rbac/module-relationships.map";`,
+      ]);
+    });
+
+    it("emits the supplied import lines instead of the defaults", async () => {
+      const source = await serializeMatrixToTs(MATRIX, {
+        roleNames: ROLE_NAMES,
+        moduleNames: MODULE_NAMES,
+        importLines: [`import { RoleId } from "./x";`],
+      });
+      expect(source).toContain(`import { RoleId } from "./x";`);
+      expect(source).not.toContain(`@neural-erp/shared`);
+      expect(source).not.toContain(`module-relationships.map`);
+    });
+
+    it("emits supplied import lines in order", async () => {
+      const importLines = [
+        `import { RoleId } from "../config/enums/role.id";`,
+        `import { ModuleId } from "@avvocato360ai/shared";`,
+        `import { perm, defineRbac } from "@carlonicora/nestjs-neo4jsonapi";`,
+      ];
+      const source = await serializeMatrixToTs(MATRIX, {
+        roleNames: ROLE_NAMES,
+        moduleNames: MODULE_NAMES,
+        importLines,
+      });
+      const positions = importLines.map((line) => source.indexOf(line));
+      expect(positions.every((p) => p >= 0)).toBe(true);
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    });
+
+    it("emits no import lines when an empty array is supplied", async () => {
+      const source = await serializeMatrixToTs(MATRIX, {
+        roleNames: ROLE_NAMES,
+        moduleNames: MODULE_NAMES,
+        importLines: [],
+      });
+      expect(source).not.toContain("import ");
+      expect(source).toContain("export const rbac = defineRbac");
+    });
   });
 });

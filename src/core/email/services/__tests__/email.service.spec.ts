@@ -64,6 +64,7 @@ vi.mock("handlebars", () => ({
 import * as fs from "fs";
 import * as nodemailer from "nodemailer";
 import * as Handlebars from "handlebars";
+import { join, sep } from "path";
 import { AppLoggingService } from "../../../logging/services/logging.service";
 import { EmailService } from "../email.service";
 
@@ -505,6 +506,32 @@ describe("EmailService", () => {
       expect(eqHelper("a", "b")).toBe(false);
       expect(eqHelper(1, 1)).toBe(true);
       expect(eqHelper(1, "1")).toBe(false);
+    });
+  });
+
+  describe("configurable default template locale", () => {
+    it("falls back to the configured defaultLocale when the requested locale has no template", async () => {
+      const itConfig = { ...emailConfig, defaultLocale: "it" };
+      const enSegment = join("email", "en") + sep;
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => !String(p).includes(enSegment));
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmailService,
+          {
+            provide: ConfigService,
+            useValue: { get: vi.fn((key: string) => (key === "email" ? itConfig : appConfig)) },
+          },
+          { provide: AppLoggingService, useValue: { error: vi.fn(), log: vi.fn(), warn: vi.fn() } },
+        ],
+      }).compile();
+      const svc = module.get<EmailService>(EmailService);
+
+      await svc.sendEmail("taskCompleted", { to: "user@example.com", name: "Mario" }, "en");
+
+      const readPaths = vi.mocked(fs.readFileSync).mock.calls.map((call) => String(call[0]));
+      expect(readPaths.some((p) => p.includes(join("it", "taskCompleted.hbs")))).toBe(true);
+      expect(readPaths.some((p) => p.includes(join("en", "taskCompleted.hbs")))).toBe(false);
     });
   });
 });

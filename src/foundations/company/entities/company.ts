@@ -1,5 +1,5 @@
 import { Entity, defineEntity } from "../../../common";
-import type { Feature } from "../../feature/entities/feature.entity";
+import type { Feature } from "../../feature/entities/feature";
 import type { Module } from "../../module/entities/module.entity";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { moduleMeta } from "../../module/entities/module.meta";
@@ -55,13 +55,28 @@ export type Company = Entity & {
 export const CompanyDescriptor = defineEntity<Company>()({
   ...companyMeta,
 
+  // Company is the TENANT ROOT: every other entity is scoped to a company, so the
+  // company itself has no parent company to filter by. Without this flag
+  // `defineEntity` defaults `isCompanyScoped` to `true` and the generic query
+  // builders inject a meaningless `(company)-[:BELONGS_TO]->(company)` synthetic
+  // self-relationship into every read/write.
+  isCompanyScoped: false,
+
   // Field definitions
   fields: {
     name: { type: "string", required: true },
     logo: { type: "string" },
     logoUrl: { type: "string" },
+    // DELIBERATELY still serialised. Sibling applications (neural-erp, phlow) read
+    // this attribute off the wire to drive their subscription banner
+    // (`CommonSidebar.tsx`), so excluding it here would silently break them.
+    // Applications that do not want it on their wire exclude it in their own
+    // extension descriptor (a360ai does exactly that).
     isActiveSubscription: { type: "boolean" },
-    ownerEmail: { type: "string" },
+    // Internal only: identifies the owning/admin account. Never belongs on the wire
+    // (it leaks a user's email to every company reader) and has zero wire consumers
+    // across all consuming applications.
+    ownerEmail: { type: "string", excludeFromJsonApi: true },
     monthlyTokens: { type: "number" },
     availableMonthlyTokens: { type: "number" },
     availableExtraTokens: { type: "number" },

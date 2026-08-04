@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { NotificationServices } from "../notification.service";
 import { NotificationRepository } from "../../repositories/notification.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
@@ -21,11 +22,12 @@ describe("NotificationServices", () => {
   ];
 
   const createMockNotificationRepository = () => ({
-    find: vi.fn(),
-    findById: vi.fn(),
+    findForUser: vi.fn(),
+    findByIdForUser: vi.fn(),
     markAsRead: vi.fn(),
     archive: vi.fn(),
-    create: vi.fn(),
+    createNotification: vi.fn(),
+    createIdempotent: vi.fn(),
     delete: vi.fn(),
   });
 
@@ -43,6 +45,7 @@ describe("NotificationServices", () => {
         NotificationServices,
         { provide: NotificationRepository, useValue: createMockNotificationRepository() },
         { provide: JsonApiService, useValue: createMockJsonApiService() },
+        { provide: ClsService, useValue: { get: vi.fn(), set: vi.fn(), has: vi.fn().mockReturnValue(false) } },
       ],
     }).compile();
 
@@ -61,18 +64,18 @@ describe("NotificationServices", () => {
     });
   });
 
-  describe("find", () => {
+  describe("findForUser", () => {
     it("should find notifications with pagination", async () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_NOTIFICATIONS };
-      notificationRepository.find.mockResolvedValue(MOCK_NOTIFICATIONS);
+      notificationRepository.findForUser.mockResolvedValue(MOCK_NOTIFICATIONS);
       jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
 
       // Act
-      const result = await service.find({ query: {}, userId: TEST_IDS.userId });
+      const result = await service.findForUser({ query: {}, userId: TEST_IDS.userId });
 
       // Assert
-      expect(notificationRepository.find).toHaveBeenCalledWith({
+      expect(notificationRepository.findForUser).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
         isArchived: undefined,
         cursor: expect.anything(),
@@ -81,16 +84,29 @@ describe("NotificationServices", () => {
       expect(result).toBe(mockJsonApiResponse);
     });
 
+    it("should build the list with the descriptor model", async () => {
+      notificationRepository.findForUser.mockResolvedValue([]);
+      jsonApiService.buildList.mockReturnValue({ data: [] });
+
+      await service.findForUser({ query: {}, userId: TEST_IDS.userId });
+
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "notifications", nodeName: "notification" }),
+        [],
+        expect.anything(),
+      );
+    });
+
     it("should filter by isArchived when provided", async () => {
       // Arrange
-      notificationRepository.find.mockResolvedValue([]);
+      notificationRepository.findForUser.mockResolvedValue([]);
       jsonApiService.buildList.mockReturnValue({ data: [] });
 
       // Act
-      await service.find({ query: {}, userId: TEST_IDS.userId, isArchived: true });
+      await service.findForUser({ query: {}, userId: TEST_IDS.userId, isArchived: true });
 
       // Assert
-      expect(notificationRepository.find).toHaveBeenCalledWith(
+      expect(notificationRepository.findForUser).toHaveBeenCalledWith(
         expect.objectContaining({
           isArchived: true,
         }),
@@ -100,41 +116,41 @@ describe("NotificationServices", () => {
     it("should handle pagination query parameters", async () => {
       // Arrange
       const query = { page: { size: 10, after: "cursor123" } };
-      notificationRepository.find.mockResolvedValue([]);
+      notificationRepository.findForUser.mockResolvedValue([]);
       jsonApiService.buildList.mockReturnValue({ data: [] });
 
       // Act
-      await service.find({ query, userId: TEST_IDS.userId });
+      await service.findForUser({ query, userId: TEST_IDS.userId });
 
       // Assert
-      expect(notificationRepository.find).toHaveBeenCalled();
+      expect(notificationRepository.findForUser).toHaveBeenCalled();
     });
 
     it("should propagate errors from repository", async () => {
       // Arrange
-      notificationRepository.find.mockRejectedValue(new Error("Database error"));
+      notificationRepository.findForUser.mockRejectedValue(new Error("Database error"));
 
       // Act & Assert
-      await expect(service.find({ query: {}, userId: TEST_IDS.userId })).rejects.toThrow("Database error");
+      await expect(service.findForUser({ query: {}, userId: TEST_IDS.userId })).rejects.toThrow("Database error");
     });
   });
 
-  describe("findById", () => {
+  describe("findByIdForUser", () => {
     it("should find notification by ID", async () => {
       // Arrange
       const mockNotification = MOCK_NOTIFICATIONS[0];
       const mockJsonApiResponse = { data: mockNotification };
-      notificationRepository.findById.mockResolvedValue(mockNotification);
+      notificationRepository.findByIdForUser.mockResolvedValue(mockNotification);
       jsonApiService.buildSingle.mockReturnValue(mockJsonApiResponse);
 
       // Act
-      const result = await service.findById({
+      const result = await service.findByIdForUser({
         notificationId: TEST_IDS.notificationId1,
         userId: TEST_IDS.userId,
       });
 
       // Assert
-      expect(notificationRepository.findById).toHaveBeenCalledWith({
+      expect(notificationRepository.findByIdForUser).toHaveBeenCalledWith({
         notificationId: TEST_IDS.notificationId1,
         userId: TEST_IDS.userId,
       });
@@ -144,11 +160,11 @@ describe("NotificationServices", () => {
 
     it("should propagate errors from repository", async () => {
       // Arrange
-      notificationRepository.findById.mockRejectedValue(new Error("Not found"));
+      notificationRepository.findByIdForUser.mockRejectedValue(new Error("Not found"));
 
       // Act & Assert
       await expect(
-        service.findById({
+        service.findByIdForUser({
           notificationId: TEST_IDS.notificationId1,
           userId: TEST_IDS.userId,
         }),

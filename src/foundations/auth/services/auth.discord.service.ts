@@ -3,7 +3,10 @@ import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { AuthService } from "..";
+// Direct file import, NOT the `..` barrel — same DI-metadata cycle as
+// auth.google.service.ts: through the barrel, `AuthService` is undefined when
+// `design:paramtypes` is emitted and Nest cannot resolve the dependency.
+import { AuthService } from "./auth.service";
 import { BaseConfigInterface, ConfigApiInterface, ConfigAppInterface, ConfigAuthInterface } from "../../../config";
 import { ConfigDiscordInterface } from "../../../config/interfaces/config.discord.interface";
 import { DiscordUserService } from "../../discord-user";

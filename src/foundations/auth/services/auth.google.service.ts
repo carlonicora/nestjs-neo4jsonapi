@@ -3,7 +3,11 @@ import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { AuthService } from "..";
+// Direct file import, NOT the `..` barrel: the barrel exports this service, so
+// importing back through it creates a cycle in which `AuthService` is still
+// undefined when this class's `design:paramtypes` metadata is emitted — Nest
+// then boots with "can't resolve dependencies ... at index [2]".
+import { AuthService } from "./auth.service";
 import { BaseConfigInterface, ConfigApiInterface, ConfigAppInterface, ConfigAuthInterface } from "../../../config";
 import { ConfigGoogleInterface } from "../../../config/interfaces/config.google.interface";
 import { GoogleUser } from "../../google-user/entities/google-user";

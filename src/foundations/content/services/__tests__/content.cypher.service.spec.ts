@@ -191,7 +191,9 @@ describe("ContentCypherService", () => {
       // Assert
       expect(result).toContain("MATCH (content)-[:BELONGS_TO]->(content_company:");
       expect(result).toContain("MATCH (content)<-[:PUBLISHED]-(content_owner:");
-      expect(result).toContain("MATCH (content)<-[:PUBLISHED]-(content_author:");
+      // The author match is OPTIONAL (it duplicates the owner's PUBLISHED edge,
+      // so the row set is unchanged) but it is still emitted by default.
+      expect(result).toContain("OPTIONAL MATCH (content)<-[:PUBLISHED]-(content_author:");
       expect(result).toContain("RETURN content");
       expect(result).toContain("content_company");
       expect(result).toContain("content_owner");
@@ -279,6 +281,96 @@ describe("ContentCypherService", () => {
       // Assert
       expect(result).toContain("content_category");
       expect(result).toContain("content_tag");
+    });
+  });
+
+  describe("default configuration (package behaviour must not drift)", () => {
+    it("should match the owner on a directed PUBLISHED edge", () => {
+      expect(service.ownerMatch({ target: "content_owner:User" })).toBe(
+        "MATCH (content)<-[:PUBLISHED]-(content_owner:User)",
+      );
+    });
+
+    it("should match the owner by id on a directed PUBLISHED edge", () => {
+      expect(service.ownerMatch({ target: ":User {id: $ownerId}" })).toBe(
+        "MATCH (content)<-[:PUBLISHED]-(:User {id: $ownerId})",
+      );
+    });
+
+    it("should apply no tldr filter", () => {
+      expect(service.tldrFilter()).toBe("");
+      expect(service.default()).not.toContain("tldr");
+    });
+
+    it("should emit no extra meta-field projection", () => {
+      expect(service.returnStatement()).not.toContain(" AS ");
+    });
+  });
+
+  describe("a360ai-shaped configuration", () => {
+    const A360_CONFIG: ContentExtensionConfig = {
+      additionalRelationships: [],
+      ownerMatchPattern: { relationships: ["PUBLISHED", "FROM"], undirected: true },
+      requireTldr: true,
+      metaFields: [
+        {
+          key: "proceedingId",
+          optionalMatch: "OPTIONAL MATCH (memoProceeding:Proceeding)-[:HAS_MEMO]->(content)",
+          returnAlias: "memoProceeding.id",
+        },
+      ],
+      serialiseAuthor: false,
+    };
+
+    it("should match the owner on an undirected PUBLISHED|FROM edge", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      expect(a360.ownerMatch({ target: "content_owner:User" })).toBe(
+        "MATCH (content)-[:PUBLISHED|FROM]-(content_owner:User)",
+      );
+      expect(a360.returnStatement()).toContain("MATCH (content)-[:PUBLISHED|FROM]-(content_owner:User)");
+    });
+
+    it("should filter on a non-empty tldr in the default match", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      const result = a360.default();
+
+      expect(result).toContain("WHERE content.tldr IS NOT NULL");
+      expect(result).toContain(`AND content.tldr <> ""`);
+      expect(result).toContain("AND $companyId IS NULL");
+    });
+
+    it("should expose the tldr filter as trailing AND predicates", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      const result = a360.tldrFilter();
+
+      expect(result).toContain("AND content.tldr IS NOT NULL");
+      expect(result).toContain(`AND content.tldr <> ""`);
+    });
+
+    it("should add the meta-field OPTIONAL MATCH and its RETURN projection", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      const result = a360.returnStatement();
+
+      expect(result).toContain("OPTIONAL MATCH (memoProceeding:Proceeding)-[:HAS_MEMO]->(content)");
+      expect(result).toContain("memoProceeding.id AS proceedingId");
+    });
+
+    it("should drop the author match and the author RETURN alias", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      expect(a360.returnStatement()).not.toContain("content_author");
+    });
+
+    it("should keep totalScore last when requested", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      const result = a360.returnStatement({ useTotalScore: true });
+
+      expect(result.indexOf("memoProceeding.id AS proceedingId")).toBeLessThan(result.indexOf("totalScore"));
     });
   });
 });

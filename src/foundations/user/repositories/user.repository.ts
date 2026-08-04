@@ -1,9 +1,11 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { RoleId } from "../../../common/constants/system.roles";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
 import { companyMeta } from "../../company/entities/company.meta";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import {
@@ -19,30 +21,48 @@ import { User, UserDescriptor } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 
+/**
+ * User repository.
+ *
+ * Extends `AbstractRepository` so an application can subclass it (see
+ * `ExtendedUserRepository` in a consuming app) and have BOTH the inherited
+ * generic methods AND every method declared here resolve the *extended*
+ * descriptor. Model resolution is by subclass polymorphism — `this.descriptor`
+ * — never by a registry lookup: Nest constructs providers long before
+ * `onModuleInit`, where models are registered, so a registry lookup at
+ * construction time would yield `undefined`.
+ *
+ * The three domain methods whose names collide with the abstract's generic
+ * CRUD (`create` / `put` / `delete`) are named `createUser` / `putUser` /
+ * `deleteUser` so the inherited descriptor-driven CRUD stays reachable.
+ */
 @Injectable()
-export class UserRepository implements OnModuleInit {
-  constructor(
-    private readonly neo4j: Neo4jService,
-    private readonly cls: ClsService,
-    private readonly userCypherService: UserCypherService,
-  ) {}
+export class UserRepository extends AbstractRepository<User, typeof UserDescriptor.relationships> {
+  protected readonly descriptor = UserDescriptor;
 
+  constructor(
+    neo4j: Neo4jService,
+    securityService: SecurityService,
+    clsService: ClsService,
+    protected readonly userCypherService: UserCypherService,
+  ) {
+    super(neo4j, securityService, clsService);
+  }
+
+  /**
+   * `AbstractRepository.onModuleInit` creates the constraints and indexes
+   * declared by the descriptor. `defineEntity` only ever emits the `id` UNIQUE
+   * constraint, so the User-specific `email` UNIQUE constraint is added here.
+   * The fulltext index is created by the parent from `descriptor.indexes`
+   * (`stringFields`), which excludes `password` and `code` — both carry
+   * `excludeFromSearch: true`.
+   */
   async onModuleInit() {
-    await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT user_id IF NOT EXISTS FOR (user:User) REQUIRE user.id IS UNIQUE`,
-    });
+    await super.onModuleInit();
 
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT user_email IF NOT EXISTS FOR (user:User) REQUIRE user.email IS UNIQUE`,
     });
-
-    // Create fulltext search index for user string fields
-    if (UserDescriptor.fulltextIndexName && UserDescriptor.stringFields.length > 0) {
-      await this.neo4j.writeOne({
-        query: `CREATE FULLTEXT INDEX \`${UserDescriptor.fulltextIndexName}\` IF NOT EXISTS FOR (n:\`${userMeta.labelName}\`) ON EACH [${UserDescriptor.stringFields.map((p) => `n.\`${p}\``).join(", ")}]`,
-        queryParams: {},
-      });
-    }
   }
 
   async makeCompanyAdmin(params: { userId: string; companyId: string }) {
@@ -65,7 +85,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findOneForAdmin(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       userId: params.userId,
@@ -93,7 +113,7 @@ export class UserRepository implements OnModuleInit {
    * Returns user with roles, company, and features needed for token creation.
    */
   async findForTwoFactorLogin(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       userId: params.userId,
@@ -124,7 +144,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findFullUser(params: { userId: string }): Promise<User> {
-    let query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    let query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -178,7 +198,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByUserId(params: { userId: string; companyId?: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
@@ -204,7 +224,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByEmail(params: { email: string; includeDeleted?: boolean }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       email: params.email.toLowerCase(),
@@ -236,7 +256,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findByCode(params: { code: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
     query.queryParams = {
       code: params.code,
@@ -263,15 +283,15 @@ export class UserRepository implements OnModuleInit {
     includeDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
       term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
     };
 
-    if (params.term && UserDescriptor.fulltextIndexName) {
-      query.query += `CALL db.index.fulltext.queryNodes("${UserDescriptor.fulltextIndexName}", $term)
+    if (params.term && this.descriptor.fulltextIndexName) {
+      query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(company)
 
@@ -301,7 +321,7 @@ export class UserRepository implements OnModuleInit {
     term?: string;
     includeDeleted?: boolean;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, fetchAll: true });
 
     query.queryParams = {
       ...query.queryParams,
@@ -330,7 +350,7 @@ export class UserRepository implements OnModuleInit {
     isDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
   }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       companyId: params.companyId,
@@ -350,7 +370,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -376,7 +396,7 @@ export class UserRepository implements OnModuleInit {
   }
 
   async findNotInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
       ...query.queryParams,
@@ -406,7 +426,7 @@ export class UserRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
-  async create(params: {
+  async createUser(params: {
     userId: string;
     email: string;
     name: string;
@@ -425,7 +445,7 @@ export class UserRepository implements OnModuleInit {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
-      currentUserId: this.cls.has("userId") ? this.cls.get("userId") : null,
+      currentUserId: this.clsService.has("userId") ? this.clsService.get("userId") : null,
       userId: params.userId,
       email: params.email.toLowerCase(),
       name: params.name,
@@ -498,11 +518,11 @@ export class UserRepository implements OnModuleInit {
     return this.findByUserId({ userId: params.userId });
   }
 
-  async put(params: {
+  async putUser(params: {
     isAdmin: boolean;
     userId: string;
     email: string;
-    name: string;
+    name?: string;
     title?: string;
     bio?: string;
     password?: string;
@@ -513,7 +533,9 @@ export class UserRepository implements OnModuleInit {
     preserveAvatar?: boolean;
   }): Promise<void> {
     const setClauses = [];
-    setClauses.push("user.name = $name");
+    // `name` is optional on the PUT DTO: an omitted name must leave the stored
+    // name untouched, never overwrite it with null.
+    if (params.name !== undefined) setClauses.push("user.name = $name");
     setClauses.push("user.email = $email");
     setClauses.push("user.title = $title");
     setClauses.push("user.bio = $bio");
@@ -637,7 +659,7 @@ export class UserRepository implements OnModuleInit {
     await this.neo4j.writeOne(query);
   }
 
-  async delete(params: { userId: string }): Promise<void> {
+  async deleteUser(params: { userId: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -708,7 +730,7 @@ export class UserRepository implements OnModuleInit {
    * These users have the Administrator role and receive internal payment notifications.
    */
   async findPlatformAdministrators(): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, fetchAll: true });
 
     query.queryParams = {
       administratorRoleId: RoleId.Administrator,
@@ -729,7 +751,7 @@ export class UserRepository implements OnModuleInit {
    * Query path: StripeCustomer -> Company <- User with CompanyAdministrator role
    */
   async findCompanyAdminsByStripeCustomerId(params: { stripeCustomerId: string }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, fetchAll: true });
 
     query.queryParams = {
       stripeCustomerId: params.stripeCustomerId,
@@ -759,7 +781,7 @@ export class UserRepository implements OnModuleInit {
    * Used for deletion warning notifications
    */
   async findAdminsByCompanyId(params: { companyId: string }): Promise<User[]> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, fetchAll: true });
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, fetchAll: true });
 
     query.queryParams = {
       companyId: params.companyId,

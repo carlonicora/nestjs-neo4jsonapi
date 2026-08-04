@@ -33,11 +33,13 @@ type EmailAddress = {
 export class EmailService {
   private templateBasePath: string;
   private libraryTemplateBasePath: string;
+  private readonly defaultLocale: string;
 
   constructor(
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly logger: AppLoggingService,
   ) {
+    this.defaultLocale = this.config.get<ConfigEmailInterface>("email")?.defaultLocale ?? "en";
     // App templates (overrides)
     this.templateBasePath = join(process.cwd(), "templates", "email");
 
@@ -70,18 +72,20 @@ export class EmailService {
   private loadTemplate(templateId: string, locale: string): string {
     // Try app templates first (override)
     const appTemplatePath = join(this.templateBasePath, locale, `${templateId}.hbs`);
-    const appFallbackPath = join(this.templateBasePath, "en", `${templateId}.hbs`);
+    const appFallbackPath = join(this.templateBasePath, this.defaultLocale, `${templateId}.hbs`);
 
-    // Try library templates as fallback (default)
+    // Try library templates as fallback (default). Library templates ship in
+    // English only, so the library fallback is always "en" regardless of the
+    // app's configured defaultLocale.
     const libraryTemplatePath = join(this.libraryTemplateBasePath, locale, `${templateId}.hbs`);
     const libraryFallbackPath = join(this.libraryTemplateBasePath, "en", `${templateId}.hbs`);
 
     let templatePath: string | null = null;
 
-    // Check in order: app locale → app en → library locale → library en
+    // Check in order: app locale → app default-locale → library locale → library en
     if (fs.existsSync(appTemplatePath)) {
       templatePath = appTemplatePath;
-    } else if (locale !== "en" && fs.existsSync(appFallbackPath)) {
+    } else if (locale !== this.defaultLocale && fs.existsSync(appFallbackPath)) {
       templatePath = appFallbackPath;
     } else if (fs.existsSync(libraryTemplatePath)) {
       templatePath = libraryTemplatePath;
@@ -91,15 +95,15 @@ export class EmailService {
 
     if (!templatePath) {
       throw new Error(
-        `Template file not found for template "${templateId}" in locale "${locale}" or default "en". ` +
+        `Template file not found for template "${templateId}" in locale "${locale}", app default "${this.defaultLocale}", or library default "en". ` +
           `Checked app (${this.templateBasePath}) and library (${this.libraryTemplateBasePath}).`,
       );
     }
 
     // Load unsubscribe partial if exists
     let unsubscribePath = join(this.templateBasePath, locale, "unsubscribe.hbs");
-    if (!fs.existsSync(unsubscribePath) && locale !== "en") {
-      unsubscribePath = join(this.templateBasePath, "en", "unsubscribe.hbs");
+    if (!fs.existsSync(unsubscribePath) && locale !== this.defaultLocale) {
+      unsubscribePath = join(this.templateBasePath, this.defaultLocale, "unsubscribe.hbs");
     }
     if (fs.existsSync(unsubscribePath)) {
       const unsubscribePartial = fs.readFileSync(unsubscribePath, "utf8");

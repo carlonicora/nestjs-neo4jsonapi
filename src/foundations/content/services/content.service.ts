@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
-import { ContentModel } from "../../content/entities/content.model";
+import { getContentModel } from "../../content/entities/content";
 import { ContentRepository } from "../../content/repositories/content.repository";
 
 @Injectable()
@@ -21,7 +21,7 @@ export class ContentService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      ContentModel,
+      getContentModel(),
       await this.contentRepository.find({
         fetchAll: params.fetchAll,
         term: params.term,
@@ -34,7 +34,7 @@ export class ContentService {
 
   async findByIds(params: { contentIds: string[] }): Promise<JsonApiDataInterface> {
     return this.builder.buildList(
-      ContentModel,
+      getContentModel(),
       await this.contentRepository.findByIds({
         contentIds: params.contentIds,
       }),
@@ -45,7 +45,7 @@ export class ContentService {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
-      ContentModel,
+      getContentModel(),
       await this.contentRepository.findByOwner({
         ownerId: params.ownerId,
         fetchAll: params.fetchAll,

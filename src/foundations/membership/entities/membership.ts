@@ -16,6 +16,11 @@ export type Membership = Entity;
 export const MembershipDescriptor = defineEntity<Membership>()({
   ...membershipMeta,
 
+  // Platform-level memberships have NO IN_COMPANY edge (global Administrator).
+  // A company-scoped default would BELONGS_TO-filter any future generic read
+  // and silently hide platform memberships.
+  isCompanyScoped: false,
+
   fields: {},
 
   relationships: {

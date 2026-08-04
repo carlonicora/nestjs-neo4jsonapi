@@ -8,9 +8,9 @@ export class UserPutAttributesDTO {
   @IsString()
   email: string;
 
-  @IsDefined()
+  @IsOptional()
   @IsString()
-  name: string;
+  name?: string;
 
   @IsOptional()
   @IsString()

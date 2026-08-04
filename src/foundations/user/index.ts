@@ -1,6 +1,11 @@
+export { UserController } from "./controllers/user.controller";
 export { UserDataDTO, UserDataListDTO } from "./dtos/user.dto";
+export { UserPatchAvatarDTO } from "./dtos/user.patch.avatar.dto";
+export { UserPatchRateDTO } from "./dtos/user.patch.rate.dto";
+export { UserPostDataDTO, UserPostDTO } from "./dtos/user.post.dto";
+export { UserPutDTO } from "./dtos/user.put.dto";
 export { User, UserDescriptor, OwnerDescriptor, AssigneeDescriptor, AuthorDescriptor } from "./entities/user";
-export { authorMeta, ownerMeta, userMeta } from "./entities/user.meta";
+export { assigneeMeta, authorMeta, ownerMeta, userMeta } from "./entities/user.meta";
 export { UserRepository } from "./repositories/user.repository";
 export { UserCypherService } from "./services/user.cypher.service";
 export { UserService } from "./services/user.service";

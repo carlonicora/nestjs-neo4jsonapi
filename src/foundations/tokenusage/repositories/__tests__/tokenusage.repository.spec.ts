@@ -1,9 +1,12 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { TokenUsageRepository } from "../tokenusage.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../../core/security/services/security.service";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { tokenUsageMeta } from "../../entities/tokenusage.meta";
+import { TokenUsageDescriptor } from "../../entities/tokenusage";
 
 // Test IDs
 const TEST_IDS = {
@@ -20,6 +23,37 @@ const createMockNeo4jService = () => ({
   readOne: vi.fn(),
   readMany: vi.fn(),
   initQuery: vi.fn(),
+  // `AbstractRepository.onModuleInit` probes SHOW INDEXES before creating the
+  // descriptor-derived FULLTEXT index.
+  read: vi.fn().mockResolvedValue({ records: [] }),
+});
+
+const createMockSecurityService = () => ({
+  userHasAccess: vi.fn().mockReturnValue(""),
+});
+
+const createMockClsService = () => ({
+  get: vi.fn().mockReturnValue(undefined),
+  set: vi.fn(),
+});
+
+describe("TokenUsageDescriptor", () => {
+  it("serialises exactly the five token-usage attributes", () => {
+    const serialised = Object.entries(TokenUsageDescriptor.fields)
+      .filter(([, def]: [string, any]) => !def.excludeFromJsonApi && !def.meta)
+      .map(([name]) => name)
+      .sort();
+
+    expect(serialised).toEqual(["cachedInputTokens", "cost", "inputTokens", "outputTokens", "tokenUsageType"]);
+  });
+
+  it("declares no relationships (the old TokenUsageModel had childrenTokens: [])", () => {
+    expect(Object.keys(TokenUsageDescriptor.relationships).sort()).toEqual([]);
+  });
+
+  it("is company-scoped (old TokenUsageModel.singleChildrenTokens: [companyMeta.nodeName])", () => {
+    expect(TokenUsageDescriptor.isCompanyScoped).toBe(true);
+  });
 });
 
 describe("TokenUsageRepository", () => {
@@ -35,7 +69,12 @@ describe("TokenUsageRepository", () => {
     neo4jService = createMockNeo4jService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TokenUsageRepository, { provide: Neo4jService, useValue: neo4jService }],
+      providers: [
+        TokenUsageRepository,
+        { provide: Neo4jService, useValue: neo4jService },
+        { provide: SecurityService, useValue: createMockSecurityService() },
+        { provide: ClsService, useValue: createMockClsService() },
+      ],
     }).compile();
 
     repository = module.get<TokenUsageRepository>(TokenUsageRepository);
@@ -51,6 +90,9 @@ describe("TokenUsageRepository", () => {
 
       await repository.onModuleInit();
 
+      // Emitted by the inherited AbstractRepository.onModuleInit from
+      // TokenUsageDescriptor.constraints — byte-identical to the constraint this
+      // repository used to declare by hand.
       expect(neo4jService.writeOne).toHaveBeenCalledWith({
         query: `CREATE CONSTRAINT ${tokenUsageMeta.nodeName}_id IF NOT EXISTS FOR (${tokenUsageMeta.nodeName}:${tokenUsageMeta.labelName}) REQUIRE ${tokenUsageMeta.nodeName}.id IS UNIQUE`,
       });
@@ -103,6 +145,7 @@ describe("TokenUsageRepository", () => {
       expect(mockQuery.query).toContain("tokenUsageType: $tokenUsageType");
       expect(mockQuery.query).toContain("inputTokens: $inputTokens");
       expect(mockQuery.query).toContain("outputTokens: $outputTokens");
+      expect(mockQuery.query).toContain("cachedInputTokens: $cachedInputTokens");
       expect(mockQuery.query).toContain("cost: $cost");
       expect(mockQuery.query).toContain("createdAt: datetime()");
       expect(mockQuery.query).toContain("updatedAt: datetime()");
@@ -164,6 +207,41 @@ describe("TokenUsageRepository", () => {
       });
 
       expect(mockQuery.queryParams.cost).toBe(0);
+    });
+
+    it("should default cachedInputTokens to 0 when not provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.create({
+        id: TEST_IDS.tokenUsageId,
+        tokenUsageType: TokenUsageType.Analyser,
+        inputTokens: 100,
+        outputTokens: 50,
+        relationshipId: TEST_IDS.contentId,
+        relationshipType: "Content",
+      });
+
+      expect(mockQuery.queryParams.cachedInputTokens).toBe(0);
+    });
+
+    it("should persist the cached input tokens when provided", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.create({
+        id: TEST_IDS.tokenUsageId,
+        tokenUsageType: TokenUsageType.Responder,
+        inputTokens: 1000,
+        outputTokens: 50,
+        cachedInputTokens: 300,
+        relationshipId: TEST_IDS.contentId,
+        relationshipType: "Content",
+      });
+
+      expect(mockQuery.queryParams.cachedInputTokens).toBe(300);
     });
 
     it("should handle zero tokens", async () => {

@@ -42,3 +42,12 @@ export * from "../stripe-usage";
 
 // Re-export stripe-webhook module for backward compatibility
 export * from "../stripe-webhook";
+
+// Re-export stripe-product module for backward compatibility
+export * from "../stripe-product";
+
+// Re-export stripe-promotion-code module for backward compatibility
+export * from "../stripe-promotion-code";
+
+// Re-export stripe-trial module for backward compatibility
+export * from "../stripe-trial";

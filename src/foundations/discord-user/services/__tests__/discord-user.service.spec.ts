@@ -44,7 +44,7 @@ describe("DiscordUserService", () => {
   });
 
   const createMockUserRepository = () => ({
-    create: vi.fn(),
+    createUser: vi.fn(),
     findById: vi.fn(),
     findByEmail: vi.fn(),
     update: vi.fn(),
@@ -52,7 +52,7 @@ describe("DiscordUserService", () => {
   });
 
   const createMockCompanyRepository = () => ({
-    create: vi.fn(),
+    createCompanyNode: vi.fn(),
     findById: vi.fn(),
     findByCompanyId: vi.fn(),
     update: vi.fn(),
@@ -99,8 +99,8 @@ describe("DiscordUserService", () => {
   describe("create", () => {
     it("should set companyId and userId in CLS service", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -117,8 +117,8 @@ describe("DiscordUserService", () => {
 
     it("should create company with username as name", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -129,7 +129,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(companyRepository.create).toHaveBeenCalledWith({
+      expect(companyRepository.createCompanyNode).toHaveBeenCalledWith({
         companyId: TEST_IDS.companyId,
         name: "testuser",
       });
@@ -137,8 +137,8 @@ describe("DiscordUserService", () => {
 
     it("should create user with discord details", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -152,7 +152,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith({
+      expect(userRepository.createUser).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
         email: "test@example.com",
         name: "testuser",
@@ -170,8 +170,8 @@ describe("DiscordUserService", () => {
     it("should use discord id as email when email is not available", async () => {
       // Arrange
       const discordUserWithoutEmail = { ...MOCK_DISCORD_USER, email: undefined };
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -182,7 +182,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           email: TEST_IDS.discordId,
         }),
@@ -191,8 +191,8 @@ describe("DiscordUserService", () => {
 
     it("should create discord user record", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -213,8 +213,8 @@ describe("DiscordUserService", () => {
 
     it("should handle undefined marketingConsentAt", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockResolvedValue(undefined);
 
       // Act
@@ -226,7 +226,7 @@ describe("DiscordUserService", () => {
       });
 
       // Assert
-      expect(userRepository.create).toHaveBeenCalledWith(
+      expect(userRepository.createUser).toHaveBeenCalledWith(
         expect.objectContaining({
           marketingConsentAt: undefined,
         }),
@@ -235,7 +235,7 @@ describe("DiscordUserService", () => {
 
     it("should propagate errors from company repository", async () => {
       // Arrange
-      companyRepository.create.mockRejectedValue(new Error("Company creation failed"));
+      companyRepository.createCompanyNode.mockRejectedValue(new Error("Company creation failed"));
 
       // Act & Assert
       await expect(
@@ -249,8 +249,8 @@ describe("DiscordUserService", () => {
 
     it("should propagate errors from user repository", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockRejectedValue(new Error("User creation failed"));
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockRejectedValue(new Error("User creation failed"));
 
       // Act & Assert
       await expect(
@@ -264,8 +264,8 @@ describe("DiscordUserService", () => {
 
     it("should propagate errors from discord user repository", async () => {
       // Arrange
-      companyRepository.create.mockResolvedValue(undefined);
-      userRepository.create.mockResolvedValue(undefined);
+      companyRepository.createCompanyNode.mockResolvedValue(undefined);
+      userRepository.createUser.mockResolvedValue(undefined);
       discordUserRepository.create.mockRejectedValue(new Error("Discord user creation failed"));
 
       // Act & Assert

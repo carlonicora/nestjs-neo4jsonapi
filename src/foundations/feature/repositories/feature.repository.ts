@@ -1,58 +1,64 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
-import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
-import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { Injectable } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
-import { Feature } from "../../feature/entities/feature.entity";
-import { FeatureModel } from "../../feature/entities/feature.model";
+import { SecurityService } from "../../../core/security/services/security.service";
+import { Feature, FeatureDescriptor } from "../entities/feature";
+import { featureMeta } from "../entities/feature.meta";
 
 @Injectable()
-export class FeatureRepository implements OnModuleInit {
-  constructor(
-    private readonly neo4j: Neo4jService,
-    private readonly logger: AppLoggingService,
-  ) {}
+export class FeatureRepository extends AbstractRepository<Feature, typeof FeatureDescriptor.relationships> {
+  protected readonly descriptor = FeatureDescriptor;
 
-  async onModuleInit() {
-    await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT feature_id IF NOT EXISTS FOR (feature:Feature) REQUIRE feature.id IS UNIQUE`,
-    });
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
   }
 
+  // onModuleInit() (id constraint + fulltext index) and find({ term, cursor, orderBy })
+  // (search + module relationship) are inherited — the descriptor declares `module` as a
+  // cardinality-many relationship, so buildReturnStatement() already emits the
+  // `OPTIONAL MATCH (feature)<-[:IN_FEATURE]-(feature_module:Module)` the old bespoke
+  // find() had, and the `name` string field auto-generates the fulltext index the
+  // inherited find() searches against for `term`.
+
+  /**
+   * Companies opt into features via a (Company)-[:HAS_FEATURE]->(Feature) edge that
+   * is NOT modelled as a descriptor relationship (Feature.isCompanyScoped is false —
+   * it is a global entity many companies point to, not something a Feature "belongs"
+   * to). The explicit Company MATCH is the intended cross-tenant opt-in for a global
+   * entity, not a bypass of buildDefaultMatch(). Keep the name and signature stable —
+   * external consumers depend on them.
+   */
   async findByCompany(params: { companyId: string }): Promise<Feature[]> {
-    const query = this.neo4j.initQuery({ serialiser: FeatureModel });
+    const query = this.neo4j.initQuery({ serialiser: FeatureDescriptor.model });
 
-    query.queryParams = {
-      companyId: params.companyId,
-    };
+    query.queryParams = { ...query.queryParams, companyId: params.companyId };
 
     query.query = `
-      MATCH (company:Company {id: $companyId})-[:HAS_FEATURE]->(feature:Feature)
-      RETURN feature
+      MATCH (company:Company {id: $companyId})-[:HAS_FEATURE]->(${featureMeta.nodeName}:${featureMeta.labelName})
+      RETURN ${featureMeta.nodeName}
     `;
 
     return this.neo4j.readMany(query);
   }
 
-  async find(params: { term?: string; cursor: JsonApiCursorInterface }): Promise<Feature[]> {
-    const query = this.neo4j.initQuery({ serialiser: FeatureModel, cursor: params.cursor });
+  /**
+   * Case-insensitive exact-name lookup — not the fulltext CONTAINS search the
+   * inherited find({ term }) performs. Feature is a global entity, so the bare
+   * label MATCH is correct here. Keep the name and signature stable — external
+   * consumers depend on them.
+   */
+  async findByName(params: { name: string }): Promise<Feature> {
+    const query = this.neo4j.initQuery({ serialiser: FeatureDescriptor.model });
 
-    query.queryParams = {
-      term: params.term,
-    };
+    query.queryParams = { ...query.queryParams, name: params.name };
 
     query.query = `
-      MATCH (feature:Feature)
-      ${params.term ? "WHERE toLower(feature.name) CONTAINS toLower($term)" : ""}
-      
-      WITH feature
-      ORDER BY feature.name ASC
-      {CURSOR}
-      
-      OPTIONAL MATCH (feature)<-[:IN_FEATURE]-(feature_module:Module)
-
-      RETURN feature, feature_module
+      MATCH (${featureMeta.nodeName}:${featureMeta.labelName})
+      WHERE toLower(${featureMeta.nodeName}.name) = toLower($name)
+      ${this.buildReturnStatement()}
     `;
 
-    return this.neo4j.readMany(query);
+    return this.neo4j.readOne(query);
   }
 }

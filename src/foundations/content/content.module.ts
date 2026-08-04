@@ -1,24 +1,36 @@
-import { DynamicModule, Module, OnModuleInit } from "@nestjs/common";
+import { DynamicModule, Inject, Module, OnModuleInit } from "@nestjs/common";
+import { EntityDescriptor, RelationshipDef } from "../../common/interfaces/entity.schema.interface";
 import { modelRegistry } from "../../common/registries/registry";
 import { RelevancyModule } from "../relevancy/relevancy.module";
 import { ContentController } from "./controllers/content.controller";
-import { ContentModel } from "./entities/content.model";
-import { createExtendedContentModel } from "./factories/content.model.factory";
-import { ContentExtensionConfig, CONTENT_EXTENSION_CONFIG } from "./interfaces/content.extension.interface";
+import { buildContentDescriptor, Content } from "./entities/content";
+import {
+  ContentExtensionConfig,
+  CONTENT_DESCRIPTOR,
+  CONTENT_EXTENSION_CONFIG,
+} from "./interfaces/content.extension.interface";
 import { ContentRepository } from "./repositories/content.repository";
-import { ContentSerialiser } from "./serialisers/content.serialiser";
 import { ContentCypherService } from "./services/content.cypher.service";
 import { ContentService } from "./services/content.service";
 
 /**
  * ContentModule - Configurable module for Content management.
  *
- * Supports optional extension via ContentExtensionConfig to add additional
- * relationships to Content responses. When extended, the module will:
- * - Register an extended ContentModel with additional childrenTokens
- * - Inject extension config into CypherService and Serialiser
- * - Generate OPTIONAL MATCH clauses for extension relationships
- * - Include extension relationships in JSON:API output
+ * Supports optional extension via ContentExtensionConfig. The configuration
+ * shapes both the entity descriptor and the generated Cypher:
+ * - `additionalRelationships` — extra relationships on the descriptor, an
+ *   OPTIONAL MATCH per relationship, and the related node in the RETURN
+ * - `ownerMatchPattern` — the owner edge's relationship types / direction
+ * - `requireTldr` — restricts reads to records carrying a non-empty tldr
+ * - `metaFields` — extra computed meta keys hydrated by extra OPTIONAL MATCHes
+ * - `serialiseAuthor` — whether the `author` relationship exists at all
+ *
+ * With no configuration the module behaves exactly as it always has.
+ *
+ * The module is `global: true` so `ContentCypherService` can be handed to
+ * RelevancyService from any module. It is nonetheless excludable from the
+ * foundations composition by class reference
+ * (`FoundationsModule.forRoot({ exclude: [ContentModule] })`).
  *
  * @example
  * ```typescript
@@ -35,16 +47,22 @@ import { ContentService } from "./services/content.service";
  */
 @Module({})
 export class ContentModule implements OnModuleInit {
-  private static extension?: ContentExtensionConfig;
+  constructor(
+    @Inject(CONTENT_DESCRIPTOR)
+    private readonly descriptor: EntityDescriptor<Content, Record<string, RelationshipDef>>,
+  ) {}
 
   /**
    * Configure ContentModule with optional extension.
    *
-   * @param extension - Optional configuration for additional relationships
+   * @param extension - Optional configuration for the Content descriptor and Cypher
    * @returns DynamicModule configured with extension support
    */
   static forRoot(extension?: ContentExtensionConfig): DynamicModule {
-    ContentModule.extension = extension;
+    // The descriptor is built ONCE here so that the serialiser class provided
+    // to the container is the very class carried by the model registered in
+    // onModuleInit (JsonApiSerialiserFactory resolves it through ModuleRef).
+    const descriptor = buildContentDescriptor(extension);
 
     return {
       module: ContentModule,
@@ -55,26 +73,21 @@ export class ContentModule implements OnModuleInit {
           provide: CONTENT_EXTENSION_CONFIG,
           useValue: extension,
         },
-        ContentSerialiser,
+        {
+          provide: CONTENT_DESCRIPTOR,
+          useValue: descriptor,
+        },
+        descriptor.model.serialiser,
         ContentRepository,
         ContentService,
         ContentCypherService,
       ],
-      exports: [ContentCypherService, CONTENT_EXTENSION_CONFIG],
+      exports: [ContentCypherService, CONTENT_EXTENSION_CONFIG, CONTENT_DESCRIPTOR],
       imports: [RelevancyModule],
     };
   }
 
   onModuleInit() {
-    const extension = ContentModule.extension;
-
-    if (extension?.additionalRelationships?.length) {
-      // Register extended model (overwrites base model in registry)
-      const extendedModel = createExtendedContentModel(extension);
-      modelRegistry.register(extendedModel);
-    } else {
-      // Register base model
-      modelRegistry.register(ContentModel);
-    }
+    modelRegistry.register(this.descriptor.model);
   }
 }

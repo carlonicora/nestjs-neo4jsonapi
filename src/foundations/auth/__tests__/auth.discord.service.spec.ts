@@ -1,22 +1,13 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 
-// Mock the auth index module to avoid circular dependency issue with authMeta in decorators
-// This must come before any imports that could trigger the module loading
-vi.mock("..", () => ({
-  authMeta: {
-    type: "auth",
-    endpoint: "auth",
-    nodeName: "auth",
-    labelName: "Auth",
-  },
-  // Re-export AuthService class - we'll provide mock instance in test
+// auth.discord.service.ts now imports AuthService from the FILE (not the `..`
+// barrel — see the comment in that file). Mock the file module the service
+// actually imports.
+vi.mock("../services/auth.service", () => ({
   AuthService: class MockAuthService {
     createToken = vi.fn();
     createCode = vi.fn();
   },
-  AuthModule: class {},
-  AuthController: class {},
-  TrialQueueService: class {},
 }));
 
 // Mock axios
@@ -33,7 +24,7 @@ import { ClsService } from "nestjs-cls";
 import axios from "axios";
 
 import { AuthDiscordService } from "../services/auth.discord.service";
-import { AuthService } from ".."; // This imports the mocked AuthService
+import { AuthService } from "../services/auth.service"; // This imports the mocked AuthService
 import { UserRepository } from "../../user";
 import { DiscordUserRepository } from "../../discord-user/repositories/discord-user.repository";
 import { DiscordUserService } from "../../discord-user";

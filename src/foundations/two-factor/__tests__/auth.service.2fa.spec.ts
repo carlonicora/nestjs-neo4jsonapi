@@ -19,7 +19,7 @@ import { GoogleUserService } from "../../google-user/services/google-user.servic
 import { TrialQueueService } from "../../auth/services/trial-queue.service";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { TwoFactorService } from "../services/two-factor.service";
-import { Auth } from "../../auth/entities/auth.entity";
+import { Auth } from "../../auth/entities/auth";
 import { User } from "../../user/entities/user";
 
 // Mock crypto
@@ -111,7 +111,7 @@ describe("AuthService - 2FA Integration", () => {
 
     mockAuthRepository = {
       findByUserId: vi.fn().mockResolvedValue(null),
-      create: vi.fn().mockResolvedValue(MOCK_AUTH),
+      createSession: vi.fn().mockResolvedValue(MOCK_AUTH),
       update: vi.fn().mockResolvedValue(MOCK_AUTH),
       findByRefreshToken: vi.fn(),
       deleteByRefreshToken: vi.fn(),
@@ -128,7 +128,7 @@ describe("AuthService - 2FA Integration", () => {
       findByResetCode: vi.fn(),
       updatePassword: vi.fn(),
       update: vi.fn(),
-      create: vi.fn(),
+      createUser: vi.fn(),
     } as any;
 
     mockCompanyRepository = {
@@ -263,7 +263,10 @@ describe("AuthService - 2FA Integration", () => {
         pendingId: TEST_IDS.pendingId,
       });
       expect(result.data).toHaveProperty("id", TEST_IDS.pendingId);
-      expect(result.data).toHaveProperty("token", "pending-jwt-token");
+      // `pendingToken` / `expiresAt` are the wire attribute names of the
+      // two-factor-challenge resource — see entities/pending-auth.ts.
+      expect(result.data).toHaveProperty("pendingToken", "pending-jwt-token");
+      expect(result.data).toHaveProperty("expiresAt");
       expect(result.data).toHaveProperty("availableMethods");
       expect(result.data).toHaveProperty("preferredMethod", "totp");
     });
@@ -356,7 +359,7 @@ describe("AuthService - 2FA Integration", () => {
       const result = await service.completeTwoFactorLogin(TEST_IDS.userId);
 
       // createAuth always calls repository.create, not update
-      expect(mockAuthRepository.create).toHaveBeenCalled();
+      expect(mockAuthRepository.createSession).toHaveBeenCalled();
       expect(result).toBeDefined();
     });
 

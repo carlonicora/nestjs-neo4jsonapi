@@ -11,16 +11,6 @@ vi.mock("../services/auth.google.service", () => ({
   })),
 }));
 
-// Mock authMeta used in controller decorator
-vi.mock("..", () => ({
-  authMeta: {
-    type: "auths",
-    endpoint: "auth",
-    nodeName: "auth",
-    labelName: "Auth",
-  },
-}));
-
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { HttpException, HttpStatus } from "@nestjs/common";

@@ -1,7 +1,10 @@
 import { Controller, Get, HttpException, HttpStatus, Query, Res } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { FastifyReply } from "fastify";
-import { authMeta } from "..";
+// Direct file import, NOT the `..` barrel — same import-time cycle as
+// auth.google.controller.ts: through the barrel, `authMeta` is undefined when
+// the `@Get()` route decorators evaluate.
+import { authMeta } from "../entities/auth.meta";
 import { BaseConfigInterface, ConfigDiscordInterface } from "../../../config/interfaces";
 import { discordUser } from "../../discord-user/types/discord.user.type";
 import { AuthDiscordService } from "../services/auth.discord.service";

@@ -155,13 +155,13 @@ export class UserController {
         companyId: body.data.relationships.company.data.id,
       });
     } else {
-      await this.companyService.create({
+      await this.companyService.createCompanyFromDTO({
         data: body.included[0] as CompanyPostDataDTO,
       });
       forceCompanyAdmin = true;
     }
 
-    const response = await this.users.create({
+    const response = await this.users.createUser({
       data: body.data,
       forceCompanyAdmin: forceCompanyAdmin,
       language: lng ?? "en",
@@ -185,7 +185,7 @@ export class UserController {
       roles: [RoleId.Administrator, RoleId.CompanyAdministrator],
     });
 
-    const response = await this.users.put({
+    const response = await this.users.putUser({
       data: body.data,
       isAdmin: isAdmin,
       isCurrentUser: request.user.userId === userId,
@@ -239,7 +239,7 @@ export class UserController {
   @Delete(`${userMeta.endpoint}/:userId`)
   @CacheInvalidate(userMeta, "userId")
   async delete(@Req() request: any, @Param("userId") userId: string) {
-    await this.users.delete({
+    await this.users.deleteUser({
       userId: userId,
     });
   }

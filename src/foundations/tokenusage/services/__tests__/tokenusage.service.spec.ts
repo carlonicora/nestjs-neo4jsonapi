@@ -1,10 +1,12 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
+import { ClsService } from "nestjs-cls";
 import { TokenUsageService } from "../tokenusage.service";
 import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { ConfigAiInterface } from "../../../../config/interfaces/config.ai.interface";
+import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { TOKEN_USAGE_RECORDED_EVENT } from "../../events/tokenusage.events";
@@ -26,6 +28,18 @@ describe("TokenUsageService", () => {
 
   const createMockEventEmitter = () => ({
     emit: vi.fn(),
+  });
+
+  // TokenUsageService extends AbstractService: JsonApiService + ClsService are
+  // constructor dependencies of the abstract base and must be resolvable.
+  const createMockJsonApiService = () => ({
+    buildSingle: vi.fn(),
+    buildList: vi.fn(),
+  });
+
+  const createMockClsService = () => ({
+    get: vi.fn().mockReturnValue(undefined),
+    set: vi.fn(),
   });
 
   const createMockAiConfig = (): ConfigAiInterface => ({
@@ -95,7 +109,9 @@ describe("TokenUsageService", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TokenUsageService,
+        { provide: JsonApiService, useValue: createMockJsonApiService() },
         { provide: TokenUsageRepository, useValue: mockTokenUsageRepository },
+        { provide: ClsService, useValue: createMockClsService() },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
@@ -138,7 +154,9 @@ describe("TokenUsageService", () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           TokenUsageService,
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
@@ -285,7 +303,9 @@ describe("TokenUsageService", () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           TokenUsageService,
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
@@ -321,7 +341,9 @@ describe("TokenUsageService", () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           TokenUsageService,
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],
@@ -361,7 +383,9 @@ describe("TokenUsageService", () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           TokenUsageService,
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
           { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+          { provide: ClsService, useValue: createMockClsService() },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: EventEmitter2, useValue: createMockEventEmitter() },
         ],

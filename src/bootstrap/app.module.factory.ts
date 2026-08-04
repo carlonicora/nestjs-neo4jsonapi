@@ -134,6 +134,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                 FoundationsModule.forRoot({
                   contentExtension: options.contentExtension,
                   referral: options.referral,
+                  userActivity: options.userActivity,
                   exclude: options.foundations?.exclude ?? [],
                 }),
               ]),

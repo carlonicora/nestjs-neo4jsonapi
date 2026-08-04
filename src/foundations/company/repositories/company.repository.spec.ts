@@ -10,12 +10,14 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { CompanyRepository } from "./company.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
 import { Company } from "../entities/company";
 
 describe("CompanyRepository", () => {
   let repository: CompanyRepository;
   let mockNeo4jService: vi.Mocked<Neo4jService>;
   let mockClsService: vi.Mocked<ClsService>;
+  let mockSecurityService: vi.Mocked<SecurityService>;
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_COMPANY: Company = {
@@ -54,10 +56,15 @@ describe("CompanyRepository", () => {
       set: vi.fn(),
     } as any;
 
+    mockSecurityService = {
+      userHasAccess: vi.fn().mockImplementation(({ validator }: any) => validator()),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CompanyRepository,
         { provide: Neo4jService, useValue: mockNeo4jService },
+        { provide: SecurityService, useValue: mockSecurityService },
         { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
@@ -65,15 +72,19 @@ describe("CompanyRepository", () => {
     repository = module.get<CompanyRepository>(CompanyRepository);
   });
 
-  describe("onModuleInit", () => {
+  describe("onModuleInit (inherited from AbstractRepository)", () => {
     it("should create unique constraint for company id", async () => {
       mockNeo4jService.writeOne.mockResolvedValue(null);
+      // The inherited implementation also reconciles the descriptor's FULLTEXT index.
+      mockNeo4jService.read.mockResolvedValue({ records: [] });
 
       await repository.onModuleInit();
 
-      expect(mockNeo4jService.writeOne).toHaveBeenCalledWith({
-        query: expect.stringContaining("CREATE CONSTRAINT company_id IF NOT EXISTS"),
-      });
+      expect(mockNeo4jService.writeOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: expect.stringContaining("CREATE CONSTRAINT company_id IF NOT EXISTS"),
+        }),
+      );
     });
   });
 
@@ -160,12 +171,12 @@ describe("CompanyRepository", () => {
     });
   });
 
-  describe("create", () => {
+  describe("createCompanyNode", () => {
     it("should create company with all parameters", async () => {
       mockNeo4jService.validateExistingNodes.mockResolvedValue();
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
-      const result = await repository.create({
+      const result = await repository.createCompanyNode({
         companyId: MOCK_COMPANY_ID,
         name: "New Company",
         configurations: '{"key": "value"}',
@@ -186,7 +197,7 @@ describe("CompanyRepository", () => {
       mockNeo4jService.validateExistingNodes.mockResolvedValue();
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
-      const result = await repository.create({
+      const result = await repository.createCompanyNode({
         companyId: MOCK_COMPANY_ID,
         name: "Minimal Company",
       });
@@ -200,7 +211,7 @@ describe("CompanyRepository", () => {
       mockNeo4jService.validateExistingNodes.mockResolvedValue();
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
-      await repository.create({
+      await repository.createCompanyNode({
         companyId: MOCK_COMPANY_ID,
         name: "Company with relations",
         featureIds: ["feature-1"],
@@ -511,7 +522,7 @@ describe("CompanyRepository", () => {
     it("should delete company by ID", async () => {
       mockNeo4jService.writeOne.mockResolvedValue();
 
-      await repository.delete({ companyId: MOCK_COMPANY_ID });
+      await repository.delete({ id: MOCK_COMPANY_ID });
 
       expect(mockNeo4jService.initQuery).toHaveBeenCalled();
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();

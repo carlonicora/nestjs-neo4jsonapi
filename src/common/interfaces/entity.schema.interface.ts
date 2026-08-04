@@ -175,6 +175,8 @@ export interface RelationshipDef {
   polymorphic?: PolymorphicConfig;
   /** If true, relationship is set only on creation and skipped during PUT (default: false) */
   immutable?: boolean;
+  /** If true, the relationship is never written by generic descriptor-driven paths (create/put/patch skip it; relationship handlers reject it). Serialisation-only. */
+  readOnly?: boolean;
   /** Human-readable description. Required for the relationship to be visible to the chatbot. */
   description?: string;
   /** Opts in reverse traversal from the target entity. Omit to keep one-way. */

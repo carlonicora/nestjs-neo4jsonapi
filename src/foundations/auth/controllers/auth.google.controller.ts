@@ -1,7 +1,11 @@
 import { Controller, Get, HttpException, HttpStatus, Query, Res } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { FastifyReply } from "fastify";
-import { authMeta } from "..";
+// Direct file import, NOT the `..` barrel: the barrel now exports this
+// controller, so importing back through it creates a cycle in which
+// `authMeta` is still uninitialised when the `@Get()` decorators evaluate
+// ("Cannot read properties of undefined (reading 'endpoint')" at import time).
+import { authMeta } from "../entities/auth.meta";
 import { BaseConfigInterface, ConfigGoogleInterface } from "../../../config/interfaces";
 import { googleUser } from "../../google-user/types/google.user.type";
 import { AuthGoogleService } from "../services/auth.google.service";

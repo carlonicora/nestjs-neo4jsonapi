@@ -5,7 +5,7 @@ import { Reflector } from "@nestjs/core";
 import { ClsService } from "nestjs-cls";
 import { JwtAuthGuard } from "../jwt.auth.guard";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
-import { SYSTEM_ROLES } from "../../tokens";
+import { AUTH_CONTEXT_HOOK, AuthContextHookInterface, SYSTEM_ROLES } from "../../tokens";
 
 // Test IDs
 const TEST_IDS = {
@@ -336,5 +336,138 @@ describe("JwtAuthGuard without SYSTEM_ROLES", () => {
     const result = guard.handleRequest(null, userWithAdminString, null, context);
 
     expect(result).toEqual(userWithAdminString);
+  });
+});
+
+describe("JwtAuthGuard AUTH_CONTEXT_HOOK seam", () => {
+  // The passport `AuthGuard("jwt")` mixin prototype: stubbed so `super.canActivate`
+  // can report a successful authentication without a real strategy.
+  const passportPrototype = Object.getPrototypeOf(JwtAuthGuard.prototype);
+
+  let clsService: ReturnType<typeof createMockClsService>;
+  let reflector: ReturnType<typeof createMockReflector>;
+  let neo4jService: ReturnType<typeof createMockNeo4jService>;
+  let superCanActivate: any;
+
+  const MOCK_USER = {
+    userId: TEST_IDS.userId,
+    companyId: TEST_IDS.companyId,
+    roles: ["editor"],
+  };
+
+  const buildGuard = async (hook?: AuthContextHookInterface): Promise<JwtAuthGuard> => {
+    const providers: any[] = [
+      JwtAuthGuard,
+      { provide: ClsService, useValue: clsService },
+      { provide: Reflector, useValue: reflector },
+      { provide: Neo4jService, useValue: neo4jService },
+      {
+        provide: SYSTEM_ROLES,
+        useValue: { Administrator: TEST_IDS.adminRoleId },
+      },
+    ];
+
+    if (hook) providers.push({ provide: AUTH_CONTEXT_HOOK, useValue: hook });
+
+    const module: TestingModule = await Test.createTestingModule({ providers }).compile();
+
+    return module.get<JwtAuthGuard>(JwtAuthGuard);
+  };
+
+  beforeEach(() => {
+    clsService = createMockClsService();
+    reflector = createMockReflector();
+    neo4jService = createMockNeo4jService();
+    superCanActivate = vi.spyOn(passportPrototype, "canActivate").mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    superCanActivate.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("should authenticate normally when no hook is provided", async () => {
+    const guard = await buildGuard();
+    const context = createMockExecutionContext({
+      headers: { authorization: "Bearer valid-token" },
+      user: MOCK_USER,
+    });
+
+    const result = await guard.canActivate(context);
+
+    expect(result).toBe(true);
+    expect(superCanActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call onAuthenticated once with request and context after successful auth", async () => {
+    const onAuthenticated = vi.fn();
+    const guard = await buildGuard({ onAuthenticated });
+    const context = createMockExecutionContext({
+      headers: { authorization: "Bearer valid-token" },
+      user: MOCK_USER,
+    });
+    const request = context.switchToHttp().getRequest();
+
+    const result = await guard.canActivate(context);
+
+    expect(result).toBe(true);
+    expect(onAuthenticated).toHaveBeenCalledTimes(1);
+    expect(onAuthenticated).toHaveBeenCalledWith({ request, context });
+  });
+
+  it("should await an asynchronous hook before returning", async () => {
+    let resolved = false;
+    const onAuthenticated = vi.fn(async () => {
+      await Promise.resolve();
+      resolved = true;
+    });
+    const guard = await buildGuard({ onAuthenticated });
+    const context = createMockExecutionContext({
+      headers: { authorization: "Bearer valid-token" },
+      user: MOCK_USER,
+    });
+
+    await guard.canActivate(context);
+
+    expect(resolved).toBe(true);
+  });
+
+  it("should not call onAuthenticated when the authorization header is missing", async () => {
+    const onAuthenticated = vi.fn();
+    const guard = await buildGuard({ onAuthenticated });
+    const context = createMockExecutionContext({ headers: {} });
+
+    const result = await guard.canActivate(context);
+
+    expect(result).toBe(false);
+    expect(onAuthenticated).not.toHaveBeenCalled();
+    expect(superCanActivate).not.toHaveBeenCalled();
+  });
+
+  it("should not call onAuthenticated when no user was attached to the request", async () => {
+    const onAuthenticated = vi.fn();
+    const guard = await buildGuard({ onAuthenticated });
+    const context = createMockExecutionContext({
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    const result = await guard.canActivate(context);
+
+    expect(result).toBe(true);
+    expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it("should propagate an HttpException thrown by the hook", async () => {
+    const onAuthenticated = vi.fn(() => {
+      throw new HttpException("Unauthorised", 401);
+    });
+    const guard = await buildGuard({ onAuthenticated });
+    const context = createMockExecutionContext({
+      headers: { authorization: "Bearer valid-token" },
+      user: MOCK_USER,
+    });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(HttpException);
+    expect(onAuthenticated).toHaveBeenCalledTimes(1);
   });
 });

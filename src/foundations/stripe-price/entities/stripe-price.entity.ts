@@ -1,6 +1,6 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { StripeProduct } from "../../stripe-product/entities/stripe-product.entity";
-import { Feature } from "../../feature/entities/feature.entity";
+import type { Feature } from "../../feature/entities/feature";
 
 export type StripePriceType = "one_time" | "recurring";
 export type StripePriceRecurringInterval = "day" | "week" | "month" | "year";

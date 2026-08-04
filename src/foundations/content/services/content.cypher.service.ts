@@ -22,15 +22,57 @@ export class ContentCypherService {
     return types.length > 0 ? types : [contentMeta.labelName];
   }
 
+  /** Whether the `author` relationship is matched and returned (default: yes). */
+  private get serialiseAuthor(): boolean {
+    return this.extension?.serialiseAuthor !== false;
+  }
+
   default(params?: { searchField: string; blockCompanyAndUser?: boolean }): string {
     return `
       MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")} ${params ? ` {${params.searchField}: $searchValue}` : ``})
-      WHERE $companyId IS NULL
+      WHERE ${
+        this.extension?.requireTldr
+          ? `${contentMeta.nodeName}.tldr IS NOT NULL
+      AND ${contentMeta.nodeName}.tldr <> ""
+      AND `
+          : ``
+      }$companyId IS NULL
       OR EXISTS {
         MATCH (${contentMeta.nodeName})-[:BELONGS_TO]-(company)
       }
       WITH ${contentMeta.nodeName}${params?.blockCompanyAndUser ? `` : `, company, currentUser`}
     `;
+  }
+
+  /**
+   * The `requireTldr` filter as trailing `AND` predicates, for callers that
+   * already opened a WHERE clause of their own (e.g. `ContentRepository.findByIds`).
+   * Returns an empty string when the filter is disabled (the default).
+   */
+  tldrFilter(): string {
+    if (!this.extension?.requireTldr) return ``;
+
+    return `
+        AND ${contentMeta.nodeName}.tldr IS NOT NULL
+        AND ${contentMeta.nodeName}.tldr <> ""`;
+  }
+
+  /**
+   * The Content → owner MATCH clause, driven by `ownerMatchPattern`.
+   *
+   * Default: `MATCH (content)<-[:PUBLISHED]-(<target>)`.
+   *
+   * @param params.target - The pattern's node body, e.g. `"content_owner:User"`
+   *   (bind an alias) or `":User {id: $ownerId}"` (filter without binding).
+   */
+  ownerMatch(params: { target: string }): string {
+    const pattern = this.extension?.ownerMatchPattern;
+    const relationships = pattern?.relationships?.length ? pattern.relationships : ["PUBLISHED"];
+    const relationshipTypes = relationships.join("|");
+
+    return pattern?.undirected
+      ? `MATCH (${contentMeta.nodeName})-[:${relationshipTypes}]-(${params.target})`
+      : `MATCH (${contentMeta.nodeName})<-[:${relationshipTypes}]-(${params.target})`;
   }
 
   userHasAccess = (params?: { useTotalScore?: boolean }): string => {
@@ -46,8 +88,17 @@ export class ContentCypherService {
     // Base MATCH clauses for core relationships
     let query = `
       MATCH (${contentMeta.nodeName})-[:BELONGS_TO]->(${contentMeta.nodeName}_${companyMeta.nodeName}:${companyMeta.labelName})
-      MATCH (${contentMeta.nodeName})<-[:PUBLISHED]-(${contentMeta.nodeName}_${ownerMeta.nodeName}:${ownerMeta.labelName})
-      MATCH (${contentMeta.nodeName})<-[:PUBLISHED]-(${contentMeta.nodeName}_${authorMeta.nodeName}:${authorMeta.labelName})`;
+      ${this.ownerMatch({ target: `${contentMeta.nodeName}_${ownerMeta.nodeName}:${ownerMeta.labelName}` })}`;
+
+    // The author match is OPTIONAL: it traverses the SAME `PUBLISHED` edge as
+    // the owner match above, so on package data every row surviving the owner
+    // match already resolves it — the row set is unchanged by default. Making
+    // it optional stops it from silently dropping every row for apps whose
+    // owner edge is not `PUBLISHED` (see `ownerMatchPattern`).
+    if (this.serialiseAuthor) {
+      query += `
+      OPTIONAL MATCH (${contentMeta.nodeName})<-[:PUBLISHED]-(${contentMeta.nodeName}_${authorMeta.nodeName}:${authorMeta.labelName})`;
+    }
 
     // Add OPTIONAL MATCH for extension relationships
     if (this.extension?.additionalRelationships) {
@@ -65,18 +116,38 @@ export class ContentCypherService {
       }
     }
 
+    // Add the config-driven meta-field clauses (appended verbatim)
+    if (this.extension?.metaFields) {
+      for (const metaField of this.extension.metaFields) {
+        query += `
+      ${metaField.optionalMatch}`;
+      }
+    }
+
     // Base RETURN clause
     query += `
       RETURN ${contentMeta.nodeName},
         ${contentMeta.nodeName}_${companyMeta.nodeName},
-        ${contentMeta.nodeName}_${ownerMeta.nodeName},
+        ${contentMeta.nodeName}_${ownerMeta.nodeName}`;
+
+    if (this.serialiseAuthor) {
+      query += `,
         ${contentMeta.nodeName}_${authorMeta.nodeName}`;
+    }
 
     // Add extension relationship nodes to RETURN
     if (this.extension?.additionalRelationships) {
       for (const rel of this.extension.additionalRelationships) {
         query += `,
         ${contentMeta.nodeName}_${rel.model.nodeName}`;
+      }
+    }
+
+    // Add the config-driven meta-field projections
+    if (this.extension?.metaFields) {
+      for (const metaField of this.extension.metaFields) {
+        query += `,
+        ${metaField.returnAlias} AS ${metaField.key}`;
       }
     }
 

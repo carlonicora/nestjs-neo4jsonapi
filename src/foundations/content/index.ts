@@ -1,11 +1,18 @@
 export { ContentModule } from "./content.module";
-export { Content } from "./entities/content.entity";
+export {
+  buildContentDescriptor,
+  Content,
+  ContentDescriptor,
+  ContentDescriptorType,
+  getContentModel,
+} from "./entities/content";
 export { contentMeta } from "./entities/content.meta";
-export { ContentModel } from "./entities/content.model";
-export { createExtendedContentModel } from "./factories/content.model.factory";
 export {
   ContentExtensionConfig,
+  ContentMetaFieldExtension,
+  ContentOwnerMatchPattern,
   ContentRelationshipExtension,
+  CONTENT_DESCRIPTOR,
   CONTENT_EXTENSION_CONFIG,
 } from "./interfaces/content.extension.interface";
 export { ContentRepository } from "./repositories/content.repository";

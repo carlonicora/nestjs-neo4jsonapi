@@ -51,7 +51,7 @@ export const UserDescriptor = defineEntity<User>()({
     name: { type: "string" },
     title: { type: "string" },
     bio: { type: "string" },
-    password: { type: "string", excludeFromJsonApi: true },
+    password: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
     avatar: {
       type: "string",
       transform: async (data, services) => {
@@ -65,7 +65,8 @@ export const UserDescriptor = defineEntity<User>()({
     isActive: { type: "boolean", meta: true },
     lastLogin: { type: "datetime", meta: true },
     isDeleted: { type: "boolean", meta: true },
-    code: { type: "string" },
+    // one-time invitation/reset code — never serialised, never indexed
+    code: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
     codeExpiration: { type: "datetime", excludeFromJsonApi: true },
     termsAcceptedAt: { type: "datetime", excludeFromJsonApi: true },
     marketingConsent: { type: "boolean", excludeFromJsonApi: true },
@@ -84,14 +85,27 @@ export const UserDescriptor = defineEntity<User>()({
     // Serialisation-only: roles are hydrated through the Membership path
     // (see foundations/membership/queries/membership.query.ts) — no single-hop
     // (user)-[:HAS_MEMBERSHIP]->(role) edge exists. The serialiser maps by key +
-    // model, and no generic descriptor-driven writer touches this relationship
-    // (UserRepository/UserService do not extend AbstractRepository/AbstractService).
+    // model, which is what every UserRepository/UserService read path relies on.
+    //
+    // WARNING: UserRepository/UserService now extend AbstractRepository/
+    // AbstractService, so the INHERITED generic methods (find, findById, create,
+    // put, patch, addToRelationship…) would traverse/write this relationship as a
+    // single hop and therefore silently return no roles (read) or create a bogus
+    // (user)-[:HAS_MEMBERSHIP]->(:Role) edge (write). Use the explicit domain
+    // methods — findMany / findByUserId / createUser / putUser / addUserToRole —
+    // for anything involving roles.
+    //
+    // `readOnly: true` closes that hole generically (spec §3.4): the generic
+    // create/put/patch paths skip this relationship and findByRelated /
+    // addToRelationship / removeFromRelationship reject it with 400 instead of
+    // silently writing a bogus edge or returning an empty list.
     role: {
       model: roleMeta,
       direction: "out",
       relationship: "HAS_MEMBERSHIP",
       cardinality: "many",
       dtoKey: "roles",
+      readOnly: true,
     },
     company: {
       model: CompanyDescriptor.model,

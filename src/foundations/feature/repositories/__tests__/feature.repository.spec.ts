@@ -1,10 +1,10 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { FeatureRepository } from "../feature.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
-import { AppLoggingService } from "../../../../core/logging/services/logging.service";
-import { Feature } from "../../entities/feature.entity";
-import { FeatureModel } from "../../entities/feature.model";
+import { SecurityService } from "../../../../core/security/services/security.service";
+import { Feature, FeatureDescriptor } from "../../entities/feature";
 
 // Test IDs
 const TEST_IDS = {
@@ -18,24 +18,28 @@ const createMockNeo4jService = () => ({
   writeOne: vi.fn(),
   readOne: vi.fn(),
   readMany: vi.fn(),
+  read: vi.fn().mockResolvedValue({ records: [] }),
   initQuery: vi.fn(),
 });
 
-const createMockLoggingService = () => ({
-  log: vi.fn(),
-  error: vi.fn(),
-  warn: vi.fn(),
-  debug: vi.fn(),
+const createMockSecurityService = () => ({
+  userHasAccess: vi.fn().mockResolvedValue(true),
+});
+
+const createMockClsService = () => ({
+  get: vi.fn().mockReturnValue(undefined),
+  set: vi.fn(),
 });
 
 describe("FeatureRepository", () => {
   let repository: FeatureRepository;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
-  let loggingService: ReturnType<typeof createMockLoggingService>;
+  let securityService: ReturnType<typeof createMockSecurityService>;
+  let clsService: ReturnType<typeof createMockClsService>;
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, any>,
   });
 
   const MOCK_FEATURE: Feature = {
@@ -58,13 +62,15 @@ describe("FeatureRepository", () => {
 
   beforeEach(async () => {
     neo4jService = createMockNeo4jService();
-    loggingService = createMockLoggingService();
+    securityService = createMockSecurityService();
+    clsService = createMockClsService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FeatureRepository,
         { provide: Neo4jService, useValue: neo4jService },
-        { provide: AppLoggingService, useValue: loggingService },
+        { provide: SecurityService, useValue: securityService },
+        { provide: ClsService, useValue: clsService },
       ],
     }).compile();
 
@@ -86,6 +92,20 @@ describe("FeatureRepository", () => {
       });
     });
 
+    it("should create the fulltext index derived from the descriptor string fields", async () => {
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.onModuleInit();
+
+      const indexCall = neo4jService.writeOne.mock.calls.find((call: any[]) =>
+        call[0]?.query?.includes("CREATE FULLTEXT INDEX"),
+      );
+
+      expect(indexCall).toBeDefined();
+      expect(indexCall![0].query).toContain("feature_search_index");
+      expect(indexCall![0].query).toContain("n.`name`");
+    });
+
     it("should handle errors during constraint creation", async () => {
       const error = new Error("Constraint creation failed");
       neo4jService.writeOne.mockRejectedValue(error);
@@ -102,7 +122,7 @@ describe("FeatureRepository", () => {
 
       const result = await repository.findByCompany({ companyId: TEST_IDS.companyId });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: FeatureModel });
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: FeatureDescriptor.model });
       expect(mockQuery.queryParams.companyId).toBe(TEST_IDS.companyId);
       expect(mockQuery.query).toContain("Company {id: $companyId}");
       expect(mockQuery.query).toContain(":HAS_FEATURE");
@@ -129,85 +149,52 @@ describe("FeatureRepository", () => {
     });
   });
 
-  describe("find", () => {
-    it("should find all features without search term", async () => {
+  describe("findByName", () => {
+    it("should look the feature up case-insensitively by exact name", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_FEATURE, MOCK_FEATURE_2]);
+      neo4jService.readOne.mockResolvedValue(MOCK_FEATURE);
 
-      const cursor = { limit: 10, offset: 0 };
-      const result = await repository.find({ cursor });
+      const result = await repository.findByName({ name: "test feature" });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: FeatureModel,
-        cursor,
-      });
-      expect(mockQuery.queryParams.term).toBeUndefined();
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: FeatureDescriptor.model });
+      expect(mockQuery.queryParams.name).toBe("test feature");
       expect(mockQuery.query).toContain("MATCH (feature:Feature)");
-      expect(mockQuery.query).toContain("ORDER BY feature.name ASC");
-      expect(mockQuery.query).toContain("OPTIONAL MATCH (feature)<-[:IN_FEATURE]-(feature_module:Module)");
+      expect(mockQuery.query).toContain("toLower(");
+      expect(mockQuery.query).toContain("$name");
+      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
+      expect(neo4jService.readMany).not.toHaveBeenCalled();
+      expect(result).toEqual(MOCK_FEATURE);
+    });
+
+    it("should include the module relationship in the return statement", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_FEATURE);
+
+      await repository.findByName({ name: "Test Feature" });
+
+      expect(mockQuery.query).toContain("feature_module:Module");
+      expect(mockQuery.query).toContain(":IN_FEATURE");
       expect(mockQuery.query).toContain("RETURN feature, feature_module");
-      expect(result).toEqual([MOCK_FEATURE, MOCK_FEATURE_2]);
     });
 
-    it("should find features with search term", async () => {
+    it("should return whatever readOne returns when no feature matches", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_FEATURE]);
+      neo4jService.readOne.mockResolvedValue(undefined);
 
-      const cursor = { limit: 10, offset: 0 };
-      const result = await repository.find({ term: "Test", cursor });
+      const result = await repository.findByName({ name: "nonexistent" });
 
-      expect(mockQuery.queryParams.term).toBe("Test");
-      expect(mockQuery.query).toContain("WHERE toLower(feature.name) CONTAINS toLower($term)");
-      expect(result).toEqual([MOCK_FEATURE]);
-    });
-
-    it("should not include WHERE clause when term is empty", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const cursor = { limit: 10, offset: 0 };
-      await repository.find({ term: "", cursor });
-
-      // Empty string is falsy, so WHERE clause should not be added
-      expect(mockQuery.query).not.toContain("WHERE toLower");
-    });
-
-    it("should pass cursor to initQuery", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const cursor = { limit: 25, offset: 50 };
-      await repository.find({ cursor });
-
-      expect(neo4jService.initQuery).toHaveBeenCalledWith(
-        expect.objectContaining({
-          cursor,
-        }),
-      );
-    });
-
-    it("should return empty array when no features found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const cursor = { limit: 10, offset: 0 };
-      const result = await repository.find({ term: "nonexistent", cursor });
-
-      expect(result).toEqual([]);
+      expect(result).toBeUndefined();
     });
 
     it("should handle errors from neo4jService", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockRejectedValue(new Error("Query failed"));
+      neo4jService.readOne.mockRejectedValue(new Error("Query failed"));
 
-      const cursor = { limit: 10, offset: 0 };
-      await expect(repository.find({ cursor })).rejects.toThrow("Query failed");
+      await expect(repository.findByName({ name: "Test Feature" })).rejects.toThrow("Query failed");
     });
   });
 
@@ -223,28 +210,16 @@ describe("FeatureRepository", () => {
       expect(mockQuery.queryParams.companyId).toBe(exactId);
     });
 
-    it("should handle special characters in search term", async () => {
+    it("should pass special characters in the name through as a query parameter", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
+      neo4jService.readOne.mockResolvedValue(undefined);
 
-      const specialTerm = "Test with 'quotes' and \"double quotes\"";
-      const cursor = { limit: 10, offset: 0 };
-      await repository.find({ term: specialTerm, cursor });
+      const specialName = "Test with 'quotes' and \"double quotes\"";
+      await repository.findByName({ name: specialName });
 
-      expect(mockQuery.queryParams.term).toBe(specialTerm);
-    });
-
-    it("should include module relationship in return statement", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_FEATURE]);
-
-      const cursor = { limit: 10, offset: 0 };
-      await repository.find({ cursor });
-
-      expect(mockQuery.query).toContain("feature_module:Module");
-      expect(mockQuery.query).toContain(":IN_FEATURE");
+      expect(mockQuery.queryParams.name).toBe(specialName);
+      expect(mockQuery.query).not.toContain(specialName);
     });
   });
 });

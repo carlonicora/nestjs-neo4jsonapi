@@ -14,12 +14,10 @@ import { UserModule } from "../user/user.module";
 import { WaitlistModule } from "../waitlist/waitlist.module";
 import { AuthDiscordController } from "./controllers/auth.discord.controller";
 import { AuthGoogleController } from "./controllers/auth.google.controller";
-import { AuthCodeModel } from "./entities/auth.code.model";
-import { AuthModel } from "./entities/auth.model";
-import { PendingAuthModel } from "./entities/pending-auth.model";
+import { AuthDescriptor } from "./entities/auth";
+import { AuthCodeDescriptor } from "./entities/auth.code";
+import { PendingAuthDescriptor } from "./entities/pending-auth";
 import { AuthRepository } from "./repositories/auth.repository";
-import { AuthSerialiser } from "./serialisers/auth.serialiser";
-import { PendingAuthSerialiser } from "./serialisers/pending-auth.serialiser";
 import { AuthDiscordService } from "./services/auth.discord.service";
 import { AuthGoogleService } from "./services/auth.google.service";
 import { AuthService } from "./services/auth.service";
@@ -31,8 +29,9 @@ import { TrialQueueService } from "./services/trial-queue.service";
   providers: [
     AuthService,
     AuthRepository,
-    AuthSerialiser,
-    PendingAuthSerialiser,
+    AuthDescriptor.model.serialiser,
+    AuthCodeDescriptor.model.serialiser,
+    PendingAuthDescriptor.model.serialiser,
     AuthDiscordService,
     AuthGoogleService,
     PendingRegistrationService,
@@ -52,8 +51,8 @@ import { TrialQueueService } from "./services/trial-queue.service";
 })
 export class AuthModule implements OnModuleInit {
   onModuleInit() {
-    modelRegistry.register(AuthModel);
-    modelRegistry.register(AuthCodeModel);
-    modelRegistry.register(PendingAuthModel);
+    modelRegistry.register(AuthDescriptor.model);
+    modelRegistry.register(AuthCodeDescriptor.model);
+    modelRegistry.register(PendingAuthDescriptor.model);
   }
 }

@@ -34,6 +34,8 @@ import { StripeTrialModule } from "./stripe-trial/stripe-trial.module";
 import { TokenUsageModule } from "./tokenusage/tokenusage.module";
 import { TwoFactorModule } from "./two-factor/two-factor.module";
 import { UserModule } from "./user/user.module";
+import { UserActivityModule } from "./user-activity/user-activity.module";
+import { UserActivityModuleConfig } from "./user-activity/interfaces/user-activity.config.interface";
 import { WaitlistModule } from "./waitlist/waitlist.module";
 
 /**
@@ -44,15 +46,21 @@ export interface FoundationsModuleConfig {
   contentExtension?: ContentExtensionConfig;
   /** Optional configuration for the referral feature module */
   referral?: ReferralModuleConfig;
+  /** Optional configuration for the user-activity feature module */
+  userActivity?: UserActivityModuleConfig;
   /**
    * Foundation module classes to exclude from registration.
    * Default [] keeps all modules registered (neural-erp behavior unchanged).
+   *
+   * Dynamic modules are excluded by the same class reference as static ones:
+   * `exclude: [ContentModule, UserActivityModule]`.
    */
   exclude?: Type<any>[];
 }
 
 /**
- * All static foundation modules (excluding ContentModule which is dynamic).
+ * All static foundation modules. The dynamic ones (ContentModule,
+ * UserActivityModule, ReferralModule) are assembled inside forRoot().
  * Queue registration is handled centrally by QueueModule (via baseConfig.chunkQueues).
  */
 const STATIC_FOUNDATION_MODULES = [
@@ -128,10 +136,21 @@ export class FoundationsModule {
   static forRoot(config?: FoundationsModuleConfig): DynamicModule {
     const excluded = new Set<Type<any>>(config?.exclude ?? []);
     const modules = STATIC_FOUNDATION_MODULES.filter((m) => !excluded.has(m));
+
+    // Dynamic foundation modules are excluded by class reference exactly like
+    // the static ones: the pair keeps the class (matched against `exclude`)
+    // next to the factory that configures it, and the factory only runs for
+    // modules that survive the filter.
+    const dynamicModules: Array<{ classRef: Type<any>; factory: () => DynamicModule }> = [
+      { classRef: ContentModule, factory: () => ContentModule.forRoot(config?.contentExtension) },
+      { classRef: UserActivityModule, factory: () => UserActivityModule.forRoot(config?.userActivity) },
+      { classRef: ReferralModule, factory: () => ReferralModule.forRoot(config?.referral) },
+    ].filter((entry) => !excluded.has(entry.classRef));
+
     return {
       module: FoundationsModule,
-      imports: [...modules, ContentModule.forRoot(config?.contentExtension), ReferralModule.forRoot(config?.referral)],
-      exports: [...modules, ContentModule, ReferralModule],
+      imports: [...modules, ...dynamicModules.map((entry) => entry.factory())],
+      exports: [...modules, ...dynamicModules.map((entry) => entry.classRef)],
     };
   }
 }

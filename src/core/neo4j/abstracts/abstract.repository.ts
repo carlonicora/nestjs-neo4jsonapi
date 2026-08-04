@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { modelRegistry } from "../../../common/registries/registry";
@@ -523,6 +523,14 @@ export abstract class AbstractRepository<
       throw new HttpException(`Unknown relationship: ${params.relationship}`, HttpStatus.BAD_REQUEST);
     }
 
+    // Read-only relationships are serialisation-only: no single-hop edge exists in the
+    // graph (e.g. user→role hydrates through :Membership), so the generic single-hop
+    // traversal below would silently return an empty list. Fail loudly instead — use the
+    // entity's explicit domain method, or findByRelatedEdge for a raw edge spec.
+    if (rel.readOnly) {
+      throw new BadRequestException(`Relationship '${params.relationship}' is read-only`);
+    }
+
     const relatedIds = Array.isArray(params.id) ? params.id : [params.id];
 
     const query = this.neo4j.initQuery({
@@ -696,6 +704,9 @@ export abstract class AbstractRepository<
     // Validate related nodes exist
     const nodesToValidate: Array<{ id: string; label: string }> = [];
     for (const [name, rel] of Object.entries(relationships)) {
+      // Read-only relationships are serialisation-only and never written on create
+      if (rel.readOnly) continue;
+
       const paramValue = params[name];
       if (paramValue) {
         const ids = Array.isArray(paramValue) ? paramValue : [paramValue];
@@ -769,6 +780,9 @@ export abstract class AbstractRepository<
         continue;
       }
 
+      // Skip read-only relationships - serialisation-only, never written by the generic create path
+      if (rel.readOnly) continue;
+
       const paramValue = mergedParams[name];
       // Add param to query params
       query.queryParams[name] = paramValue ? (Array.isArray(paramValue) ? paramValue : [paramValue]) : [];
@@ -826,6 +840,8 @@ export abstract class AbstractRepository<
     const nodesToValidate: Array<{ id: string; label: string }> = [];
     for (const [name, rel] of Object.entries(relationships)) {
       if (rel.immutable) continue;
+      // Read-only relationships are serialisation-only and never written on PUT
+      if (rel.readOnly) continue;
 
       const paramValue = params[name];
       if (paramValue) {
@@ -888,6 +904,9 @@ export abstract class AbstractRepository<
       // Skip immutable relationships - they are preserved as-is during PUT
       if (rel.immutable) continue;
 
+      // Skip read-only relationships - serialisation-only, never written by the generic PUT path
+      if (rel.readOnly) continue;
+
       const paramValue = params[name];
       // Add param to query params
       query.queryParams[name] = paramValue ? (Array.isArray(paramValue) ? paramValue : [paramValue]) : [];
@@ -941,8 +960,11 @@ export abstract class AbstractRepository<
     // Determine which fields to update (only those in params AND in fieldNames)
     const fieldsToUpdate = fieldNames.filter((field) => params[field] !== undefined);
 
-    // Determine which relationships to update (only those in params)
-    const relationshipsToUpdate = Object.entries(relationships).filter(([name]) => params[name] !== undefined);
+    // Determine which relationships to update (only those in params).
+    // Read-only relationships are serialisation-only and never written by PATCH.
+    const relationshipsToUpdate = Object.entries(relationships).filter(
+      ([name, rel]) => params[name] !== undefined && !rel.readOnly,
+    );
 
     // Validate related nodes exist
     const nodesToValidate: Array<{ id: string; label: string }> = [];
@@ -1044,6 +1066,9 @@ export abstract class AbstractRepository<
 
     // Handle edge-only updates (update edge properties without changing linked items)
     for (const [name, rel] of Object.entries(relationships)) {
+      // Skip read-only relationships - serialisation-only, their edges are never written
+      if (rel.readOnly) continue;
+
       const edgePropsUpdate = params[`${name}EdgePropsUpdate`];
       if (edgePropsUpdate && rel.fields && rel.fields.length > 0) {
         query.queryParams[`${name}EdgePropsMap`] = edgePropsUpdate;
@@ -1111,6 +1136,11 @@ export abstract class AbstractRepository<
         `addToRelationship only works with 'many' cardinality relationships`,
         HttpStatus.BAD_REQUEST,
       );
+    }
+
+    // Read-only relationships are serialisation-only - reject before any Cypher is built
+    if (rel.readOnly) {
+      throw new BadRequestException(`Relationship '${params.relationship}' is read-only`);
     }
 
     const query = this.neo4j.initQuery();
@@ -1181,6 +1211,11 @@ export abstract class AbstractRepository<
         `removeFromRelationship only works with 'many' cardinality relationships`,
         HttpStatus.BAD_REQUEST,
       );
+    }
+
+    // Read-only relationships are serialisation-only - reject before any Cypher is built
+    if (rel.readOnly) {
+      throw new BadRequestException(`Relationship '${params.relationship}' is read-only`);
     }
 
     const query = this.neo4j.initQuery();

@@ -1,10 +1,13 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { AuthRepository } from "../auth.repository";
+import { modelRegistry } from "../../../../common/registries/registry";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
-import { Auth } from "../../entities/auth.entity";
-import { AuthCode } from "../../entities/auth.code.entity";
+import { UserDescriptor } from "../../../user/entities/user";
+import { Auth, AuthDescriptor } from "../../entities/auth";
+import { AuthCode, AuthCodeDescriptor } from "../../entities/auth.code";
 
 // Mock crypto.randomUUID
 vi.mock("crypto", () => ({
@@ -34,10 +37,24 @@ const createMockSecurityService = () => ({
   tokenExpiration: new Date("2025-01-02T00:00:00Z"),
 });
 
+const createMockClsService = () => ({
+  get: vi.fn(),
+  set: vi.fn(),
+});
+
 describe("AuthRepository", () => {
   let repository: AuthRepository;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let securityService: ReturnType<typeof createMockSecurityService>;
+
+  // The repository resolves its serialisers from the global model registry
+  // (getAuthModel / getAuthCodeModel / getUserModel), so the models must be
+  // registered before any query is built — AuthModule does this at runtime.
+  beforeAll(() => {
+    modelRegistry.register(AuthDescriptor.model);
+    modelRegistry.register(AuthCodeDescriptor.model);
+    modelRegistry.register(UserDescriptor.model);
+  });
 
   const createMockQuery = () => ({
     query: "",
@@ -83,6 +100,7 @@ describe("AuthRepository", () => {
         AuthRepository,
         { provide: Neo4jService, useValue: neo4jService },
         { provide: SecurityService, useValue: securityService },
+        { provide: ClsService, useValue: createMockClsService() },
       ],
     }).compile();
 
@@ -184,7 +202,7 @@ describe("AuthRepository", () => {
     });
   });
 
-  describe("findById", () => {
+  describe("findAuthById", () => {
     it("should find auth by ID with all relationships", async () => {
       const firstQuery = createMockQuery();
       const secondQuery = createMockQuery();
@@ -192,7 +210,7 @@ describe("AuthRepository", () => {
       neo4jService.readOne.mockResolvedValue(MOCK_AUTH);
       neo4jService.readMany.mockResolvedValue([]);
 
-      const result = await repository.findById({ authId: TEST_IDS.authId });
+      const result = await repository.findAuthById({ authId: TEST_IDS.authId });
 
       expect(firstQuery.queryParams).toMatchObject({
         authId: TEST_IDS.authId,
@@ -215,7 +233,7 @@ describe("AuthRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readOne.mockResolvedValue(null);
 
-      await expect(repository.findById({ authId: "nonexistent" })).rejects.toThrow();
+      await expect(repository.findAuthById({ authId: "nonexistent" })).rejects.toThrow();
     });
   });
 
