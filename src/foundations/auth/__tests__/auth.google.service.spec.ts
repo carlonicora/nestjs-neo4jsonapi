@@ -1,20 +1,14 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 
-// Mock the auth index module to avoid circular dependency issue with authMeta in decorators
-vi.mock("..", () => ({
-  authMeta: {
-    type: "auth",
-    endpoint: "auth",
-    nodeName: "auth",
-    labelName: "Auth",
-  },
+// auth.google.service.ts now imports AuthService from the FILE (not the `..`
+// barrel — the barrel exports the google service itself, so the barrel import
+// left AuthService undefined in DI metadata at boot). Mock the file module the
+// service actually imports.
+vi.mock("../services/auth.service", () => ({
   AuthService: class MockAuthService {
     createToken = vi.fn();
     createCode = vi.fn();
   },
-  AuthModule: class {},
-  AuthController: class {},
-  TrialQueueService: class {},
 }));
 
 // Mock axios
@@ -31,7 +25,7 @@ import { ClsService } from "nestjs-cls";
 import axios from "axios";
 
 import { AuthGoogleService } from "../services/auth.google.service";
-import { AuthService } from "..";
+import { AuthService } from "../services/auth.service";
 import { UserRepository } from "../../user";
 import { GoogleUserRepository } from "../../google-user/repositories/google-user.repository";
 import { PendingRegistrationService } from "../services/pending-registration.service";

@@ -3,7 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
-import { SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
+import { AUTH_CONTEXT_HOOK, AuthContextHookInterface, SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
@@ -15,6 +15,9 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     @Optional()
     @Inject(SYSTEM_ROLES)
     private readonly systemRoles?: SystemRolesInterface,
+    @Optional()
+    @Inject(AUTH_CONTEXT_HOOK)
+    private readonly authContextHook?: AuthContextHookInterface,
   ) {
     super();
   }
@@ -26,6 +29,9 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     if (!authorizationHeader) return false;
 
     const isAuthenticated = (await super.canActivate(context)) as boolean;
+
+    if (isAuthenticated && request.user && this.authContextHook)
+      await this.authContextHook.onAuthenticated({ request, context });
 
     return isAuthenticated;
   }

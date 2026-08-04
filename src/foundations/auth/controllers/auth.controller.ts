@@ -11,6 +11,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthPostForgotDTO } from "../../auth/dtos/auth.post.forgot.dto";
@@ -49,17 +50,20 @@ export class AuthController {
     return await this.service.deleteByToken({ token: token });
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60000 }, ip: { limit: 5, ttl: 60000 } })
   @Post("login")
   async login(@Body() body: AuthPostLoginDTO) {
     return this.service.login({ data: body.data });
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
   @Post("register")
   @HttpCode(HttpStatus.NO_CONTENT)
   async register(@Body() body: AuthPostRegisterDTO) {
     this.service.register({ data: body.data });
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
   @Post("forgot")
   @HttpCode(HttpStatus.NO_CONTENT)
   async forgotPassword(@Body() body: AuthPostForgotDTO, @Query("lng") lng?: string) {
@@ -72,6 +76,7 @@ export class AuthController {
     await this.service.validateCode(code);
   }
 
+  @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
   @Post("reset/:code")
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetPassword(@Body() body: AuthPostResetPasswordDTO, @Param("code") code: string) {

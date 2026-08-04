@@ -19,8 +19,9 @@ import { GoogleUserService } from "../../../google-user/services/google-user.ser
 import { TrialQueueService } from "../trial-queue.service";
 import { WaitlistService } from "../../../waitlist/services/waitlist.service";
 import { TwoFactorService } from "../../../two-factor/services/two-factor.service";
-import { Auth } from "../../entities/auth.entity";
-import { AuthCode } from "../../entities/auth.code.entity";
+import { Auth, AuthDescriptor } from "../../entities/auth";
+import { AuthCode } from "../../entities/auth.code";
+import { PendingAuthDescriptor } from "../../entities/pending-auth";
 import { User } from "../../../user/entities/user";
 
 // Mock crypto
@@ -119,10 +120,10 @@ describe("AuthService", () => {
   const createMockAuthRepository = () => ({
     countUserCompanies: vi.fn().mockResolvedValue(1),
     findUserCompanies: vi.fn(),
-    create: vi.fn(),
+    createSession: vi.fn(),
     findByToken: vi.fn(),
     findByRefreshToken: vi.fn(),
-    findById: vi.fn(),
+    findAuthById: vi.fn(),
     findByCode: vi.fn(),
     findUserById: vi.fn(),
     createCode: vi.fn(),
@@ -158,6 +159,7 @@ describe("AuthService", () => {
   const createMockSecurityService = () => ({
     signJwt: vi.fn().mockReturnValue("jwt-token"),
     signCompanySelectionJwt: vi.fn().mockReturnValue("selection-token"),
+    signPendingJwt: vi.fn().mockReturnValue("pending-jwt-token"),
     decodeJwt: vi.fn().mockReturnValue({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
     refreshTokenExpiration: new Date(Date.now() + 3600000),
   });
@@ -296,7 +298,7 @@ describe("AuthService", () => {
   describe("createAuth", () => {
     it("should create auth with user and set refreshToken", async () => {
       // Arrange
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
 
       // Act
@@ -310,7 +312,7 @@ describe("AuthService", () => {
         features: [TEST_IDS.featureId],
         userName: MOCK_USER.name,
       });
-      expect(authRepository.create).toHaveBeenCalled();
+      expect(authRepository.createSession).toHaveBeenCalled();
       expect(authRepository.setLastLogin).toHaveBeenCalledWith({ userId: MOCK_USER.id });
       expect((result as any).refreshToken).toBe(MOCK_AUTH.id);
     });
@@ -318,7 +320,7 @@ describe("AuthService", () => {
     it("should clear user when refreshToken is provided", async () => {
       // Arrange
       const authWithUser = { ...MOCK_AUTH };
-      authRepository.create.mockResolvedValue(authWithUser);
+      authRepository.createSession.mockResolvedValue(authWithUser);
       authRepository.setLastLogin.mockResolvedValue(undefined);
 
       // Act
@@ -331,7 +333,7 @@ describe("AuthService", () => {
     it("should handle user without roles", async () => {
       // Arrange
       const userWithoutRoles = { ...MOCK_USER, role: undefined };
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
 
       // Act
@@ -351,7 +353,7 @@ describe("AuthService", () => {
         ...MOCK_USER,
         company: { id: TEST_IDS.companyId, name: "Test", feature: undefined },
       };
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
 
       // Act
@@ -369,7 +371,7 @@ describe("AuthService", () => {
   describe("createToken", () => {
     it("should create token and set CLS context", async () => {
       // Arrange
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
       jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
 
@@ -386,7 +388,7 @@ describe("AuthService", () => {
       // Arrange
       const userWithoutCompany = { ...MOCK_USER, company: undefined };
       const authWithoutCompany = { ...MOCK_AUTH, user: userWithoutCompany };
-      authRepository.create.mockResolvedValue(authWithoutCompany);
+      authRepository.createSession.mockResolvedValue(authWithoutCompany);
       authRepository.setLastLogin.mockResolvedValue(undefined);
       jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
 
@@ -496,7 +498,7 @@ describe("AuthService", () => {
       // Arrange
       userRepository.findByEmail.mockResolvedValue(MOCK_USER);
       vi.mocked(checkPassword).mockResolvedValue(true);
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
       jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
 
@@ -570,7 +572,7 @@ describe("AuthService", () => {
         expect.anything(),
         expect.objectContaining({ requiresCompanySelection: true, selectionToken: "selection-token" }),
       );
-      expect(authRepository.create).not.toHaveBeenCalled();
+      expect(authRepository.createSession).not.toHaveBeenCalled();
       expect(authRepository.setLastLogin).not.toHaveBeenCalled();
       expect(result).toEqual(mockResponse);
     });
@@ -600,7 +602,7 @@ describe("AuthService", () => {
       // Arrange
       clsService.get.mockReturnValue(TEST_IDS.userId);
       authRepository.findUserById.mockResolvedValue(MOCK_USER);
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       const mockResponse = { data: { type: "auths" } };
       jsonApiService.buildSingle.mockResolvedValue(mockResponse);
 
@@ -612,7 +614,7 @@ describe("AuthService", () => {
         userId: TEST_IDS.userId,
         companyId: TEST_IDS.companyId,
       });
-      expect(authRepository.create).toHaveBeenCalledWith(
+      expect(authRepository.createSession).toHaveBeenCalledWith(
         expect.objectContaining({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
       );
       expect(result).toEqual(mockResponse);
@@ -627,7 +629,7 @@ describe("AuthService", () => {
       await expect(service.selectCompany({ companyId: "another-company" })).rejects.toThrow(
         new HttpException("User does not belong to this company", HttpStatus.FORBIDDEN),
       );
-      expect(authRepository.create).not.toHaveBeenCalled();
+      expect(authRepository.createSession).not.toHaveBeenCalled();
     });
   });
 
@@ -710,7 +712,7 @@ describe("AuthService", () => {
     it("should find auth by code successfully", async () => {
       // Arrange
       authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
-      authRepository.findById.mockResolvedValue(MOCK_AUTH);
+      authRepository.findAuthById.mockResolvedValue(MOCK_AUTH);
       jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
 
       // Act
@@ -718,7 +720,7 @@ describe("AuthService", () => {
 
       // Assert
       expect(authRepository.findByCode).toHaveBeenCalledWith({ code: "valid-code" });
-      expect(authRepository.findById).toHaveBeenCalledWith({ authId: MOCK_AUTH.id });
+      expect(authRepository.findAuthById).toHaveBeenCalledWith({ authId: MOCK_AUTH.id });
       expect(result).toEqual({ data: { type: "auths" } });
     });
 
@@ -746,7 +748,7 @@ describe("AuthService", () => {
     it("should throw NOT_FOUND when auth not found", async () => {
       // Arrange
       authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
-      authRepository.findById.mockResolvedValue(null);
+      authRepository.findAuthById.mockResolvedValue(null);
 
       // Act & Assert
       await expect(service.findAuthByCode({ code: "valid-code" })).rejects.toThrow(
@@ -1009,7 +1011,7 @@ describe("AuthService", () => {
       trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
       pendingRegistrationService.delete.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
       authRepository.createCode.mockResolvedValue(undefined);
       authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
@@ -1044,7 +1046,7 @@ describe("AuthService", () => {
       trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
       pendingRegistrationService.delete.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
-      authRepository.create.mockResolvedValue(MOCK_AUTH);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
       authRepository.setLastLogin.mockResolvedValue(undefined);
       authRepository.createCode.mockResolvedValue(undefined);
       authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
@@ -1104,5 +1106,237 @@ describe("AuthService", () => {
         new HttpException("Unsupported provider: facebook", HttpStatus.BAD_REQUEST),
       );
     });
+  });
+
+  /**
+   * The satellite foundation modules (TwoFactorModule, WaitlistModule,
+   * DiscordUserModule, the trial queue) are @Optional() on AuthService so an
+   * application can compose auth without them. These tests build the service
+   * with a dependency deliberately absent — the package AuthModule still
+   * provides all of them, so the default behaviour is unchanged.
+   */
+  describe("optional satellite dependencies", () => {
+    const LOGIN_DATA = {
+      attributes: {
+        email: "test@example.com",
+        password: "password123",
+      },
+    };
+
+    const REGISTER_DATA = {
+      id: "new-user-id",
+      attributes: {
+        email: "new@example.com",
+        password: "newpassword123",
+        name: "New User",
+        inviteCode: "invite-123",
+      },
+    };
+
+    /**
+     * Builds AuthService with every dependency EXCEPT TwoFactorService (which
+     * has to be opted in explicitly, since its absence is what most of these
+     * tests exercise). `omit` drops a token entirely; `overrides` replaces one.
+     */
+    const buildModule = async (params?: { omit?: any[]; overrides?: any[] }): Promise<TestingModule> => {
+      const base: any[] = [
+        { provide: JsonApiService, useValue: createMockJsonApiService() },
+        { provide: AuthRepository, useValue: createMockAuthRepository() },
+        { provide: UserService, useValue: createMockUserService() },
+        { provide: UserRepository, useValue: createMockUserRepository() },
+        { provide: CompanyRepository, useValue: createMockCompanyRepository() },
+        { provide: EmailService, useValue: createMockEmailService() },
+        { provide: SecurityService, useValue: createMockSecurityService() },
+        { provide: ClsService, useValue: createMockClsService() },
+        { provide: Neo4jService, useValue: createMockNeo4jService() },
+        { provide: ModuleRef, useValue: createMockModuleRef() },
+        { provide: ConfigService, useValue: createMockConfigService() },
+        { provide: PendingRegistrationService, useValue: createMockPendingRegistrationService() },
+        { provide: DiscordUserService, useValue: createMockDiscordUserService() },
+        { provide: GoogleUserService, useValue: createMockGoogleUserService() },
+        { provide: TrialQueueService, useValue: createMockTrialQueueService() },
+        { provide: WaitlistService, useValue: createMockWaitlistService() },
+      ];
+
+      const omit = params?.omit ?? [];
+      const overrides = params?.overrides ?? [];
+      const overridden = overrides.map((provider) => provider.provide);
+
+      return Test.createTestingModule({
+        providers: [
+          AuthService,
+          ...base.filter((provider) => !omit.includes(provider.provide) && !overridden.includes(provider.provide)),
+          ...overrides,
+        ],
+      }).compile();
+    };
+
+    it("logs in with a full auth payload when TwoFactorService is absent", async () => {
+      // Arrange
+      const module = await buildModule();
+      const scopedService = module.get<AuthService>(AuthService);
+      const scopedUsers = module.get(UserRepository) as any;
+      const scopedRepository = module.get(AuthRepository) as any;
+      const scopedJsonApi = module.get(JsonApiService) as any;
+
+      scopedUsers.findByEmail.mockResolvedValue(MOCK_USER);
+      vi.mocked(checkPassword).mockResolvedValue(true);
+      scopedRepository.countUserCompanies.mockResolvedValue(1);
+      scopedRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      scopedJsonApi.buildSingle.mockResolvedValue({ data: { type: "auth" } });
+
+      // Act
+      const result = await scopedService.login({ data: LOGIN_DATA as any });
+
+      // Assert
+      expect(scopedRepository.createSession).toHaveBeenCalled();
+      expect(scopedJsonApi.buildSingle).toHaveBeenCalledWith(AuthDescriptor.model, expect.anything());
+      expect(scopedJsonApi.buildSingle).not.toHaveBeenCalledWith(PendingAuthDescriptor.model, expect.anything());
+      expect(result).toEqual({ data: { type: "auth" } });
+    });
+
+    it("still returns the two-factor challenge when TwoFactorService is present and enabled", async () => {
+      // Arrange
+      const twoFactorService = createMockTwoFactorService();
+      twoFactorService.getConfig.mockResolvedValue({ isEnabled: true, preferredMethod: "totp" });
+      twoFactorService.createPendingSession.mockResolvedValue({
+        pendingId: "pending-123",
+        expiration: new Date(Date.now() + 300000),
+      });
+      twoFactorService.getAvailableMethods.mockResolvedValue(["totp"]);
+
+      const module = await buildModule({ overrides: [{ provide: TwoFactorService, useValue: twoFactorService }] });
+      const scopedService = module.get<AuthService>(AuthService);
+      const scopedUsers = module.get(UserRepository) as any;
+      const scopedRepository = module.get(AuthRepository) as any;
+      const scopedJsonApi = module.get(JsonApiService) as any;
+
+      scopedUsers.findByEmail.mockResolvedValue(MOCK_USER);
+      vi.mocked(checkPassword).mockResolvedValue(true);
+      scopedJsonApi.buildSingle.mockResolvedValue({ data: { type: "two-factor-challenge" } });
+
+      // Act
+      const result = await scopedService.login({ data: LOGIN_DATA as any });
+
+      // Assert
+      expect(scopedJsonApi.buildSingle).toHaveBeenCalledWith(
+        PendingAuthDescriptor.model,
+        expect.objectContaining({
+          id: "pending-123",
+          pendingToken: "pending-jwt-token",
+          preferredMethod: "totp",
+          availableMethods: ["totp"],
+        }),
+      );
+      expect(scopedRepository.createSession).not.toHaveBeenCalled();
+      expect(result).toEqual({ data: { type: "two-factor-challenge" } });
+    });
+
+    it("throws NOT_IMPLEMENTED on waitlist registration when WaitlistService is absent", async () => {
+      // Arrange
+      const configService = {
+        get: vi.fn((key: string) => {
+          if (key === "auth") return { allowRegistration: true, registrationMode: "waitlist" };
+          if (key === "app") return MOCK_APP_CONFIG;
+          return undefined;
+        }),
+      };
+
+      const module = await buildModule({
+        omit: [WaitlistService],
+        overrides: [{ provide: ConfigService, useValue: configService }],
+      });
+      const scopedService = module.get<AuthService>(AuthService);
+
+      // Act & Assert
+      await expect(scopedService.register({ data: REGISTER_DATA as any })).rejects.toThrow(
+        new HttpException("Waitlist registration is not available", HttpStatus.NOT_IMPLEMENTED),
+      );
+    });
+
+    it("registers normally in waitlist mode when WaitlistService is present", async () => {
+      // Arrange
+      const configService = {
+        get: vi.fn((key: string) => {
+          if (key === "auth") return { allowRegistration: true, registrationMode: "waitlist" };
+          if (key === "app") return MOCK_APP_CONFIG;
+          return undefined;
+        }),
+      };
+
+      const module = await buildModule({ overrides: [{ provide: ConfigService, useValue: configService }] });
+      const scopedService = module.get<AuthService>(AuthService);
+      const scopedWaitlist = module.get(WaitlistService) as any;
+      const scopedUserService = module.get(UserService) as any;
+      const scopedUsers = module.get(UserRepository) as any;
+      const scopedCompanies = module.get(CompanyRepository) as any;
+
+      scopedWaitlist.validateInviteCode.mockResolvedValue({ valid: true });
+      scopedUserService.expectNotExists.mockResolvedValue(undefined);
+      scopedCompanies.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "New Company" });
+      scopedUsers.createUser.mockResolvedValue(MOCK_USER);
+
+      // Act
+      await scopedService.register({ data: REGISTER_DATA as any });
+
+      // Assert
+      expect(scopedWaitlist.validateInviteCode).toHaveBeenCalledWith(REGISTER_DATA.attributes.inviteCode);
+      expect(scopedWaitlist.markAsRegistered).toHaveBeenCalled();
+    });
+
+    it("activates an account without queueing a trial when TrialQueueService is absent", async () => {
+      // Arrange
+      const module = await buildModule({ omit: [TrialQueueService] });
+      const scopedService = module.get<AuthService>(AuthService);
+      const scopedUsers = module.get(UserRepository) as any;
+      const scopedRepository = module.get(AuthRepository) as any;
+
+      scopedUsers.findByCode.mockResolvedValue(MOCK_USER);
+      scopedUsers.findPlatformAdministrators = vi.fn().mockResolvedValue([]);
+
+      // Act
+      await scopedService.activateAccount("valid-code");
+
+      // Assert
+      expect(scopedRepository.activateAccount).toHaveBeenCalledWith({ userId: MOCK_USER.id });
+    });
+  });
+});
+
+/**
+ * Wire-contract parity: the descriptors replaced the hand-written
+ * AuthSerialiser / PendingAuthSerialiser, and the attribute sets they
+ * serialise must stay identical. The one sanctioned change is the Auth
+ * self-link endpoint, `auth/refreshtoken` -> `auth`.
+ */
+describe("Auth descriptors — serialiser parity", () => {
+  it("pins the Auth attribute set (fields + virtual fields)", () => {
+    const attributes = [...Object.keys(AuthDescriptor.fields), ...Object.keys(AuthDescriptor.virtualFields)].sort();
+
+    expect(attributes).toEqual(["expiration", "refreshToken", "requiresCompanySelection", "selectionToken", "token"]);
+  });
+
+  it("pins the Auth relationship set", () => {
+    expect(Object.keys(AuthDescriptor.relationships)).toEqual(["user"]);
+  });
+
+  it("pins the PendingAuth attribute set to the deleted PendingAuthSerialiser", () => {
+    expect(Object.keys(PendingAuthDescriptor.fields).sort()).toEqual([
+      "availableMethods",
+      "expiresAt",
+      "pendingToken",
+      "preferredMethod",
+    ]);
+    expect(Object.keys(PendingAuthDescriptor.virtualFields)).toEqual([]);
+    expect(Object.keys(PendingAuthDescriptor.relationships)).toEqual([]);
+  });
+
+  it("serves the Auth resource from the `auth` endpoint (self-link fix)", () => {
+    expect(AuthDescriptor.model.endpoint).toBe("auth");
+    expect(AuthDescriptor.model.type).toBe("auth");
+  });
+
+  it("keeps the two-factor challenge JSON:API type", () => {
+    expect(PendingAuthDescriptor.model.type).toBe("two-factor-challenge");
   });
 });

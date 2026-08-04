@@ -1,12 +1,12 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { ClsService } from "nestjs-cls";
 import { RoleId } from "../../../common/constants/system.roles";
+import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
+import { modelRegistry } from "../../../common/registries/registry";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
-import { AuthCode } from "../../auth/entities/auth.code.entity";
-import { AuthCodeModel } from "../../auth/entities/auth.code.model";
-import { Auth } from "../../auth/entities/auth.entity";
-import { AuthModel } from "../../auth/entities/auth.model";
 import { Company, CompanyDescriptor, companyMeta } from "../../company";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { membershipRoleMatch } from "../../membership/queries/membership.query";
@@ -14,15 +14,73 @@ import { ModuleModel } from "../../module/entities/module.model";
 import { featureModuleQuery } from "../../module/queries/feature.module.query";
 import { Role } from "../../role/entities/role";
 import { userMeta } from "../../user";
-import { User, UserDescriptor } from "../../user/entities/user";
+import { User } from "../../user/entities/user";
+import { AuthCode } from "../entities/auth.code";
+import { authCodeMeta } from "../entities/auth.code.meta";
+import { Auth, AuthDescriptor } from "../entities/auth";
+import { authMeta } from "../entities/auth.meta";
 
+/**
+ * Auth is deliberately NOT company-scoped (see entities/auth.ts) and every
+ * method here is bespoke — JWT signing lives in AuthService, and reads
+ * enrich the user with role/company/feature/module permissions via a
+ * hand-written Cypher CASE cascade that doesn't map onto the generic
+ * descriptor CRUD (create/put/patch/find/findById). None of
+ * AbstractRepository's inherited generic methods are used; extending it
+ * here is for descriptor typing consistency only.
+ *
+ * Two methods collide by name with AbstractRepository's generic surface but
+ * have incompatible signatures/return types (this repo's `findById` takes
+ * `{ authId }` and does permission-enrichment; its `create` takes
+ * `{ authId, userId, token, expiration }` and returns the created Auth) —
+ * both were renamed (`findAuthById`, `createSession`) to resolve the
+ * TS2416 override collision. AuthRepository has no external callers other
+ * than AuthService, so these are internal-only renames.
+ */
 @Injectable()
-export class AuthRepository implements OnModuleInit {
-  constructor(
-    private readonly neo4j: Neo4jService,
-    private readonly security: SecurityService,
-  ) {}
+export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescriptor.relationships> {
+  protected readonly descriptor = AuthDescriptor;
 
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
+  }
+
+  /**
+   * Models are resolved from the registry rather than referenced statically so
+   * that an application which registers an extended model (extra
+   * childrenTokens, extra relationships) is served ITS model here — mirrors
+   * ContentRepository.getContentModel().
+   */
+  private getAuthModel(): DataModelInterface<Auth> {
+    const model = modelRegistry.get(authMeta.nodeName);
+    if (!model) {
+      throw new Error(`AuthModel not found in registry for nodeName: ${authMeta.nodeName}`);
+    }
+    return model as DataModelInterface<Auth>;
+  }
+
+  private getAuthCodeModel(): DataModelInterface<AuthCode> {
+    const model = modelRegistry.get(authCodeMeta.nodeName);
+    if (!model) {
+      throw new Error(`AuthCodeModel not found in registry for nodeName: ${authCodeMeta.nodeName}`);
+    }
+    return model as DataModelInterface<AuthCode>;
+  }
+
+  private getUserModel(): DataModelInterface<User> {
+    const model = modelRegistry.get(userMeta.nodeName);
+    if (!model) {
+      throw new Error(`UserModel not found in registry for nodeName: ${userMeta.nodeName}`);
+    }
+    return model as DataModelInterface<User>;
+  }
+
+  /**
+   * Bespoke constraint set: the inherited AbstractRepository.onModuleInit would
+   * also derive a FULLTEXT index over the descriptor's string fields — which
+   * here are the live session token and the company-selection token. Neither
+   * has any business being searchable text.
+   */
   async onModuleInit() {
     await this.neo4j.writeOne({
       query: `CREATE CONSTRAINT authcode_id IF NOT EXISTS FOR (authcode:AuthCode) REQUIRE authcode.id IS UNIQUE`,
@@ -48,7 +106,7 @@ export class AuthRepository implements OnModuleInit {
   }
 
   async findByCode(params: { code: string }): Promise<AuthCode> {
-    const query = this.neo4j.initQuery({ serialiser: AuthCodeModel });
+    const query = this.neo4j.initQuery({ serialiser: this.getAuthCodeModel() });
 
     query.queryParams = {
       authCodeId: params.code,
@@ -62,8 +120,8 @@ export class AuthRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async findById(params: { authId: string }): Promise<Auth> {
-    let query = this.neo4j.initQuery({ serialiser: AuthModel });
+  async findAuthById(params: { authId: string }): Promise<Auth> {
+    let query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
 
     query.queryParams = {
       ...query.queryParams,
@@ -156,9 +214,9 @@ export class AuthRepository implements OnModuleInit {
     query.query = `
       MATCH (auth:Auth {id: $authId})
       CREATE (authcode:AuthCode {
-        id: $authCodeId, 
-        expiration: datetime($expiration), 
-        createdAt: datetime(), 
+        id: $authCodeId,
+        expiration: datetime($expiration),
+        createdAt: datetime(),
         updatedAt: datetime()
       })
       WITH auth, authcode
@@ -169,17 +227,17 @@ export class AuthRepository implements OnModuleInit {
   }
 
   async refreshToken(params: { authId: string; token: string }): Promise<Auth> {
-    const query = this.neo4j.initQuery({ serialiser: AuthModel });
+    const query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
 
     query.queryParams = {
       authId: params.authId,
       token: params.token,
-      expiration: this.security.refreshTokenExpiration.toISOString(),
+      expiration: this.securityService.refreshTokenExpiration.toISOString(),
     };
 
     query.query = `
-      MATCH (auth:Auth {id: $authId}) 
-      SET auth.token = $token, 
+      MATCH (auth:Auth {id: $authId})
+      SET auth.token = $token,
       auth.expiration = datetime($expiration)
       RETURN auth
     `;
@@ -188,7 +246,7 @@ export class AuthRepository implements OnModuleInit {
   }
 
   async findByRefreshToken(params: { authId: string }): Promise<Auth> {
-    const query = this.neo4j.initQuery({ serialiser: AuthModel });
+    const query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
 
     query.queryParams = {
       authId: params.authId,
@@ -203,7 +261,7 @@ export class AuthRepository implements OnModuleInit {
   }
 
   async findValidToken(params: { userId: string }): Promise<Auth> {
-    const query = this.neo4j.initQuery({ serialiser: AuthModel });
+    const query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
 
     query.queryParams = {
       userId: params.userId,
@@ -213,7 +271,7 @@ export class AuthRepository implements OnModuleInit {
     };
 
     query.query = `
-      MATCH (auth:Auth {userId: $userId, expiration: $expiration}) 
+      MATCH (auth:Auth {userId: $userId, expiration: $expiration})
       RETURN auth
     `;
 
@@ -229,7 +287,7 @@ export class AuthRepository implements OnModuleInit {
    * the CLS value injected by `initQuery()` — identical to the previous behaviour.
    */
   async findUserById(params: { userId: string; companyId?: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.getUserModel() });
 
     query.queryParams = {
       ...query.queryParams,
@@ -243,7 +301,7 @@ export class AuthRepository implements OnModuleInit {
       ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       OPTIONAL MATCH (user)-[:BELONGS_TO]->(user_company:Company${params.companyId ? ` {id: $companyId}` : ``})
       MATCH (${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-      WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
+      WHERE ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true
       OR EXISTS {((${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
 
       RETURN user, user_role, user_company, ${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}
@@ -303,7 +361,7 @@ export class AuthRepository implements OnModuleInit {
    * user who belongs to more than one company would get a session whose company
    * and roles disagree.
    */
-  async create(params: {
+  async createSession(params: {
     authId: string;
     userId: string;
     token: string;
@@ -312,7 +370,7 @@ export class AuthRepository implements OnModuleInit {
   }): Promise<Auth> {
     const user = await this.findUserById({ userId: params.userId, companyId: params.companyId });
 
-    let query = this.neo4j.initQuery({ serialiser: AuthModel });
+    let query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
     query.queryParams = {
       ...query.queryParams,
       authId: params.authId,
@@ -333,7 +391,7 @@ export class AuthRepository implements OnModuleInit {
     if (user.role?.some((role: Role) => role.id === RoleId.Administrator) && !user.company) {
       query.query = `
         MATCH (auth_user:User {id: $userId})
-        CREATE (auth:Auth {id: $authId, token: $token, expiration: $expiration, createdAt: datetime(), updatedAt: datetime()}) 
+        CREATE (auth:Auth {id: $authId, token: $token, expiration: datetime($expiration), createdAt: datetime(), updatedAt: datetime()})
         CREATE (auth_user)-[:HAS_AUTH]->(auth)
 
         WITH auth, auth_user
@@ -343,22 +401,22 @@ export class AuthRepository implements OnModuleInit {
 
 WITH auth, auth_user, auth_user_role, module, apoc.convert.fromJsonList(module.permissions) AS modPerms
 
-WITH auth, auth_user, auth_user_role, module, 
-CASE 
-    WHEN head([p IN modPerms WHERE p.type = "create"]) IS NULL THEN false 
-    ELSE head([p IN modPerms WHERE p.type = "create"]).value 
+WITH auth, auth_user, auth_user_role, module,
+CASE
+    WHEN head([p IN modPerms WHERE p.type = "create"]) IS NULL THEN false
+    ELSE head([p IN modPerms WHERE p.type = "create"]).value
   END AS defaultCreate,
-CASE 
-    WHEN head([p IN modPerms WHERE p.type = "read"]) IS NULL THEN false 
-    ELSE head([p IN modPerms WHERE p.type = "read"]).value 
+CASE
+    WHEN head([p IN modPerms WHERE p.type = "read"]) IS NULL THEN false
+    ELSE head([p IN modPerms WHERE p.type = "read"]).value
   END AS defaultRead,
-CASE 
-    WHEN head([p IN modPerms WHERE p.type = "update"]) IS NULL THEN false 
-    ELSE head([p IN modPerms WHERE p.type = "update"]).value 
+CASE
+    WHEN head([p IN modPerms WHERE p.type = "update"]) IS NULL THEN false
+    ELSE head([p IN modPerms WHERE p.type = "update"]).value
   END AS defaultUpdate,
-CASE 
-    WHEN head([p IN modPerms WHERE p.type = "delete"]) IS NULL THEN false 
-    ELSE head([p IN modPerms WHERE p.type = "delete"]).value 
+CASE
+    WHEN head([p IN modPerms WHERE p.type = "delete"]) IS NULL THEN false
+    ELSE head([p IN modPerms WHERE p.type = "delete"]).value
   END AS defaultDelete
 
 OPTIONAL MATCH (auth_user_role)-[perm:HAS_PERMISSIONS]->(module)
@@ -374,19 +432,19 @@ WITH auth, auth_user, auth_user_role, module,
      [defaultDelete] + [r IN rolePermsParsed WHERE r.type="delete" | r.value] AS deleteValues
 
 WITH auth, auth_user,  auth_user_role, module,
-     CASE 
+     CASE
        WHEN any(x IN createValues WHERE x = true) THEN true
        WHEN any(x IN createValues WHERE x <> true AND x <> false) THEN head([x IN createValues WHERE x <> true AND x <> false])
        WHEN any(x IN createValues WHERE x = false) THEN false ELSE false END AS effectiveCreate,
-     CASE 
+     CASE
        WHEN any(x IN readValues WHERE x = true) THEN true
        WHEN any(x IN readValues WHERE x <> true AND x <> false) THEN head([x IN readValues WHERE x <> true AND x <> false])
        WHEN any(x IN readValues WHERE x = false) THEN false ELSE false END AS effectiveRead,
-     CASE 
+     CASE
        WHEN any(x IN updateValues WHERE x = true) THEN true
        WHEN any(x IN updateValues WHERE x <> true AND x <> false) THEN head([x IN updateValues WHERE x <> true AND x <> false])
        WHEN any(x IN updateValues WHERE x = false) THEN false ELSE false END AS effectiveUpdate,
-     CASE 
+     CASE
        WHEN any(x IN deleteValues WHERE x = true) THEN true
        WHEN any(x IN deleteValues WHERE x <> true AND x <> false) THEN head([x IN deleteValues WHERE x <> true AND x <> false])
        WHEN any(x IN deleteValues WHERE x = false) THEN false ELSE false END AS effectiveDelete
@@ -413,7 +471,7 @@ WITH auth, auth_user,  auth_user_role, module,
 
     query.query = `
       MATCH (auth_user:User {id: $userId})
-      CREATE (auth:Auth {id: $authId, token: $token, expiration: $expiration, createdAt: datetime(), updatedAt: datetime()}) 
+      CREATE (auth:Auth {id: $authId, token: $token, expiration: datetime($expiration), createdAt: datetime(), updatedAt: datetime()})
       CREATE (auth_user)-[:HAS_AUTH]->(auth)
 
       WITH auth, auth_user
@@ -421,9 +479,9 @@ WITH auth, auth_user,  auth_user_role, module,
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
 
       MATCH (auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-      WHERE auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true 
+      WHERE auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}.isCore = true
       OR EXISTS {((auth_${userMeta.nodeName}_${companyMeta.nodeName})-[:HAS_FEATURE]->(auth_${userMeta.nodeName}_${companyMeta.nodeName}_${featureMeta.nodeName}))}
-      
+
       OPTIONAL MATCH (auth_user_company)-[:HAS_CONFIGURATION]->(auth_user_company_configuration:Configuration)
       RETURN auth, auth_user, auth_user_role, auth_user_company, auth_user_company_feature, auth_user_company_configuration
     `;
@@ -448,7 +506,7 @@ WITH auth, auth_user,  auth_user_role, module,
   }
 
   async findByToken(params: { token: string }): Promise<Auth> {
-    let query = this.neo4j.initQuery({ serialiser: AuthModel });
+    let query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
     query.queryParams = {
       ...query.queryParams,
       token: params.token,
@@ -500,7 +558,7 @@ WITH auth, auth_user,  auth_user_role, module,
   }
 
   async startResetPassword(params: { userId: string }): Promise<User> {
-    const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model });
+    const query = this.neo4j.initQuery({ serialiser: this.getUserModel() });
 
     query.queryParams = {
       userId: params.userId,
@@ -509,8 +567,8 @@ WITH auth, auth_user,  auth_user_role, module,
     };
 
     query.query = `
-      MATCH (user:User {id: $userId}) 
-      SET user.code = $code, 
+      MATCH (user:User {id: $userId})
+      SET user.code = $code,
         user.codeExpiration = datetime($codeExpiration)
       RETURN user
     `;
@@ -526,9 +584,9 @@ WITH auth, auth_user,  auth_user_role, module,
     };
 
     query.query = `
-      MATCH (user:User {id: $userId}) 
-      SET user.password = $password, 
-        user.code = null, 
+      MATCH (user:User {id: $userId})
+      SET user.password = $password,
+        user.code = null,
         user.codeExpiration = null
       RETURN user
     `;
@@ -545,12 +603,12 @@ WITH auth, auth_user,  auth_user_role, module,
     };
 
     query.query = `
-      MATCH (user:User {id: $userId}) 
-      SET user.password = $password, 
+      MATCH (user:User {id: $userId})
+      SET user.password = $password,
         user.isActive = true,
         user.isDeleted = false,
-        user.code = null, 
-        user.codeExpiration = null 
+        user.code = null,
+        user.codeExpiration = null
     `;
 
     await this.neo4j.writeOne(query);
@@ -564,10 +622,10 @@ WITH auth, auth_user,  auth_user_role, module,
     };
 
     query.query = `
-      MATCH (user:User {id: $userId}) 
-      SET user.isActive = true, 
-        user.code = null, 
-        user.codeExpiration = null 
+      MATCH (user:User {id: $userId})
+      SET user.isActive = true,
+        user.code = null,
+        user.codeExpiration = null
     `;
 
     await this.neo4j.writeOne(query);
@@ -583,7 +641,7 @@ WITH auth, auth_user,  auth_user_role, module,
     query.query = `
       MATCH (user:User {id: $userId})
       MATCH (user)-[:HAS_AUTH]->(auth:Auth)
-      WHERE auth.expiration < datetime() 
+      WHERE auth.expiration < datetime()
       DETACH DELETE auth
     `;
 

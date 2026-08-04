@@ -320,4 +320,39 @@ describe("AuthController", () => {
       expect(controller["service"]).toBeDefined();
     });
   });
+
+  /**
+   * The credential-taking routes are rate limited. @Throttle writes its options
+   * as `THROTTLER:LIMIT<name>` / `THROTTLER:TTL<name>` metadata on the handler,
+   * so the limits can be pinned without booting the guard.
+   */
+  describe("rate limiting", () => {
+    const limitFor = (handler: any, throttler: string) => Reflect.getMetadata(`THROTTLER:LIMIT${throttler}`, handler);
+    const ttlFor = (handler: any, throttler: string) => Reflect.getMetadata(`THROTTLER:TTL${throttler}`, handler);
+
+    it("limits login to 5 requests per minute on both throttlers", () => {
+      const handler = AuthController.prototype.login;
+
+      expect(limitFor(handler, "default")).toBe(5);
+      expect(ttlFor(handler, "default")).toBe(60000);
+      expect(limitFor(handler, "ip")).toBe(5);
+      expect(ttlFor(handler, "ip")).toBe(60000);
+    });
+
+    it.each([
+      ["register", AuthController.prototype.register],
+      ["forgotPassword", AuthController.prototype.forgotPassword],
+      ["resetPassword", AuthController.prototype.resetPassword],
+    ])("limits %s to 3 requests per minute on both throttlers", (_name, handler) => {
+      expect(limitFor(handler, "default")).toBe(3);
+      expect(ttlFor(handler, "default")).toBe(60000);
+      expect(limitFor(handler, "ip")).toBe(3);
+      expect(ttlFor(handler, "ip")).toBe(60000);
+    });
+
+    it("leaves the non-credential routes unthrottled", () => {
+      expect(limitFor(AuthController.prototype.validateResetCode, "default")).toBeUndefined();
+      expect(limitFor(AuthController.prototype.activateAccount, "default")).toBeUndefined();
+    });
+  });
 });
