@@ -1,17 +1,26 @@
-import { Document } from "@langchain/core/documents";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
-import { modelRegistry } from "../../../common/registries/registry";
 import { BaseConfigInterface, ConfigContentTypesInterface } from "../../../config/interfaces";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
-import { Content } from "../../content/entities/content.entity";
+import { Content, getContentModel } from "../../content/entities/content";
 import { contentMeta } from "../../content/entities/content.meta";
 import { ContentCypherService } from "../../content/services/content.cypher.service";
 import { ownerMeta } from "../../user/entities/user.meta";
 
+/**
+ * Content is a virtual, multi-label aggregate (the labels come from
+ * `baseConfig.contentTypes`) with no single Neo4j label of its own, so the
+ * inherited AbstractRepository query builders — which assume one
+ * `${labelName}` match — cannot express these reads. Every method below is
+ * genuinely custom and delegates its Cypher fragments to ContentCypherService.
+ *
+ * ContentCypherService is also handed, as an instance, to
+ * RelevancyService/RelevancyRepository by ContentController (duck-typed as
+ * `cypherService: any`, calling `.userHasAccess()` / `.returnStatement()`) for
+ * the `/contents/:id/relevance` endpoint. Do not delete it.
+ */
 @Injectable()
 export class ContentRepository {
   constructor(
@@ -26,17 +35,6 @@ export class ContentRepository {
     return types.length > 0 ? types : [contentMeta.labelName];
   }
 
-  /**
-   * Get the ContentModel from registry (may be extended with additional childrenTokens)
-   */
-  private getContentModel(): DataModelInterface<Content> {
-    const model = modelRegistry.get(contentMeta.nodeName);
-    if (!model) {
-      throw new Error(`ContentModel not found in registry for nodeName: ${contentMeta.nodeName}`);
-    }
-    return model as DataModelInterface<Content>;
-  }
-
   async find(params: {
     fetchAll?: boolean;
     term?: string;
@@ -45,7 +43,7 @@ export class ContentRepository {
   }): Promise<Content[]> {
     const query = this.neo4j.initQuery({
       cursor: params.cursor,
-      serialiser: this.getContentModel(),
+      serialiser: getContentModel(),
       fetchAll: params.fetchAll,
     });
 
@@ -67,8 +65,8 @@ export class ContentRepository {
     return this.neo4j.readMany(query);
   }
 
-  async findByIds(params: { contentIds: string[] }): Promise<Document[]> {
-    const query = this.neo4j.initQuery({ serialiser: this.getContentModel() });
+  async findByIds(params: { contentIds: string[] }): Promise<Content[]> {
+    const query = this.neo4j.initQuery({ serialiser: getContentModel() });
 
     query.queryParams = {
       ...query.queryParams,
@@ -77,7 +75,7 @@ export class ContentRepository {
 
     query.query += `
         MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")})-[:BELONGS_TO]->(company)
-        WHERE ${contentMeta.nodeName}.id IN $ids
+        WHERE ${contentMeta.nodeName}.id IN $ids${this.contentCypherService.tldrFilter()}
         ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
         ${this.contentCypherService.returnStatement()}
       `;
@@ -93,7 +91,7 @@ export class ContentRepository {
     cursor?: JsonApiCursorInterface;
   }) {
     const query = this.neo4j.initQuery({
-      serialiser: this.getContentModel(),
+      serialiser: getContentModel(),
       cursor: params.cursor,
       fetchAll: params.fetchAll,
     });
@@ -107,7 +105,7 @@ export class ContentRepository {
     query.query += `
       ${this.contentCypherService.default()}
       ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
-      MATCH (${contentMeta.nodeName})<-[:PUBLISHED]-(:${ownerMeta.labelName} {id: $ownerId})
+      ${this.contentCypherService.ownerMatch({ target: `:${ownerMeta.labelName} {id: $ownerId}` })}
 
       ORDER BY ${contentMeta.nodeName}.${params.orderBy ? `${params.orderBy}` : `updatedAt DESC`}
       {CURSOR}

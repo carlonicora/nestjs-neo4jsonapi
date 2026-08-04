@@ -11,4 +11,5 @@ export enum QueueId {
   EMAIL = "email",
   HOWTO = "howto",
   TRIAL = "trial",
+  USER_ACTIVITY = "user-activity",
 }

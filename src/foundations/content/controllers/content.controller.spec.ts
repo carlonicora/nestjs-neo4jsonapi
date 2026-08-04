@@ -65,24 +65,24 @@ vi.mock("../../relevancy/services/relevancy.service", () => ({
   })),
 }));
 
-// Mock ContentModel
-vi.mock("../entities/content.model", () => ({
-  ContentModel: {
-    meta: {
-      type: "contents",
-      endpoint: "contents",
-      nodeName: "content",
-      labelName: "Content",
-    },
-  },
-}));
+// Mock the Content entity module: the controller resolves the registered model
+// through getContentModel() (the model ContentModule.forRoot built).
+vi.mock("../entities/content", () => {
+  const model = {
+    type: "contents",
+    endpoint: "contents",
+    nodeName: "content",
+    labelName: "Content",
+  };
+  return { getContentModel: () => model };
+});
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
-import { ContentModel } from "../entities/content.model";
+import { getContentModel } from "../entities/content";
 import { ContentCypherService } from "../services/content.cypher.service";
 import { ContentService } from "../services/content.service";
 import { RelevancyService } from "../../relevancy/services/relevancy.service";
@@ -511,7 +511,7 @@ describe("ContentController", () => {
       const result = await controller.findContentsRelevantForContent(mockQuery, MOCK_CONTENT_ID);
 
       expect(relevancyService.findRelevant).toHaveBeenCalledWith({
-        model: ContentModel,
+        model: getContentModel(),
         cypherService: cypherService,
         id: MOCK_CONTENT_ID,
         query: mockQuery,
@@ -526,7 +526,7 @@ describe("ContentController", () => {
       const result = await controller.findContentsRelevantForContent(emptyQuery, MOCK_CONTENT_ID);
 
       expect(relevancyService.findRelevant).toHaveBeenCalledWith({
-        model: ContentModel,
+        model: getContentModel(),
         cypherService: cypherService,
         id: MOCK_CONTENT_ID,
         query: emptyQuery,

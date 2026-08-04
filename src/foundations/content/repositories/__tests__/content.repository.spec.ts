@@ -4,8 +4,10 @@ import { ConfigService } from "@nestjs/config";
 import { ContentRepository } from "../content.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
+import { ClsService } from "nestjs-cls";
 import { ContentCypherService } from "../../services/content.cypher.service";
-import { Content } from "../../entities/content.entity";
+import { Content } from "../../entities/content";
+import { ContentExtensionConfig, CONTENT_EXTENSION_CONFIG } from "../../interfaces/content.extension.interface";
 import { modelRegistry } from "../../../../common/registries/registry";
 
 // Test IDs
@@ -43,6 +45,9 @@ const createMockContentCypherService = () => ({
   default: vi.fn().mockReturnValue("MATCH (content:Article|Document)"),
   userHasAccess: vi.fn().mockReturnValue("WITH content, company, currentUser"),
   returnStatement: vi.fn().mockReturnValue("RETURN content"),
+  // Default (no extension config) fragments — see ContentCypherService
+  tldrFilter: vi.fn().mockReturnValue(""),
+  ownerMatch: vi.fn(({ target }: { target: string }) => `MATCH (content)<-[:PUBLISHED]-(${target})`),
 });
 
 // Mock the model registry
@@ -421,6 +426,98 @@ describe("ContentRepository", () => {
       await repository.find({ term: specialTerm });
 
       expect(mockQuery.queryParams.term).toBe(specialTerm);
+    });
+  });
+
+  describe("configuration seams (real ContentCypherService)", () => {
+    const A360_CONFIG: ContentExtensionConfig = {
+      additionalRelationships: [],
+      ownerMatchPattern: { relationships: ["PUBLISHED", "FROM"], undirected: true },
+      requireTldr: true,
+      metaFields: [
+        {
+          key: "proceedingId",
+          optionalMatch: "OPTIONAL MATCH (memoProceeding:Proceeding)-[:HAS_MEMO]->(content)",
+          returnAlias: "memoProceeding.id",
+        },
+      ],
+      serialiseAuthor: false,
+    };
+
+    const buildRepository = async (extension?: ContentExtensionConfig) => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          ContentRepository,
+          ContentCypherService,
+          { provide: Neo4jService, useValue: neo4jService },
+          { provide: ConfigService, useValue: configService },
+          { provide: SecurityService, useValue: securityService },
+          { provide: ClsService, useValue: { get: vi.fn(), set: vi.fn(), run: vi.fn() } },
+          ...(extension ? [{ provide: CONTENT_EXTENSION_CONFIG, useValue: extension }] : []),
+        ],
+      }).compile();
+
+      return module.get<ContentRepository>(ContentRepository);
+    };
+
+    it("should apply no tldr filter in findByIds without configuration", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const defaultRepository = await buildRepository();
+
+      await defaultRepository.findByIds({ contentIds: [TEST_IDS.contentId1] });
+
+      expect(mockQuery.query).toContain("WHERE content.id IN $ids");
+      expect(mockQuery.query).not.toContain("tldr");
+    });
+
+    it("should match the owner on a directed PUBLISHED edge without configuration", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const defaultRepository = await buildRepository();
+
+      await defaultRepository.findByOwner({ ownerId: TEST_IDS.ownerId });
+
+      expect(mockQuery.query).toContain("MATCH (content)<-[:PUBLISHED]-(:User {id: $ownerId})");
+    });
+
+    it("should apply the tldr filter in findByIds when requireTldr is set", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const a360Repository = await buildRepository(A360_CONFIG);
+
+      await a360Repository.findByIds({ contentIds: [TEST_IDS.contentId1] });
+
+      expect(mockQuery.query).toContain("AND content.tldr IS NOT NULL");
+      expect(mockQuery.query).toContain(`AND content.tldr <> ""`);
+      expect(mockQuery.query).toContain("memoProceeding.id AS proceedingId");
+    });
+
+    it("should apply the tldr filter in find when requireTldr is set", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const a360Repository = await buildRepository(A360_CONFIG);
+
+      await a360Repository.find({});
+
+      expect(mockQuery.query).toContain("WHERE content.tldr IS NOT NULL");
+      expect(mockQuery.query).toContain(`AND content.tldr <> ""`);
+    });
+
+    it("should match the owner on the undirected PUBLISHED|FROM edge when configured", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const a360Repository = await buildRepository(A360_CONFIG);
+
+      await a360Repository.findByOwner({ ownerId: TEST_IDS.ownerId });
+
+      expect(mockQuery.query).toContain("MATCH (content)-[:PUBLISHED|FROM]-(:User {id: $ownerId})");
+      expect(mockQuery.query).not.toContain("content_author");
     });
   });
 });

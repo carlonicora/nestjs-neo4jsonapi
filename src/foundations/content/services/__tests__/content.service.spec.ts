@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ContentService } from "../content.service";
 import { ContentRepository } from "../../repositories/content.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 describe("ContentService", () => {
   let service: ContentService;
@@ -36,8 +37,24 @@ describe("ContentService", () => {
     buildError: vi.fn(),
   });
 
+  // ContentService serialises with the model ContentModule.forRoot() registered
+  // (it carries the configured relationships / meta fields), so the registry
+  // must be populated before the service runs.
+  const REGISTERED_CONTENT_MODEL = {
+    type: "contents",
+    endpoint: "contents",
+    nodeName: "content",
+    labelName: "Content",
+    entity: undefined,
+    mapper: vi.fn(),
+    serialiser: class {},
+    singleChildrenTokens: ["company", "owner"],
+    childrenTokens: [],
+  } as any;
+
   beforeEach(async () => {
     vi.clearAllMocks();
+    modelRegistry.register(REGISTERED_CONTENT_MODEL);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -59,6 +76,17 @@ describe("ContentService", () => {
   describe("constructor", () => {
     it("should create the service", () => {
       expect(service).toBeDefined();
+    });
+  });
+
+  describe("model resolution", () => {
+    it("should serialise with the model registered by ContentModule.forRoot", async () => {
+      contentRepository.find.mockResolvedValue(MOCK_CONTENTS);
+      jsonApiService.buildList.mockReturnValue({ data: MOCK_CONTENTS });
+
+      await service.find({ query: {} });
+
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(REGISTERED_CONTENT_MODEL, MOCK_CONTENTS, expect.anything());
     });
   });
 

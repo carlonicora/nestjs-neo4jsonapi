@@ -35,4 +35,5 @@ export * from "./stripe";
 export * from "./tokenusage";
 export * from "./two-factor";
 export * from "./user";
+export * from "./user-activity";
 export * from "./rbac";

@@ -3,9 +3,8 @@ import { FastifyReply } from "fastify";
 
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
-import { Content } from "../../content/entities/content.entity";
+import { Content, getContentModel } from "../../content/entities/content";
 import { contentMeta } from "../../content/entities/content.meta";
-import { ContentModel } from "../../content/entities/content.model";
 import { ContentCypherService } from "../../content/services/content.cypher.service";
 import { ContentService } from "../../content/services/content.service";
 import { RelevancyService } from "../../relevancy/services/relevancy.service";
@@ -90,7 +89,7 @@ export class ContentController {
   @Get(`${contentMeta.endpoint}/:contentId/relevance`)
   async findContentsRelevantForContent(@Query() query: any, @Param("contentId") contentId: string) {
     return await this.relevancyService.findRelevant({
-      model: ContentModel,
+      model: getContentModel(),
       cypherService: this.cypherService,
       id: contentId,
       query: query,

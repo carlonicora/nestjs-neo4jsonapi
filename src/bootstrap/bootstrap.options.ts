@@ -5,6 +5,7 @@ import { SecurityService } from "../core/security/services/security.service";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
 import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
+import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
 
 /**
  * i18n configuration options
@@ -78,6 +79,23 @@ export interface BootstrapOptions {
    * ```
    */
   referral?: ReferralModuleConfig;
+
+  /**
+   * Configuration for the user-activity feature module.
+   * Controls the queue/job used to record activity and whether the global
+   * recording interceptor is installed. Omitted keys fall back to the module
+   * defaults (queue "user-activity", job "userActivity:record", interceptor off).
+   *
+   * @example
+   * ```typescript
+   * userActivity: {
+   *   queueId: QueueId.USER_ACTIVITY,
+   *   jobName: JobName.userActivity.Record,
+   *   interceptorEnabled: true,
+   * }
+   * ```
+   */
+  userActivity?: UserActivityModuleConfig;
 
   /**
    * OpenAPI documentation configuration.
