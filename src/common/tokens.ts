@@ -1,4 +1,6 @@
 import type { ExecutionContext } from "@nestjs/common";
+import type { ModelWeight } from "../core/llm/enums/model.weight";
+import type { TokenUsageInterface } from "./interfaces/token.usage.interface";
 
 /**
  * Injection tokens for common module dependencies
@@ -34,4 +36,47 @@ export const AUTH_CONTEXT_HOOK = Symbol("AUTH_CONTEXT_HOOK");
  */
 export interface AuthContextHookInterface {
   onAuthenticated(params: { request: any; context: ExecutionContext }): Promise<void> | void;
+}
+
+/**
+ * Optional application-provided sink for token-usage records produced INSIDE the
+ * package (today: every LLM call persisted by `LLMService.persistUsage`).
+ *
+ * Why it exists: `LLMModule` imports the package `TokenUsageModule`, so
+ * `LLMService` resolves the package `TokenUsageService` from its own module
+ * context. An application that subclasses the service and aliases the class
+ * token in ITS module (`{ provide: TokenUsageService, useExisting:
+ * ExtendedTokenUsageService }`) does NOT change what `LLMService` gets — Nest
+ * resolves per injector context — so package-side LLM calls silently bypassed
+ * the app's billing logic (a360ai: no `pages` written, no allowance deducted).
+ *
+ * Binding this token in a `@Global()` application module redirects those writes
+ * to the app's implementation. When no provider is registered, `LLMService`
+ * falls back to its module-local `TokenUsageService` — i.e. today's behaviour,
+ * unchanged, for every consumer that does not opt in.
+ *
+ * FUTURE PACKAGE CALLERS: any new package code that persists token usage MUST
+ * go through this token (`@Optional() @Inject(TOKEN_USAGE_RECORDER)` with the
+ * same `?? tokenUsageService` fallback) rather than injecting
+ * `TokenUsageService` directly. Injecting the class re-opens the bypass this
+ * seam closes. `LLMService` is currently the only such caller.
+ */
+export const TOKEN_USAGE_RECORDER = Symbol("TOKEN_USAGE_RECORDER");
+
+/**
+ * Contract implemented by an application-provided token-usage recorder.
+ *
+ * Deliberately minimal — the write path only. Cost/telemetry helpers
+ * (`computeCost`) stay on the package `TokenUsageService`, which every consumer
+ * keeps resolving as before.
+ */
+export interface TokenUsageRecorderInterface {
+  recordTokenUsage(params: {
+    tokens: TokenUsageInterface;
+    type: string;
+    relationshipId: string;
+    relationshipType: string;
+    useVisionCosts?: boolean;
+    modelWeight?: ModelWeight;
+  }): Promise<void>;
 }

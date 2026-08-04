@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { HttpException, HttpStatus } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { AbstractRepository } from "../abstract.repository";
@@ -813,6 +813,168 @@ describe("AbstractRepository", () => {
           itemIds: [TEST_IDS.relatedId],
         }),
       ).rejects.toThrow("removeFromRelationship only works with 'many' cardinality relationships");
+    });
+  });
+
+  describe("readOnly relationships", () => {
+    // A readOnly relationship is serialisation-only: no single-hop edge exists in the graph
+    // (foundations UserDescriptor.role hydrates through :Membership), so the generic
+    // descriptor-driven write paths must skip it and the direct relationship methods must
+    // reject it instead of silently writing a bogus edge / returning an empty list.
+    type ReadOnlyRelationships = TestRelationships & { members: RelationshipDef };
+
+    const createReadOnlyDescriptor = (): EntityDescriptor<TestEntity, ReadOnlyRelationships> => {
+      const base = createMockDescriptor(true);
+      return {
+        ...base,
+        relationships: {
+          ...base.relationships,
+          members: {
+            model: createMockRelatedModel(),
+            direction: "out",
+            relationship: "HAS_MEMBERSHIP",
+            cardinality: "many",
+            dtoKey: "members",
+            readOnly: true,
+          },
+        },
+        relationshipKeys: { author: "author", topics: "topics", members: "members" },
+      } as unknown as EntityDescriptor<TestEntity, ReadOnlyRelationships>;
+    };
+
+    class ReadOnlyRelationshipRepository extends AbstractRepository<TestEntity, ReadOnlyRelationships> {
+      protected readonly descriptor = createReadOnlyDescriptor();
+    }
+
+    let readOnlyRepository: ReadOnlyRelationshipRepository;
+
+    beforeEach(() => {
+      readOnlyRepository = new ReadOnlyRelationshipRepository(
+        neo4jService as unknown as Neo4jService,
+        securityService as unknown as SecurityService,
+        clsService as unknown as ClsService,
+      );
+    });
+
+    it("should never write a readOnly relationship on create", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await readOnlyRepository.create({
+        id: TEST_IDS.entityId,
+        name: "New Entity",
+        members: [TEST_IDS.relatedId],
+      });
+
+      expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
+      expect(mockQuery.queryParams.members).toBeUndefined();
+      // the readOnly relationship is not even validated - it is ignored entirely
+      expect(neo4jService.validateExistingNodes).not.toHaveBeenCalled();
+    });
+
+    it("should still write non-readOnly relationships on create (default behaviour unchanged)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await readOnlyRepository.create({
+        id: TEST_IDS.entityId,
+        name: "New Entity",
+        author: TEST_IDS.relatedId,
+        members: [TEST_IDS.relatedId],
+      });
+
+      expect(mockQuery.query).toContain("AUTHORED_BY");
+      expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
+      expect(neo4jService.validateExistingNodes).toHaveBeenCalledWith({
+        nodes: [{ id: TEST_IDS.relatedId, label: "RelatedEntity" }],
+      });
+    });
+
+    it("should never write a readOnly relationship on put", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await readOnlyRepository.put({
+        id: TEST_IDS.entityId,
+        name: "Updated Entity",
+        topics: [TEST_IDS.relatedId],
+        members: [TEST_IDS.relatedId],
+      });
+
+      // the writable relationship is still rewritten by the full update
+      expect(mockQuery.query).toContain("TAGGED_WITH");
+      expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
+    });
+
+    it("should never write a readOnly relationship on patch", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await readOnlyRepository.patch({
+        id: TEST_IDS.entityId,
+        author: TEST_IDS.relatedId,
+        members: [TEST_IDS.relatedId],
+      });
+
+      expect(mockQuery.query).toContain("AUTHORED_BY");
+      expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
+      expect(mockQuery.queryParams.members).toBeUndefined();
+    });
+
+    it("should throw BadRequest when adding to a readOnly relationship", async () => {
+      await expect(
+        readOnlyRepository.addToRelationship({
+          id: TEST_IDS.entityId,
+          relationship: "members",
+          items: [{ id: TEST_IDS.relatedId }],
+        }),
+      ).rejects.toThrow("Relationship 'members' is read-only");
+
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
+    });
+
+    it("should throw BadRequest when removing from a readOnly relationship", async () => {
+      await expect(
+        readOnlyRepository.removeFromRelationship({
+          id: TEST_IDS.entityId,
+          relationship: "members",
+          itemIds: [TEST_IDS.relatedId],
+        }),
+      ).rejects.toThrow("Relationship 'members' is read-only");
+
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
+    });
+
+    it("should throw BadRequest when querying by a readOnly relationship", async () => {
+      await expect(
+        readOnlyRepository.findByRelated({
+          relationship: "members",
+          id: TEST_IDS.relatedId,
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(neo4jService.readMany).not.toHaveBeenCalled();
+    });
+
+    it("should leave relationships without the flag writable (flag absent = today's behaviour)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.addToRelationship({
+        id: TEST_IDS.entityId,
+        relationship: "topics",
+        items: [{ id: TEST_IDS.relatedId, edgeProps: { relevance: 0.8 } }],
+      });
+
+      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });
   });
 

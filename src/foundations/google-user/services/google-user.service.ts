@@ -27,7 +27,7 @@ export class GoogleUserService {
     this.clsService.set("companyId", params.companyId);
     this.clsService.set("userId", params.userId);
 
-    await this.companyRepository.create({
+    await this.companyRepository.createCompanyNode({
       companyId: params.companyId,
       name: `${params.userDetails.name}`,
     });

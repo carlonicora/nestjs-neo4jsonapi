@@ -54,7 +54,7 @@ describe("CompanyService", () => {
   beforeEach(async () => {
     mockRepository = {
       findByCompanyId: vi.fn(),
-      create: vi.fn(),
+      createCompanyNode: vi.fn(),
       update: vi.fn(),
       updateConfigurations: vi.fn(),
       find: vi.fn(),
@@ -238,7 +238,7 @@ describe("CompanyService", () => {
     });
   });
 
-  describe("create", () => {
+  describe("createCompanyFromDTO", () => {
     it("should create a company with all parameters", async () => {
       const postData = {
         id: MOCK_COMPANY_ID,
@@ -256,11 +256,11 @@ describe("CompanyService", () => {
         },
       };
 
-      mockRepository.create.mockResolvedValue(MOCK_COMPANY);
+      mockRepository.createCompanyNode.mockResolvedValue(MOCK_COMPANY);
 
-      const result = await service.create({ data: postData as any });
+      const result = await service.createCompanyFromDTO({ data: postData as any });
 
-      expect(mockRepository.create).toHaveBeenCalledWith({
+      expect(mockRepository.createCompanyNode).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
         name: "New Company",
         configurations: '{"key": "value"}',
@@ -280,11 +280,11 @@ describe("CompanyService", () => {
         },
       };
 
-      mockRepository.create.mockResolvedValue(MOCK_COMPANY);
+      mockRepository.createCompanyNode.mockResolvedValue(MOCK_COMPANY);
 
-      await service.create({ data: postData as any });
+      await service.createCompanyFromDTO({ data: postData as any });
 
-      expect(mockRepository.create).toHaveBeenCalledWith({
+      expect(mockRepository.createCompanyNode).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
         name: "Minimal Company",
         configurations: undefined,
@@ -314,13 +314,13 @@ describe("CompanyService", () => {
       };
 
       const mockJsonApiResponse = { type: "companies", id: MOCK_COMPANY_ID };
-      mockRepository.create.mockResolvedValue(MOCK_COMPANY);
+      mockRepository.createCompanyNode.mockResolvedValue(MOCK_COMPANY);
       mockRepository.findByCompanyId.mockResolvedValue(MOCK_COMPANY);
       mockJsonApiService.buildSingle.mockResolvedValue(mockJsonApiResponse);
 
       const result = await service.createForController({ data: postData as any });
 
-      expect(mockRepository.create).toHaveBeenCalled();
+      expect(mockRepository.createCompanyNode).toHaveBeenCalled();
       expect(mockRepository.findByCompanyId).toHaveBeenCalledWith({ companyId: MOCK_COMPANY_ID });
       expect(mockJsonApiService.buildSingle).toHaveBeenCalled();
       expect(result).toEqual(mockJsonApiResponse);
@@ -454,7 +454,7 @@ describe("CompanyService", () => {
 
   describe("delete", () => {
     it("should add delete job to queue", async () => {
-      await service.delete({ companyId: MOCK_COMPANY_ID });
+      await service.delete({ id: MOCK_COMPANY_ID });
 
       expect(mockQueue.add).toHaveBeenCalledWith("deleteCompany", {
         companyId: MOCK_COMPANY_ID,
@@ -469,7 +469,7 @@ describe("CompanyService", () => {
       await service.deleteFullCompany({ companyId: MOCK_COMPANY_ID });
 
       expect(mockRepository.delete).toHaveBeenCalledWith({
-        companyId: MOCK_COMPANY_ID,
+        id: MOCK_COMPANY_ID,
       });
     });
   });
@@ -481,7 +481,7 @@ describe("CompanyService", () => {
       await service.deleteImmediate({ companyId: MOCK_COMPANY_ID });
 
       expect(mockRepository.delete).toHaveBeenCalledWith({
-        companyId: MOCK_COMPANY_ID,
+        id: MOCK_COMPANY_ID,
       });
     });
 
@@ -491,7 +491,7 @@ describe("CompanyService", () => {
       await service.deleteImmediate({ companyId: MOCK_COMPANY_ID, companyName: "Test Company" });
 
       expect(mockRepository.delete).toHaveBeenCalledWith({
-        companyId: MOCK_COMPANY_ID,
+        id: MOCK_COMPANY_ID,
       });
     });
   });

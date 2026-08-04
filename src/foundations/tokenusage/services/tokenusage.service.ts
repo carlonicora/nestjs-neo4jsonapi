@@ -2,27 +2,58 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { randomUUID } from "crypto";
+import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
+import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { TokenUsage, TokenUsageDescriptor } from "../../tokenusage/entities/tokenusage";
 import { TokenUsageRepository } from "../../tokenusage/repositories/tokenusage.repository";
 import { ModelWeight } from "../../../core/llm/enums/model.weight";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
 
+/**
+ * TokenUsage service.
+ *
+ * Extends `AbstractService` so a consuming application can subclass it (see
+ * `ExtendedTokenUsageService` in a consuming app) and have BOTH the inherited
+ * generic methods AND every method declared here serialise with the *extended*
+ * model. Model resolution is by subclass polymorphism — a subclass re-declares
+ * `descriptor` and `model` as initialised class fields — never by a registry
+ * lookup (Nest constructs providers before `onModuleInit`, where models are
+ * registered).
+ *
+ * Every member is `protected` rather than `private` precisely so a subclass can
+ * reuse it: TypeScript forbids a subclass from redeclaring a name a base class
+ * holds privately (TS2415), which would otherwise force the extension to invent
+ * aliases for its own constructor parameters.
+ *
+ * Inherited generic CRUD (find / findById / create / put / patch / delete) is
+ * unused by any HTTP route in the package — there is no tokenusage controller,
+ * records are only ever written through `recordTokenUsage()` — but is available
+ * to consuming apps that mount their own controller.
+ */
 @Injectable()
-export class TokenUsageService {
-  private readonly logger = new Logger(TokenUsageService.name);
+export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenUsageDescriptor.relationships> {
+  protected readonly descriptor = TokenUsageDescriptor;
+
+  protected readonly logger = new Logger(TokenUsageService.name);
 
   constructor(
-    private readonly tokenUsageRepository: TokenUsageRepository,
-    private readonly configService: ConfigService<BaseConfigInterface>,
-    private readonly eventEmitter: EventEmitter2,
-  ) {}
+    jsonApiService: JsonApiService,
+    protected readonly tokenUsageRepository: TokenUsageRepository,
+    clsService: ClsService,
+    protected readonly configService: ConfigService<BaseConfigInterface>,
+    protected readonly eventEmitter: EventEmitter2,
+  ) {
+    super(jsonApiService, tokenUsageRepository, clsService, TokenUsageDescriptor.model);
+  }
 
-  private get aiConfig(): ConfigAiInterface {
+  protected get aiConfig(): ConfigAiInterface {
     return this.configService.get<ConfigAiInterface>("ai");
   }
 
-  private configForWeight(weight?: ModelWeight) {
+  protected configForWeight(weight?: ModelWeight) {
     switch (weight) {
       case ModelWeight.Lite:
         return this.aiConfig.aiLite;

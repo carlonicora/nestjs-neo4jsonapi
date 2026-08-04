@@ -155,7 +155,7 @@ export class UserController {
         companyId: body.data.relationships.company.data.id,
       });
     } else {
-      await this.companyService.create({
+      await this.companyService.createCompanyFromDTO({
         data: body.included[0] as CompanyPostDataDTO,
       });
       forceCompanyAdmin = true;

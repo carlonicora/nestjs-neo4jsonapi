@@ -142,7 +142,7 @@ describe("UserController", () => {
 
     const mockCompanyService = {
       validate: vi.fn(),
-      create: vi.fn(),
+      createCompanyFromDTO: vi.fn(),
     };
 
     const mockCacheService = {
@@ -363,12 +363,12 @@ describe("UserController", () => {
         included: [{ type: "companies", attributes: { name: "New Company" } }],
       };
       userService.expectNotExists.mockResolvedValue(undefined);
-      companyService.create.mockResolvedValue(undefined);
+      companyService.createCompanyFromDTO.mockResolvedValue(undefined);
       userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.createUser(req, bodyWithCompany as any, mockReply, undefined);
 
-      expect(companyService.create).toHaveBeenCalled();
+      expect(companyService.createCompanyFromDTO).toHaveBeenCalled();
       expect(userService.createUser).toHaveBeenCalledWith({
         data: bodyWithCompany.data,
         forceCompanyAdmin: true,

@@ -2,12 +2,13 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as ai from "ai";
 import { wrapAISDK } from "langsmith/experimental/vercel";
 import { ZodType } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
@@ -239,6 +240,13 @@ export class LLMService {
     // cache) keep resolving LLMService; when absent, cacheable calls simply
     // skip the cache and run normally.
     @Optional() private readonly cache?: LLMCacheService,
+    // Optional application-provided sink for the usage records written below.
+    // See TOKEN_USAGE_RECORDER in common/tokens.ts: `LLMModule` imports the
+    // package `TokenUsageModule`, so `tokenUsageService` above is ALWAYS the
+    // package implementation, whatever an app aliases in its own module. When
+    // this token is bound, persistUsage writes through the app's implementation
+    // instead; when it is absent, behaviour is unchanged.
+    @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
   ) {}
 
   /**
@@ -321,6 +329,12 @@ export class LLMService {
    * Records token usage for cost/observability attribution. Never throws —
    * a persistence failure logs a warning and the LLM call continues, so
    * observability problems can't break the primary request path.
+   *
+   * Writes through the application-provided `TOKEN_USAGE_RECORDER` when one is
+   * bound, falling back to the module-local `TokenUsageService` otherwise. This
+   * is the ONLY token-usage write inside the package; any future package caller
+   * MUST use the same token rather than injecting `TokenUsageService` directly
+   * (see the token's docblock for why).
    */
   private async persistUsage(
     params: {
@@ -336,7 +350,7 @@ export class LLMService {
     // so we skip — the package stays domain-agnostic.
     if (!params.relationshipId || !params.relationshipType) return;
     try {
-      await this.tokenUsageService.recordTokenUsage({
+      await (this.tokenUsageRecorder ?? this.tokenUsageService).recordTokenUsage({
         tokens,
         type: params.tokenUsageType ?? TokenUsageType.TextGeneration,
         relationshipId: params.relationshipId,

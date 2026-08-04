@@ -1,7 +1,7 @@
-export { TokenUsage } from "./entities/tokenusage.entity";
+export { TokenUsage, TokenUsageDescriptor } from "./entities/tokenusage";
 export { tokenUsageMeta } from "./entities/tokenusage.meta";
-export { TokenUsageModel } from "./entities/tokenusage.model";
 export { TokenUsageType } from "./enums/tokenusage.type";
+export { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "./events/tokenusage.events";
 export { TokenUsageRepository } from "./repositories/tokenusage.repository";
 export { TokenUsageService } from "./services/tokenusage.service";
 export { TokenUsageModule } from "./tokenusage.module";

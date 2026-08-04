@@ -46,6 +46,6 @@ export class CompanyProcessor extends WorkerHost {
   }
 
   async deleteFullCompany(params: { companyId: string }): Promise<void> {
-    await this.companyRepository.delete({ companyId: params.companyId });
+    await this.companyRepository.delete({ id: params.companyId });
   }
 }

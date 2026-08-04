@@ -9,6 +9,7 @@ import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 import { LLMCallDumper } from "../llm-call-dumper.service";
 import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
+import { TOKEN_USAGE_RECORDER } from "../../../../common/tokens";
 
 // Mock LangChain modules
 vi.mock("@langchain/core/messages", () => {
@@ -659,6 +660,88 @@ describe("LLMService", () => {
       });
 
       expect(result.response).toBe("test response");
+    });
+  });
+
+  // The seam that lets an application own the write path. `LLMModule` imports the
+  // package `TokenUsageModule`, so `tokenUsageService` is ALWAYS the package
+  // implementation no matter what an app aliases in its own module — an app that
+  // subclasses it (a360ai: writes `pages`, deducts the company allowance) needs
+  // this token to be reached at all.
+  describe("token usage recorder seam (TOKEN_USAGE_RECORDER)", () => {
+    const outputSchema = z.object({ response: z.string() });
+
+    /** Builds LLMService with the same mocks, optionally binding the override token. */
+    const buildService = async (recorder?: { recordTokenUsage: ReturnType<typeof vi.fn> }): Promise<LLMService> => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          LLMService,
+          { provide: ModelService, useValue: mockModelService },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: LLMCallDumper, useValue: mockDumper },
+          { provide: TokenUsageService, useValue: mockTokenUsageService },
+          ...(recorder ? [{ provide: TOKEN_USAGE_RECORDER, useValue: recorder }] : []),
+        ],
+      }).compile();
+
+      return module.get<LLMService>(LLMService);
+    };
+
+    it("writes through the override when TOKEN_USAGE_RECORDER is bound", async () => {
+      const overrideRecord = vi.fn().mockResolvedValue(undefined);
+      const overridden = await buildService({ recordTokenUsage: overrideRecord });
+
+      await overridden.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        tokenUsageType: "graph_creator",
+        relationshipId: "document-1",
+        relationshipType: "Document",
+      });
+
+      expect(overrideRecord).toHaveBeenCalledTimes(1);
+      const arg = overrideRecord.mock.calls[0][0];
+      expect(arg.type).toBe("graph_creator");
+      expect(arg.relationshipId).toBe("document-1");
+      expect(arg.relationshipType).toBe("Document");
+      expect(arg.tokens).toEqual({ input: 100, output: 50, cached: 0 });
+
+      // The module-local service must NOT also be written to — a double write
+      // would bill the same call twice.
+      expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the module-local TokenUsageService when the token is absent", async () => {
+      const plain = await buildService();
+
+      await plain.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        tokenUsageType: "graph_creator",
+        relationshipId: "document-1",
+        relationshipType: "Document",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].type).toBe("graph_creator");
+    });
+
+    it("does NOT throw when the override rejects (persistence stays best-effort)", async () => {
+      const overrideRecord = vi.fn().mockRejectedValue(new Error("db down"));
+      const overridden = await buildService({ recordTokenUsage: overrideRecord });
+
+      const result = await overridden.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        relationshipId: "document-1",
+        relationshipType: "Document",
+      });
+
+      expect(result.response).toBe("test response");
+      expect(overrideRecord).toHaveBeenCalledTimes(1);
     });
   });
 

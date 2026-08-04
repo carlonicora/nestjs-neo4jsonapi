@@ -94,12 +94,18 @@ export const UserDescriptor = defineEntity<User>()({
     // (user)-[:HAS_MEMBERSHIP]->(:Role) edge (write). Use the explicit domain
     // methods — findMany / findByUserId / createUser / putUser / addUserToRole —
     // for anything involving roles.
+    //
+    // `readOnly: true` closes that hole generically (spec §3.4): the generic
+    // create/put/patch paths skip this relationship and findByRelated /
+    // addToRelationship / removeFromRelationship reject it with 400 instead of
+    // silently writing a bogus edge or returning an empty list.
     role: {
       model: roleMeta,
       direction: "out",
       relationship: "HAS_MEMBERSHIP",
       cardinality: "many",
       dtoKey: "roles",
+      readOnly: true,
     },
     company: {
       model: CompanyDescriptor.model,

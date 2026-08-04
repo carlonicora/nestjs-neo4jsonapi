@@ -1,26 +1,50 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { updateRelationshipQuery } from "../../../core";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
 import { Company, CompanyDescriptor } from "../../company/entities/company";
 import { featureMeta } from "../../feature/entities/feature.meta";
-import { moduleMeta } from "../../module";
+import { moduleMeta } from "../../module/entities/module.meta";
 import { companyMeta } from "../entities/company.meta";
 
+/**
+ * Company repository.
+ *
+ * Extends `AbstractRepository` so a consuming application can subclass it (see
+ * `ExtendedCompanyRepository`) and have BOTH the inherited generic methods AND
+ * every method declared here resolve the *extended* descriptor. Model resolution
+ * is by subclass polymorphism — `this.descriptor` — never by a registry lookup:
+ * Nest constructs providers long before `onModuleInit`, where models are
+ * registered, so a registry lookup at construction time would yield `undefined`.
+ *
+ * COMPANY SCOPING — why this repository never calls `buildDefaultMatch()`.
+ * Company is the TENANT ROOT (`CompanyDescriptor.isCompanyScoped: false`): there is
+ * no parent company to filter by, and `buildDefaultMatch()` would inject a
+ * `BELONGS_TO`→Company join onto the Company node itself, which is meaningless.
+ * Tenancy is expressed per query instead: company-scoped reads/writes carry an
+ * explicit `MATCH (company:Company {id: $companyId})`, while the deliberately
+ * cross-tenant queries (platform-admin listings, deletion sweeps) match the label
+ * directly BY DESIGN.
+ *
+ * The one domain method whose name collides with the abstract's generic CRUD
+ * (`create`) is named `createCompanyNode` so the inherited descriptor-driven CRUD
+ * stays reachable.
+ */
 @Injectable()
-export class CompanyRepository implements OnModuleInit {
-  constructor(
-    private readonly neo4j: Neo4jService,
-    private readonly clsService: ClsService,
-  ) {}
+export class CompanyRepository extends AbstractRepository<Company, typeof CompanyDescriptor.relationships> {
+  protected readonly descriptor = CompanyDescriptor;
 
-  async onModuleInit() {
-    await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT company_id IF NOT EXISTS FOR (company:Company) REQUIRE company.id IS UNIQUE`,
-    });
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
   }
+
+  // NOTE: onModuleInit() is inherited from AbstractRepository — it creates the
+  // same `company_id` uniqueness constraint the old custom implementation did,
+  // derived from CompanyDescriptor's auto-generated `constraints`.
 
   async fetchAll(): Promise<Company[]> {
     const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
@@ -76,7 +100,16 @@ export class CompanyRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async create(params: {
+  /**
+   * Create a new company with its defaults and HAS_FEATURE/HAS_MODULE relationships.
+   *
+   * RENAMED from `create` to `createCompanyNode` (TS2416): the inherited
+   * `AbstractRepository.create()` is descriptor-driven and returns `Promise<void>`,
+   * so this DTO-independent, domain-specific creator cannot override it. The name
+   * mirrors the shipped a360ai reference implementation, which already compiles
+   * against the abstracts.
+   */
+  async createCompanyNode(params: {
     companyId: string;
     name: string;
     configurations?: string;
@@ -498,11 +531,21 @@ export class CompanyRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
-  async delete(params: { companyId: string }): Promise<void> {
+  /**
+   * Delete a company and cascade its Memberships.
+   *
+   * KEPT under the name `delete` (overriding `AbstractRepository.delete()`) — the
+   * Membership cascade below MUST run for every caller, including an application
+   * subclass that overrides it. The param was renamed from `companyId` to `id` to
+   * match `AbstractRepository.delete()`'s exact `{ id: string }` shape (required to
+   * satisfy `extends AbstractRepository`); this mirrors the shipped a360ai
+   * reference implementation.
+   */
+  async delete(params: { id: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
-      companyId: params.companyId,
+      companyId: params.id,
     };
 
     // SC-3 invariant: an orphaned Membership whose company vanished would read as a
