@@ -1,3 +1,5 @@
+## [1.118.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.117.0...v1.118.0) (2026-08-07)
+
 ## [1.117.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.116.0...v1.117.0) (2026-08-07)
 
 ## [1.116.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v1.115.1...v1.116.0) (2026-08-04)
