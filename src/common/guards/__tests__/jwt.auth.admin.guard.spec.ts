@@ -142,15 +142,20 @@ describe("AdminJwtAuthGuard", () => {
       expect(() => guard.handleRequest(originalError, null, null, context)).toThrow(originalError);
     });
 
-    it("should return null when no user and no error", () => {
+    // SECURITY REGRESSION GUARD. This previously asserted `toBeNull()`, which
+    // encoded an auth bypass: AuthGuard.canActivate assigns the return value to
+    // request.user and then returns true unconditionally, so a null return
+    // ADMITTED the caller and skipped _validateRoles entirely. Reached with any
+    // token passport rejects for a reason other than expiry — a forged
+    // signature or a malformed JWT — on every route this guard protects.
+    it("should THROW 401 when a token is present but yields no user and no error", () => {
       const context = createMockExecutionContext({
-        headers: { authorization: "Bearer token" },
+        headers: { authorization: "Bearer forged-or-malformed" },
       });
       reflector.get.mockReturnValue([]);
 
-      const result = guard.handleRequest(null, null, null, context);
-
-      expect(result).toBeNull();
+      expect(() => guard.handleRequest(null, null, null, context)).toThrow(HttpException);
+      expect(() => guard.handleRequest(null, null, null, context)).toThrow("Unauthorised");
     });
 
     it("should set CLS values for admin user", () => {
