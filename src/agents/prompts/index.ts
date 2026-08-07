@@ -2,8 +2,12 @@
 // This file exports the default prompts for reference
 
 // Default prompts - re-exported from services for reference
-export { prompt as defaultGraphCreatorPrompt } from "../graph.creator/services/graph.creator.service";
+export { defaultGraphCreatorPrompt } from "../graph.creator/services/graph.creator.service";
+// Also exported under its bare in-service name, mirroring the responder pair below.
+export { prompt as graphCreatorPrompt } from "../graph.creator/services/graph.creator.service";
 export { defaultAnswerPrompt as defaultResponderAnswerPrompt } from "../responder/nodes/responder.answer.node.service";
+// Also exported under its own name — app-side prompt overrides reference it directly.
+export { defaultAnswerPrompt } from "../responder/nodes/responder.answer.node.service";
 
 // Contextualiser default prompts
 export { defaultQuestionRefinerPrompt } from "../contextualiser/nodes/question.refiner.node.service";

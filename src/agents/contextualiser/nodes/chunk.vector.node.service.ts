@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { z } from "zod";
@@ -11,6 +11,10 @@ import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
+import { NotebookContext } from "../../contextualiser/contexts/notebook.context";
+import { RETRIEVAL_SOURCES, RetrievalSourceContribution } from "../interfaces/retrieval.source.interface";
+
+const NEIGHBOR_WINDOW = 1;
 
 export const defaultChunkVectorPrompt = `
 As an intelligent assistant, your primary objective is to assess a specific **text chunk** and determine whether the available information suffices to answer the question.
@@ -77,6 +81,7 @@ const inputSchema = z.object({
 
 @Injectable()
 export class ChunkVectorNodeService {
+  private readonly logger = new Logger(ChunkVectorNodeService.name);
   private readonly systemPrompt: string;
 
   constructor(
@@ -85,20 +90,53 @@ export class ChunkVectorNodeService {
     private readonly webSocketService: WebSocketService,
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    @Optional()
+    @Inject(RETRIEVAL_SOURCES)
+    private readonly retrievalSources?: RetrievalSourceContribution[],
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.systemPrompt = prompts?.contextualiser?.chunkVector ?? defaultChunkVectorPrompt;
   }
 
   async execute(params: { state: typeof ContextualiserContext.State }): Promise<Partial<ContextualiserContextState>> {
-    const chunks = await this.chunkRepository.findPotentialChunks({
-      question: params.state.question,
-      dataLimits: params.state.limits,
-    });
+    const [chunks, contributed] = await Promise.all([
+      this.chunkRepository.findPotentialChunks({
+        question: params.state.question,
+        dataLimits: params.state.limits,
+      }),
+      Promise.all(
+        (this.retrievalSources ?? []).map((source) =>
+          source
+            .search({
+              question: params.state.question,
+              rationalPlan: params.state.rationalPlan,
+              companyId: params.state.companyId,
+              dataLimits: params.state.limits,
+            })
+            .catch((e: Error) => {
+              this.logger.warn(`retrieval source contribution failed: ${e.message}`);
+              return [];
+            }),
+        ),
+      ).then((lists) => lists.flat()),
+    ]);
 
-    if (chunks.length === 0) {
-      params.state.nextStep = "answer";
-      return params.state;
+    // Neighbour-window widening: each retrieved chunk is analysed together with the
+    // chunks immediately before/after it, so the LLM sees continuous prose.
+    const allRetrievedIds = chunks.map((c) => c.id);
+    const neighborRecords = allRetrievedIds.length
+      ? await this.chunkRepository.findChunkNeighbors({ chunkIds: allRetrievedIds, window: NEIGHBOR_WINDOW })
+      : [];
+    const neighborById = new Map(neighborRecords.map((n) => [n.chunkId, n]));
+    const widen = (id: string, content: string): string => {
+      const n = neighborById.get(id);
+      if (!n) return content;
+      return [...n.before, content, ...n.after].join("\n\n");
+    };
+
+    if (chunks.length === 0 && contributed.length === 0) {
+      this.logger.log("chunk_vector: no results — continuing per rational plan routing");
+      return {};
     }
 
     const llmResponses: ({
@@ -117,7 +155,7 @@ export class ChunkVectorNodeService {
         const inputParams: z.infer<typeof inputSchema> = {
           rationalPlan: params.state.rationalPlan,
           question: params.state.question,
-          text: chunk.content,
+          text: widen(chunk.id, chunk.content),
         };
 
         const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
@@ -151,7 +189,7 @@ export class ChunkVectorNodeService {
       input: 0,
       output: 0,
     };
-    const newNotebookEntries: { chunkId: string; content: string; reason: string }[] = [];
+    const newNotebookEntries: (typeof NotebookContext.State)[] = [];
     const statuses: string[] = [];
 
     for (const llmResponse of llmResponses.filter((response) => !!response)) {
@@ -161,6 +199,8 @@ export class ChunkVectorNodeService {
         chunkId: llmResponse.chunkId,
         content: llmResponse.note.content,
         reason: llmResponse.note.reason,
+        sourceLayer: "case",
+        metadata: undefined,
       });
       if (
         llmResponse.status &&
@@ -169,6 +209,16 @@ export class ChunkVectorNodeService {
       ) {
         statuses.push(llmResponse.status);
       }
+    }
+
+    for (const entry of contributed) {
+      newNotebookEntries.push({
+        chunkId: entry.chunkId,
+        content: entry.content,
+        reason: entry.reason,
+        sourceLayer: entry.sourceLayer ?? "case",
+        metadata: entry.metadata,
+      });
     }
 
     return {

@@ -5,7 +5,16 @@ import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.i
 export interface UnifiedTrace {
   planner: {
     reasoning: string;
+    /**
+     * The branch plan that ACTUALLY ran — the planner's pick after the config
+     * and per-call branch toggles have been applied. Always reflects execution.
+     */
     branchPlan: { runGraph: boolean; runContextualiser: boolean; runDrift: boolean };
+    /**
+     * The planner's original, unmasked pick. Present only when the toggles
+     * changed the plan, so its absence means "nothing was masked".
+     */
+    rawBranchPlan?: { runGraph: boolean; runContextualiser: boolean; runDrift: boolean };
     tokens: { input: number; output: number };
   };
   graph?: {

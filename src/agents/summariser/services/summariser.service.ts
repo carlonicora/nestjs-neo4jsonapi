@@ -5,8 +5,10 @@ import { ConfigService } from "@nestjs/config";
 import { UsageMetadata } from "../../../common/interfaces/langchain.usage.interface";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
+import { ConfigSummariserInterface } from "../../../config/interfaces/config.summariser.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
+import { sanitizeTldr } from "../utils/tldr.sanitizer";
 
 export const defaultMapPrompt = `Summarize the following content using clean markdown formatting.
 
@@ -40,6 +42,7 @@ export class SummariserService {
   private readonly mapPromptText: string;
   private readonly combinePromptText: string;
   private readonly tldrPromptText: string;
+  private readonly summariserConfig?: ConfigSummariserInterface;
 
   constructor(
     private readonly modelService: ModelService,
@@ -49,6 +52,8 @@ export class SummariserService {
     this.mapPromptText = prompts?.summariser?.map ?? defaultMapPrompt;
     this.combinePromptText = prompts?.summariser?.combine ?? defaultCombinePrompt;
     this.tldrPromptText = prompts?.summariser?.tldr ?? defaultTldrPrompt;
+
+    this.summariserConfig = this.configService.get<ConfigSummariserInterface>("summariser");
   }
 
   async summarise(params: { chunks: Chunk[] }): Promise<{
@@ -101,6 +106,22 @@ export class SummariserService {
 
     const summary = String(reduceResponse.content);
 
+    // Sentinel short-circuit: when the input has nothing meaningful to summarise, the
+    // configured prompt can instruct the model to emit a literal sentinel token instead of a
+    // summary. When the combine output is exactly that token, treat it as "no summary" and
+    // return empty content without firing the tldr LLM call.
+    const sentinel = this.summariserConfig?.emptySentinel;
+    if (sentinel && summary.trim().toUpperCase() === sentinel.toUpperCase()) {
+      return {
+        content: "",
+        tldr: "",
+        tokens: {
+          input: totalInputTokens,
+          output: totalOutputTokens,
+        },
+      };
+    }
+
     const tldrPrompt = ChatPromptTemplate.fromMessages([["user", this.tldrPromptText]]);
 
     const tldrFormatted = await tldrPrompt.invoke({ summary });
@@ -113,7 +134,9 @@ export class SummariserService {
 
     return {
       content: summary,
-      tldr: String(tldrResponse.content),
+      tldr: this.summariserConfig?.sanitizeTldr
+        ? sanitizeTldr(String(tldrResponse.content))
+        : String(tldrResponse.content),
       tokens: {
         input: totalInputTokens,
         output: totalOutputTokens,

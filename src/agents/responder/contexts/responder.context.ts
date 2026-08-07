@@ -7,6 +7,7 @@ import { DataLimits } from "../../../common/types/data.limits";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.interface";
 import type { EntityReference } from "../interfaces/entity.reference.interface";
+import type { ResponderResponseInterface } from "../interfaces/responder.response.interface";
 import type { UnifiedTrace } from "../interfaces/unified.trace.interface";
 
 export const ResponderContext = Annotation.Root({
@@ -37,7 +38,9 @@ export const ResponderContext = Annotation.Root({
     default: () => undefined,
     reducer: (current, update) => (current === undefined ? update : current),
   }),
-  sources: Annotation<{ chunkId: string; relevance: number; reason: string }[]>,
+  // Mirrors the response contract exactly, so `sourceLayer` / `metadata` survive
+  // the graph state with their declared types instead of being erased here.
+  sources: Annotation<ResponderResponseInterface["sources"]>,
   ontologies: Annotation<string[]>,
 
   // new

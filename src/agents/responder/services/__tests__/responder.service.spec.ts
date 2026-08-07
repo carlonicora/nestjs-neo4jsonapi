@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { Test } from "@nestjs/testing";
+import { ConfigService } from "@nestjs/config";
 import { ResponderService } from "../responder.service";
 import { ResponderContextFactoryService } from "../../factories/responder.context.factory";
 import { ContextualiserContextFactoryService } from "../../../contextualiser/factories/contextualiser.context.factory";
@@ -164,14 +165,9 @@ describe("ResponderService — unified workflow", () => {
   let contextualiserService: { run: Mock };
   let driftSearchService: { search: Mock };
   let answerNode: { execute: Mock };
+  let config: { get: Mock };
 
-  beforeEach(async () => {
-    plannerNode = { execute: vi.fn() };
-    graphNode = { execute: vi.fn().mockResolvedValue(graphSuccessReturn()) };
-    contextualiserService = { run: vi.fn().mockResolvedValue(contextualiserSuccessReturn()) };
-    driftSearchService = { search: vi.fn().mockResolvedValue(driftSuccessReturn()) };
-    answerNode = answerNodeMock();
-
+  async function build(): Promise<ResponderService> {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ResponderService,
@@ -182,10 +178,22 @@ describe("ResponderService — unified workflow", () => {
         { provide: ResponderAnswerNodeService, useValue: answerNode },
         { provide: PlannerNodeService, useValue: plannerNode },
         { provide: GraphNodeService, useValue: graphNode },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
 
-    service = moduleRef.get(ResponderService);
+    return moduleRef.get(ResponderService);
+  }
+
+  beforeEach(async () => {
+    plannerNode = { execute: vi.fn() };
+    graphNode = { execute: vi.fn().mockResolvedValue(graphSuccessReturn()) };
+    contextualiserService = { run: vi.fn().mockResolvedValue(contextualiserSuccessReturn()) };
+    driftSearchService = { search: vi.fn().mockResolvedValue(driftSuccessReturn()) };
+    answerNode = answerNodeMock();
+    config = { get: vi.fn().mockReturnValue(undefined) };
+
+    service = await build();
   });
 
   const baseRunArgs = () => ({
@@ -357,6 +365,69 @@ describe("ResponderService — unified workflow", () => {
     answerNode.execute.mockRejectedValue(new Error("answer LLM down"));
 
     await expect(service.run(baseRunArgs())).rejects.toThrow(/answer LLM down/);
+  });
+
+  describe("branch toggles", () => {
+    it("config responder.branches.drift=false masks the planner's drift pick", async () => {
+      config.get.mockReturnValue({ branches: { drift: false } });
+      service = await build();
+      plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: true }));
+
+      await service.run(baseRunArgs());
+
+      expect(graphNode.execute).toHaveBeenCalledTimes(1);
+      expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+    });
+
+    it("per-call branches mask the planner's picks", async () => {
+      plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: true }));
+
+      await service.run({ ...baseRunArgs(), branches: { graph: false, drift: false } });
+
+      expect(graphNode.execute).not.toHaveBeenCalled();
+      expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+    });
+
+    it("masking every picked branch falls back to the contextualiser when it is allowed", async () => {
+      plannerNode.execute.mockResolvedValue(
+        plannerOutput({ runGraph: true, runContextualiser: false, runDrift: true }),
+      );
+
+      await service.run({ ...baseRunArgs(), branches: { graph: false, drift: false } });
+
+      expect(graphNode.execute).not.toHaveBeenCalled();
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+      expect(contextualiserService.run).toHaveBeenCalledTimes(1);
+      expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("everything masked off routes straight to answer when the contextualiser is also disallowed", async () => {
+      plannerNode.execute.mockResolvedValue(plannerOutput({ runGraph: true, runContextualiser: true, runDrift: true }));
+
+      const result = await service.run({
+        ...baseRunArgs(),
+        branches: { graph: false, contextualiser: false, drift: false },
+      });
+
+      expect(graphNode.execute).not.toHaveBeenCalled();
+      expect(contextualiserService.run).not.toHaveBeenCalled();
+      expect(driftSearchService.search).not.toHaveBeenCalled();
+      expect(answerNode.execute).toHaveBeenCalledTimes(1);
+      expect(result.answer).toBeDefined();
+    });
+
+    it("a planner that picked nothing is left alone (no contextualiser fallback)", async () => {
+      plannerNode.execute.mockResolvedValue(
+        plannerOutput({ runGraph: false, runContextualiser: false, runDrift: false }),
+      );
+
+      await service.run(baseRunArgs());
+
+      expect(contextualiserService.run).not.toHaveBeenCalled();
+      expect(answerNode.execute).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("howToMode workflow", () => {

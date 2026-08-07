@@ -105,7 +105,7 @@ export class KeyConceptsNodeService {
           `(question="${params.state.question}" howToMode=${!!params.state.limits.howToMode} ` +
           `limitToHowToId=${params.state.limits.limitToHowToId ?? "none"})`,
       );
-    } else if (params.state.nextStep === "negbouring_nodes") {
+    } else if (params.state.nextStep === "neighbouring_nodes") {
       params.state.neighbouringAlreadyExplored = true;
       keyConcepts = await this.keyConceptRepository.findNeighboursByKeyConcepts({
         keyConcepts: params.state.processedKeyConcepts,

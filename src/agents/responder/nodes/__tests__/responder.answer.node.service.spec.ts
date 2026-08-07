@@ -390,6 +390,56 @@ describe("ResponderAnswerNodeService.execute", () => {
     expect(result.references![0]).toMatchObject({ type: "accounts", id: "a-1", relevance: 90 });
   });
 
+  it("citation backfill: sourceLayer and metadata are carried from the notebook onto each source", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(
+      makeLLMResponse({
+        citations: [
+          { chunkId: "chunk-1", relevance: 70 },
+          { chunkId: "chunk-1", relevance: 95 }, // duplicate — dedup keeps the first, enriched entry
+          { chunkId: "chunk-2", relevance: 60 },
+          { chunkId: "chunk-unknown", relevance: 40 }, // not in the notebook — stays bare
+        ],
+      }),
+    );
+
+    const state = buildState({
+      branchPlan: { runGraph: false, runContextualiser: true, runDrift: false, reasoning: "" },
+      context: {
+        ...sampleContext,
+        notebook: [
+          {
+            chunkId: "chunk-1",
+            content: "X is a thing",
+            reason: "definition",
+            sourceLayer: "reference",
+            metadata: { docId: "d-1", docName: "Handbook" },
+          },
+          // no sourceLayer → package default "case"
+          { chunkId: "chunk-2", content: "X has properties", reason: "details" },
+        ],
+      },
+    });
+
+    const result = await service.execute({ state });
+
+    expect(result.sources).toHaveLength(3);
+
+    const chunk1 = result.sources!.find((s) => s.chunkId === "chunk-1")! as any;
+    expect(chunk1.relevance).toBe(95); // dedup raises the kept entry's relevance
+    expect(chunk1.reason).toBe("definition");
+    expect(chunk1.sourceLayer).toBe("reference");
+    expect(chunk1.metadata).toEqual({ docId: "d-1", docName: "Handbook" });
+
+    const chunk2 = result.sources!.find((s) => s.chunkId === "chunk-2")! as any;
+    expect(chunk2.sourceLayer).toBe("case"); // package default
+    expect(chunk2.metadata).toBeUndefined();
+
+    const unknown = result.sources!.find((s) => s.chunkId === "chunk-unknown")! as any;
+    expect(unknown.reason).toBe("");
+    expect(unknown.sourceLayer).toBeUndefined();
+    expect(unknown.metadata).toBeUndefined();
+  });
+
   it("scope section: contentId/contentType set produces scopeSection with type:id token", async () => {
     (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
 

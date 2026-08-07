@@ -8,6 +8,7 @@ import { RationalNodeService } from "../../nodes/rational.node.service";
 import { KeyConceptsNodeService } from "../../nodes/keyconcepts.node.service";
 import { AtomicFactsNodeService } from "../../nodes/atomicfacts.node.service";
 import { ChunkNodeService } from "../../nodes/chunk.node.service";
+import { ChunkVectorNodeService } from "../../nodes/chunk.vector.node.service";
 import { TracingService } from "../../../../core/tracing/services/tracing.service";
 import { ContextualiserContextState } from "../../contexts/contextualiser.context";
 
@@ -106,6 +107,7 @@ describe("ContextualiserService", () => {
     const mockKeyConceptsNode = createMockNodeService();
     const mockAtomicFactsNode = createMockNodeService();
     const mockChunkNode = createMockNodeService();
+    const mockChunkVectorNode = createMockNodeService();
     const mockClsService = createMockClsService();
     const mockTracingService = createMockTracingService();
 
@@ -118,6 +120,7 @@ describe("ContextualiserService", () => {
         { provide: KeyConceptsNodeService, useValue: mockKeyConceptsNode },
         { provide: AtomicFactsNodeService, useValue: mockAtomicFactsNode },
         { provide: ChunkNodeService, useValue: mockChunkNode },
+        { provide: ChunkVectorNodeService, useValue: mockChunkVectorNode },
         { provide: ClsService, useValue: mockClsService },
         { provide: TracingService, useValue: mockTracingService },
       ],
@@ -171,12 +174,12 @@ describe("ContextualiserService", () => {
           question: "What is this?",
           maxHops: 20,
           recursionLimit: 22,
-          initialNode: "question_refiner",
+          initialNode: "rational_plan",
         }),
       });
     });
 
-    it("should use rational_plan as initial node when messages exist", async () => {
+    it("should use question_refiner as initial node when messages exist", async () => {
       // Arrange
       const initialState = createMockInitialState();
       contextFactory.create.mockReturnValue(initialState);
@@ -197,7 +200,7 @@ describe("ContextualiserService", () => {
         "Contextualiser Workflow",
         expect.objectContaining({
           attributes: expect.objectContaining({
-            initialNode: "rational_plan",
+            initialNode: "question_refiner",
             messagesCount: 1,
           }),
         }),

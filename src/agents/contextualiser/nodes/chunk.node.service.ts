@@ -1,4 +1,5 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { DynamicStructuredTool } from "@langchain/core/tools";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { z } from "zod";
@@ -12,6 +13,8 @@ import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
+import { NotebookContext } from "../../contextualiser/contexts/notebook.context";
+import { CONTEXTUALISER_TOOLS } from "../interfaces/retrieval.source.interface";
 
 export const defaultChunkPrompt = `
 As an intelligent assistant, your primary objective is to assess a specific **text chunk** and determine whether the available information suffices to answer the question.
@@ -92,6 +95,9 @@ export class ChunkNodeService {
     private readonly webSocketService: WebSocketService,
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    @Optional()
+    @Inject(CONTEXTUALISER_TOOLS)
+    private readonly contributedTools?: DynamicStructuredTool[],
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.systemPrompt = prompts?.contextualiser?.chunk ?? defaultChunkPrompt;
@@ -164,6 +170,7 @@ export class ChunkNodeService {
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],
           temperature: 0.1,
+          ...(this.contributedTools?.length ? { tools: this.contributedTools } : {}),
         });
 
         if (params.state.contentType === "Conversation")
@@ -189,7 +196,7 @@ export class ChunkNodeService {
       input: 0,
       output: 0,
     };
-    const newNotebookEntries: { chunkId: string; content: string; reason: string }[] = [];
+    const newNotebookEntries: (typeof NotebookContext.State)[] = [];
 
     const statuses = [];
     for (const llmResponse of llmResponses.filter((response) => !!response)) {
@@ -200,6 +207,8 @@ export class ChunkNodeService {
           chunkId: llmResponse.chunkId,
           content: llmResponse.note.content,
           reason: llmResponse.note.reason,
+          sourceLayer: "case",
+          metadata: undefined,
         });
       if (!statuses.includes(llmResponse.status) && !params.state.status.includes(llmResponse.status))
         statuses.push(llmResponse.status);

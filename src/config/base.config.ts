@@ -4,6 +4,8 @@ import { ConfigContentTypesInterface } from "./interfaces/config.content.types.i
 import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
 import { ConfigOperatorInterface } from "./interfaces/config.operator.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
+import { ConfigResponderInterface } from "./interfaces/config.responder.interface";
+import { ConfigSummariserInterface } from "./interfaces/config.summariser.interface";
 import { AiTierConfig } from "./interfaces/config.ai.interface";
 
 /**
@@ -84,6 +86,12 @@ export interface BaseConfigOptions {
    * All prompts are optional - the library includes working defaults.
    */
   prompts?: ConfigPromptsInterface;
+
+  /** Responder branch toggles (graph / contextualiser / drift). All default to enabled. */
+  responder?: ConfigResponderInterface;
+
+  /** Summariser behaviour switches (empty-content sentinel, TL;DR sanitizing). */
+  summariser?: ConfigSummariserInterface;
 
   /**
    * Operator agent configuration (approval gates).
@@ -400,6 +408,8 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       pendingTtl: parseInt(process.env.TWO_FACTOR_PENDING_TTL || "300", 10),
     },
     prompts: options?.prompts ?? {},
+    responder: options?.responder ?? {},
+    summariser: options?.summariser ?? {},
     operator: options?.operator ?? {},
     chunker: {
       strategy: (process.env.CHUNKER_STRATEGY as "markdown-structural" | "semantic") || "markdown-structural",

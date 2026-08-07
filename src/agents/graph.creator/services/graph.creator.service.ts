@@ -174,6 +174,18 @@ For each unique key concept extracted, generate a brief description (1-2 sentenc
 ## **Strictly follow the above instructions. Evaluate text quality first, then decompose compound sentences. Begin.**
 `;
 
+/**
+ * The default Graph Creator system prompt, exported under a descriptive name.
+ *
+ * This single prompt drives ONE LLM call whose schema demands `atomicFacts`,
+ * `keyConceptsRelationships` AND `keyConceptDescriptions`. An app that overrides
+ * `prompts.graphCreator` must therefore COMPOSE on top of this default (append a
+ * domain tail) rather than replace it — replacing it with a facts-only prompt
+ * leaves the relationship and description fields uninstructed, and they come
+ * back empty.
+ */
+export const defaultGraphCreatorPrompt = prompt;
+
 const outputSchema = z.object({
   atomicFacts: z
     .array(

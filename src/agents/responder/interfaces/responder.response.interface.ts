@@ -18,7 +18,15 @@ export interface ResponderResponseInterface {
     questions: string[];
     hasAnswer: boolean;
   };
-  sources: { chunkId: string; relevance: number; reason: string }[];
+  sources: {
+    chunkId: string;
+    relevance: number;
+    reason: string;
+    /** App-defined provenance tag for the chunk; package default is "case". */
+    sourceLayer?: string;
+    /** Opaque app payload carried through from the retrieval source. */
+    metadata?: Record<string, unknown>;
+  }[];
   references: EntityReference[];
   ontologies: string[];
   trace: UnifiedTrace;

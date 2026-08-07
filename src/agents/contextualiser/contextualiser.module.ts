@@ -10,12 +10,14 @@ import { ContextualiserService } from "./services/contextualiser.service";
 import { LLMModule } from "../../core/llm/llm.module";
 import { AtomicFactModule } from "../../foundations/atomicfact/atomicfact.module";
 import { ChunkModule } from "../../foundations/chunk/chunk.module";
-import { CompanyModule } from "../../foundations/company/company.module";
+// NOTE: CompanyModule is deliberately NOT imported — see the note in
+// responder.module.ts. Nothing here injects CompanyService/CompanyRepository,
+// and importing it would mount CompanyController into every consumer.
 import { KeyConceptModule } from "../../foundations/keyconcept/keyconcept.module";
 import { S3Module } from "../../foundations/s3/s3.module";
 
 @Module({
-  imports: [LLMModule, S3Module, CompanyModule, AtomicFactModule, KeyConceptModule, ChunkModule],
+  imports: [LLMModule, S3Module, AtomicFactModule, KeyConceptModule, ChunkModule],
   providers: [
     ContextualiserContextFactoryService,
     ContextualiserService,

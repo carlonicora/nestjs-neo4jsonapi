@@ -167,6 +167,19 @@ const inputSchema = z.object({
 type ContextField = NonNullable<(typeof ResponderContext.State)["context"]>;
 type DriftContextField = NonNullable<(typeof ResponderContext.State)["driftContext"]>;
 
+/**
+ * A citation the synthesizer produced, enriched from the contextualiser's
+ * notebook. `sourceLayer` and `metadata` are opaque, app-defined provenance
+ * carried through from the retrieval sources to the responder's response.
+ */
+type AnswerSource = {
+  chunkId: string;
+  relevance: number;
+  reason: string;
+  sourceLayer?: string;
+  metadata?: Record<string, unknown>;
+};
+
 @Injectable()
 export class ResponderAnswerNodeService {
   private readonly logger = new Logger(ResponderAnswerNodeService.name);
@@ -249,15 +262,21 @@ export class ResponderAnswerNodeService {
     });
 
     // Sources — chunks from the contextualiser branch
-    const sources = (llmResponse.citations ?? []).map((c) => ({
+    const sources: AnswerSource[] = (llmResponse.citations ?? []).map((c) => ({
       chunkId: c.chunkId ?? "",
       relevance: c.relevance ?? 0,
       reason: "",
+      sourceLayer: undefined as string | undefined,
+      metadata: undefined as Record<string, unknown> | undefined,
     }));
     if (state.context) {
       for (const s of sources) {
         const note = state.context.notebook?.find((n) => n.chunkId === s.chunkId);
-        if (note) s.reason = note.reason;
+        if (note) {
+          s.reason = note.reason;
+          s.sourceLayer = note.sourceLayer ?? "case";
+          s.metadata = note.metadata;
+        }
       }
     }
     const filteredSources = this.deduplicateByChunkId(sources);
@@ -360,10 +379,14 @@ export class ResponderAnswerNodeService {
     return parts.join("\n");
   }
 
-  private deduplicateByChunkId(
-    sources: { chunkId: string; relevance: number; reason: string }[],
-  ): { chunkId: string; relevance: number; reason: string }[] {
-    const out: { chunkId: string; relevance: number; reason: string }[] = [];
+  /**
+   * Keeps the FIRST entry for each chunkId — which, because the notebook
+   * backfill above runs over every source before deduplication, is already
+   * enriched with `reason` / `sourceLayer` / `metadata`. Later duplicates only
+   * ever raise the kept entry's relevance; their fields are discarded.
+   */
+  private deduplicateByChunkId(sources: AnswerSource[]): AnswerSource[] {
+    const out: AnswerSource[] = [];
     for (const s of sources) {
       const existing = out.find((o) => o.chunkId === s.chunkId);
       if (!existing) {

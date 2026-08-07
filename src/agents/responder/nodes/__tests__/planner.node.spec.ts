@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { Test } from "@nestjs/testing";
-import { PlannerNodeService, PLANNER_SYSTEM_PROMPT } from "../planner.node.service";
+import { ConfigService } from "@nestjs/config";
+import { PlannerNodeService, defaultPlannerPrompt } from "../planner.node.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
 
@@ -9,20 +10,27 @@ describe("PlannerNodeService", () => {
   const catalog = {
     getTypeIndexFor: vi.fn().mockReturnValue("- accounts — A customer."),
   } as unknown as GraphCatalogService;
+  const config = { get: vi.fn().mockReturnValue(undefined) } as unknown as ConfigService;
 
   let service: PlannerNodeService;
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    (catalog.getTypeIndexFor as unknown as Mock).mockReturnValue("- accounts — A customer.");
+  async function build(): Promise<PlannerNodeService> {
     const moduleRef = await Test.createTestingModule({
       providers: [
         PlannerNodeService,
         { provide: LLMService, useValue: llm },
         { provide: GraphCatalogService, useValue: catalog },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
-    service = moduleRef.get(PlannerNodeService);
+    return moduleRef.get(PlannerNodeService);
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    (catalog.getTypeIndexFor as unknown as Mock).mockReturnValue("- accounts — A customer.");
+    (config.get as unknown as Mock).mockReturnValue(undefined);
+    service = await build();
   });
 
   it("returns the structured plan and refined question on success", async () => {
@@ -105,15 +113,50 @@ describe("PlannerNodeService", () => {
     expect(promptBlob).toContain("abc-123");
   });
 
-  describe("PLANNER_SYSTEM_PROMPT", () => {
+  describe("prompt slot", () => {
+    it("uses the default planner prompt when config supplies none", async () => {
+      (llm.call as unknown as Mock).mockResolvedValue({
+        runGraph: true,
+        runContextualiser: false,
+        runDrift: false,
+        reasoning: "r",
+        refinedQuestion: "q",
+      });
+
+      await service.execute({ state: { userModuleIds: [], chatHistory: [], rawQuestion: "q" } as any });
+
+      const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+      expect(callArgs.systemPrompts).toEqual([defaultPlannerPrompt]);
+    });
+
+    it("prefers prompts.planner from config when set", async () => {
+      (config.get as unknown as Mock).mockReturnValue({ planner: "CUSTOM PLANNER PROMPT" });
+      const configured = await build();
+
+      (llm.call as unknown as Mock).mockResolvedValue({
+        runGraph: true,
+        runContextualiser: false,
+        runDrift: false,
+        reasoning: "r",
+        refinedQuestion: "q",
+      });
+
+      await configured.execute({ state: { userModuleIds: [], chatHistory: [], rawQuestion: "q" } as any });
+
+      const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+      expect(callArgs.systemPrompts).toEqual(["CUSTOM PLANNER PROMPT"]);
+    });
+  });
+
+  describe("defaultPlannerPrompt", () => {
     it("forbids paraphrasing proper-noun-looking spans in refinedQuestion", () => {
-      expect(PLANNER_SYSTEM_PROMPT).toMatch(/proper-noun-looking span/i);
-      expect(PLANNER_SYSTEM_PROMPT).toMatch(/verbatim/i);
-      expect(PLANNER_SYSTEM_PROMPT).toMatch(/Do not change "and" to "or"/i);
+      expect(defaultPlannerPrompt).toMatch(/proper-noun-looking span/i);
+      expect(defaultPlannerPrompt).toMatch(/verbatim/i);
+      expect(defaultPlannerPrompt).toMatch(/Do not change "and" to "or"/i);
     });
 
     it("explains why paraphrasing breaks the lookup", () => {
-      expect(PLANNER_SYSTEM_PROMPT).toMatch(/uses `?refinedQuestion`? as the user's literal phrase/i);
+      expect(defaultPlannerPrompt).toMatch(/uses `?refinedQuestion`? as the user's literal phrase/i);
     });
   });
 });

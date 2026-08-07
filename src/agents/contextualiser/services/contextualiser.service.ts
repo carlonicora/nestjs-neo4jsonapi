@@ -9,12 +9,23 @@ import {
 import { ContextualiserContextFactoryService } from "../../contextualiser/factories/contextualiser.context.factory";
 import { AtomicFactsNodeService } from "../../contextualiser/nodes/atomicfacts.node.service";
 import { ChunkNodeService } from "../../contextualiser/nodes/chunk.node.service";
+import { ChunkVectorNodeService } from "../../contextualiser/nodes/chunk.vector.node.service";
 import { KeyConceptsNodeService } from "../../contextualiser/nodes/keyconcepts.node.service";
 import { QuestionRefinerNodeService } from "../../contextualiser/nodes/question.refiner.node.service";
 import { RationalNodeService } from "../../contextualiser/nodes/rational.node.service";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
+
+/**
+ * Picks the graph entry node for a turn.
+ *
+ * A fresh conversation has nothing to refine, so it goes straight to the rational
+ * plan; every follow-up turn is first rewritten against the history by the
+ * question refiner.
+ */
+export const selectInitialNode = (messagesCount: number): "rational_plan" | "question_refiner" =>
+  messagesCount === 0 ? "rational_plan" : "question_refiner";
 
 @Injectable()
 export class ContextualiserService {
@@ -27,6 +38,7 @@ export class ContextualiserService {
     private readonly keyConceptsNode: KeyConceptsNodeService,
     private readonly atomicFactsNode: AtomicFactsNodeService,
     private readonly chunkNode: ChunkNodeService,
+    private readonly chunkVectorNode: ChunkVectorNodeService,
     private readonly clsService: ClsService,
     private readonly tracer: TracingService,
   ) {}
@@ -45,7 +57,7 @@ export class ContextualiserService {
     const mainPrompt: string | undefined = undefined;
     const finalPrompt: string | undefined = undefined;
 
-    const initial = params.messages.length === 0 ? "question_refiner" : "rational_plan";
+    const initial = selectInitialNode(params.messages.length);
 
     this.logger.log(
       `contextualiser START question="${params.question ?? "<from history>"}" ` +
@@ -123,6 +135,14 @@ export class ContextualiserService {
         });
         return result;
       })
+      .addNode("chunk_vector", async (state: ContextualiserContextState) => {
+        this.tracer.addSpanEvent(`Node: chunk_vector - hop ${state.hops}/${maxHops}`, {
+          hopCount: state.hops,
+        });
+        const result = await this.chunkVectorNode.execute({ state });
+        this.tracer.addSpanEvent(`Node: chunk_vector complete - hop ${state.hops}/${maxHops}`);
+        return result;
+      })
       .addNode("chunks", async (state: ContextualiserContextState) => {
         this.tracer.addSpanEvent(`Node: chunks - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
@@ -155,7 +175,8 @@ export class ContextualiserService {
       })
       .addEdge(START, initial)
       .addEdge("question_refiner", "rational_plan")
-      .addConditionalEdges("rational_plan", (state: ContextualiserContextState) => returnState({ state }))
+      .addEdge("rational_plan", "chunk_vector")
+      .addConditionalEdges("chunk_vector", (state: ContextualiserContextState) => returnState({ state }))
       .addConditionalEdges("key_concepts", (state: ContextualiserContextState) =>
         returnState({ state: state, forceNextStep: "atomic_facts" }),
       )

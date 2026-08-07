@@ -8,11 +8,15 @@ import { PlannerNodeService } from "./nodes/planner.node.service";
 import { ResponderAnswerNodeService } from "./nodes/responder.answer.node.service";
 import { ResponderService } from "./services/responder.service";
 import { LLMModule } from "../../core/llm/llm.module";
-import { CompanyModule } from "../../foundations/company/company.module";
 import { S3Module } from "../../foundations/s3/s3.module";
 
+// NOTE: CompanyModule is deliberately NOT imported. Nothing in this module's
+// provider graph injects CompanyService/CompanyRepository, and CompanyModule
+// declares CompanyController — importing it mounts `companies/*` routes into
+// every consumer. An app that replaces the company foundation with its own
+// controller then boots into a duplicate-route crash.
 @Module({
-  imports: [LLMModule, S3Module, CompanyModule, ContextualiserModule, DriftModule, GraphModule],
+  imports: [LLMModule, S3Module, ContextualiserModule, DriftModule, GraphModule],
   providers: [
     ResponderContextFactoryService,
     ResponderService,

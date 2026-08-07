@@ -1,6 +1,9 @@
 import { END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigResponderInterface } from "../../../config/interfaces/config.responder.interface";
 import { ContextualiserService } from "../../contextualiser/services/contextualiser.service";
 import { DriftSearchService } from "../../drift/services/drift.search.service";
 import { ResponderContext, ResponderContextState } from "../contexts/responder.context";
@@ -13,6 +16,23 @@ import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { DataLimits } from "../../../common/types/data.limits";
 
+export interface BranchToggles {
+  graph?: boolean;
+  contextualiser?: boolean;
+  drift?: boolean;
+}
+
+/**
+ * Composes the deployment-wide branch toggles (`responder.branches` in config)
+ * with the per-call toggles passed to `run()`. A branch is allowed only when
+ * BOTH say so — either side switching it off wins. Both default to `true`.
+ */
+export const resolveAllowedBranches = (config?: BranchToggles, perCall?: BranchToggles) => ({
+  graph: (config?.graph ?? true) && (perCall?.graph ?? true),
+  contextualiser: (config?.contextualiser ?? true) && (perCall?.contextualiser ?? true),
+  drift: (config?.drift ?? true) && (perCall?.drift ?? true),
+});
+
 @Injectable()
 export class ResponderService {
   private readonly logger = new Logger(ResponderService.name);
@@ -24,6 +44,7 @@ export class ResponderService {
     private readonly answerNode: ResponderAnswerNodeService,
     private readonly plannerNode: PlannerNodeService,
     private readonly graphNode: GraphNodeService,
+    private readonly configService: ConfigService<BaseConfigInterface>,
   ) {}
 
   async run(params: {
@@ -35,7 +56,13 @@ export class ResponderService {
     dataLimits: DataLimits;
     messages: MessageInterface[];
     question?: string;
+    branches?: BranchToggles;
   }): Promise<ResponderResponseInterface> {
+    const allowed = resolveAllowedBranches(
+      this.configService.get<ConfigResponderInterface>("responder")?.branches,
+      params.branches,
+    );
+
     const lastUserMessage =
       params.question ?? [...params.messages].reverse().find((m) => m.type === AgentMessageType.User)?.content ?? "";
 
@@ -113,7 +140,55 @@ export class ResponderService {
       workflow.addEdge(START, "contextualiser").addEdge("contextualiser", "answer").addEdge("answer", END);
     } else {
       workflow
-        .addNode("planner", async (state) => this.plannerNode.execute({ state }))
+        .addNode("planner", async (state) => {
+          const result = await this.plannerNode.execute({ state });
+          const plan = result.branchPlan;
+          if (!plan) return result;
+
+          const plannerPickedSomething = plan.runGraph || plan.runContextualiser || plan.runDrift;
+          const masked = {
+            ...plan,
+            runGraph: plan.runGraph && allowed.graph,
+            runContextualiser: plan.runContextualiser && allowed.contextualiser,
+            runDrift: plan.runDrift && allowed.drift,
+          };
+          // Never mask into a dead end: if the planner picked branches but the
+          // toggles switched every one of them off, fall back to the
+          // contextualiser when it is allowed (mirrors the planner-error fallback).
+          // A planner that picked nothing at all is left alone — the conditional
+          // edge already routes that case straight to the answer node.
+          if (
+            plannerPickedSomething &&
+            !masked.runGraph &&
+            !masked.runContextualiser &&
+            !masked.runDrift &&
+            allowed.contextualiser
+          ) {
+            masked.runContextualiser = true;
+          }
+
+          // Keep the trace honest: `trace.planner.branchPlan` must describe what
+          // actually ran, so it carries the masked plan. The planner's original
+          // pick is preserved beside it as `rawBranchPlan`, and only when the
+          // toggles actually changed something.
+          const wasMasked =
+            masked.runGraph !== plan.runGraph ||
+            masked.runContextualiser !== plan.runContextualiser ||
+            masked.runDrift !== plan.runDrift;
+
+          const trace = result.trace
+            ? {
+                ...result.trace,
+                planner: {
+                  ...result.trace.planner,
+                  branchPlan: masked,
+                  ...(wasMasked ? { rawBranchPlan: plan } : {}),
+                },
+              }
+            : result.trace;
+
+          return { ...result, branchPlan: masked, trace };
+        })
         .addNode("graph", async (state) => this.graphNode.execute({ state }))
         .addNode("drift", async (state) => {
           try {

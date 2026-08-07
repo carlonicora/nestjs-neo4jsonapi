@@ -1,5 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
+import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { ResponderContextState } from "../contexts/responder.context";
@@ -19,7 +21,7 @@ const PlannerInputSchema = z.object({
   contentScope: z.object({ contentType: z.string(), contentId: z.string() }).nullable(),
 });
 
-export const PLANNER_SYSTEM_PROMPT = `
+export const defaultPlannerPrompt = `
 You decide which retrieval branches a unified assistant should run for a single user turn.
 
 You have three branches to choose from (subset, not exclusive):
@@ -40,11 +42,16 @@ Return STRICTLY: { runGraph, runContextualiser, runDrift, reasoning, refinedQues
 @Injectable()
 export class PlannerNodeService {
   private readonly logger = new Logger(PlannerNodeService.name);
+  private readonly systemPrompt: string;
 
   constructor(
     private readonly llm: LLMService,
     private readonly catalog: GraphCatalogService,
-  ) {}
+    private readonly configService: ConfigService<BaseConfigInterface>,
+  ) {
+    const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
+    this.systemPrompt = prompts?.planner ?? defaultPlannerPrompt;
+  }
 
   async execute(params: { state: ResponderContextState }): Promise<Partial<ResponderContextState>> {
     const state = params.state;
@@ -55,7 +62,7 @@ export class PlannerNodeService {
 
     try {
       const out = await this.llm.call<z.infer<typeof PlannerOutputSchema>>({
-        systemPrompts: [PLANNER_SYSTEM_PROMPT],
+        systemPrompts: [this.systemPrompt],
         inputSchema: PlannerInputSchema,
         inputParams: {
           rawQuestion: state.rawQuestion,
