@@ -170,8 +170,8 @@ describe("TrialService", () => {
       });
       expect(companyRepository.updateTokens).toHaveBeenCalledWith({
         companyId: trialParams.companyId,
-        monthlyTokens: MOCK_TRIAL_PRICE.token,
-        availableMonthlyTokens: MOCK_TRIAL_PRICE.token,
+        monthlyCredits: MOCK_TRIAL_PRICE.token,
+        availableMonthlyCredits: MOCK_TRIAL_PRICE.token,
       });
       expect(companyRepository.markSubscriptionStatus).toHaveBeenCalledWith({
         companyId: trialParams.companyId,

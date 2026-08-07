@@ -87,9 +87,9 @@ describe("FeatureSyncService", () => {
   const MOCK_COMPANY = {
     id: MOCK_COMPANY_ID,
     name: "Test Company",
-    monthlyTokens: 5000,
-    availableMonthlyTokens: 2500,
-    availableExtraTokens: 0,
+    monthlyCredits: 5000,
+    availableMonthlyCredits: 2500,
+    availableExtraCredits: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

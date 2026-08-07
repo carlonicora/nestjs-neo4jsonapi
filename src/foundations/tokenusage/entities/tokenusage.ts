@@ -16,6 +16,7 @@ export type TokenUsage = Entity & {
   outputTokens: number;
   cachedInputTokens?: number;
   cost?: number;
+  credits?: number;
   tokenUsageType: string;
 
   company: Company;
@@ -74,6 +75,11 @@ export const TokenUsageDescriptor = defineEntity<TokenUsage>()({
       type: "number",
       description:
         "The computed monetary cost of this LLM call, derived from the configured per-million-token input/cached-input/output rates of the tier the call used. Absent or 0 when cost tracking is disabled (rates set to 0).",
+    },
+    credits: {
+      type: "number",
+      description:
+        "The number of billing credits this call consumed: max(minCreditsPerRecord, round2(cost / creditCost)). 0 when credits tracking is disabled. Fractional (2 decimals).",
     },
     tokenUsageType: {
       type: "string",

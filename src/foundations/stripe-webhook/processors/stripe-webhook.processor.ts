@@ -202,8 +202,8 @@ export class StripeWebhookProcessor extends WorkerHost {
               // Reset tokens to 0
               await this.companyRepository.updateTokens({
                 companyId: company.id,
-                monthlyTokens: 0,
-                availableMonthlyTokens: 0,
+                monthlyCredits: 0,
+                availableMonthlyCredits: 0,
               });
               this.logger.log(`Company ${company.id} tokens reset to 0 (reason: ${deactivationReason})`);
 

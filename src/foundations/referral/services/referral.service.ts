@@ -209,9 +209,9 @@ export class ReferralService implements ReferralCompletionHandler {
     // Award tokens to both companies
     const referrerCompanyId = referral.referrer?.id;
     if (referrerCompanyId) {
-      await this.companyRepository.addExtraTokens({
+      await this.companyRepository.addExtraCredits({
         companyId: referrerCompanyId,
-        tokens: rewardTokens,
+        credits: rewardTokens,
       });
       this.logger.log(`Awarded ${rewardTokens} tokens to referrer company ${referrerCompanyId}`);
 
@@ -243,9 +243,9 @@ export class ReferralService implements ReferralCompletionHandler {
       }
     }
 
-    await this.companyRepository.addExtraTokens({
+    await this.companyRepository.addExtraCredits({
       companyId: params.referredCompanyId,
-      tokens: rewardTokens,
+      credits: rewardTokens,
     });
     this.logger.log(`Awarded ${rewardTokens} tokens to referred company ${params.referredCompanyId}`);
 

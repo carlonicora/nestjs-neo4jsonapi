@@ -28,9 +28,9 @@ describe("CompanyRepository", () => {
     logoUrl: "https://s3.amazonaws.com/logos/test.png",
     isActiveSubscription: true,
     ownerEmail: "owner@test.com",
-    monthlyTokens: 10000,
-    availableMonthlyTokens: 5000,
-    availableExtraTokens: 2000,
+    monthlyCredits: 10000,
+    availableMonthlyCredits: 5000,
+    availableExtraCredits: 2000,
     configurations: '{"setting": true}',
     feature: [],
     module: [],
@@ -180,9 +180,9 @@ describe("CompanyRepository", () => {
         companyId: MOCK_COMPANY_ID,
         name: "New Company",
         configurations: '{"key": "value"}',
-        monthlyTokens: 5000,
-        availableMonthlyTokens: 5000,
-        availableExtraTokens: 1000,
+        monthlyCredits: 5000,
+        availableMonthlyCredits: 5000,
+        availableExtraCredits: 1000,
         featureIds: ["feature-1", "feature-2"],
         moduleIds: ["module-1"],
       });
@@ -237,9 +237,9 @@ describe("CompanyRepository", () => {
         name: "Updated Company",
         configurations: '{"updated": true}',
         logo: "logos/new.png",
-        monthlyTokens: 20000,
-        availableMonthlyTokens: 15000,
-        availableExtraTokens: 3000,
+        monthlyCredits: 20000,
+        availableMonthlyCredits: 15000,
+        availableExtraCredits: 3000,
         featureIds: ["feature-new"],
         moduleIds: ["module-new"],
       });
@@ -299,141 +299,100 @@ describe("CompanyRepository", () => {
     });
   });
 
-  describe("useTokens", () => {
-    it("should use monthly tokens when sufficient", async () => {
-      const companyWithTokens = {
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 5000,
-        availableExtraTokens: 0,
-      };
-      mockNeo4jService.readOne.mockResolvedValue(companyWithTokens);
-      mockNeo4jService.writeOne.mockResolvedValue();
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      await repository.useTokens({ input: 100, output: 50 });
-
-      expect(mockNeo4jService.readOne).toHaveBeenCalled();
-      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
+  describe("useCredits", () => {
+    /** The deduction waterfall runs inside Neo4j, so the driver echoes the post-write node back. */
+    const companyAfterWrite = (availableMonthlyCredits: number, availableExtraCredits: number) => ({
+      ...MOCK_COMPANY,
+      availableMonthlyCredits,
+      availableExtraCredits,
     });
 
-    it("should use both monthly and extra tokens when monthly insufficient", async () => {
-      const companyWithLowMonthly = {
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 100,
-        availableExtraTokens: 500,
-      };
-      mockNeo4jService.readOne.mockResolvedValue(companyWithLowMonthly);
-      mockNeo4jService.writeOne.mockResolvedValue();
+    it("returns the new balances when the monthly allowance covers the deduction", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(4990.5, 200));
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
 
-      await repository.useTokens({ input: 100, output: 50 }); // 150 tokens needed
+      const result = await repository.useCredits({ credits: 9.5 });
 
-      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
-    });
-
-    it("should use explicit companyId when provided", async () => {
-      mockNeo4jService.readOne.mockResolvedValue(MOCK_COMPANY);
-      mockNeo4jService.writeOne.mockResolvedValue();
-
-      await repository.useTokens({
-        input: 50,
-        output: 25,
-        companyId: "explicit-company-id",
-      });
-
-      expect(mockNeo4jService.readOne).toHaveBeenCalled();
-    });
-
-    it("should handle BigInt token values from Neo4j", async () => {
-      const companyWithBigInt = {
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: BigInt(5000),
-        availableExtraTokens: BigInt(2000),
-      };
-      mockNeo4jService.readOne.mockResolvedValue(companyWithBigInt);
-      mockNeo4jService.writeOne.mockResolvedValue();
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      await repository.useTokens({ input: 100, output: 50 });
-
-      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
-    });
-
-    it("deducts entirely from extra tokens when monthly is exhausted (writes a valid SET query)", async () => {
-      const companyNoMonthly = {
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 0,
-        availableExtraTokens: 1000,
-      };
-      mockNeo4jService.readOne.mockResolvedValue(companyNoMonthly);
-      mockNeo4jService.writeOne.mockResolvedValue();
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      await repository.useTokens({ input: 100, output: 50 }); // 150 tokens, monthly = 0
-
-      expect(mockNeo4jService.writeOne).toHaveBeenCalled();
+      expect(result).toEqual({ availableMonthlyCredits: 4990.5, availableExtraCredits: 200 });
       const writtenQuery = mockNeo4jService.writeOne.mock.calls[0][0];
-      expect(writtenQuery.query).toContain("SET company.availableExtraTokens = $availableExtraTokens");
-      expect(writtenQuery.queryParams.availableExtraTokens).toBe(850);
+      expect(writtenQuery.queryParams).toEqual({ companyId: MOCK_COMPANY_ID, credits: 9.5 });
     });
 
-    it("does nothing when zero tokens are consumed", async () => {
+    it("returns the new balances when the deduction spills from monthly into extra", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(0, 450.25));
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
 
-      await repository.useTokens({ input: 0, output: 0 });
+      const result = await repository.useCredits({ credits: 149.75 });
 
+      expect(result).toEqual({ availableMonthlyCredits: 0, availableExtraCredits: 450.25 });
+    });
+
+    it("returns the new balances when deducting from extra only", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(0, 850));
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useCredits({ credits: 150 });
+
+      expect(result).toEqual({ availableMonthlyCredits: 0, availableExtraCredits: 850 });
+    });
+
+    it("returns a negative extra balance unchanged — balances are deliberately not clamped", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(0, -12.4));
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const result = await repository.useCredits({ credits: 20 });
+
+      expect(result).toEqual({ availableMonthlyCredits: 0, availableExtraCredits: -12.4 });
+    });
+
+    it("uses the explicit companyId when provided instead of the CLS one", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(10, 0));
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      await repository.useCredits({ credits: 1, companyId: "explicit-company-id" });
+
+      const writtenQuery = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(writtenQuery.queryParams.companyId).toBe("explicit-company-id");
+    });
+
+    it("does nothing when zero or negative credits are consumed", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      const zero = await repository.useCredits({ credits: 0 });
+      const negative = await repository.useCredits({ credits: -5 });
+
+      expect(zero).toBeUndefined();
+      expect(negative).toBeUndefined();
       expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
       expect(mockNeo4jService.writeOne).not.toHaveBeenCalled();
     });
 
-    it("returns the new balances when deducting from monthly only", async () => {
-      mockNeo4jService.readOne.mockResolvedValue({
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 5000,
-        availableExtraTokens: 200,
-      });
-      mockNeo4jService.writeOne.mockResolvedValue();
+    it("returns undefined when the company node does not exist", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
 
-      const result = await repository.useTokens({ input: 100, output: 50 });
-
-      expect(result).toEqual({ availableMonthlyTokens: 4850, availableExtraTokens: 200 });
-    });
-
-    it("returns the new balances when spilling from monthly into extra", async () => {
-      mockNeo4jService.readOne.mockResolvedValue({
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 100,
-        availableExtraTokens: 500,
-      });
-      mockNeo4jService.writeOne.mockResolvedValue();
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      const result = await repository.useTokens({ input: 100, output: 50 });
-
-      expect(result).toEqual({ availableMonthlyTokens: 0, availableExtraTokens: 450 });
-    });
-
-    it("returns the new balances when deducting from extra only", async () => {
-      mockNeo4jService.readOne.mockResolvedValue({
-        ...MOCK_COMPANY,
-        availableMonthlyTokens: 0,
-        availableExtraTokens: 1000,
-      });
-      mockNeo4jService.writeOne.mockResolvedValue();
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      const result = await repository.useTokens({ input: 100, output: 50 });
-
-      expect(result).toEqual({ availableMonthlyTokens: 0, availableExtraTokens: 850 });
-    });
-
-    it("returns undefined when zero tokens are consumed", async () => {
-      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-
-      const result = await repository.useTokens({ input: 0, output: 0 });
+      const result = await repository.useCredits({ credits: 5 });
 
       expect(result).toBeUndefined();
+    });
+
+    it("deducts atomically — a single MATCH ... SET ... RETURN statement, no separate read", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(1, 1));
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      await repository.useCredits({ credits: 5 });
+
+      expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
+      expect(mockNeo4jService.writeOne).toHaveBeenCalledTimes(1);
+
+      const { query } = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(query.match(/MATCH /g)).toHaveLength(1);
+      expect(query.match(/\bSET\b/g)).toHaveLength(1);
+      expect(query.match(/RETURN /g)).toHaveLength(1);
+      expect(query).toContain("MATCH (company:Company {id: $companyId})");
+      expect(query).toContain("company.availableMonthlyCredits = CASE");
+      expect(query).toContain("company.availableExtraCredits");
+      expect(query).toContain("RETURN company");
     });
   });
 
@@ -463,26 +422,26 @@ describe("CompanyRepository", () => {
   });
 
   describe("updateTokens", () => {
-    it("should update all token fields", async () => {
+    it("should update all credit fields", async () => {
       mockNeo4jService.writeOne.mockResolvedValue();
 
       await repository.updateTokens({
         companyId: MOCK_COMPANY_ID,
-        monthlyTokens: 10000,
-        availableMonthlyTokens: 10000,
-        availableExtraTokens: 5000,
+        monthlyCredits: 10000,
+        availableMonthlyCredits: 10000,
+        availableExtraCredits: 5000,
       });
 
       expect(mockNeo4jService.initQuery).toHaveBeenCalled();
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();
     });
 
-    it("should update only specified token fields", async () => {
+    it("should update only specified credit fields", async () => {
       mockNeo4jService.writeOne.mockResolvedValue();
 
       await repository.updateTokens({
         companyId: MOCK_COMPANY_ID,
-        monthlyTokens: 15000,
+        monthlyCredits: 15000,
       });
 
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();

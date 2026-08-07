@@ -319,6 +319,8 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         dimensions: parseInt(process.env.EMBEDDER_DIMENSIONS || "0"),
         region: process.env.EMBEDDER_REGION || "",
         googleCredentialsBase64: process.env.EMBEDDER_GOOGLE_CREDENTIALS_BASE64 || "",
+        // € per 1M input tokens. 0/unset → embeddings are not billed.
+        inputCostPer1MTokens: parseFloat(process.env.EMBEDDER_INPUT_COST_PER_1M_TOKENS || "0"),
         rateLimit: {
           tpmLimit: parseInt(process.env.EMBEDDER_TPM_LIMIT || "1000000"),
           safetyTokens: parseInt(process.env.EMBEDDER_TPM_SAFETY || "200000"),
@@ -330,6 +332,12 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
           bucketKey: "embedder:tpm:bucket",
         },
       },
+    },
+    // Billing unit: credits = max(minCreditsPerRecord, round2(cost / creditCost)),
+    // with `cost` in EUROS. CREDIT_COST unset/0 disables credits entirely.
+    credits: {
+      creditCost: parseFloat(process.env.CREDIT_COST || "0"),
+      minCreditsPerRecord: parseFloat(process.env.CREDIT_MINIMUM || "0.1"),
     },
     rateLimit: {
       enabled: process.env.RATE_LIMIT_ENABLED !== "false",

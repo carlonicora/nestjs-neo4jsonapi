@@ -14,9 +14,9 @@ export type Company = Entity & {
   logoUrl?: string;
   isActiveSubscription: boolean;
   ownerEmail: string;
-  monthlyTokens: number;
-  availableMonthlyTokens: number;
-  availableExtraTokens: number;
+  monthlyCredits: number;
+  availableMonthlyCredits: number;
+  availableExtraCredits: number;
   configurations?: string;
   configuration?: any;
 
@@ -77,9 +77,9 @@ export const CompanyDescriptor = defineEntity<Company>()({
     // (it leaks a user's email to every company reader) and has zero wire consumers
     // across all consuming applications.
     ownerEmail: { type: "string", excludeFromJsonApi: true },
-    monthlyTokens: { type: "number" },
-    availableMonthlyTokens: { type: "number" },
-    availableExtraTokens: { type: "number" },
+    monthlyCredits: { type: "number" },
+    availableMonthlyCredits: { type: "number" },
+    availableExtraCredits: { type: "number" },
     configurations: { type: "string" },
     configuration: { type: "string" },
     subscriptionEndedAt: { type: "datetime" },

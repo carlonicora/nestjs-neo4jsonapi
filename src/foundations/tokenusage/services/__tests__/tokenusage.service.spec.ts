@@ -6,6 +6,7 @@ import { TokenUsageService } from "../tokenusage.service";
 import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
 import { TokenUsageType } from "../../enums/tokenusage.type";
 import { ConfigAiInterface } from "../../../../config/interfaces/config.ai.interface";
+import { ConfigCreditsInterface } from "../../../../config/interfaces/config.credits.interface";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 import { EventEmitter2 } from "@nestjs/event-emitter";
@@ -89,14 +90,75 @@ describe("TokenUsageService", () => {
     },
   });
 
-  const createMockConfigService = (aiConfig: ConfigAiInterface) => ({
+  /**
+   * Credits tracking is OFF by default in these fixtures (`creditCost: 0`) so
+   * every pre-credits cost test keeps its exact expectations and records
+   * `credits: 0`. The credits suite opts in with CREDITS_ENABLED.
+   */
+  const DISABLED_CREDITS: ConfigCreditsInterface = { creditCost: 0, minCreditsPerRecord: 0.1 };
+
+  /** a360ai production values: € per credit 0.004, floor 0.1 credits per record. */
+  const CREDITS_ENABLED: ConfigCreditsInterface = { creditCost: 0.004, minCreditsPerRecord: 0.1 };
+
+  const createMockConfigService = (
+    aiConfig: ConfigAiInterface,
+    creditsConfig: ConfigCreditsInterface | undefined = DISABLED_CREDITS,
+  ) => ({
     get: vi.fn((key: string) => {
       if (key === "ai") {
         return aiConfig;
       }
+      if (key === "credits") {
+        return creditsConfig;
+      }
       return undefined;
     }),
   });
+
+  /**
+   * Builds an isolated service with per-test cost rates and credits config.
+   * Returns the repository and event-emitter mocks as well, so credits cases can
+   * assert on BOTH the persisted record and the emitted payload.
+   */
+  const buildServiceWithRates = async (rates: {
+    inputCostPer1MTokens?: number;
+    outputCostPer1MTokens?: number;
+    cachedInputCostPer1MTokens?: number;
+    credits?: ConfigCreditsInterface;
+  }) => {
+    const config = createMockAiConfig();
+    if (rates.inputCostPer1MTokens !== undefined) {
+      config.ai.inputCostPer1MTokens = rates.inputCostPer1MTokens;
+    }
+    if (rates.outputCostPer1MTokens !== undefined) {
+      config.ai.outputCostPer1MTokens = rates.outputCostPer1MTokens;
+    }
+    if (rates.cachedInputCostPer1MTokens !== undefined) {
+      (config.ai as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens =
+        rates.cachedInputCostPer1MTokens;
+    }
+
+    // `"credits" in rates` (not `??`) so a test can pass `credits: undefined`
+    // explicitly to model a consumer with NO credits config block at all.
+    const creditsConfig = "credits" in rates ? rates.credits : DISABLED_CREDITS;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        TokenUsageService,
+        { provide: JsonApiService, useValue: createMockJsonApiService() },
+        { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
+        { provide: ClsService, useValue: createMockClsService() },
+        { provide: ConfigService, useValue: createMockConfigService(config, creditsConfig) },
+        { provide: EventEmitter2, useValue: createMockEventEmitter() },
+      ],
+    }).compile();
+
+    return {
+      service: module.get<TokenUsageService>(TokenUsageService),
+      repository: module.get(TokenUsageRepository) as MockedObject<TokenUsageRepository>,
+      eventEmitter: module.get(EventEmitter2) as MockedObject<EventEmitter2>,
+    };
+  };
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -134,41 +196,10 @@ describe("TokenUsageService", () => {
   });
 
   describe("computeCost (cached input discount)", () => {
-    const buildServiceWithRates = async (rates: {
-      inputCostPer1MTokens: number;
-      outputCostPer1MTokens: number;
-      cachedInputCostPer1MTokens?: number;
-    }) => {
-      const config = createMockAiConfig();
-      config.ai.inputCostPer1MTokens = rates.inputCostPer1MTokens;
-      config.ai.outputCostPer1MTokens = rates.outputCostPer1MTokens;
-      if (rates.cachedInputCostPer1MTokens !== undefined) {
-        (config.ai as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens =
-          rates.cachedInputCostPer1MTokens;
-      }
-
-      const mockConfigService = {
-        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
-      };
-
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          TokenUsageService,
-          { provide: JsonApiService, useValue: createMockJsonApiService() },
-          { provide: TokenUsageRepository, useValue: createMockTokenUsageRepository() },
-          { provide: ClsService, useValue: createMockClsService() },
-          { provide: ConfigService, useValue: mockConfigService },
-          { provide: EventEmitter2, useValue: createMockEventEmitter() },
-        ],
-      }).compile();
-
-      return module.get<TokenUsageService>(TokenUsageService);
-    };
-
     it("bills cached tokens at the cached rate (cached is a subset of input)", async () => {
       // input=1000 (300 cached), output=500; inputRate=2, cachedRate=0.2, outputRate=8 per 1M
       // (1000-300)*2 + 300*0.2 + 500*8 = 1400 + 60 + 4000 = 5460  → /1e6
-      const svc = await buildServiceWithRates({
+      const { service: svc } = await buildServiceWithRates({
         inputCostPer1MTokens: 2,
         outputCostPer1MTokens: 8,
         cachedInputCostPer1MTokens: 0.2,
@@ -179,14 +210,14 @@ describe("TokenUsageService", () => {
 
     it("falls back to the input rate when no cached rate is configured (unchanged cost)", async () => {
       // cachedInputCostPer1MTokens undefined → cached billed at inputRate → same as no-cache
-      const svc = await buildServiceWithRates({ inputCostPer1MTokens: 2, outputCostPer1MTokens: 8 });
+      const { service: svc } = await buildServiceWithRates({ inputCostPer1MTokens: 2, outputCostPer1MTokens: 8 });
       const withCache = svc.computeCost({ tokens: { input: 1000, output: 500, cached: 300 } });
       const noCache = svc.computeCost({ tokens: { input: 1000, output: 500 } });
       expect(withCache).toBeCloseTo(noCache, 12);
     });
 
     it("clamps cached to input (never negative uncached input)", async () => {
-      const svc = await buildServiceWithRates({
+      const { service: svc } = await buildServiceWithRates({
         inputCostPer1MTokens: 2,
         outputCostPer1MTokens: 8,
         cachedInputCostPer1MTokens: 0.2,
@@ -208,7 +239,14 @@ describe("TokenUsageService", () => {
         relationshipType: "Content",
       });
 
-      expect(eventEmitter.emit).toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, { input: 1000, output: 500 });
+      // Default fixture has credits disabled (creditCost 0) → credits 0.
+      // Cost: (10 * 1000 + 30 * 500) / 1e6 = 0.025
+      expect(eventEmitter.emit).toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, {
+        input: 1000,
+        output: 500,
+        cost: 0.025,
+        credits: 0,
+      });
     });
 
     it("does not throw when the event emit fails (best-effort)", async () => {
@@ -291,14 +329,7 @@ describe("TokenUsageService", () => {
       const zeroInputCostConfig = createMockAiConfig();
       zeroInputCostConfig.ai.inputCostPer1MTokens = 0;
 
-      const mockConfigService = {
-        get: vi.fn((key: string) => {
-          if (key === "ai") {
-            return zeroInputCostConfig;
-          }
-          return undefined;
-        }),
-      };
+      const mockConfigService = createMockConfigService(zeroInputCostConfig);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -334,9 +365,7 @@ describe("TokenUsageService", () => {
       config.ai.inputCostPer1MTokens = 0;
       config.ai.outputCostPer1MTokens = 5;
 
-      const mockConfigService = {
-        get: vi.fn((key: string) => (key === "ai" ? config : undefined)),
-      };
+      const mockConfigService = createMockConfigService(config);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -371,14 +400,7 @@ describe("TokenUsageService", () => {
       const zeroOutputCostConfig = createMockAiConfig();
       zeroOutputCostConfig.ai.outputCostPer1MTokens = 0;
 
-      const mockConfigService = {
-        get: vi.fn((key: string) => {
-          if (key === "ai") {
-            return zeroOutputCostConfig;
-          }
-          return undefined;
-        }),
-      };
+      const mockConfigService = createMockConfigService(zeroOutputCostConfig);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -591,6 +613,203 @@ describe("TokenUsageService", () => {
         modelWeight: ModelWeight.Large,
       });
       expect(tokenUsageRepository.create).toHaveBeenCalledWith(expect.objectContaining({ cost: 20 + 60 }));
+    });
+  });
+
+  /**
+   * Credits are the customer-facing billing unit:
+   *   credits = max(minCreditsPerRecord, round2(cost / creditCost))
+   * The "migration pin" cases below encode the exact figures agreed for the
+   * page → credit migration and must not drift.
+   */
+  describe("recordTokenUsage (credits)", () => {
+    // a360ai production rates for the pinned cases: € 0.1 / 1M input,
+    // € 0.4 / 1M output; creditCost € 0.004, minCreditsPerRecord 0.1.
+    const A360_RATES = {
+      inputCostPer1MTokens: 0.1,
+      outputCostPer1MTokens: 0.4,
+      credits: CREDITS_ENABLED,
+    };
+
+    it("charges credits proportionally to true cost (migration pin: 9.51)", async () => {
+      const { service: svc, repository } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 285_159, output: 23_794 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // (285159 * 0.1 + 23794 * 0.4) / 1e6 = 0.0380335 → / 0.004 = 9.508375 → 9.51
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBeCloseTo(0.0380335, 10);
+      expect(createCall.credits).toBe(9.51);
+    });
+
+    it("floors a tiny call at minCreditsPerRecord (migration pin: 0.1)", async () => {
+      const { service: svc, repository } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000, output: 200 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // cost 0.00018 → 0.045 credits → below the 0.1 floor
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBeCloseTo(0.00018, 10);
+      expect(createCall.credits).toBe(0.1);
+    });
+
+    it("rounds to 2 decimals (migration pin: 3.25)", async () => {
+      const { service: svc, repository } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 90_000, output: 10_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // (90000 * 0.1 + 10000 * 0.4) / 1e6 = 0.013 → / 0.004 = 3.25
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBeCloseTo(0.013, 10);
+      expect(createCall.credits).toBe(3.25);
+    });
+
+    it("uses the aiLarge rates for credits when modelWeight is Large", async () => {
+      const { service: svc, repository } = await buildServiceWithRates({ credits: CREDITS_ENABLED });
+
+      await svc.recordTokenUsage({
+        tokens: { input: 100_000, output: 10_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        modelWeight: ModelWeight.Large,
+      });
+
+      // aiLarge: (100000 * 50 + 10000 * 100) / 1e6 = 6 € → / 0.004 = 1500 credits
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBe(6);
+      expect(createCall.credits).toBe(1500);
+    });
+
+    it("uses the vision rates for credits when useVisionCosts is true", async () => {
+      const { service: svc, repository } = await buildServiceWithRates({ credits: CREDITS_ENABLED });
+
+      await svc.recordTokenUsage({
+        tokens: { input: 100_000, output: 10_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        useVisionCosts: true,
+      });
+
+      // vision: (100000 * 20 + 10000 * 60) / 1e6 = 2.6 € → / 0.004 = 650 credits
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBe(2.6);
+      expect(createCall.credits).toBe(650);
+    });
+
+    it("discounts cached input in the credits figure", async () => {
+      const { service: svc, repository } = await buildServiceWithRates({
+        inputCostPer1MTokens: 10,
+        outputCostPer1MTokens: 0,
+        cachedInputCostPer1MTokens: 1,
+        credits: CREDITS_ENABLED,
+      });
+
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 0, cached: 500_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 0 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      // cached:   (500000 * 10 + 500000 * 1) / 1e6 = 5.5 € → 1375 credits
+      // uncached: (1000000 * 10) / 1e6          = 10  € → 2500 credits
+      const cachedCall = repository.create.mock.calls[0][0];
+      const uncachedCall = repository.create.mock.calls[1][0];
+      expect(cachedCall.credits).toBe(1375);
+      expect(uncachedCall.credits).toBe(2500);
+      expect(cachedCall.credits).toBeLessThan(uncachedCall.credits!);
+    });
+
+    it("skips the floor when applyMinimum is false", async () => {
+      const { service: svc, repository } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000, output: 200 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        applyMinimum: false,
+      });
+
+      // cost 0.00018 → 0.00018 / 0.004 = 0.045 → round2 → 0.05, no floor applied
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.credits).toBe(0.05);
+    });
+
+    it("uses costOverride verbatim instead of computeCost when provided", async () => {
+      const { service: svc, repository } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 285_159, output: 23_794 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        costOverride: 0.02,
+      });
+
+      // computeCost would have produced 0.0380335 — the override wins.
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBe(0.02);
+      expect(createCall.credits).toBe(5);
+    });
+
+    it("records credits 0 and still records cost when creditCost is 0/absent", async () => {
+      const disabled = await buildServiceWithRates({ ...A360_RATES, credits: DISABLED_CREDITS });
+      const absent = await buildServiceWithRates({ ...A360_RATES, credits: undefined });
+
+      for (const built of [disabled, absent]) {
+        await built.service.recordTokenUsage({
+          tokens: { input: 90_000, output: 10_000 },
+          type: TokenUsageType.Summariser,
+          relationshipId: TEST_IDS.relationshipId,
+          relationshipType: "Content",
+        });
+
+        const createCall = built.repository.create.mock.calls[0][0];
+        expect(createCall.cost).toBeCloseTo(0.013, 10);
+        expect(createCall.credits).toBe(0);
+      }
+    });
+
+    it("emits tokenusage.recorded with { input, output, cost, credits }", async () => {
+      const { service: svc, eventEmitter: emitter } = await buildServiceWithRates(A360_RATES);
+
+      await svc.recordTokenUsage({
+        tokens: { input: 90_000, output: 10_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      expect(emitter.emit).toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, {
+        input: 90_000,
+        output: 10_000,
+        cost: 0.013,
+        credits: 3.25,
+      });
     });
   });
 });

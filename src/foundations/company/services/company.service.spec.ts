@@ -41,9 +41,9 @@ describe("CompanyService", () => {
     logoUrl: "https://s3.amazonaws.com/logos/test.png",
     isActiveSubscription: true,
     ownerEmail: "owner@test.com",
-    monthlyTokens: 10000,
-    availableMonthlyTokens: 5000,
-    availableExtraTokens: 2000,
+    monthlyCredits: 10000,
+    availableMonthlyCredits: 5000,
+    availableExtraCredits: 2000,
     configurations: '{"setting": true}',
     feature: [],
     module: [],
@@ -60,7 +60,7 @@ describe("CompanyService", () => {
       find: vi.fn(),
       findSingle: vi.fn(),
       delete: vi.fn(),
-      useTokens: vi.fn(),
+      useCredits: vi.fn(),
     } as any;
 
     mockJsonApiService = {
@@ -122,119 +122,118 @@ describe("CompanyService", () => {
     });
   });
 
-  describe("validateCompanyTokens", () => {
-    it("should not throw when company has available monthly tokens", async () => {
+  describe("validateCompanyCredits", () => {
+    it("should not throw when company has available monthly credits", async () => {
       mockRepository.findByCompanyId.mockResolvedValue({
         ...MOCK_COMPANY,
-        availableMonthlyTokens: 1000,
-        availableExtraTokens: 0,
+        availableMonthlyCredits: 1000,
+        availableExtraCredits: 0,
       });
 
-      await expect(service.validateCompanyTokens({ companyId: MOCK_COMPANY_ID })).resolves.not.toThrow();
+      await expect(service.validateCompanyCredits({ companyId: MOCK_COMPANY_ID })).resolves.not.toThrow();
     });
 
-    it("should not throw when company has available extra tokens", async () => {
+    it("should not throw when company has available extra credits", async () => {
       mockRepository.findByCompanyId.mockResolvedValue({
         ...MOCK_COMPANY,
-        availableMonthlyTokens: 0,
-        availableExtraTokens: 500,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 500,
       });
 
-      await expect(service.validateCompanyTokens({ companyId: MOCK_COMPANY_ID })).resolves.not.toThrow();
+      await expect(service.validateCompanyCredits({ companyId: MOCK_COMPANY_ID })).resolves.not.toThrow();
     });
 
-    it("should throw NO_TOKENS when no tokens available", async () => {
+    it("should throw NO_CREDITS when no credits available", async () => {
       mockRepository.findByCompanyId.mockResolvedValue({
         ...MOCK_COMPANY,
-        availableMonthlyTokens: 0,
-        availableExtraTokens: 0,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 0,
       });
 
-      await expect(service.validateCompanyTokens({ companyId: MOCK_COMPANY_ID })).rejects.toThrow(
-        new HttpException("NO_TOKENS", HttpStatus.PAYMENT_REQUIRED),
+      await expect(service.validateCompanyCredits({ companyId: MOCK_COMPANY_ID })).rejects.toThrow(
+        new HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED),
       );
     });
 
-    it("should throw NO_TOKENS when tokens are negative", async () => {
+    it("should throw NO_CREDITS when credits are negative", async () => {
       mockRepository.findByCompanyId.mockResolvedValue({
         ...MOCK_COMPANY,
-        availableMonthlyTokens: -10,
-        availableExtraTokens: -5,
+        availableMonthlyCredits: -10,
+        availableExtraCredits: -5,
       });
 
-      await expect(service.validateCompanyTokens({ companyId: MOCK_COMPANY_ID })).rejects.toThrow(
-        new HttpException("NO_TOKENS", HttpStatus.PAYMENT_REQUIRED),
+      await expect(service.validateCompanyCredits({ companyId: MOCK_COMPANY_ID })).rejects.toThrow(
+        new HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED),
       );
     });
   });
 
-  describe("useTokens", () => {
-    const MOCK_BALANCES = { availableMonthlyTokens: 4850, availableExtraTokens: 2000 };
+  describe("useCredits", () => {
+    const MOCK_BALANCES = { availableMonthlyCredits: 4850.25, availableExtraCredits: 2000 };
 
-    it("should call repository to use tokens", async () => {
+    it("should call repository to use credits", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
+      mockRepository.useCredits.mockResolvedValue(MOCK_BALANCES);
 
-      await service.useTokens({ inputTokens: 100, outputTokens: 50 });
+      await service.useCredits({ credits: 9.51 });
 
-      expect(mockRepository.useTokens).toHaveBeenCalledWith({
-        input: 100,
-        output: 50,
-      });
+      expect(mockRepository.useCredits).toHaveBeenCalledWith({ credits: 9.51 });
     });
 
-    it("should broadcast token update via websocket with the new balances", async () => {
+    it("should broadcast the credits update via websocket with the new balances", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
+      mockRepository.useCredits.mockResolvedValue(MOCK_BALANCES);
 
-      await service.useTokens({ inputTokens: 100, outputTokens: 50 });
+      await service.useCredits({ credits: 9.51 });
 
       expect(mockWebSocketService.sendMessageToCompany).toHaveBeenCalledWith(
         MOCK_COMPANY_ID,
-        "company:tokens_updated",
+        "company:credits_updated",
         {
-          type: "company:tokens_updated",
+          type: "company:credits_updated",
           companyId: MOCK_COMPANY_ID,
-          availableMonthlyTokens: 4850,
-          availableExtraTokens: 2000,
+          availableMonthlyCredits: 4850.25,
+          availableExtraCredits: 2000,
         },
       );
     });
 
     it("should not broadcast if companyId is not set", async () => {
       mockClsService.get.mockReturnValue(undefined);
-      mockRepository.useTokens.mockResolvedValue(MOCK_BALANCES);
+      mockRepository.useCredits.mockResolvedValue(MOCK_BALANCES);
 
-      await service.useTokens({ inputTokens: 100, outputTokens: 50 });
+      await service.useCredits({ credits: 9.51 });
 
       expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
     });
 
     it("should not broadcast when nothing was consumed", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue(undefined);
+      mockRepository.useCredits.mockResolvedValue(undefined);
 
-      await service.useTokens({ inputTokens: 0, outputTokens: 0 });
+      await service.useCredits({ credits: 0 });
 
       expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
     });
   });
 
   describe("handleTokenUsageRecorded", () => {
-    it("deducts the recorded tokens from the company balance", async () => {
+    it("forwards the recorded credits to the company balance deduction", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockResolvedValue();
+      mockRepository.useCredits.mockResolvedValue(undefined);
 
-      await service.handleTokenUsageRecorded({ input: 100, output: 50 });
+      await service.handleTokenUsageRecorded({ input: 100, output: 50, cost: 0.038, credits: 9.51 });
 
-      expect(mockRepository.useTokens).toHaveBeenCalledWith({ input: 100, output: 50 });
+      expect(mockRepository.useCredits).toHaveBeenCalledWith({ credits: 9.51 });
     });
 
     it("does not throw when deduction fails (best-effort)", async () => {
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
-      mockRepository.useTokens.mockRejectedValue(new Error("boom"));
+      mockRepository.useCredits.mockRejectedValue(new Error("boom"));
 
-      await expect(service.handleTokenUsageRecorded({ input: 100, output: 50 })).resolves.toBeUndefined();
+      await expect(
+        service.handleTokenUsageRecorded({ input: 100, output: 50, cost: 0.038, credits: 9.51 }),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -245,9 +244,9 @@ describe("CompanyService", () => {
         attributes: {
           name: "New Company",
           configurations: '{"key": "value"}',
-          monthlyTokens: 5000,
-          availableMonthlyTokens: 5000,
-          availableExtraTokens: 1000,
+          monthlyCredits: 5000,
+          availableMonthlyCredits: 5000,
+          availableExtraCredits: 1000,
         },
         relationships: {
           features: {
@@ -264,9 +263,9 @@ describe("CompanyService", () => {
         companyId: MOCK_COMPANY_ID,
         name: "New Company",
         configurations: '{"key": "value"}',
-        monthlyTokens: 5000,
-        availableMonthlyTokens: 5000,
-        availableExtraTokens: 1000,
+        monthlyCredits: 5000,
+        availableMonthlyCredits: 5000,
+        availableExtraCredits: 1000,
         featureIds: ["feature-1"],
       });
       expect(result).toEqual(MOCK_COMPANY);
@@ -288,9 +287,9 @@ describe("CompanyService", () => {
         companyId: MOCK_COMPANY_ID,
         name: "Minimal Company",
         configurations: undefined,
-        monthlyTokens: undefined,
-        availableMonthlyTokens: undefined,
-        availableExtraTokens: undefined,
+        monthlyCredits: undefined,
+        availableMonthlyCredits: undefined,
+        availableExtraCredits: undefined,
         featureIds: undefined,
       });
     });
@@ -303,9 +302,9 @@ describe("CompanyService", () => {
         attributes: {
           name: "Controller Company",
           configurations: "",
-          monthlyTokens: 1000,
-          availableMonthlyTokens: 1000,
-          availableExtraTokens: 0,
+          monthlyCredits: 1000,
+          availableMonthlyCredits: 1000,
+          availableExtraCredits: 0,
         },
         relationships: {
           features: { data: [] },
@@ -335,9 +334,9 @@ describe("CompanyService", () => {
           name: "Updated Company",
           configurations: '{"updated": true}',
           logo: "logos/updated.png",
-          monthlyTokens: 20000,
-          availableMonthlyTokens: 15000,
-          availableExtraTokens: 3000,
+          monthlyCredits: 20000,
+          availableMonthlyCredits: 15000,
+          availableExtraCredits: 3000,
         },
         relationships: {
           features: { data: [{ id: "feature-2", type: "features" }] },
@@ -357,9 +356,9 @@ describe("CompanyService", () => {
         name: "Updated Company",
         configurations: '{"updated": true}',
         logo: "logos/updated.png",
-        monthlyTokens: 20000,
-        availableMonthlyTokens: 15000,
-        availableExtraTokens: 3000,
+        monthlyCredits: 20000,
+        availableMonthlyCredits: 15000,
+        availableExtraCredits: 3000,
         featureIds: ["feature-2"],
         moduleIds: ["module-1"],
       });

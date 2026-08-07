@@ -10,4 +10,6 @@ export const TOKEN_USAGE_RECORDED_EVENT = "tokenusage.recorded";
 export interface TokenUsageRecordedPayload {
   input: number;
   output: number;
+  cost: number;
+  credits: number;
 }

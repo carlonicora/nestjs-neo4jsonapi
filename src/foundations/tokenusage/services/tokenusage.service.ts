@@ -3,12 +3,17 @@ import { ConfigService } from "@nestjs/config";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { BaseConfigInterface, ConfigAiInterface, ConfigCreditsInterface } from "../../../config/interfaces";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
+import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { TokenUsage, TokenUsageDescriptor } from "../../tokenusage/entities/tokenusage";
-import { TokenUsageRepository } from "../../tokenusage/repositories/tokenusage.repository";
+import {
+  TokenUsageAggregated,
+  TokenUsageRepository,
+  TokenUsageSummary,
+} from "../../tokenusage/repositories/tokenusage.repository";
 import { ModelWeight } from "../../../core/llm/enums/model.weight";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
 
@@ -81,6 +86,12 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     return cost / 1_000_000;
   }
 
+  /**
+   * Persists one usage record and converts its monetary cost into billing
+   * credits: `credits = max(minCreditsPerRecord, round2(cost / creditCost))`.
+   * `creditCost` absent or 0 disables credits entirely (records store 0 and no
+   * balance is deducted), so consumers without a `credits` config are unaffected.
+   */
   async recordTokenUsage(params: {
     tokens: TokenUsageInterface;
     type: string;
@@ -88,12 +99,25 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     relationshipType: string;
     useVisionCosts?: boolean;
     modelWeight?: ModelWeight;
+    /** When false the per-record credits floor (`minCreditsPerRecord`) is skipped — sub-cent calls (embeddings) must not be floored. Defaults to true. */
+    applyMinimum?: boolean;
+    /** Pre-computed cost in euros; when provided `computeCost` is skipped (embeddings: estimated tokens × the embedder rate). */
+    costOverride?: number;
   }): Promise<void> {
-    const cost = this.computeCost({
-      tokens: params.tokens,
-      useVisionCosts: params.useVisionCosts,
-      modelWeight: params.modelWeight,
-    });
+    const cost =
+      params.costOverride ??
+      this.computeCost({
+        tokens: params.tokens,
+        useVisionCosts: params.useVisionCosts,
+        modelWeight: params.modelWeight,
+      });
+
+    const creditsConfig = this.configService.get<ConfigCreditsInterface>("credits");
+    let credits = 0;
+    if (creditsConfig && creditsConfig.creditCost > 0) {
+      credits = Math.round((cost / creditsConfig.creditCost) * 100) / 100;
+      if (params.applyMinimum !== false) credits = Math.max(creditsConfig.minCreditsPerRecord, credits);
+    }
 
     await this.tokenUsageRepository.create({
       id: randomUUID(),
@@ -102,6 +126,7 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
       outputTokens: params.tokens.output,
       cachedInputTokens: params.tokens.cached ?? 0,
       cost: cost,
+      credits: credits,
       relationshipId: params.relationshipId,
       relationshipType: params.relationshipType,
     });
@@ -113,6 +138,8 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
       const payload: TokenUsageRecordedPayload = {
         input: params.tokens.input,
         output: params.tokens.output,
+        cost: cost,
+        credits: credits,
       };
       this.eventEmitter.emit(TOKEN_USAGE_RECORDED_EVENT, payload);
     } catch (error) {
@@ -120,5 +147,46 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
         `Failed to emit ${TOKEN_USAGE_RECORDED_EVENT}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * KEPT (custom filtering not covered by inherited find()): date-range + tokenUsageType
+   * filtering. Backs GET /tokenusages in consuming apps.
+   */
+  async findByCompany(params: { query: any; startDate?: string; endDate?: string; tokenUsageType?: string }) {
+    const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
+
+    return this.jsonApiService.buildList(
+      TokenUsageDescriptor.model,
+      await this.tokenUsageRepository.findByCompany({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        tokenUsageType: params.tokenUsageType,
+        cursor: paginator.generateCursor(),
+      }),
+      paginator,
+    );
+  }
+
+  /**
+   * KEPT (raw aggregation, not JSON:API entities — inherited find()/findById() can't
+   * produce this shape). Backs GET /tokenusages/aggregated in consuming apps.
+   */
+  async getUsageByDateAndType(params: { startDate?: string; endDate?: string }): Promise<TokenUsageAggregated[]> {
+    return this.tokenUsageRepository.findAggregatedByDateAndType({
+      startDate: params.startDate,
+      endDate: params.endDate,
+    });
+  }
+
+  /**
+   * KEPT (raw aggregation — see getUsageByDateAndType above). Backs GET
+   * /tokenusages/summary in consuming apps.
+   */
+  async getUsageSummary(params: { startDate?: string; endDate?: string }): Promise<TokenUsageSummary> {
+    return this.tokenUsageRepository.findUsageSummary({
+      startDate: params.startDate,
+      endDate: params.endDate,
+    });
   }
 }

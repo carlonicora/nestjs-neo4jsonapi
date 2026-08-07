@@ -115,8 +115,8 @@ export class TrialService {
     if (trialTokens > 0) {
       await this.companyRepository.updateTokens({
         companyId: params.companyId,
-        monthlyTokens: trialTokens,
-        availableMonthlyTokens: trialTokens,
+        monthlyCredits: trialTokens,
+        availableMonthlyCredits: trialTokens,
       });
     }
 

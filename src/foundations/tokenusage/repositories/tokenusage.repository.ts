@@ -1,10 +1,40 @@
 import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { TokenUsage, TokenUsageDescriptor } from "../../tokenusage/entities/tokenusage";
 import { tokenUsageMeta } from "../../tokenusage/entities/tokenusage.meta";
+
+/**
+ * A single row of the date + operation-type usage aggregation.
+ *
+ * Not an entity shape: the aggregation returns grouped scalars, so it
+ * deliberately bypasses the serialiser (`readMany`) — there is nothing to map
+ * onto `TokenUsage`.
+ */
+export interface TokenUsageAggregated {
+  date: string;
+  tokenUsageType: string;
+  totalCredits: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCost: number;
+  count: number;
+}
+
+/**
+ * The single-row totals of the usage summary. Same non-entity rationale as
+ * `TokenUsageAggregated`.
+ */
+export interface TokenUsageSummary {
+  totalCredits: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCost: number;
+  count: number;
+}
 
 /**
  * TokenUsage repository.
@@ -47,6 +77,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
     outputTokens: number;
     cachedInputTokens?: number;
     cost?: number;
+    credits?: number;
     relationshipId: string;
     relationshipType: string;
   }): Promise<void> {
@@ -61,6 +92,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
       cachedInputTokens: params.cachedInputTokens ?? 0,
       relationshipId: params.relationshipId,
       cost: params.cost ?? 0,
+      credits: params.credits ?? 0,
     };
 
     query.query += `
@@ -71,6 +103,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
         outputTokens: $outputTokens,
         cachedInputTokens: $cachedInputTokens,
         cost: $cost,
+        credits: $credits,
         createdAt: datetime(),
         updatedAt: datetime()
       })
@@ -82,5 +115,146 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
     `;
 
     await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Custom list (KEPT — date-range + tokenUsageType filtering is not expressible via the
+   * inherited descriptor-driven find()). Reuses buildDefaultMatch()/buildReturnStatement()
+   * for company scoping and security consistency.
+   */
+  async findByCompany(params: {
+    startDate?: string;
+    endDate?: string;
+    tokenUsageType?: string;
+    cursor?: JsonApiCursorInterface;
+  }): Promise<TokenUsage[]> {
+    const query = this.neo4j.initQuery({ serialiser: TokenUsageDescriptor.model, cursor: params.cursor });
+
+    if (params.startDate) {
+      query.queryParams = { ...query.queryParams, startDate: params.startDate };
+    }
+    if (params.endDate) {
+      query.queryParams = { ...query.queryParams, endDate: params.endDate };
+    }
+    if (params.tokenUsageType) {
+      query.queryParams = { ...query.queryParams, tokenUsageType: params.tokenUsageType };
+    }
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      ${params.startDate ? `WHERE ${tokenUsageMeta.nodeName}.createdAt >= datetime($startDate)` : ""}
+      ${params.endDate ? `${params.startDate ? "AND" : "WHERE"} ${tokenUsageMeta.nodeName}.createdAt <= datetime($endDate)` : ""}
+      ${params.tokenUsageType ? `${params.startDate || params.endDate ? "AND" : "WHERE"} ${tokenUsageMeta.nodeName}.tokenUsageType = $tokenUsageType` : ""}
+
+      ORDER BY ${tokenUsageMeta.nodeName}.createdAt DESC
+      {CURSOR}
+
+      ${this.buildReturnStatement()}
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * Aggregation query (KEPT — "aggregations" rule): returns grouped totals, not
+   * TokenUsage entities, so it intentionally bypasses readMany()/the serialiser — there
+   * is nothing to map onto the entity type.
+   */
+  async findAggregatedByDateAndType(params: { startDate?: string; endDate?: string }): Promise<TokenUsageAggregated[]> {
+    const query = this.neo4j.initQuery();
+
+    if (params.startDate) {
+      query.queryParams = { ...query.queryParams, startDate: params.startDate };
+    }
+    if (params.endDate) {
+      query.queryParams = { ...query.queryParams, endDate: params.endDate };
+    }
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      ${params.startDate ? `WHERE ${tokenUsageMeta.nodeName}.createdAt >= datetime($startDate)` : ""}
+      ${params.endDate ? `${params.startDate ? "AND" : "WHERE"} ${tokenUsageMeta.nodeName}.createdAt <= datetime($endDate)` : ""}
+
+      WITH date(${tokenUsageMeta.nodeName}.createdAt) as usageDate,
+           ${tokenUsageMeta.nodeName}.tokenUsageType as usageType,
+           ${tokenUsageMeta.nodeName}
+
+      RETURN toString(usageDate) as date,
+             usageType as tokenUsageType,
+             round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 2) as totalCredits,
+             sum(toInteger(${tokenUsageMeta.nodeName}.inputTokens)) as totalInputTokens,
+             sum(toInteger(${tokenUsageMeta.nodeName}.outputTokens)) as totalOutputTokens,
+             sum(toFloat(${tokenUsageMeta.nodeName}.cost)) as totalCost,
+             count(${tokenUsageMeta.nodeName}) as count
+      ORDER BY date DESC, tokenUsageType
+    `;
+
+    const result = await this.neo4j.read(query.query, query.queryParams); // nja-lint-ignore: buildDefaultMatch()-scoped scalar aggregation — non-entity shape
+
+    return result.records.map((record: any) => ({
+      // nja-lint-ignore: aggregation rows, not entity nodes
+      date: record.get("date"),
+      tokenUsageType: record.get("tokenUsageType"),
+      totalCredits: this.toNumber(record.get("totalCredits")),
+      totalInputTokens: this.toNumber(record.get("totalInputTokens")),
+      totalOutputTokens: this.toNumber(record.get("totalOutputTokens")),
+      totalCost: this.toNumber(record.get("totalCost")),
+      count: this.toNumber(record.get("count")),
+    }));
+  }
+
+  /**
+   * Aggregation query (KEPT — see findAggregatedByDateAndType above), single-row totals.
+   */
+  async findUsageSummary(params: { startDate?: string; endDate?: string }): Promise<TokenUsageSummary> {
+    const query = this.neo4j.initQuery();
+
+    if (params.startDate) {
+      query.queryParams = { ...query.queryParams, startDate: params.startDate };
+    }
+    if (params.endDate) {
+      query.queryParams = { ...query.queryParams, endDate: params.endDate };
+    }
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      ${params.startDate ? `WHERE ${tokenUsageMeta.nodeName}.createdAt >= datetime($startDate)` : ""}
+      ${params.endDate ? `${params.startDate ? "AND" : "WHERE"} ${tokenUsageMeta.nodeName}.createdAt <= datetime($endDate)` : ""}
+
+      RETURN round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 2) as totalCredits,
+             sum(toInteger(${tokenUsageMeta.nodeName}.inputTokens)) as totalInputTokens,
+             sum(toInteger(${tokenUsageMeta.nodeName}.outputTokens)) as totalOutputTokens,
+             sum(toFloat(${tokenUsageMeta.nodeName}.cost)) as totalCost,
+             count(${tokenUsageMeta.nodeName}) as count
+    `;
+
+    const result = await this.neo4j.read(query.query, query.queryParams); // nja-lint-ignore: buildDefaultMatch()-scoped scalar aggregation — non-entity shape
+
+    if (result.records.length === 0) {
+      return {
+        totalCredits: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCost: 0,
+        count: 0,
+      };
+    }
+
+    const record = result.records[0];
+    return {
+      totalCredits: this.toNumber(record.get("totalCredits")),
+      totalInputTokens: this.toNumber(record.get("totalInputTokens")),
+      totalOutputTokens: this.toNumber(record.get("totalOutputTokens")),
+      totalCost: this.toNumber(record.get("totalCost")),
+      count: this.toNumber(record.get("count")),
+    };
+  }
+
+  private toNumber(value: any): number {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "number") return value;
+    if (typeof value.toNumber === "function") return value.toNumber();
+    return Number(value) || 0;
   }
 }

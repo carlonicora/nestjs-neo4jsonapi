@@ -57,60 +57,57 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     if (!company) throw new HttpException("Company not found", HttpStatus.UNAUTHORIZED);
   }
 
-  async validateCompanyTokens(params: { companyId: string }) {
+  async validateCompanyCredits(params: { companyId: string }) {
     const company = await this.companyRepository.findByCompanyId({
       companyId: params.companyId,
     });
 
     if (
-      (!company.availableMonthlyTokens || company.availableMonthlyTokens <= 0) &&
-      (!company.availableExtraTokens || company.availableExtraTokens <= 0)
+      (!company.availableMonthlyCredits || company.availableMonthlyCredits <= 0) &&
+      (!company.availableExtraCredits || company.availableExtraCredits <= 0)
     )
-      throw new HttpException("NO_TOKENS", HttpStatus.PAYMENT_REQUIRED);
+      throw new HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED);
   }
 
-  async hasAvailableTokens(params: { companyId: string }): Promise<boolean> {
+  async hasAvailableCredits(params: { companyId: string }): Promise<boolean> {
     const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
     return (
-      (company.availableMonthlyTokens && company.availableMonthlyTokens > 0) ||
-      (company.availableExtraTokens && company.availableExtraTokens > 0)
+      (company.availableMonthlyCredits && company.availableMonthlyCredits > 0) ||
+      (company.availableExtraCredits && company.availableExtraCredits > 0)
     );
   }
 
-  async useTokens(params: { inputTokens: number; outputTokens: number }) {
-    const balances = await this.companyRepository.useTokens({
-      input: params.inputTokens,
-      output: params.outputTokens,
-    });
+  async useCredits(params: { credits: number }) {
+    const balances = await this.companyRepository.useCredits({ credits: params.credits });
 
     // Nothing consumed — no balance change worth broadcasting.
     if (!balances) return;
 
     // Broadcast the new balances to all company users. Consumers patch these in
-    // directly; they must never need to refetch the user to read a token count.
+    // directly; they must never need to refetch the user to read a credit count.
     const companyId = this.cls.get("companyId");
     if (companyId) {
-      await this.webSocketService.sendMessageToCompany(companyId, "company:tokens_updated", {
-        type: "company:tokens_updated",
+      await this.webSocketService.sendMessageToCompany(companyId, "company:credits_updated", {
+        type: "company:credits_updated",
         companyId,
-        availableMonthlyTokens: balances.availableMonthlyTokens,
-        availableExtraTokens: balances.availableExtraTokens,
+        availableMonthlyCredits: balances.availableMonthlyCredits,
+        availableExtraCredits: balances.availableExtraCredits,
       });
     }
   }
 
   /**
-   * Reacts to LLM token consumption recorded by TokenUsageService and decrements
-   * the company's running balance. Decoupled via the event bus so the tokenusage
-   * module never imports CompanyModule. Best-effort: must never throw back into
-   * the emitter (the LLM call that triggered it must not break).
+   * Reacts to LLM usage recorded by TokenUsageService and decrements the
+   * company's running credit balance. Decoupled via the event bus so the
+   * tokenusage module never imports CompanyModule. Best-effort: must never throw
+   * back into the emitter (the LLM call that triggered it must not break).
    */
   @OnEvent(TOKEN_USAGE_RECORDED_EVENT)
   async handleTokenUsageRecorded(payload: TokenUsageRecordedPayload): Promise<void> {
     try {
-      await this.useTokens({ inputTokens: payload.input, outputTokens: payload.output });
+      await this.useCredits({ credits: payload.credits });
     } catch (error) {
-      this.logger.warn(`Failed to deduct company tokens: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(`Failed to deduct company credits: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -127,9 +124,9 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       companyId: params.data.id,
       name: params.data.attributes.name,
       configurations: params.data.attributes.configurations,
-      monthlyTokens: params.data.attributes.monthlyTokens,
-      availableMonthlyTokens: params.data.attributes.availableMonthlyTokens,
-      availableExtraTokens: params.data.attributes.availableExtraTokens,
+      monthlyCredits: params.data.attributes.monthlyCredits,
+      availableMonthlyCredits: params.data.attributes.availableMonthlyCredits,
+      availableExtraCredits: params.data.attributes.availableExtraCredits,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       legal_address: params.data.attributes.legal_address,
       street_number: params.data.attributes.street_number,
@@ -149,9 +146,9 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       companyId: params.data.id,
       name: params.data.attributes.name,
       configurations: params.data.attributes.configurations,
-      monthlyTokens: params.data.attributes.monthlyTokens,
-      availableMonthlyTokens: params.data.attributes.availableMonthlyTokens,
-      availableExtraTokens: params.data.attributes.availableExtraTokens,
+      monthlyCredits: params.data.attributes.monthlyCredits,
+      availableMonthlyCredits: params.data.attributes.availableMonthlyCredits,
+      availableExtraCredits: params.data.attributes.availableExtraCredits,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       moduleIds: params.data.relationships?.modules?.data.map((module) => module.id),
       legal_address: params.data.attributes.legal_address,
@@ -178,9 +175,9 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       name: params.data.attributes.name,
       configurations: params.data.attributes.configurations,
       logo: params.data.attributes.logo,
-      monthlyTokens: params.data.attributes.monthlyTokens,
-      availableMonthlyTokens: params.data.attributes.availableMonthlyTokens,
-      availableExtraTokens: params.data.attributes.availableExtraTokens,
+      monthlyCredits: params.data.attributes.monthlyCredits,
+      availableMonthlyCredits: params.data.attributes.availableMonthlyCredits,
+      availableExtraCredits: params.data.attributes.availableExtraCredits,
       featureIds: params.data.relationships?.features?.data.map((feature) => feature.id),
       moduleIds: params.data.relationships?.modules?.data.map((module) => module.id),
       legal_address: params.data.attributes.legal_address,

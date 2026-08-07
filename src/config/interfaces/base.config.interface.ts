@@ -7,6 +7,7 @@ import { ConfigChunkerInterface } from "./config.chunker.interface";
 import { ConfigChunkQueuesInterface } from "./config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./config.content.types.interface";
 import { ConfigCorsInterface } from "./config.cors.interface";
+import { ConfigCreditsInterface } from "./config.credits.interface";
 import { ConfigDiscordInterface } from "./config.discord.interface";
 import { ConfigEmbeddingContextInterface } from "./config.embedding.context.interface";
 import { ConfigGoogleInterface } from "./config.google.interface";
@@ -45,6 +46,7 @@ export interface BaseConfigInterface {
   tempo: ConfigTempoInterface;
   s3: ConfigS3Interface;
   ai: ConfigAiInterface;
+  credits: ConfigCreditsInterface;
   rateLimit: ConfigRateLimitInterface;
   encryption: ConfigEncryptionInterface;
   stripe: ConfigStripeInterface;

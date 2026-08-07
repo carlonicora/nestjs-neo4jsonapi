@@ -73,9 +73,9 @@ describe("CompanyController", () => {
     id: MOCK_COMPANY_ID,
     attributes: {
       name: "Test Company",
-      monthlyTokens: 1000,
-      availableMonthlyTokens: 200,
-      availableExtraTokens: 500,
+      monthlyCredits: 1000,
+      availableMonthlyCredits: 200,
+      availableExtraCredits: 500,
     },
   };
 
@@ -243,9 +243,9 @@ describe("CompanyController", () => {
         id: MOCK_COMPANY_ID,
         attributes: {
           name: "New Test Company",
-          monthlyTokens: 5000,
-          availableMonthlyTokens: 1000,
-          availableExtraTokens: 500,
+          monthlyCredits: 5000,
+          availableMonthlyCredits: 1000,
+          availableExtraCredits: 500,
         },
         relationships: {
           features: { data: [{ type: "features", id: "feature-1" }] },
@@ -329,9 +329,9 @@ describe("CompanyController", () => {
         attributes: {
           name: "Updated Test Company",
           logo: "new-logo.png",
-          monthlyTokens: 2000,
-          availableMonthlyTokens: 400,
-          availableExtraTokens: 500,
+          monthlyCredits: 2000,
+          availableMonthlyCredits: 400,
+          availableExtraCredits: 500,
         },
         relationships: {
           features: { data: [{ type: "features", id: "feature-2" }] },

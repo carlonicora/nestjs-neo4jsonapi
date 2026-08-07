@@ -228,6 +228,14 @@ export interface ConfigAiInterface {
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
     /**
+     * € per 1M input tokens billed by the embedding provider, driven by
+     * EMBEDDER_INPUT_COST_PER_1M_TOKENS. Embedding providers return vectors
+     * only (no usage figures), so EmbedderService counts tokens locally and
+     * charges `tokens * rate / 1_000_000` as the cost override. 0 or unset →
+     * embeddings are free and no usage record is written.
+     */
+    inputCostPer1MTokens?: number;
+    /**
      * Distributed token-bucket rate limit for the embedder. When present,
      * ModelService.getEmbedder() wraps the provider embedder in a
      * RateLimitedEmbedder backed by a Redis token bucket (shared across all

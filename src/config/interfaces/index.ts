@@ -12,6 +12,7 @@ export * from "./config.chunker.interface";
 export * from "./config.chunk.queues.interface";
 export * from "./config.content.types.interface";
 export * from "./config.cors.interface";
+export * from "./config.credits.interface";
 export * from "./config.discord.interface";
 export * from "./config.embedding.context.interface";
 export * from "./config.google.interface";

@@ -63,7 +63,7 @@ vi.mock("../../company/repositories/company.repository", () => ({
     findByCompanyId: vi.fn(),
     findByReferralCode: vi.fn(),
     setReferralCode: vi.fn(),
-    addExtraTokens: vi.fn(),
+    addExtraCredits: vi.fn(),
   })),
 }));
 

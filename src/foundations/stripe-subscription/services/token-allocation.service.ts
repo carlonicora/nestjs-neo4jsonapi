@@ -60,7 +60,7 @@ export class TokenAllocationService {
     }
 
     // 4. Get current company state
-    const previousTokens = Number(company.availableMonthlyTokens ?? 0);
+    const previousTokens = Number(company.availableMonthlyCredits ?? 0);
 
     await this.companyRepository.markSubscriptionStatus({
       companyId: company.id,
@@ -70,8 +70,8 @@ export class TokenAllocationService {
     // 5. Reset monthly tokens to full amount
     await this.companyRepository.updateTokens({
       companyId: company.id,
-      monthlyTokens: price.token,
-      availableMonthlyTokens: price.token,
+      monthlyCredits: price.token,
+      availableMonthlyCredits: price.token,
     });
 
     this.logger.log(
@@ -142,13 +142,13 @@ export class TokenAllocationService {
     }
 
     // 5. Get current company state
-    const previousTokens = Number(company.availableMonthlyTokens ?? 0);
+    const previousTokens = Number(company.availableMonthlyCredits ?? 0);
 
     // 6. Reset to prorated amount
     await this.companyRepository.updateTokens({
       companyId: company.id,
-      monthlyTokens: newPrice.token,
-      availableMonthlyTokens: proratedTokens,
+      monthlyCredits: newPrice.token,
+      availableMonthlyCredits: proratedTokens,
     });
 
     this.logger.log(
@@ -167,7 +167,7 @@ export class TokenAllocationService {
    * Allocate extra tokens for one-time purchases
    *
    * Unlike recurring subscriptions which reset monthly tokens,
-   * one-time purchases ADD tokens to availableExtraTokens.
+   * one-time purchases ADD credits to availableExtraCredits.
    *
    * Called when payment_intent.succeeded webhook is received for a one-time purchase.
    *
@@ -202,14 +202,14 @@ export class TokenAllocationService {
       return { success: false, reason: "Company not found" };
     }
 
-    // 4. ADD tokens to availableExtraTokens (not replace)
-    const currentExtraTokens = Number(company.availableExtraTokens) || 0;
+    // 4. ADD credits to availableExtraCredits (not replace)
+    const currentExtraTokens = Number(company.availableExtraCredits) || 0;
     const tokensToAdd = Number(price.token);
     const newExtraTokens = currentExtraTokens + tokensToAdd;
 
     await this.companyRepository.updateTokens({
       companyId: company.id,
-      availableExtraTokens: newExtraTokens,
+      availableExtraCredits: newExtraTokens,
     });
 
     this.logger.log(

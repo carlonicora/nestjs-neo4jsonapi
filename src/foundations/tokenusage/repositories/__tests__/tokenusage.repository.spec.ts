@@ -38,13 +38,20 @@ const createMockClsService = () => ({
 });
 
 describe("TokenUsageDescriptor", () => {
-  it("serialises exactly the five token-usage attributes", () => {
+  it("serialises exactly the six token-usage attributes", () => {
     const serialised = Object.entries(TokenUsageDescriptor.fields)
       .filter(([, def]: [string, any]) => !def.excludeFromJsonApi && !def.meta)
       .map(([name]) => name)
       .sort();
 
-    expect(serialised).toEqual(["cachedInputTokens", "cost", "inputTokens", "outputTokens", "tokenUsageType"]);
+    expect(serialised).toEqual([
+      "cachedInputTokens",
+      "cost",
+      "credits",
+      "inputTokens",
+      "outputTokens",
+      "tokenUsageType",
+    ]);
   });
 
   it("declares no relationships (the old TokenUsageModel had childrenTokens: [])", () => {
@@ -372,6 +379,259 @@ describe("TokenUsageRepository", () => {
       });
 
       expect(mockQuery.query).toContain("MATCH (relEntity:CustomEntity {id: $relationshipId})");
+    });
+  });
+
+  describe("findByCompany", () => {
+    const mockTokenUsage = {
+      id: TEST_IDS.tokenUsageId,
+      tokenUsageType: TokenUsageType.Analyser,
+      inputTokens: 100,
+      outputTokens: 50,
+      cost: 0.01,
+      credits: 2.5,
+    };
+
+    it("should find token usage by company", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readMany.mockResolvedValue([mockTokenUsage]);
+
+      const result = await repository.findByCompany({});
+
+      expect(result).toEqual([mockTokenUsage]);
+    });
+
+    it("should filter by start date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([mockTokenUsage]);
+
+      await repository.findByCompany({ startDate: "2024-01-01" });
+
+      expect(mockQuery.queryParams.startDate).toBe("2024-01-01");
+      expect(mockQuery.query).toContain("createdAt >= datetime($startDate)");
+    });
+
+    it("should filter by end date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([mockTokenUsage]);
+
+      await repository.findByCompany({ endDate: "2024-12-31" });
+
+      expect(mockQuery.queryParams.endDate).toBe("2024-12-31");
+      expect(mockQuery.query).toContain("createdAt <= datetime($endDate)");
+    });
+
+    it("should filter by token usage type", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([mockTokenUsage]);
+
+      await repository.findByCompany({ tokenUsageType: TokenUsageType.Analyser });
+
+      expect(mockQuery.queryParams.tokenUsageType).toBe(TokenUsageType.Analyser);
+    });
+
+    it("should paginate with the {CURSOR} placeholder", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findByCompany({});
+
+      expect(mockQuery.query).toContain("{CURSOR}");
+    });
+
+    it("should handle empty results", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readMany.mockResolvedValue([]);
+
+      const result = await repository.findByCompany({});
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe("findAggregatedByDateAndType", () => {
+    it("should return aggregated data", async () => {
+      const mockRecords = [
+        {
+          get: vi.fn((key: string) => {
+            const data: Record<string, unknown> = {
+              date: "2024-01-01",
+              tokenUsageType: TokenUsageType.Analyser,
+              totalCredits: 10.25,
+              totalInputTokens: 1000,
+              totalOutputTokens: 500,
+              totalCost: 0.1,
+              count: 5,
+            };
+            return data[key];
+          }),
+        },
+      ];
+
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: mockRecords });
+
+      const result = await repository.findAggregatedByDateAndType({});
+
+      expect(result).toHaveLength(1);
+      expect(result[0].date).toBe("2024-01-01");
+      expect(result[0].totalCredits).toBe(10.25);
+    });
+
+    it("should sum credits as a rounded float, not pages as an integer", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findAggregatedByDateAndType({});
+
+      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 2) as totalCredits");
+      expect(mockQuery.query).not.toContain("totalPages");
+    });
+
+    it("should filter by start date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findAggregatedByDateAndType({ startDate: "2024-01-01" });
+
+      expect(mockQuery.queryParams.startDate).toBe("2024-01-01");
+    });
+
+    it("should filter by end date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findAggregatedByDateAndType({ endDate: "2024-12-31" });
+
+      expect(mockQuery.queryParams.endDate).toBe("2024-12-31");
+    });
+
+    it("should handle empty results", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      const result = await repository.findAggregatedByDateAndType({});
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe("findUsageSummary", () => {
+    it("should return usage summary", async () => {
+      const mockRecord = {
+        get: vi.fn((key: string) => {
+          const data: Record<string, unknown> = {
+            totalCredits: 100.5,
+            totalInputTokens: 10000,
+            totalOutputTokens: 5000,
+            totalCost: 1.0,
+            count: 50,
+          };
+          return data[key];
+        }),
+      };
+
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [mockRecord] });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(100.5);
+      expect(result.totalInputTokens).toBe(10000);
+      expect(result.totalOutputTokens).toBe(5000);
+      expect(result.totalCost).toBe(1.0);
+      expect(result.count).toBe(50);
+    });
+
+    it("should sum credits as a rounded float, not pages as an integer", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findUsageSummary({});
+
+      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 2) as totalCredits");
+      expect(mockQuery.query).not.toContain("totalPages");
+    });
+
+    it("should return zeros when no records", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(0);
+      expect(result.totalInputTokens).toBe(0);
+      expect(result.totalOutputTokens).toBe(0);
+      expect(result.totalCost).toBe(0);
+      expect(result.count).toBe(0);
+    });
+
+    it("should filter by start date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findUsageSummary({ startDate: "2024-01-01" });
+
+      expect(mockQuery.queryParams.startDate).toBe("2024-01-01");
+    });
+
+    it("should filter by end date", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findUsageSummary({ endDate: "2024-12-31" });
+
+      expect(mockQuery.queryParams.endDate).toBe("2024-12-31");
+    });
+  });
+
+  describe("Aggregation edge cases (toNumber)", () => {
+    it("should handle null values in toNumber", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [{ get: vi.fn(() => null) }] });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(0);
+    });
+
+    it("should handle undefined values in toNumber", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [{ get: vi.fn(() => undefined) }] });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(0);
+    });
+
+    it("should handle number values in toNumber", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [{ get: vi.fn(() => 100) }] });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(100);
+    });
+
+    it("should convert Neo4j Integer-like values via toNumber", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({
+        records: [{ get: vi.fn(() => ({ toNumber: () => 42 })) }],
+      });
+
+      const result = await repository.findUsageSummary({});
+
+      expect(result.totalCredits).toBe(42);
     });
   });
 });

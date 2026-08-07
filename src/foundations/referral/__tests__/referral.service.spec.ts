@@ -66,7 +66,7 @@ describe("ReferralService", () => {
       findByCompanyId: vi.fn(),
       findByReferralCode: vi.fn(),
       setReferralCode: vi.fn(),
-      addExtraTokens: vi.fn(),
+      addExtraCredits: vi.fn(),
     } as any;
 
     mockUserRepository = {
@@ -167,7 +167,7 @@ describe("ReferralService", () => {
       await service.completeReferralOnPayment({ referredCompanyId: "company-1" });
 
       expect(mockReferralRepository.findPendingByReferredCompanyId).not.toHaveBeenCalled();
-      expect(mockCompanyRepository.addExtraTokens).not.toHaveBeenCalled();
+      expect(mockCompanyRepository.addExtraCredits).not.toHaveBeenCalled();
     });
 
     it("should not throw error when trackReferral is called while disabled", async () => {
@@ -247,21 +247,21 @@ describe("ReferralService", () => {
 
       it("should complete referral and award tokens to both companies", async () => {
         mockReferralRepository.findPendingByReferredCompanyId.mockResolvedValue(mockReferral as any);
-        mockCompanyRepository.addExtraTokens.mockResolvedValue();
+        mockCompanyRepository.addExtraCredits.mockResolvedValue();
         mockReferralRepository.completeReferral.mockResolvedValue();
 
         await service.completeReferralOnPayment({ referredCompanyId: MOCK_COMPANY_ID });
 
         // Referrer gets tokens
-        expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledWith({
+        expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledWith({
           companyId: MOCK_REFERRER_COMPANY_ID,
-          tokens: 1000, // default rewardTokens
+          credits: 1000, // default rewardTokens
         });
 
         // Referred gets tokens
-        expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledWith({
+        expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledWith({
           companyId: MOCK_COMPANY_ID,
-          tokens: 1000,
+          credits: 1000,
         });
 
         // Referral marked as completed
@@ -274,12 +274,12 @@ describe("ReferralService", () => {
       it("should use configured rewardTokens amount", async () => {
         mockConfig.rewardTokens = 2500;
         mockReferralRepository.findPendingByReferredCompanyId.mockResolvedValue(mockReferral as any);
-        mockCompanyRepository.addExtraTokens.mockResolvedValue();
+        mockCompanyRepository.addExtraCredits.mockResolvedValue();
         mockReferralRepository.completeReferral.mockResolvedValue();
 
         await service.completeReferralOnPayment({ referredCompanyId: MOCK_COMPANY_ID });
 
-        expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledWith(expect.objectContaining({ tokens: 2500 }));
+        expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledWith(expect.objectContaining({ credits: 2500 }));
       });
 
       it("should silently return when no pending referral found", async () => {
@@ -287,7 +287,7 @@ describe("ReferralService", () => {
 
         await service.completeReferralOnPayment({ referredCompanyId: MOCK_COMPANY_ID });
 
-        expect(mockCompanyRepository.addExtraTokens).not.toHaveBeenCalled();
+        expect(mockCompanyRepository.addExtraCredits).not.toHaveBeenCalled();
         expect(mockReferralRepository.completeReferral).not.toHaveBeenCalled();
       });
 
@@ -297,16 +297,16 @@ describe("ReferralService", () => {
           referrer: null,
         };
         mockReferralRepository.findPendingByReferredCompanyId.mockResolvedValue(referralWithoutReferrer as any);
-        mockCompanyRepository.addExtraTokens.mockResolvedValue();
+        mockCompanyRepository.addExtraCredits.mockResolvedValue();
         mockReferralRepository.completeReferral.mockResolvedValue();
 
         await service.completeReferralOnPayment({ referredCompanyId: MOCK_COMPANY_ID });
 
         // Should still award to referred company
-        expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledTimes(1);
-        expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledWith({
+        expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledTimes(1);
+        expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledWith({
           companyId: MOCK_COMPANY_ID,
-          tokens: 1000,
+          credits: 1000,
         });
       });
     });
@@ -611,12 +611,12 @@ describe("ReferralService", () => {
         id: "referral-123",
         referrer: { id: MOCK_REFERRER_COMPANY_ID },
       } as any);
-      mockCompanyRepository.addExtraTokens.mockResolvedValue();
+      mockCompanyRepository.addExtraCredits.mockResolvedValue();
       mockReferralRepository.completeReferral.mockResolvedValue();
 
       await customService.completeReferralOnPayment({ referredCompanyId: MOCK_COMPANY_ID });
 
-      expect(mockCompanyRepository.addExtraTokens).toHaveBeenCalledWith(expect.objectContaining({ tokens: 500 }));
+      expect(mockCompanyRepository.addExtraCredits).toHaveBeenCalledWith(expect.objectContaining({ credits: 500 }));
     });
   });
 });

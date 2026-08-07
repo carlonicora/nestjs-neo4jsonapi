@@ -78,5 +78,9 @@ export interface TokenUsageRecorderInterface {
     relationshipType: string;
     useVisionCosts?: boolean;
     modelWeight?: ModelWeight;
+    /** When false the per-record credits floor (`minCreditsPerRecord`) is skipped — sub-cent calls (embeddings) must not be floored. Defaults to true. */
+    applyMinimum?: boolean;
+    /** Pre-computed cost in euros; when provided `computeCost` is skipped (embeddings: estimated tokens × the embedder rate). */
+    costOverride?: number;
   }): Promise<void>;
 }

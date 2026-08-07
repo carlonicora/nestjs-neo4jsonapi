@@ -11,15 +11,15 @@ export class CompanyPostAttributesDTO {
 
   @IsOptional()
   @IsNumber()
-  monthlyTokens?: number;
+  monthlyCredits?: number;
 
   @IsOptional()
   @IsNumber()
-  availableMonthlyTokens?: number;
+  availableMonthlyCredits?: number;
 
   @IsOptional()
   @IsNumber()
-  availableExtraTokens?: number;
+  availableExtraCredits?: number;
 
   @IsOptional()
   @IsString()

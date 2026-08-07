@@ -107,6 +107,7 @@
     "gray-matter": "^4.0.3",
     "handlebars": "^4.7.9",
     "ioredis": "^5.11.1",
+    "js-tiktoken": "^1.0.21",
     "js-yaml": "^5.2.2",
     "jszip": "^3.10.1",
     "langsmith": "^0.8.8",

@@ -113,9 +113,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     companyId: string;
     name: string;
     configurations?: string;
-    monthlyTokens?: number;
-    availableMonthlyTokens?: number;
-    availableExtraTokens?: number;
+    monthlyCredits?: number;
+    availableMonthlyCredits?: number;
+    availableExtraCredits?: number;
     featureIds?: string[];
     moduleIds?: string[];
     legal_address?: string;
@@ -145,9 +145,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     const createSetParams: string[] = [];
     createSetParams.push("company.name=$name");
     createSetParams.push("company.configurations=$configurations");
-    createSetParams.push("company.monthlyTokens=$monthlyTokens");
-    createSetParams.push("company.availableMonthlyTokens=$availableMonthlyTokens");
-    createSetParams.push("company.availableExtraTokens=$availableExtraTokens");
+    createSetParams.push("company.monthlyCredits=$monthlyCredits");
+    createSetParams.push("company.availableMonthlyCredits=$availableMonthlyCredits");
+    createSetParams.push("company.availableExtraCredits=$availableExtraCredits");
     if (params.legal_address !== undefined) createSetParams.push("company.legal_address=$legal_address");
     if (params.street_number !== undefined) createSetParams.push("company.street_number=$street_number");
     if (params.street !== undefined) createSetParams.push("company.street=$street");
@@ -165,9 +165,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       companyId: params.companyId,
       name: params.name,
       configurations: params.configurations ?? "",
-      monthlyTokens: params.monthlyTokens ?? 0,
-      availableMonthlyTokens: params.availableMonthlyTokens ?? 0,
-      availableExtraTokens: params.availableExtraTokens ?? 0,
+      monthlyCredits: params.monthlyCredits ?? 0,
+      availableMonthlyCredits: params.availableMonthlyCredits ?? 0,
+      availableExtraCredits: params.availableExtraCredits ?? 0,
       featureIds: params.featureIds ?? [],
       moduleIds: params.moduleIds ?? [],
       ...(params.legal_address !== undefined && { legal_address: params.legal_address }),
@@ -225,9 +225,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     name: string;
     configurations?: string;
     logo?: string;
-    monthlyTokens?: number;
-    availableMonthlyTokens?: number;
-    availableExtraTokens?: number;
+    monthlyCredits?: number;
+    availableMonthlyCredits?: number;
+    availableExtraCredits?: number;
     featureIds?: string[];
     moduleIds?: string[];
     legal_address?: string;
@@ -258,11 +258,11 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     updateParams.push("company.name = $name");
     updateParams.push("company.configurations = $configurations");
     if (params.logo !== undefined) updateParams.push("company.logo = $logo");
-    if (params.monthlyTokens !== undefined) updateParams.push("company.monthlyTokens = $monthlyTokens");
-    if (params.availableMonthlyTokens !== undefined)
-      updateParams.push("company.availableMonthlyTokens = $availableMonthlyTokens");
-    if (params.availableExtraTokens !== undefined)
-      updateParams.push("company.availableExtraTokens = $availableExtraTokens");
+    if (params.monthlyCredits !== undefined) updateParams.push("company.monthlyCredits = $monthlyCredits");
+    if (params.availableMonthlyCredits !== undefined)
+      updateParams.push("company.availableMonthlyCredits = $availableMonthlyCredits");
+    if (params.availableExtraCredits !== undefined)
+      updateParams.push("company.availableExtraCredits = $availableExtraCredits");
     if (params.legal_address !== undefined) updateParams.push("company.legal_address = $legal_address");
     if (params.street_number !== undefined) updateParams.push("company.street_number = $street_number");
     if (params.street !== undefined) updateParams.push("company.street = $street");
@@ -281,9 +281,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       name: params.name,
       configurations: params.configurations ?? "",
       logo: params.logo ?? "",
-      monthlyTokens: params.monthlyTokens ?? 0,
-      availableMonthlyTokens: params.availableMonthlyTokens ?? 0,
-      availableExtraTokens: params.availableExtraTokens ?? 0,
+      monthlyCredits: params.monthlyCredits ?? 0,
+      availableMonthlyCredits: params.availableMonthlyCredits ?? 0,
+      availableExtraCredits: params.availableExtraCredits ?? 0,
       featureIds: params.featureIds ?? [],
       moduleIds: params.moduleIds ?? [],
       ...(params.legal_address !== undefined && { legal_address: params.legal_address }),
@@ -376,67 +376,49 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     return await this.neo4j.writeOne(query);
   }
 
-  async useTokens(params: {
-    input: number;
-    output: number;
+  /**
+   * Deduct billing credits from a company's balances (monthly allowance first,
+   * then the extra top-up balance).
+   *
+   * @param params - Parameters
+   * @param params.credits - Credits to deduct (fractional, 2 decimals)
+   * @param params.companyId - Company identifier; defaults to the CLS company
+   */
+  async useCredits(params: {
+    credits: number;
     companyId?: string;
-  }): Promise<{ availableMonthlyTokens: number; availableExtraTokens: number } | undefined> {
-    const tokens = params.input + params.output;
+  }): Promise<{ availableMonthlyCredits: number; availableExtraCredits: number } | undefined> {
+    if (params.credits <= 0) return undefined;
 
-    // Nothing consumed — skip the read/write entirely.
-    if (tokens <= 0) return undefined;
-
-    const companyQuery = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
-    companyQuery.queryParams = {
-      companyId: params.companyId ?? this.clsService.get("companyId"),
-    };
-    companyQuery.query = `MATCH (company:Company {id: $companyId}) RETURN company`;
-    const company: Company = await this.neo4j.readOne(companyQuery);
-
-    // Convert BigInt values from Neo4j to numbers for arithmetic operations
-    const availableMonthlyTokens = Number(company.availableMonthlyTokens ?? 0);
-    const availableExtraTokens = Number(company.availableExtraTokens ?? 0);
-
-    const query = this.neo4j.initQuery();
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
     query.queryParams = {
       companyId: params.companyId ?? this.clsService.get("companyId"),
+      credits: params.credits,
     };
 
-    if (availableMonthlyTokens >= tokens) {
-      query.queryParams.availableMonthlyTokens = availableMonthlyTokens - tokens;
-
-      query.query = `
+    // Single-statement read-and-write: the monthly-then-extra waterfall is computed
+    // inside the SET so concurrent deductions cannot lose updates. Balances are
+    // 2-dp floats and are deliberately NOT clamped (a mid-operation overrun may go
+    // negative; the pre-flight guard blocks the NEXT operation).
+    query.query = `
       MATCH (company:Company {id: $companyId})
-      SET company.availableMonthlyTokens = $availableMonthlyTokens,
+      WITH company,
+           toFloat(coalesce(company.availableMonthlyCredits, 0)) AS m,
+           toFloat(coalesce(company.availableExtraCredits, 0)) AS e,
+           toFloat($credits) AS c
+      SET company.availableMonthlyCredits = CASE WHEN m >= c THEN round(m - c, 2) ELSE 0.0 END,
+          company.availableExtraCredits   = CASE WHEN m >= c THEN e
+                                                 WHEN m > 0  THEN round(e - (c - m), 2)
+                                                 ELSE round(e - c, 2) END,
           company.updatedAt = datetime()
+      RETURN company
     `;
-    } else if (availableMonthlyTokens > 0) {
-      const remainingTokens = tokens - availableMonthlyTokens;
-      query.queryParams.availableMonthlyTokens = 0;
-      query.queryParams.availableExtraTokens = availableExtraTokens - remainingTokens;
 
-      query.query = `
-      MATCH (company:Company {id: $companyId})
-      SET company.availableMonthlyTokens = $availableMonthlyTokens,
-          company.availableExtraTokens = $availableExtraTokens,
-          company.updatedAt = datetime()
-    `;
-    } else {
-      // Monthly allowance exhausted — deduct entirely from extra tokens.
-      query.queryParams.availableExtraTokens = availableExtraTokens - tokens;
-
-      query.query = `
-      MATCH (company:Company {id: $companyId})
-      SET company.availableExtraTokens = $availableExtraTokens,
-          company.updatedAt = datetime()
-    `;
-    }
-
-    await this.neo4j.writeOne(query);
-
+    const company: Company = await this.neo4j.writeOne(query);
+    if (!company) return undefined;
     return {
-      availableMonthlyTokens: query.queryParams.availableMonthlyTokens ?? availableMonthlyTokens,
-      availableExtraTokens: query.queryParams.availableExtraTokens ?? availableExtraTokens,
+      availableMonthlyCredits: Number(company.availableMonthlyCredits ?? 0),
+      availableExtraCredits: Number(company.availableExtraCredits ?? 0),
     };
   }
 
@@ -458,43 +440,43 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
-   * Update company token allocation fields
+   * Update company credit allocation fields
    *
-   * Used by TokenAllocationService to reset tokens on subscription payment
-   * or pro-rate tokens on plan changes.
+   * Used by TokenAllocationService to reset credits on subscription payment
+   * or pro-rate credits on plan changes.
    *
    * @param params - Update parameters
    * @param params.companyId - Company identifier
-   * @param params.monthlyTokens - Optional new monthly token allocation
-   * @param params.availableMonthlyTokens - Optional new available monthly tokens
-   * @param params.availableExtraTokens - Optional new available extra tokens
+   * @param params.monthlyCredits - Optional new monthly credit allocation
+   * @param params.availableMonthlyCredits - Optional new available monthly credits
+   * @param params.availableExtraCredits - Optional new available extra credits
    */
   async updateTokens(params: {
     companyId: string;
-    monthlyTokens?: number;
-    availableMonthlyTokens?: number;
-    availableExtraTokens?: number;
+    monthlyCredits?: number;
+    availableMonthlyCredits?: number;
+    availableExtraCredits?: number;
   }): Promise<void> {
     const setParams: string[] = [];
     setParams.push("company.updatedAt = datetime()");
 
-    if (params.monthlyTokens !== undefined) {
-      setParams.push("company.monthlyTokens = $monthlyTokens");
+    if (params.monthlyCredits !== undefined) {
+      setParams.push("company.monthlyCredits = $monthlyCredits");
     }
-    if (params.availableMonthlyTokens !== undefined) {
-      setParams.push("company.availableMonthlyTokens = $availableMonthlyTokens");
+    if (params.availableMonthlyCredits !== undefined) {
+      setParams.push("company.availableMonthlyCredits = $availableMonthlyCredits");
     }
-    if (params.availableExtraTokens !== undefined) {
-      setParams.push("company.availableExtraTokens = $availableExtraTokens");
+    if (params.availableExtraCredits !== undefined) {
+      setParams.push("company.availableExtraCredits = $availableExtraCredits");
     }
 
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
       companyId: params.companyId,
-      monthlyTokens: params.monthlyTokens,
-      availableMonthlyTokens: params.availableMonthlyTokens,
-      availableExtraTokens: params.availableExtraTokens,
+      monthlyCredits: params.monthlyCredits,
+      availableMonthlyCredits: params.availableMonthlyCredits,
+      availableExtraCredits: params.availableExtraCredits,
     };
 
     query.query = `
@@ -801,23 +783,23 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
-   * Add extra tokens to a company (increments availableExtraTokens)
+   * Add extra credits to a company (increments availableExtraCredits)
    *
    * @param params - Parameters
    * @param params.companyId - Company identifier
-   * @param params.tokens - Number of tokens to add
+   * @param params.credits - Number of credits to add
    */
-  async addExtraTokens(params: { companyId: string; tokens: number }): Promise<void> {
+  async addExtraCredits(params: { companyId: string; credits: number }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
       companyId: params.companyId,
-      tokens: params.tokens,
+      credits: params.credits,
     };
 
     query.query = `
       MATCH (company:Company {id: $companyId})
-      SET company.availableExtraTokens = COALESCE(company.availableExtraTokens, 0) + $tokens,
+      SET company.availableExtraCredits = round(COALESCE(company.availableExtraCredits, 0) + $credits, 2),
           company.updatedAt = datetime()
     `;
 

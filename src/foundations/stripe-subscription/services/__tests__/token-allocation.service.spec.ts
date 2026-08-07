@@ -73,9 +73,9 @@ describe("TokenAllocationService", () => {
   const MOCK_COMPANY = {
     id: MOCK_COMPANY_ID,
     name: "Test Company",
-    monthlyTokens: 5000,
-    availableMonthlyTokens: 2500,
-    availableExtraTokens: 0,
+    monthlyCredits: 5000,
+    availableMonthlyCredits: 2500,
+    availableExtraCredits: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -140,8 +140,8 @@ describe("TokenAllocationService", () => {
 
       expect(companyRepository.updateTokens).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
-        monthlyTokens: MOCK_TOKENS,
-        availableMonthlyTokens: MOCK_TOKENS,
+        monthlyCredits: MOCK_TOKENS,
+        availableMonthlyCredits: MOCK_TOKENS,
       });
     });
 
@@ -189,7 +189,7 @@ describe("TokenAllocationService", () => {
     it("should handle BigInt conversion for previous tokens", async () => {
       const companyWithBigInt = {
         ...MOCK_COMPANY,
-        availableMonthlyTokens: BigInt(5000),
+        availableMonthlyCredits: BigInt(5000),
       };
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION);
       companyRepository.findByStripeCustomerId.mockResolvedValue(companyWithBigInt);
@@ -311,7 +311,7 @@ describe("TokenAllocationService", () => {
       expect(result.reason).toBe("Company not found");
     });
 
-    it("should set monthlyTokens to new plan value", async () => {
+    it("should set monthlyCredits to new plan value", async () => {
       const midCycleSubscription = {
         ...MOCK_SUBSCRIPTION,
         currentPeriodStart: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
@@ -329,7 +329,7 @@ describe("TokenAllocationService", () => {
 
       expect(companyRepository.updateTokens).toHaveBeenCalledWith(
         expect.objectContaining({
-          monthlyTokens: MOCK_TOKENS, // Full plan value
+          monthlyCredits: MOCK_TOKENS, // Full plan value
         }),
       );
     });
