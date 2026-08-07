@@ -46,11 +46,12 @@ export interface TokenUsageSummary {
  * never by a registry lookup: Nest constructs providers long before
  * `onModuleInit`, where models are registered.
  *
- * `onModuleInit` is INHERITED rather than declared: `AbstractRepository.onModuleInit`
- * emits `CREATE CONSTRAINT tokenusage_id IF NOT EXISTS FOR (tokenusage:TokenUsage)
+ * `onModuleInit` DELEGATES to `AbstractRepository.onModuleInit` first, which emits
+ * `CREATE CONSTRAINT tokenusage_id IF NOT EXISTS FOR (tokenusage:TokenUsage)
  * REQUIRE tokenusage.id IS UNIQUE` from `descriptor.constraints` — byte-identical to
  * the constraint this repository used to declare by hand — plus the FULLTEXT index
- * derived from the descriptor's string fields.
+ * derived from the descriptor's string fields. It then adds the one index the
+ * descriptor cannot express; see the override below.
  */
 @Injectable()
 export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof TokenUsageDescriptor.relationships> {
@@ -58,6 +59,32 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
 
   constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
     super(neo4j, securityService, clsService);
+  }
+
+  /**
+   * Adds the range index every date-filtered finder here depends on —
+   * findByCompany, findAggregatedByDateAndType, findUsageSummary, and the
+   * cross-tenant admin queries in TokenUsageAdminRepository. Without it each of
+   * them scans the whole :TokenUsage label, which is the fastest-growing label
+   * in the database.
+   *
+   * There is no declarative way to express a non-FULLTEXT index via
+   * defineEntity(): EntityDescriptor.indexes is hard-coded to the string-field
+   * fulltext index, and AbstractRepository.onModuleInit only acts on
+   * type === "FULLTEXT". Hence the explicit override — same pattern, and same
+   * stated reason, as UserActivityRepository.
+   *
+   * super.onModuleInit() MUST be called first: it creates the descriptor-derived
+   * id constraint and fulltext index. Dropping it would silently remove both.
+   */
+  override async onModuleInit(): Promise<void> {
+    await super.onModuleInit();
+
+    const { nodeName, labelName } = this.descriptor.model;
+
+    await this.neo4j.writeOne({
+      query: `CREATE INDEX ${nodeName}_createdAt IF NOT EXISTS FOR (${nodeName}:${labelName}) ON (${nodeName}.createdAt)`,
+    });
   }
 
   /**
@@ -95,6 +122,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
       credits: params.credits ?? 0,
     };
 
+    // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
     query.query += `
       CREATE (${tokenUsageMeta.nodeName}:${tokenUsageMeta.labelName} {
         id: $id,
@@ -107,8 +135,8 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${tokenUsageMeta.nodeName})-[:BELONGS_TO]->(company)
-      CREATE (${tokenUsageMeta.nodeName})-[:TRIGGERED_BY]->(currentUser)
+      ${query.queryParams.companyId ? `CREATE (${tokenUsageMeta.nodeName})-[:BELONGS_TO]->(company)` : ``}
+      ${query.queryParams.currentUserId ? `CREATE (${tokenUsageMeta.nodeName})-[:TRIGGERED_BY]->(currentUser)` : ``}
       WITH ${tokenUsageMeta.nodeName}
       MATCH (relEntity:${params.relationshipType} {id: $relationshipId})
       CREATE (${tokenUsageMeta.nodeName})-[:USED_FOR]->(relEntity)

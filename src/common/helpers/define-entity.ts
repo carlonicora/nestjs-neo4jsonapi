@@ -76,8 +76,14 @@ function convertNeo4jDateTime(value: any): Date | null {
 
 /**
  * Convert a Neo4j field value based on its CypherType
+ *
+ * Exported because repositories that map scalar rollup rows by hand cannot go
+ * through the descriptor's auto-generated `mapper()` — `EntityFactory` only maps
+ * record columns that are actual Neo4j Nodes — and MUST NOT reimplement the
+ * temporal formatting. There is exactly one implementation of that formatting
+ * and this is it; see `TokenUsageAdminRepository`.
  */
-function convertFieldValue(value: any, type: CypherType): any {
+export function convertFieldValue(value: any, type: CypherType): any {
   if (value === null || value === undefined) return value;
 
   switch (type) {

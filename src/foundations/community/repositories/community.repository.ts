@@ -56,6 +56,7 @@ export class CommunityRepository implements OnModuleInit {
       rating: params.rating ?? 0,
     };
 
+    // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
     query.query += `
       CREATE (community:Community {
         id: $id,
@@ -68,7 +69,7 @@ export class CommunityRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (community)-[:BELONGS_TO]->(company)
+      ${query.queryParams.companyId ? `CREATE (community)-[:BELONGS_TO]->(company)` : ``}
       RETURN community
     `;
 

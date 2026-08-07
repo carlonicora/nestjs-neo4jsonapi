@@ -768,8 +768,12 @@ export abstract class AbstractRepository<
       })
     `;
 
-    // Create company relationship only for company-scoped entities
-    if (this.descriptor.isCompanyScoped) {
+    // Create company relationship only for company-scoped entities AND only when
+    // initQuery() actually bound the `company` variable. Without the second
+    // guard an unbound `company` inside CREATE silently creates a fresh
+    // label-less node instead of failing — the defect that left 12,237 orphan
+    // nodes in production data.
+    if (this.descriptor.isCompanyScoped && query.queryParams.companyId) {
       query.query += `CREATE (${nodeName})-[:BELONGS_TO]->(company)\n`;
     }
 

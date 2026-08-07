@@ -67,10 +67,22 @@ describe("TokenUsageRepository", () => {
   let repository: TokenUsageRepository;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
 
-  const createMockQuery = () => ({
+  // `queryParams` mirrors what Neo4jService.initQuery() actually returns: it always
+  // sets companyId/currentUserId, and binds the matching `company` / `currentUser`
+  // Cypher variables ONLY when the id is present. Tests asserting on a CLS-bound
+  // write must pass the ids in explicitly.
+  const createMockQuery = (queryParams: Record<string, any> = {}) => ({
     query: "",
-    queryParams: {},
+    queryParams,
   });
+
+  /** Arms the Neo4j double with a query whose CLS-derived ids are exactly as given. */
+  const makeRepository = (queryParams: { companyId: string | null; currentUserId: string | null }) => {
+    const query = createMockQuery({ ...queryParams });
+    neo4jService.initQuery.mockReturnValue(query);
+    neo4jService.writeOne.mockResolvedValue(undefined);
+    return { repository, query, neo4j: neo4jService };
+  };
 
   beforeEach(async () => {
     neo4jService = createMockNeo4jService();
@@ -127,7 +139,9 @@ describe("TokenUsageRepository", () => {
 
   describe("create", () => {
     it("should create a token usage record for GraphCreator", async () => {
-      const mockQuery = createMockQuery();
+      // Both ids bound: initQuery() emits the `company` and `currentUser` MATCHes,
+      // so both edges have real nodes to attach to.
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
@@ -321,6 +335,82 @@ describe("TokenUsageRepository", () => {
       });
 
       expect(mockQuery.queryParams.tokenUsageType).toBe(TokenUsageType.CounterpartIdentificator);
+    });
+  });
+
+  describe("create() edge guards", () => {
+    it("emits both edges when company and user are bound", async () => {
+      const { repository, query } = makeRepository({ companyId: "c1", currentUserId: "u1" });
+
+      await repository.create({
+        id: "t1",
+        tokenUsageType: "summariser",
+        inputTokens: 1,
+        outputTokens: 1,
+        relationshipId: "r1",
+        relationshipType: "Document",
+      });
+
+      expect(query.query).toContain("-[:BELONGS_TO]->(company)");
+      expect(query.query).toContain("-[:TRIGGERED_BY]->(currentUser)");
+    });
+
+    it("omits the company edge when companyId is absent — corpus work has no customer", async () => {
+      const { repository, query } = makeRepository({ companyId: null, currentUserId: "u1" });
+
+      await repository.create({
+        id: "t2",
+        tokenUsageType: "massima_extraction",
+        inputTokens: 1,
+        outputTokens: 1,
+        relationshipId: "r1",
+        relationshipType: "Judgement",
+      });
+
+      expect(query.query).not.toContain("-[:BELONGS_TO]->(company)");
+      expect(query.query).toContain("-[:TRIGGERED_BY]->(currentUser)");
+    });
+
+    it("omits both edges when neither id is bound", async () => {
+      const { repository, query } = makeRepository({ companyId: null, currentUserId: null });
+
+      await repository.create({
+        id: "t3",
+        tokenUsageType: "massima_extraction",
+        inputTokens: 1,
+        outputTokens: 1,
+        relationshipId: "r1",
+        relationshipType: "Judgement",
+      });
+
+      expect(query.query).not.toContain("-[:BELONGS_TO]->(company)");
+      expect(query.query).not.toContain("-[:TRIGGERED_BY]->(currentUser)");
+    });
+  });
+
+  describe("onModuleInit()", () => {
+    it("creates the createdAt range index the date-ranged finders depend on", async () => {
+      const { repository, neo4j } = makeRepository({ companyId: "c1", currentUserId: "u1" });
+
+      await repository.onModuleInit();
+
+      const queries = neo4j.writeOne.mock.calls.map((c: any[]) => c[0].query);
+      expect(
+        queries.some((q: string) =>
+          q.includes(
+            "CREATE INDEX tokenusage_createdAt IF NOT EXISTS FOR (tokenusage:TokenUsage) ON (tokenusage.createdAt)",
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("still creates the inherited id constraint — super.onModuleInit() must be called first", async () => {
+      const { repository, neo4j } = makeRepository({ companyId: "c1", currentUserId: "u1" });
+
+      await repository.onModuleInit();
+
+      const queries = neo4j.writeOne.mock.calls.map((c: any[]) => c[0].query);
+      expect(queries.some((q: string) => q.includes("CREATE CONSTRAINT tokenusage_id"))).toBe(true);
     });
   });
 

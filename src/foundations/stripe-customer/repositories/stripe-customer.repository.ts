@@ -178,7 +178,7 @@ export class StripeCustomerRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${stripeCustomerMeta.nodeName})-[:BELONGS_TO]->(${companyMeta.nodeName})
+      ${query.queryParams.companyId ? `CREATE (${stripeCustomerMeta.nodeName})-[:BELONGS_TO]->(${companyMeta.nodeName})` : ``}
       RETURN ${stripeCustomerMeta.nodeName}
     `;
 

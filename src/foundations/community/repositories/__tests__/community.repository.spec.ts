@@ -51,9 +51,12 @@ describe("CommunityRepository", () => {
   let embedderService: ReturnType<typeof createMockEmbedderService>;
   let securityService: ReturnType<typeof createMockSecurityService>;
 
-  const createMockQuery = () => ({
+  // `queryParams` mirrors what Neo4jService.initQuery() actually returns: it always
+  // sets companyId, and binds the `company` Cypher variable ONLY when that id is
+  // present. Tests asserting on the company edge must pass the id in explicitly.
+  const createMockQuery = (queryParams: Record<string, any> = {}) => ({
     query: "",
-    queryParams: {},
+    queryParams,
   });
 
   const MOCK_COMMUNITY: Community = {
@@ -146,7 +149,9 @@ describe("CommunityRepository", () => {
 
   describe("createCommunity", () => {
     it("should create community with required fields", async () => {
-      const mockQuery = createMockQuery();
+      // companyId bound: initQuery() emits `MATCH (company:Company {id: $companyId})`,
+      // so the BELONGS_TO edge has a real node to attach to.
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
 

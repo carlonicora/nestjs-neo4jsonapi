@@ -242,6 +242,7 @@ export class NotificationRepository extends AbstractRepository<
       actorId: [params.actorId],
     };
 
+    // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
     query.query += `
       CREATE (notification:Notification {
         id: $notificationId,
@@ -249,7 +250,7 @@ export class NotificationRepository extends AbstractRepository<
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (notification)-[:BELONGS_TO]->(company)
+      ${query.queryParams.companyId ? `CREATE (notification)-[:BELONGS_TO]->(company)` : ``}
     `;
 
     // `values` decides whether `updateRelationshipQuery` emits its MATCH branch

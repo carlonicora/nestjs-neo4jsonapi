@@ -157,9 +157,13 @@ describe("AbstractRepository", () => {
   let securityService: ReturnType<typeof createMockSecurityService>;
   let clsService: ReturnType<typeof createMockClsService>;
 
-  const createMockQuery = () => ({
+  // `queryParams` mirrors what Neo4jService.initQuery() actually returns: it always
+  // sets companyId/currentUserId, binding the matching `company` / `currentUser`
+  // variables ONLY when the id is present. Tests that assert on a CLS-bound write
+  // must therefore pass the ids in explicitly.
+  const createMockQuery = (queryParams: Record<string, any> = {}) => ({
     query: "",
-    queryParams: {},
+    queryParams,
     cursor: undefined,
     serialiser: undefined,
     fetchAll: false,
@@ -485,7 +489,9 @@ describe("AbstractRepository", () => {
 
   describe("create", () => {
     it("should create entity with relationships", async () => {
-      const mockQuery = createMockQuery();
+      // companyId bound: initQuery() emits `MATCH (company:Company {id: $companyId})`,
+      // so the BELONGS_TO edge has a real node to attach to.
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.validateExistingNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
@@ -500,6 +506,21 @@ describe("AbstractRepository", () => {
       expect(mockQuery.query).toContain("CREATE (testEntity:TestEntity");
       expect(mockQuery.query).toContain("CREATE (testEntity)-[:BELONGS_TO]->(company)");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
+    });
+
+    it("omits the company edge when no companyId is bound, instead of creating an orphan node", async () => {
+      // initQuery() emits no `MATCH (company:Company ...)` when companyId is absent,
+      // so an unconditional CREATE ...->(company) would create a label-less node.
+      const mockQuery = createMockQuery({ companyId: null, currentUserId: null });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      clsService.get.mockImplementation(() => undefined);
+
+      await repository.create({ id: TEST_IDS.entityId, name: "New Entity" });
+
+      expect(mockQuery.query).toContain("CREATE (testEntity:TestEntity");
+      expect(mockQuery.query).not.toContain("-[:BELONGS_TO]->(company)");
     });
 
     it("should apply field defaults", async () => {

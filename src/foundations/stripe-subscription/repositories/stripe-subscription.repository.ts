@@ -191,6 +191,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
       quantity: params.quantity,
     };
 
+    // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
     query.query += `
       MATCH (${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
       MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
@@ -210,8 +211,8 @@ export class StripeSubscriptionRepository implements OnModuleInit {
       })
       CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})
       CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})
-      CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${companyMeta.nodeName})
-      CREATE (${stripeSubscriptionMeta.nodeName})-[:CREATED_BY]->(currentUser)
+      ${query.queryParams.companyId ? `CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${companyMeta.nodeName})` : ``}
+      ${query.queryParams.currentUserId ? `CREATE (${stripeSubscriptionMeta.nodeName})-[:CREATED_BY]->(currentUser)` : ``}
       RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
     `;
 
