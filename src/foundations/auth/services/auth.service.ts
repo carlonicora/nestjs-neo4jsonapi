@@ -467,6 +467,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
         activationLink: link,
         expirationDate: user.codeExpiration.toDateString(),
         expirationTime: user.codeExpiration.toTimeString(),
+        expiresAt: user.codeExpiration.toISOString(),
         companyName: user.company.name,
       },
       locale,
@@ -517,6 +518,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
         resetLink: link,
         expirationDate: user.codeExpiration.toDateString(),
         expirationTime: user.codeExpiration.toTimeString(),
+        expiresAt: user.codeExpiration.toISOString(),
       },
       locale,
     );

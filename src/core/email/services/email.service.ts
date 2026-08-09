@@ -8,6 +8,7 @@ import { join } from "path";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
 import { ConfigEmailInterface } from "../../../config/interfaces/config.email.interface";
+import { registerEmailTemplateHelpers } from "../email.helpers";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import sendGridMail = require("@sendgrid/mail");
 
@@ -46,11 +47,9 @@ export class EmailService {
     // Library templates (defaults)
     this.libraryTemplateBasePath = join(__dirname, "../templates");
 
-    // Register eq helper for template conditionals
-    Handlebars.registerHelper("eq", (a: any, b: any) => a === b);
-
-    // Register concat helper for templates (last arg is Handlebars options)
-    Handlebars.registerHelper("concat", (...args) => args.slice(0, -1).join(""));
+    // Template helpers live in email.helpers.ts so consumers can register the
+    // identical set when rendering templates outside this service.
+    registerEmailTemplateHelpers(Handlebars);
 
     const headerPath = join(this.templateBasePath, "header.hbs");
     const footerPath = join(this.templateBasePath, "footer.hbs");

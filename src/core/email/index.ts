@@ -10,3 +10,6 @@ export * from "./email.module";
 
 // Services
 export * from "./services/email.service";
+
+// Template helpers
+export * from "./email.helpers";

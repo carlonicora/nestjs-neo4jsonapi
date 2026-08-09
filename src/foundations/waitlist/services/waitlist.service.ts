@@ -76,6 +76,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
         confirmationLink,
         expirationDate: confirmationCodeExpiration.toDateString(),
         expirationTime: confirmationCodeExpiration.toTimeString(),
+        expiresAt: confirmationCodeExpiration.toISOString(),
       },
       "en",
     );
@@ -165,6 +166,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
         registrationLink,
         expirationDate: inviteCodeExpiration.toDateString(),
         expirationTime: inviteCodeExpiration.toTimeString(),
+        expiresAt: inviteCodeExpiration.toISOString(),
       },
       "en",
     );
