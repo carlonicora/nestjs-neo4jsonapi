@@ -22,6 +22,7 @@ import { PushModule } from "./push/push.module";
 import { RelevancyModule } from "./relevancy/relevancy.module";
 import { RoleModule } from "./role/role.module";
 import { S3Module } from "./s3/s3.module";
+import { StripeCustomerModule } from "./stripe-customer/stripe-customer.module";
 import { StripeInvoiceModule } from "./stripe-invoice/stripe-invoice.module";
 import { StripePriceModule } from "./stripe-price";
 import { StripeProductModule } from "./stripe-product";
@@ -88,6 +89,14 @@ const STATIC_FOUNDATION_MODULES = [
   UserModule,
   WaitlistModule,
   StripeModule,
+  // Every other stripe-* foundation was registered here; this one was omitted,
+  // so its controller (GET/POST/PUT/DELETE /stripe-customers plus all
+  // payment-methods routes) was never mounted and its two models were never
+  // added to modelRegistry. only35 masks the bug by importing
+  // StripeCustomerModule from its own company-deletion module, which mounts the
+  // controller as a side effect; consumers without such a module get a 404 on
+  // the billing dashboard's very first request.
+  StripeCustomerModule,
   StripePromotionCodeModule,
   StripeSubscriptionModule,
   StripePriceModule,
