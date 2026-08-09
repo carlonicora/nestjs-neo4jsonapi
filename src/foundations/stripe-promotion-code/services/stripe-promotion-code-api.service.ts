@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { StripeService } from "../../stripe/services/stripe.service";
 import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
 import { stripePromotionCodeMeta } from "../entities/stripe-promotion-code.meta";
+import { toStripeCouponDuration, type StripeCouponDuration } from "../entities/stripe-promotion-code.entity";
 
 export interface PromotionCodeValidationAttributes {
   valid: boolean;
@@ -11,7 +12,7 @@ export interface PromotionCodeValidationAttributes {
   discountType?: "percent_off" | "amount_off";
   discountValue?: number;
   currency?: string;
-  duration?: "forever" | "once" | "repeating";
+  duration?: StripeCouponDuration;
   durationInMonths?: number;
   errorMessage?: string;
 }
@@ -140,7 +141,7 @@ export class StripePromotionCodeApiService {
       discountType: coupon.percent_off ? "percent_off" : "amount_off",
       discountValue: coupon.percent_off || coupon.amount_off || 0,
       currency: coupon.currency || undefined,
-      duration: coupon.duration,
+      duration: toStripeCouponDuration(coupon.duration),
       durationInMonths: coupon.duration_in_months || undefined,
     });
   }

@@ -535,7 +535,7 @@ export class StripeSubscriptionAdminService {
     }
 
     // Existing proration logic for non-trial subscriptions
-    const prorationPreview: Stripe.UpcomingInvoice = await this.stripeSubscriptionApiService.previewProration(
+    const prorationPreview: Stripe.Invoice = await this.stripeSubscriptionApiService.previewProration(
       subscription.stripeSubscriptionId,
       newPrice.stripePriceId,
     );

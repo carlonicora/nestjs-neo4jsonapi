@@ -5,6 +5,7 @@ import { StripeProductAdminService } from "../../stripe-product/services/stripe-
 import { StripeProductApiService } from "../../stripe-product/services/stripe-product-api.service";
 import { StripePricePostDataDTO, StripePricePutDataDTO } from "../dtos/stripe-price.dto";
 import { StripePriceModel } from "../entities/stripe-price.model";
+import { toStripePriceRecurringInterval } from "../entities/stripe-price.entity";
 import { StripePriceRepository } from "../repositories/stripe-price.repository";
 
 /**
@@ -314,7 +315,7 @@ export class StripePriceAdminService {
           currency: stripePrice.currency,
           unitAmount: stripePrice.unit_amount ?? undefined,
           priceType: stripePrice.type === "recurring" ? "recurring" : "one_time",
-          recurringInterval: stripePrice.recurring?.interval,
+          recurringInterval: toStripePriceRecurringInterval(stripePrice.recurring?.interval),
           recurringIntervalCount: stripePrice.recurring?.interval_count,
           recurringUsageType: stripePrice.recurring?.meter ? "metered" : "licensed",
           nickname,

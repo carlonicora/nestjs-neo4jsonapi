@@ -249,7 +249,7 @@ export class StripeSubscriptionApiService {
    * ```
    */
   @HandleStripeErrors()
-  async previewProration(subscriptionId: string, newPriceId: string): Promise<Stripe.UpcomingInvoice> {
+  async previewProration(subscriptionId: string, newPriceId: string): Promise<Stripe.Invoice> {
     const stripe = this.stripeService.getClient();
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     const itemId = subscription.items.data[0]?.id;

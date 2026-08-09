@@ -160,7 +160,7 @@ export const MOCK_PRICE_RECURRING: Stripe.Price = {
   transform_quantity: null,
   type: "recurring",
   unit_amount: 999,
-  unit_amount_decimal: "999",
+  unit_amount_decimal: Stripe.Decimal.from("999"),
 };
 
 // Mock Subscription
@@ -198,8 +198,13 @@ export const MOCK_SUBSCRIPTION: Stripe.Subscription = {
   description: null,
   discounts: [],
   ended_at: null,
+  billing_schedules: [],
+  managed_payments: null,
   invoice_settings: {
     account_tax_ids: null,
+    custom_fields: null,
+    description: null,
+    footer: null,
     issuer: {
       type: "self",
     },
@@ -268,6 +273,7 @@ export const MOCK_PAYMENT_INTENT: Stripe.PaymentIntent = {
   amount_received: 0,
   application: null,
   application_fee_amount: null,
+  managed_payments: null,
   automatic_payment_methods: {
     allow_redirects: "always",
     enabled: true,
@@ -487,6 +493,9 @@ export const MOCK_REFUND: Stripe.Refund = {
   charge: "ch_test_123",
   created: Math.floor(Date.now() / 1000),
   currency: "usd",
+  customer: null,
+  customer_account: null,
+  payment_method: null,
   destination_details: {
     card: {
       reference: null,
@@ -588,6 +597,7 @@ export const MOCK_DISPUTE: Stripe.Dispute = {
     card: {
       brand: null,
       case_type: null,
+      network: "visa",
       network_reason_code: null,
     },
     type: "card",

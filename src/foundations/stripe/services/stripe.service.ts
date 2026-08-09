@@ -33,7 +33,7 @@ export class StripeService implements OnModuleInit {
    * Initialize Stripe SDK on module initialization
    *
    * Lazily loads the Stripe SDK and configures it with:
-   * - API version: 2024-11-20.acacia
+   * - API version: SDK default (pinned by the installed stripe package) unless STRIPE_API_VERSION is set
    * - TypeScript support enabled
    * - Max network retries: 3
    * - Timeout: 30 seconds
@@ -51,12 +51,17 @@ export class StripeService implements OnModuleInit {
     const StripeModule = await import("stripe");
     const StripeConstructor = StripeModule.default;
 
+    // stripe@22 ships separate CJS and ESM type trees behind its exports map. The dynamic
+    // import above resolves in "import" mode, while the `import type Stripe` at the top of
+    // this file (and every other file in the package) resolves in "require" mode. The two
+    // declarations are structurally identical but nominally distinct, so the client is
+    // bridged here once rather than leaking the duality into every consumer of getClient().
     this.stripe = new StripeConstructor(this.stripeConfig.secretKey, {
-      apiVersion: (this.stripeConfig.apiVersion as any) || "2024-11-20.acacia",
+      ...(this.stripeConfig.apiVersion ? { apiVersion: this.stripeConfig.apiVersion as Stripe.LatestApiVersion } : {}),
       typescript: true,
       maxNetworkRetries: 3,
       timeout: 30000,
-    });
+    }) as unknown as Stripe;
   }
 
   /**

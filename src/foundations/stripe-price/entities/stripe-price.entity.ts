@@ -6,6 +6,19 @@ export type StripePriceType = "one_time" | "recurring";
 export type StripePriceRecurringInterval = "day" | "week" | "month" | "year";
 export type StripePriceRecurringUsageType = "licensed" | "metered";
 
+const STRIPE_PRICE_RECURRING_INTERVALS: readonly StripePriceRecurringInterval[] = ["day", "week", "month", "year"];
+
+/**
+ * Narrow a Stripe recurring interval to the intervals this system stores.
+ *
+ * stripe@22 widens response enums with `OtherString`, so a value the Stripe API adds in
+ * future still typechecks as `Price.Recurring.Interval`. Anything outside the known set is
+ * reported as absent rather than persisted as a value the domain type claims is impossible.
+ */
+export function toStripePriceRecurringInterval(value: string | undefined): StripePriceRecurringInterval | undefined {
+  return STRIPE_PRICE_RECURRING_INTERVALS.find((interval) => interval === value);
+}
+
 export type StripePrice = Entity & {
   stripePriceId: string;
   active: boolean;

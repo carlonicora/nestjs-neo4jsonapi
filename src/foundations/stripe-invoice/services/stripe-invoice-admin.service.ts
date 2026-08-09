@@ -136,7 +136,7 @@ export class StripeInvoiceAdminService {
       subscriptionStripeId = subscription.stripeSubscriptionId;
     }
 
-    const upcomingInvoice: Stripe.UpcomingInvoice = await this.stripeInvoiceApiService.getUpcomingInvoice({
+    const upcomingInvoice: Stripe.Invoice = await this.stripeInvoiceApiService.getUpcomingInvoice({
       customerId: customer.stripeCustomerId,
       subscriptionId: subscriptionStripeId,
     });

@@ -128,7 +128,7 @@ export class StripeInvoiceApiService {
    * ```
    */
   @HandleStripeErrors()
-  async getUpcomingInvoice(params: { customerId: string; subscriptionId?: string }): Promise<Stripe.UpcomingInvoice> {
+  async getUpcomingInvoice(params: { customerId: string; subscriptionId?: string }): Promise<Stripe.Invoice> {
     const stripe = this.stripeService.getClient();
     const previewParams: Stripe.InvoiceCreatePreviewParams = {
       customer: params.customerId,

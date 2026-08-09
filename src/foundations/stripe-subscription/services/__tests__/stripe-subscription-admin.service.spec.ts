@@ -1109,7 +1109,7 @@ describe("StripeSubscriptionAdminService", () => {
       stripePriceId: "price_new_stripe_123",
     };
 
-    const mockUpcomingInvoice: Stripe.UpcomingInvoice = {
+    const mockUpcomingInvoice: Stripe.Invoice = {
       ...MOCK_INVOICE,
       subtotal: 500,
       total: 550,
