@@ -29,6 +29,11 @@ Each turn arrives with these inputs:
   document store, each prefixed with its chunkId followed by a snippet of
   text.
 - \`driftSection\` — community-level summaries (when the drift branch ran).
+- \`seedSection\` — context blocks the host application guarantees are
+  present for this conversation, independent of retrieval. Treat them as
+  authoritative data on par with the retrieval branches. When a block
+  carries an "entities for citation" list, those \`[ref:N]\` handles are
+  citable in \`references\`.
 - \`scopeSection\` — optional scope hint when the conversation is bound to a
   single content.
 - \`branchesUsed\` — list of branches that produced data this turn.
@@ -62,13 +67,13 @@ system internals.
    \`notebookSection\`. If \`notebookSection\` is empty, \`citations\` MUST be
    \`[]\`.
 
-5. **Cite the entities that grounded a graph answer.** Every entity whose
+5. **Cite the entities that grounded the answer.** Every entity whose
    information the answer relies on goes into \`references\` as
    \`{ ref, relevance, reason }\`, with the \`ref\` handle copied verbatim
-   from the "entities for citation" block (e.g. \`"ref:0"\`). Never invent
-   a handle. Never put a chunk into \`references\`; never put an entity
-   into \`citations\`. If \`graphSection\` is empty, \`references\` MUST be
-   \`[]\`.
+   from the "entities for citation" block of \`graphSection\` or
+   \`seedSection\` (e.g. \`"ref:0"\`). Never invent a handle. Never put a
+   chunk into \`references\`; never put an entity into \`citations\`. If
+   neither section lists an entity, \`references\` MUST be \`[]\`.
 
 6. **No handles, no UUIDs in user-facing text.** \`title\` and
    \`finalAnswer\` must not contain the word "ref", the bracketed handle,
@@ -147,13 +152,15 @@ export const buildResponderOutputSchema = (descriptions?: { analyse?: string; fi
         z.object({
           ref: z
             .string()
-            .describe('A `[ref:N]` handle copied verbatim from the "entities for citation" block of `graphSection`'),
+            .describe(
+              'A `[ref:N]` handle copied verbatim from an "entities for citation" block of `graphSection` or `seedSection`',
+            ),
           relevance: z.number().describe("Relevance of this entity to the final answer (0-100)"),
           reason: z.string().describe("A short justification for why the entity grounds the answer"),
         }),
       )
       .describe(
-        `The graph entities the answer is grounded on. Use ONLY \`ref\` handles that appear in the "entities for citation" block of \`graphSection\`, copied verbatim (e.g. "ref:0"). Never invent ref handles. If the graph branch did not run or no entities were used, return an empty array.`,
+        `The entities the answer is grounded on. Use ONLY \`ref\` handles that appear in an "entities for citation" block of \`graphSection\` or \`seedSection\`, copied verbatim (e.g. "ref:0"). Never invent ref handles. If no such block lists an entity, return an empty array.`,
       ),
     questions: z
       .array(z.string())
@@ -170,6 +177,7 @@ const inputSchema = z.object({
     .describe("Notebook from the contextualiser branch (chunkId-prefixed lines), or empty if that branch did not run"),
   graphSection: z.string().describe("Graph entities discovered for the question, or empty if that branch did not run"),
   driftSection: z.string().describe("Community-level summaries from drift, or empty if that branch did not run"),
+  seedSection: z.string().describe("Context blocks the host application guarantees are present this turn, or empty"),
   scopeSection: z.string().describe("Optional content-scope hint, or empty"),
   branchesUsed: z.array(z.string()).describe("Names of branches whose data is included"),
 });
@@ -240,6 +248,27 @@ export class ResponderAnswerNodeService {
         ? `\n\n--- CONVERSATION SCOPE ---\nThe conversation is scoped to ${state.contentType}:${state.contentId}.`
         : "";
 
+    // Seed contexts are rendered AFTER graphSection on purpose: buildGraphSection
+    // renders every refMap entry, so seed handles minted here must not leak into it.
+    const seedContexts = state.seedContexts ?? [];
+    const seenRefs = new Set(refMap.map((e) => `${e.type}:${e.id}`));
+    const seedSectionParts: string[] = [];
+    for (const seed of seedContexts) {
+      const lines = ["", `--- ${seed.title} ---`, seed.content];
+      const refLines: string[] = [];
+      for (const ref of seed.references ?? []) {
+        const key = `${ref.type}:${ref.id}`;
+        if (seenRefs.has(key)) continue;
+        seenRefs.add(key);
+        const handle = `ref:${refMap.length}`;
+        refMap.push({ ref: handle, type: ref.type, id: ref.id, reason: ref.reason, fields: ref.fields });
+        refLines.push(`[${handle}] ${ref.type} — ${ref.reason}`);
+      }
+      if (refLines.length) lines.push("", "--- entities for citation ---", ...refLines);
+      seedSectionParts.push(lines.join("\n"));
+    }
+    const seedSection = seedSectionParts.join("\n");
+
     this.logger.log(
       `answer node input: branchesUsed=${JSON.stringify(branchesUsed)} ` +
         `branchPlan=${JSON.stringify(branchPlan)} ` +
@@ -251,6 +280,7 @@ export class ResponderAnswerNodeService {
         `notebookChars=${notebookSection.length} ` +
         `graphChars=${graphSection.length} ` +
         `driftChars=${driftSection.length} ` +
+        `seedChars=${seedSection.length} ` +
         `scopeChars=${scopeSection.length}`,
     );
     if (graphSection.length) this.logger.debug(`answer node graphSection:\n${graphSection}`);
@@ -262,6 +292,7 @@ export class ResponderAnswerNodeService {
         notebookSection,
         graphSection,
         driftSection,
+        seedSection,
         scopeSection,
         branchesUsed,
       },
@@ -340,7 +371,7 @@ export class ResponderAnswerNodeService {
       analysis: llmResponse.analyse,
       answer: llmResponse.finalAnswer,
       questions: llmResponse.questions ?? [],
-      hasAnswer: branchesUsed.length > 0 || filteredSources.length + references.length > 0,
+      hasAnswer: branchesUsed.length > 0 || seedSection.length > 0 || filteredSources.length + references.length > 0,
     };
 
     state.trace = {

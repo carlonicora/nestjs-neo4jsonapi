@@ -5,6 +5,7 @@ import { ResponderAnswerContext } from "./responder.answer.context";
 import { TokenUsageContext } from "../../../common/contexts/tokenusage.context";
 import { DataLimits } from "../../../common/types/data.limits";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
+import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.interface";
 import type { EntityReference } from "../interfaces/entity.reference.interface";
 import type { ResponderResponseInterface } from "../interfaces/responder.response.interface";
@@ -19,6 +20,8 @@ export const ResponderContext = Annotation.Root({
   scopeId: Annotation<string | undefined>,
   /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
   scopeType: Annotation<string | undefined>,
+  /** App-provided context blocks guaranteed present this turn (seed-context providers). */
+  seedContexts: Annotation<AssistantSeedContext[] | undefined>,
   dataLimits: Annotation<DataLimits>(),
   context: Annotation<typeof ContextualiserContext.State>({
     default: () => undefined,

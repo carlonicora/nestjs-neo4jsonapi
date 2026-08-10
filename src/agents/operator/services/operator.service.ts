@@ -5,6 +5,7 @@ import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
+import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
@@ -28,6 +29,12 @@ const finalAnswerSchema = z.object({
   answer: z.string(),
   questions: z.array(z.string()),
 });
+
+/** Renders seed-context blocks into one system-prompt string; null when there is nothing to render. */
+export const renderSeedContexts = (seeds?: AssistantSeedContext[]): string | null => {
+  if (!seeds?.length) return null;
+  return seeds.map((s) => `--- ${s.title} ---\n${s.content}`).join("\n\n");
+};
 
 /** Payload frozen into the checkpoint when a destructive tool requests approval. */
 interface OperatorInterruptPayload {
@@ -94,18 +101,23 @@ export class OperatorService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** App-provided context blocks guaranteed present this turn. */
+    seedContexts?: AssistantSeedContext[];
   }): Promise<OperatorRunResult> {
-    const app = await this.compileGraph({
-      companyId: params.companyId,
-      userId: params.userId,
-      userModuleIds: params.userModuleIds,
-      contentId: params.contentId,
-      contentType: params.contentType,
-      dataLimits: {},
-      messages: params.messages,
-      scopeId: params.scopeId,
-      scopeType: params.scopeType,
-    });
+    const app = await this.compileGraph(
+      {
+        companyId: params.companyId,
+        userId: params.userId,
+        userModuleIds: params.userModuleIds,
+        contentId: params.contentId,
+        contentType: params.contentType,
+        dataLimits: {},
+        messages: params.messages,
+        scopeId: params.scopeId,
+        scopeType: params.scopeType,
+      },
+      params.seedContexts,
+    );
 
     const initialState: Partial<OperatorContextState> = {
       messages: this.buildInitialMessages(params.messages, params.question),
@@ -140,20 +152,25 @@ export class OperatorService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** App-provided context blocks guaranteed present this turn. */
+    seedContexts?: AssistantSeedContext[];
   }): Promise<OperatorRunResult> {
     // The resumed run rebuilds its tools from this context, so the scope must
     // be supplied again — the frozen checkpoint does not carry the closures.
-    const app = await this.compileGraph({
-      companyId: params.companyId,
-      userId: params.userId,
-      userModuleIds: params.userModuleIds,
-      contentId: params.contentId,
-      contentType: params.contentType,
-      dataLimits: {},
-      messages: params.messages ?? [],
-      scopeId: params.scopeId,
-      scopeType: params.scopeType,
-    });
+    const app = await this.compileGraph(
+      {
+        companyId: params.companyId,
+        userId: params.userId,
+        userModuleIds: params.userModuleIds,
+        contentId: params.contentId,
+        contentType: params.contentType,
+        dataLimits: {},
+        messages: params.messages ?? [],
+        scopeId: params.scopeId,
+        scopeType: params.scopeType,
+      },
+      params.seedContexts,
+    );
 
     const finalState = (await app.invoke(new Command({ resume: { approved: params.approved } }), {
       configurable: { thread_id: params.threadId },
@@ -163,8 +180,12 @@ export class OperatorService {
     return this.mapResult(finalState);
   }
 
-  private async compileGraph(ctx: OperatorRetrievalContext) {
+  private async compileGraph(ctx: OperatorRetrievalContext, seedContexts?: AssistantSeedContext[]) {
     const saver: BaseCheckpointSaver = await this.checkpointer.getSaver();
+
+    // Rendered once per compile and closed over by the agent node, like the
+    // recorder and the tool map below.
+    const seedPrompt = renderSeedContexts(seedContexts);
 
     // Per-compile recorder: tool wrappers (registry-built closures) push
     // ToolCallRecords here. It accumulates for the lifetime of the compiled
@@ -180,7 +201,7 @@ export class OperatorService {
     const workflow = new StateGraph(OperatorContext)
       .addNode("agent", async (state) => {
         const response = await this.llm.callStep({
-          systemPrompts: [this.systemPrompt],
+          systemPrompts: seedPrompt ? [this.systemPrompt, seedPrompt] : [this.systemPrompt],
           messages: state.messages,
           tools,
           // Deterministic tool-following: at the config-default temperature the

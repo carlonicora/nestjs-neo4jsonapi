@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
@@ -13,6 +13,11 @@ import type { ToolCallRecord, UserContext } from "../../../agents/graph/tools/to
 import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.trace.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
+import {
+  ASSISTANT_SEED_CONTEXT_PROVIDERS,
+  AssistantSeedContext,
+  AssistantSeedContextProvider,
+} from "../../../common/interfaces/seed.context.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigOperatorInterface } from "../../../config/interfaces/config.operator.interface";
@@ -96,6 +101,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     private readonly mentions: AssistantMentionExtractor,
     private readonly blockNote: BlockNoteService,
     private readonly scopeGuard: ScopeGuard,
+    @Optional()
+    @Inject(ASSISTANT_SEED_CONTEXT_PROVIDERS)
+    private readonly seedContextProviders?: AssistantSeedContextProvider[],
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
@@ -422,6 +430,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       assistantId,
       threadId,
       contentScope,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
     });
 
     const outcome = await this.persistOperatorOutcome({
@@ -511,6 +521,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       assistantId: params.assistantId,
       threadId,
       contentScope,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
     });
 
     const outcome = await this.persistOperatorOutcome({
@@ -584,6 +596,20 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       content: m.content,
     }));
 
+    // Rebuild the same turn context appendMessageOperator would build, so the
+    // resumed run gets the scope AND the seed contexts the original run had.
+    const resumeCtx = this.buildTurnContext({
+      companyId,
+      userId,
+      userModuleIds,
+      boundContent: this.toBoundContent(contentScope ?? {}),
+    });
+    const seedContexts = await this.collectSeedContexts({
+      ctx: resumeCtx,
+      contentScope: contentScope ?? {},
+      question: "",
+    });
+
     let result: OperatorRunResult;
     try {
       result = await this.operator.resume({
@@ -594,6 +620,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         userModuleIds,
         contentId: contentScope?.contentId,
         contentType: contentScope?.contentType,
+        scopeId: resumeCtx.scopeId,
+        scopeType: resumeCtx.scopeType,
+        seedContexts,
         messages,
       });
     } catch (err) {
@@ -721,6 +750,44 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       );
     }
     return ctx;
+  }
+
+  /**
+   * Collects seed-context blocks from the app-registered providers for one
+   * turn. Help-mode turns are never seeded. A provider returning null
+   * contributes nothing; a provider that throws is logged and skipped — the
+   * turn must run (unseeded) no matter what a provider does.
+   */
+  private async collectSeedContexts(params: {
+    ctx: UserContext;
+    contentScope: { contentId?: string; contentType?: string };
+    question: string;
+    howToMode?: boolean;
+    limitToHowToId?: string;
+  }): Promise<AssistantSeedContext[]> {
+    if (!this.seedContextProviders?.length) return [];
+    if (params.howToMode || params.limitToHowToId) return [];
+    const collected: AssistantSeedContext[] = [];
+    for (const provider of this.seedContextProviders) {
+      try {
+        const seed = await provider.provide({
+          companyId: params.ctx.companyId,
+          userId: params.ctx.userId,
+          userModuleIds: params.ctx.userModuleIds,
+          scopeId: params.ctx.scopeId,
+          scopeType: params.ctx.scopeType,
+          contentId: params.contentScope.contentId,
+          contentType: params.contentScope.contentType,
+          question: params.question,
+        });
+        if (seed) collected.push(seed);
+      } catch (err) {
+        this.assistantLogger.warn(
+          `seed context provider failed — skipped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return collected;
   }
 
   /**
@@ -887,6 +954,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistantId: string;
     threadId: string;
     contentScope: { contentId?: string; contentType?: string };
+    howToMode?: boolean;
+    limitToHowToId?: string;
   }): Promise<OperatorRunResult> {
     const now = new Date();
     this.clsService.set("assistantTurnContext", {
@@ -907,6 +976,14 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       { type: AgentMessageType.User, content: params.question },
     ];
 
+    const seedContexts = await this.collectSeedContexts({
+      ctx: params.ctx,
+      contentScope: params.contentScope,
+      question: params.question,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
+    });
+
     return await this.operator.run({
       companyId: params.ctx.companyId,
       userId: params.ctx.userId,
@@ -918,6 +995,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       messages,
       question: params.question,
       threadId: params.threadId,
+      seedContexts,
     });
   }
 
@@ -1070,6 +1148,14 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       { type: AgentMessageType.User, content: params.newUserMessage.content },
     ];
 
+    const seedContexts = await this.collectSeedContexts({
+      ctx: params.ctx,
+      contentScope: params.contentScope,
+      question: params.newUserMessage.content,
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
+    });
+
     const response = await this.responder.run({
       companyId: params.ctx.companyId,
       userId: params.ctx.userId,
@@ -1084,6 +1170,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       },
       messages,
       question: params.newUserMessage.content,
+      seedContexts,
     });
 
     return {

@@ -19,6 +19,7 @@ const PlannerInputSchema = z.object({
   catalog: z.string(),
   history: z.array(z.object({ role: z.string(), content: z.string() })),
   contentScope: z.object({ contentType: z.string(), contentId: z.string() }).nullable(),
+  seedTitles: z.array(z.string()),
 });
 
 export const defaultPlannerPrompt = `
@@ -31,6 +32,8 @@ You have three branches to choose from (subset, not exclusive):
 
 Decide based on the user's question, prior chat history, the available entity catalog, and any content scope.
 You MUST select at least one branch. Prefer multiple branches in parallel when the question could plausibly draw on more than one.
+
+\`seedTitles\` lists context sections the host application already guarantees will be present at the answer stage. Plan retrieval for what they do NOT cover — never pick a branch solely to re-fetch that same context.
 
 Refine the question into a single canonical form that all chosen branches can use.
 
@@ -59,6 +62,7 @@ export class PlannerNodeService {
     const history = (state.chatHistory ?? []).map((m) => ({ role: String(m.type), content: m.content }));
     const contentScope =
       state.contentId && state.contentType ? { contentType: state.contentType, contentId: state.contentId } : null;
+    const seedTitles = (state.seedContexts ?? []).map((s) => s.title);
 
     try {
       const out = await this.llm.call<z.infer<typeof PlannerOutputSchema>>({
@@ -69,6 +73,7 @@ export class PlannerNodeService {
           catalog: catalogText,
           history,
           contentScope,
+          seedTitles,
         },
         outputSchema: PlannerOutputSchema,
         temperature: 0.0,

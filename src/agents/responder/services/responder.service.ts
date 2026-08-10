@@ -13,6 +13,7 @@ import { ResponderAnswerNodeService } from "../nodes/responder.answer.node.servi
 import { PlannerNodeService } from "../nodes/planner.node.service";
 import { GraphNodeService } from "../nodes/graph.node.service";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
+import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { DataLimits } from "../../../common/types/data.limits";
 
@@ -61,6 +62,8 @@ export class ResponderService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** App-provided context blocks guaranteed present this turn. */
+    seedContexts?: AssistantSeedContext[];
   }): Promise<ResponderResponseInterface> {
     const allowed = resolveAllowedBranches(
       this.configService.get<ConfigResponderInterface>("responder")?.branches,
@@ -83,6 +86,7 @@ export class ResponderService {
     initialState.chatHistory = params.messages;
     initialState.rawQuestion = lastUserMessage;
     initialState.question = lastUserMessage;
+    initialState.seedContexts = params.seedContexts;
 
     const useHowToBranch = !!params.dataLimits.howToMode || !!params.dataLimits.limitToHowToId;
 
