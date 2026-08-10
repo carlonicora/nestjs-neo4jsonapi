@@ -30,6 +30,12 @@ import { mockFromZodSchema } from "../utils/mock-from-zod";
 import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
+import {
+  REPEATED_TOOL_FAILURE_LIMIT,
+  describeToolInputRejection,
+  repeatedToolFailureMessage,
+  toolCallSignature,
+} from "./tool-error-feedback";
 
 // LangSmith tracing for the Vercel AI SDK streaming path. `wrapAISDK` wraps the
 // SDK functions; when LangSmith tracing is disabled (no LANGSMITH_TRACING /
@@ -845,6 +851,12 @@ export class LLMService {
       // Bind tools to model
       const modelWithTools = baseModel.bindTools(params.tools);
 
+      // Signature → consecutive rejections. A model that cannot fix a malformed
+      // call re-emits it verbatim; without this it does so until the iteration
+      // budget is gone.
+      const failureStreaks = new Map<string, number>();
+      let abandonToolLoop = false;
+
       // Tool calling loop
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         session.startIteration("tool-loop", conversationMessages);
@@ -945,22 +957,51 @@ export class LLMService {
               }),
             );
             session.recordToolResult(toolCall.id ?? "", toolCall.name, resultStr);
+            // A success clears the streak: the model is making progress again.
+            failureStreaks.delete(toolCallSignature(toolCall.name, toolCall.args));
           } catch (error) {
             failedToolCalls++;
             console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
+
+            const signature = toolCallSignature(toolCall.name, toolCall.args);
+            const attempts = (failureStreaks.get(signature) ?? 0) + 1;
+            failureStreaks.set(signature, attempts);
+
+            // Schema rejections happen inside LangChain, before the tool's own
+            // code runs, so the model only ever sees a generic "did not match
+            // expected schema". Replace it with the actionable version.
+            const rejection = describeToolInputRejection({
+              toolName: toolCall.name,
+              schema: (tool as unknown as { schema?: unknown }).schema,
+              args: toolCall.args,
+            });
+
+            const givingUp = attempts >= REPEATED_TOOL_FAILURE_LIMIT;
+            if (givingUp) {
+              // The same rejected call keeps coming back; further iterations
+              // would only reprice the same mistake. Finish answering the tool
+              // calls in this batch, then leave the loop.
+              abandonToolLoop = true;
+              this.logger.warn(
+                `[${label}] abandoning tool loop: "${toolCall.name}" rejected ${attempts}x with identical arguments`,
+              );
+            }
+
+            const content = givingUp
+              ? repeatedToolFailureMessage({ toolName: toolCall.name, attempts })
+              : (rejection ?? `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`);
+
             conversationMessages.push(
               new ToolMessage({
-                content: `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
+                content,
                 tool_call_id: toolCall.id ?? "",
               }),
             );
-            session.recordToolResult(
-              toolCall.id ?? "",
-              toolCall.name,
-              `Tool error: ${error instanceof Error ? error.message : "Unknown error"}`,
-            );
+            session.recordToolResult(toolCall.id ?? "", toolCall.name, content);
           }
         }
+
+        if (abandonToolLoop) break;
       }
     }
 

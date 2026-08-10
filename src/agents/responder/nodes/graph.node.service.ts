@@ -11,7 +11,7 @@ import { SearchEntitiesTool } from "../../graph/tools/search-entities.tool";
 import { ReadEntityTool } from "../../graph/tools/read-entity.tool";
 import { TraverseTool } from "../../graph/tools/traverse.tool";
 import { renderGraphNodeSystemPrompt } from "../../graph/prompts/graph.node.system.prompt";
-import { humanizeTool } from "../../graph/services/humanize-tool";
+import { collectEntityLabels, humanizeTool } from "../../graph/services/humanize-tool";
 import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.interface";
 import { ResponderContextState } from "../contexts/responder.context";
 
@@ -98,6 +98,11 @@ export class GraphNodeService {
     if (this.ws) {
       const ws = this.ws;
       const userId = state.userId;
+      // id → human label, harvested from each tool result as the turn runs.
+      // The id-taking tools (read_entity, traverse) only ever receive a uuid,
+      // so without this the status line can only print the uuid back at the
+      // user. resolve_entity/search_entities run first and carry the names.
+      const labels = new Map<string, string>();
       tools = tools.map(
         (t) =>
           new DynamicStructuredTool({
@@ -107,13 +112,21 @@ export class GraphNodeService {
             func: async (input: Record<string, unknown>) => {
               try {
                 await ws.sendMessageToUser(userId, "assistant:status", {
-                  status: humanizeTool(t.name, input),
+                  status: humanizeTool(t.name, input, labels),
                   at: new Date().toISOString(),
                 });
               } catch (err) {
                 this.logger.warn(`assistant:status emit failed: ${err instanceof Error ? err.message : String(err)}`);
               }
-              return t.func(input as any);
+              const result = await t.func(input as any);
+              try {
+                collectEntityLabels(result, labels);
+              } catch (err) {
+                this.logger.warn(
+                  `assistant:status label harvest failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
+              return result;
             },
           }),
       );

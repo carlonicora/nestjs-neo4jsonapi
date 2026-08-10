@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import { modelRegistry } from "../../../common/registries/registry";
 import { AssistantService } from "../services/assistant.service";
+
+// The bound-content path resolves the target's Neo4j label from the global
+// model registry, which no host app has populated inside a unit test.
+modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
 
 const DEFAULT_TRACE = {
   planner: {
@@ -22,6 +27,12 @@ const blocksWithOneMention = [
     ],
   },
 ];
+
+/**
+ * A rich composer submits its document as a JSON string in the ordinary
+ * message attribute — there is no separate blocks parameter on the service.
+ */
+const messageWithOneMention = JSON.stringify(blocksWithOneMention);
 
 function makePersistedAssistant() {
   return {
@@ -68,6 +79,8 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
       create: vi.fn(async () => undefined),
       find: vi.fn(async () => [makePersistedAssistant()]),
       findById: vi.fn(async () => makePersistedAssistant()),
+      bindContent: vi.fn(async () => undefined),
+      findByRelatedEdge: vi.fn(async () => []),
     } as any;
 
     const assistantMessages = { createFromDTO: vi.fn(async () => ({ data: {} })) } as any;
@@ -189,9 +202,9 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     vi.clearAllMocks();
   });
 
-  it("writes the BOUND_TO edge from the post relationships block", async () => {
-    const { service } = buildSut();
-    const createFromDTO = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+  it("writes the BOUND_TO edge with the label resolved from the model registry", async () => {
+    const { service, repo } = buildSut();
+    vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
 
     await service.createWithFirstMessage({
       companyId: "c",
@@ -200,14 +213,8 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
       boundContent: { type: "campaigns", id: "camp-1" },
     });
 
-    expect(createFromDTO).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          relationships: expect.objectContaining({
-            content: { data: { type: "campaigns", id: "camp-1" } },
-          }),
-        }),
-      }),
+    expect(repo.bindContent).toHaveBeenCalledWith(
+      expect.objectContaining({ targetLabel: "Campaign", targetId: "camp-1" }),
     );
   });
 
@@ -218,8 +225,7 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     await service.createWithFirstMessage({
       companyId: "c",
       userId: "u",
-      firstMessage: "ignored",
-      contentBlocks: blocksWithOneMention,
+      firstMessage: messageWithOneMention,
       boundContent: { type: "campaigns", id: "camp-1" },
     });
 
@@ -234,8 +240,7 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     await service.createWithFirstMessage({
       companyId: "c",
       userId: "u",
-      firstMessage: "ignored",
-      contentBlocks: blocksWithOneMention,
+      firstMessage: messageWithOneMention,
       boundContent: { type: "campaigns", id: "camp-1" },
     });
 
@@ -252,8 +257,7 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     await service.createWithFirstMessage({
       companyId: "c",
       userId: "u",
-      firstMessage: "ignored",
-      contentBlocks: blocksWithOneMention,
+      firstMessage: messageWithOneMention,
       boundContent: { type: "campaigns", id: "camp-1" },
     });
 
@@ -291,16 +295,28 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     expect(sys).toBeUndefined();
   });
 
-  it("findByBoundContent delegates to the inherited findByRelated over the content relationship", async () => {
+  it("findByBoundContent walks the BOUND_TO edge with the label resolved from the model registry", async () => {
+    const { service, repo } = buildSut();
+
+    await service.findByBoundContent({ boundType: "campaigns", boundId: "camp-1", query: { page: 1 } });
+
+    // findByRelatedEdge, not findByRelated: the `content` relationship is
+    // polymorphic, so the target label cannot be derived from the descriptor.
+    expect(repo.findByRelatedEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cypherLabel: "BOUND_TO",
+        cypherDirection: "out",
+        relatedLabel: "Campaign",
+        relatedId: "camp-1",
+      }),
+    );
+  });
+
+  it("findByBoundContent rejects a boundType that is not a registered resource", async () => {
     const { service } = buildSut();
-    const findByRelated = vi.spyOn(service as any, "findByRelated").mockResolvedValue({ data: [] });
 
-    await service.findByBoundContent({ boundId: "camp-1", query: { page: 1 } });
-
-    expect(findByRelated).toHaveBeenCalledWith({
-      relationship: "content",
-      id: "camp-1",
-      query: { page: 1 },
-    });
+    await expect(service.findByBoundContent({ boundType: "nonesuch", boundId: "x", query: {} })).rejects.toThrow(
+      /Unknown resource type "nonesuch"/,
+    );
   });
 });
