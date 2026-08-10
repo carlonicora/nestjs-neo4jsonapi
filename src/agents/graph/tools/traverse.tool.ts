@@ -6,6 +6,7 @@ import { buildToolFieldsOutput } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { ScopeGuard } from "../services/scope.guard";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -118,6 +119,9 @@ export class TraverseTool {
     private readonly factory: ToolFactory,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
+    // ScopeGuard is deliberately the LAST constructor parameter so existing
+    // positional call sites keep working.
+    private readonly scopeGuard: ScopeGuard,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -202,15 +206,19 @@ export class TraverseTool {
         const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
         // Probe one extra record so truncation is visible to the model:
         // without this, a silently clipped list is reported as complete.
-        const fetched: any[] = await targetSvc.findRelatedRecordsByEdge({
-          cypherLabel: rel.cypherLabel,
-          cypherDirection: targetDirection,
-          relatedLabel: source.labelName,
-          relatedId: input.fromId,
-          filters,
-          orderByFields: sort,
-          limit: limit + 1,
-        });
+        const fetched: any[] = await this.filterInScope(
+          target.type,
+          await targetSvc.findRelatedRecordsByEdge({
+            cypherLabel: rel.cypherLabel,
+            cypherDirection: targetDirection,
+            relatedLabel: source.labelName,
+            relatedId: input.fromId,
+            filters,
+            orderByFields: sort,
+            limit: limit + 1,
+          }),
+          ctx,
+        );
         const hasMore = fetched.length > limit;
         const records = hasMore ? fetched.slice(0, limit) : fetched;
         const truncation = hasMore
@@ -238,7 +246,7 @@ export class TraverseTool {
               bridge: target,
               record: { id: item.id, fields: item.fields },
               ctx,
-              deps: { catalog: this.catalog, registry: this.registry },
+              deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
               onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
             }),
           ),
@@ -252,5 +260,15 @@ export class TraverseTool {
       recorder[recorder.length - 1].materialised = localMaterialised;
     }
     return result;
+  }
+
+  /**
+   * Drop records outside the run's scope. An unscoped run short-circuits
+   * before the guard is consulted — the same contract ScopeGuard.filter
+   * applies internally, restated here so an unscoped run never depends on it.
+   */
+  private async filterInScope(type: string, records: any[], ctx: UserContext): Promise<any[]> {
+    if (!ctx.scopeId || !ctx.scopeType) return records;
+    return this.scopeGuard.filter({ type, records, ctx });
   }
 }

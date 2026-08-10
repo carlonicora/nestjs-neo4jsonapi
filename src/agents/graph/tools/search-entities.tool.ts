@@ -8,6 +8,7 @@ import { GraphCatalogService } from "../services/graph.catalog.service";
 import { buildToolFieldsOutput } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { ScopeGuard } from "../services/scope.guard";
 import { coerceFilters, coerceSort } from "./traverse.tool";
 
 const inputSchema = z
@@ -38,6 +39,9 @@ export class SearchEntitiesTool {
     private readonly _search: GraphSearchService,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
+    // ScopeGuard is deliberately the LAST constructor parameter so existing
+    // positional call sites keep working.
+    private readonly scopeGuard: ScopeGuard,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -105,13 +109,32 @@ export class SearchEntitiesTool {
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
 
+        const scopeRelKey = entity.scope?.path.length === 1 ? entity.scope.path[0].key : undefined;
+        const useScopedRead = !!ctx.scopeId && entity.scope?.rootType === ctx.scopeType;
+
+        // A 1-hop scope is expressible as a relationship read, which reuses the
+        // entity's own repository (and therefore its ownership rules). Deeper
+        // chains fall back to an unrestricted read plus a ScopeGuard filter.
         // Probe one extra record so truncation is visible to the model:
         // without this, a silently clipped list is reported as complete.
-        const fetched = await svc.findRecords({
-          filters,
-          orderByFields: sort,
-          limit: limit + 1,
-        });
+        const fetched =
+          useScopedRead && scopeRelKey
+            ? await svc.findRelatedRecords({
+                relationship: scopeRelKey,
+                id: ctx.scopeId!,
+                filters,
+                orderByFields: sort,
+                limit: limit + 1,
+              })
+            : await this.filterInScope(
+                entity.type,
+                await svc.findRecords({
+                  filters,
+                  orderByFields: sort,
+                  limit: limit + 1,
+                }),
+                ctx,
+              );
         const hasMore = fetched.length > limit;
         const records = hasMore ? fetched.slice(0, limit) : fetched;
 
@@ -131,6 +154,16 @@ export class SearchEntitiesTool {
       recorder[recorder.length - 1].materialised = localMaterialised;
     }
     return result;
+  }
+
+  /**
+   * Drop records outside the run's scope. An unscoped run short-circuits
+   * before the guard is consulted — the same contract ScopeGuard.filter
+   * applies internally, restated here so an unscoped run never depends on it.
+   */
+  private async filterInScope(type: string, records: any[], ctx: UserContext): Promise<any[]> {
+    if (!ctx.scopeId || !ctx.scopeType) return records;
+    return this.scopeGuard.filter({ type, records, ctx });
   }
 
   private async buildOutput(
@@ -157,7 +190,7 @@ export class SearchEntitiesTool {
           bridge: entity,
           record: { id: item.id, fields: item.fields },
           ctx,
-          deps: { catalog: this.catalog, registry: this.registry },
+          deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
           onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
         }).then((m) => ({ ...m, score })),
       ),

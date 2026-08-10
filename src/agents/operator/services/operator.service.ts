@@ -90,6 +90,10 @@ export class OperatorService {
     messages: MessageInterface[];
     question: string;
     threadId: string;
+    /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+    scopeId?: string;
+    /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+    scopeType?: string;
   }): Promise<OperatorRunResult> {
     const app = await this.compileGraph({
       companyId: params.companyId,
@@ -99,6 +103,8 @@ export class OperatorService {
       contentType: params.contentType,
       dataLimits: {},
       messages: params.messages,
+      scopeId: params.scopeId,
+      scopeType: params.scopeType,
     });
 
     const initialState: Partial<OperatorContextState> = {
@@ -108,6 +114,8 @@ export class OperatorService {
       userModuleIds: params.userModuleIds,
       contentId: params.contentId ?? null,
       contentType: params.contentType ?? null,
+      scopeId: params.scopeId,
+      scopeType: params.scopeType,
       question: params.question,
     };
 
@@ -128,7 +136,13 @@ export class OperatorService {
     contentId?: string;
     contentType?: string;
     messages?: MessageInterface[];
+    /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+    scopeId?: string;
+    /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+    scopeType?: string;
   }): Promise<OperatorRunResult> {
+    // The resumed run rebuilds its tools from this context, so the scope must
+    // be supplied again — the frozen checkpoint does not carry the closures.
     const app = await this.compileGraph({
       companyId: params.companyId,
       userId: params.userId,
@@ -137,6 +151,8 @@ export class OperatorService {
       contentType: params.contentType,
       dataLimits: {},
       messages: params.messages ?? [],
+      scopeId: params.scopeId,
+      scopeType: params.scopeType,
     });
 
     const finalState = (await app.invoke(new Command({ resume: { approved: params.approved } }), {

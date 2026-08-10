@@ -14,11 +14,17 @@ export class ResponderContextFactoryService {
     contentId?: string;
     contentType?: string;
     dataLimits: DataLimits;
+    /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+    scopeId?: string;
+    /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+    scopeType?: string;
   }): ResponderContextState {
     return {
       companyId: params.companyId,
       contentId: params.contentId,
       contentType: params.contentType,
+      scopeId: params.scopeId,
+      scopeType: params.scopeType,
       dataLimits: params.dataLimits,
       driftContext: undefined,
       context: undefined,

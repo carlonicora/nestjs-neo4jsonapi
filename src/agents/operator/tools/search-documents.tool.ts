@@ -2,6 +2,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
 import { ContextualiserService } from "../../contextualiser/services/contextualiser.service";
+import { ScopeGuard } from "../../graph/services/scope.guard";
 import { ToolCallRecord, ToolFactory } from "../../graph/tools/tool.factory";
 import { OperatorRetrievalContext, OperatorToolCallRecord } from "../interfaces/operator.tool.interface";
 
@@ -18,6 +19,9 @@ export class SearchDocumentsTool {
   constructor(
     private readonly factory: ToolFactory,
     private readonly contextualiserService: ContextualiserService,
+    // ScopeGuard is deliberately the LAST constructor parameter so existing
+    // positional call sites keep working.
+    private readonly scopeGuard: ScopeGuard,
   ) {}
 
   build(ctx: OperatorRetrievalContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -53,7 +57,7 @@ export class SearchDocumentsTool {
             question: input.question,
           });
 
-          const notebook = state.notebook ?? [];
+          const notebook = await this.dropOutOfScope(state.notebook ?? [], ctx);
           return {
             answer: notebook.length
               ? notebook.map((n) => `${n.chunkId}: ${n.content}`).join("\n")
@@ -72,5 +76,58 @@ export class SearchDocumentsTool {
       // capture() records errors too — always flush the local record into the shared recorder.
       recorder.push(...local);
     }
+  }
+
+  /**
+   * Enforcement point: a scoped run must not read passages whose source record
+   * lives under another scope root.
+   *
+   * Retrieved passages carry their provenance in the opaque `metadata` bag the
+   * contributing retrieval source filled in. Entries that name a source record
+   * are grouped by type and checked with ONE ScopeGuard.filter call per type
+   * (never one per chunk). Entries that name no source record are plain
+   * document chunks with no entity provenance to test — they are company-wide
+   * material (help content and the like) and are left alone; scoping them is
+   * only possible once a retrieval source tags them.
+   */
+  private async dropOutOfScope<T extends { metadata?: Record<string, unknown> }>(
+    entries: T[],
+    ctx: OperatorRetrievalContext,
+  ): Promise<T[]> {
+    if (!ctx.scopeId || !ctx.scopeType) return entries;
+    if (entries.length === 0) return entries;
+
+    const sourceOf = (entry: T): { type: string; id: string } | undefined => {
+      const metadata = entry.metadata ?? {};
+      const type = metadata.entityType ?? metadata.sourceType ?? metadata.type;
+      const id = metadata.entityId ?? metadata.sourceId ?? metadata.id;
+      return typeof type === "string" && type && typeof id === "string" && id ? { type, id } : undefined;
+    };
+
+    const byType = new Map<string, Set<string>>();
+    for (const entry of entries) {
+      const source = sourceOf(entry);
+      if (!source) continue;
+      const ids = byType.get(source.type) ?? new Set<string>();
+      ids.add(source.id);
+      byType.set(source.type, ids);
+    }
+    if (byType.size === 0) return entries;
+
+    const allowed = new Map<string, Set<string>>();
+    for (const [type, ids] of byType) {
+      const kept = await this.scopeGuard.filter({
+        type,
+        records: Array.from(ids).map((id) => ({ id })),
+        ctx,
+      });
+      allowed.set(type, new Set(kept.map((record) => record.id)));
+    }
+
+    return entries.filter((entry) => {
+      const source = sourceOf(entry);
+      if (!source) return true;
+      return allowed.get(source.type)?.has(source.id) ?? false;
+    });
   }
 }

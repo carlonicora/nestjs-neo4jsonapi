@@ -15,6 +15,10 @@ export const ResponderContext = Annotation.Root({
   companyId: Annotation<string>,
   contentId: Annotation<string | undefined>,
   contentType: Annotation<string | undefined>,
+  /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+  scopeId: Annotation<string | undefined>,
+  /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+  scopeType: Annotation<string | undefined>,
   dataLimits: Annotation<DataLimits>(),
   context: Annotation<typeof ContextualiserContext.State>({
     default: () => undefined,

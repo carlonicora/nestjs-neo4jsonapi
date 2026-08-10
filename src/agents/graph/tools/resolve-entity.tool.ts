@@ -31,10 +31,16 @@ export class ResolveEntityTool {
     return this.factory.capture(
       { tool: "resolve_entity", input },
       async () =>
+        // scopeId/scopeType are load-bearing: without them GraphSearchService
+        // skips its scope predicate entirely and name resolution ranks
+        // candidates from every scope root in the company, leaking names and
+        // types across campaigns even though read/traverse would refuse them.
         this.search.resolveEntity({
           text: input.text,
           companyId: ctx.companyId,
           userModuleIds: ctx.userModuleIds,
+          scopeId: ctx.scopeId,
+          scopeType: ctx.scopeType,
         }),
       recorder,
     );

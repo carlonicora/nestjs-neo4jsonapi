@@ -62,10 +62,14 @@ export class GraphNodeService {
 
   async execute(params: { state: ResponderContextState }): Promise<Partial<ResponderContextState>> {
     const state = params.state;
+    // Every graph tool built below reads scopeId/scopeType off this context —
+    // it is the only channel confining the whole turn to one scope root.
     const ctx = {
       companyId: state.companyId,
       userId: state.userId,
       userModuleIds: state.userModuleIds ?? [],
+      scopeId: state.scopeId,
+      scopeType: state.scopeType,
     };
 
     if (ctx.userModuleIds.length === 0) {

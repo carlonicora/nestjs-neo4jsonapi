@@ -278,6 +278,14 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     summary?: (data: any) => string;
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
+    /**
+     * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
+     * root) or the key of a relationship on THIS descriptor pointing one hop
+     * closer to the root. The catalog walks the chain at boot.
+     */
+    scope?: string;
+    /** When true, the operator's generic write tools may mutate this type. */
+    writable?: boolean;
   };
 
   /**
@@ -362,6 +370,14 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     summary?: (data: any) => string;
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
+    /**
+     * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
+     * root) or the key of a relationship on THIS descriptor pointing one hop
+     * closer to the root. The catalog walks the chain at boot.
+     */
+    scope?: string;
+    /** When true, the operator's generic write tools may mutate this type. */
+    writable?: boolean;
   };
 
   /** See EntitySchemaInput.bridge. */

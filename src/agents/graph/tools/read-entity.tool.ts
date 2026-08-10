@@ -6,6 +6,7 @@ import { buildToolFieldsOutput } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { ScopeGuard } from "../services/scope.guard";
 
 const inputSchema = z.object({
   type: z.string(),
@@ -21,6 +22,9 @@ export class ReadEntityTool {
     private readonly factory: ToolFactory,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
+    // ScopeGuard is deliberately the LAST constructor parameter so existing
+    // positional call sites keep working.
+    private readonly scopeGuard: ScopeGuard,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -59,6 +63,15 @@ export class ReadEntityTool {
         const svc = this.factory.resolveService(entity.type);
         if (!svc) return { error: `Service not available for "${entity.type}".` };
 
+        // An out-of-scope id must be indistinguishable from a non-existent
+        // one, and must never cause the record to be read at all.
+        if (ctx.scopeId && ctx.scopeType) {
+          const inScope = await this.scopeGuard.isInScope({ type: entity.type, id: input.id, ctx });
+          // Byte-identical to the missing-record message below: a different
+          // string would tell the caller "this exists, in another scope".
+          if (!inScope) return { error: `No ${entity.type} with id ${input.id}.` };
+        }
+
         const record: any = await svc.findRecordById({ id: input.id });
         if (!record) return { error: `No ${entity.type} with id ${input.id}.` };
 
@@ -74,13 +87,17 @@ export class ReadEntityTool {
             // Use edge-based lookup so this works for relationships that are
             // reverse-only on the catalog (not declared on the target descriptor).
             const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
-            const records: any[] = await targetSvc.findRelatedRecordsByEdge({
-              cypherLabel: rel.cypherLabel,
-              cypherDirection: targetDirection,
-              relatedLabel: entity.labelName,
-              relatedId: input.id,
-              limit: 50,
-            });
+            const records: any[] = await this.filterInScope(
+              rel.targetType,
+              await targetSvc.findRelatedRecordsByEdge({
+                cypherLabel: rel.cypherLabel,
+                cypherDirection: targetDirection,
+                relatedLabel: entity.labelName,
+                relatedId: input.id,
+                limit: 50,
+              }),
+              ctx,
+            );
             const targetEntity = this.factory.resolveEntity(rel.targetType, ctx);
             const summariser =
               "error" in targetEntity
@@ -105,7 +122,7 @@ export class ReadEntityTool {
             bridge: entity,
             record: { id: record.id, fields: baseFields },
             ctx,
-            deps: { catalog: this.catalog, registry: this.registry },
+            deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
             onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
           });
           return input.include?.length ? { ...materialised, related } : materialised;
@@ -126,5 +143,15 @@ export class ReadEntityTool {
       recorder[recorder.length - 1].materialised = localMaterialised;
     }
     return result;
+  }
+
+  /**
+   * Drop records outside the run's scope. An unscoped run short-circuits
+   * before the guard is consulted — the same contract ScopeGuard.filter
+   * applies internally, restated here so an unscoped run never depends on it.
+   */
+  private async filterInScope(type: string, records: any[], ctx: UserContext): Promise<any[]> {
+    if (!ctx.scopeId || !ctx.scopeType) return records;
+    return this.scopeGuard.filter({ type, records, ctx });
   }
 }

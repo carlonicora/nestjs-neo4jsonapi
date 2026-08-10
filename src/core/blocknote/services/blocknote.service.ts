@@ -23,9 +23,14 @@ import { randomUUID } from "crypto";
 export class BlockNoteService {
   /**
    * Converts a BlockNoteJS/Prosemirror data structure into markdown.
+   *
+   * `preserveMentions` keeps mention inline nodes addressable in the markdown
+   * (see `processMention`). It is opt-in because every existing caller wants
+   * the plain alias.
    */
-  convertToMarkdown(params: { nodes: any[] }): string {
-    return params.nodes.map((node) => this.processNode(node)).join("");
+  convertToMarkdown(params: { nodes: any[]; preserveMentions?: boolean }): string {
+    const preserveMentions = params.preserveMentions ?? false;
+    return params.nodes.map((node) => this.processNode(node, 0, preserveMentions)).join("");
   }
 
   /**
@@ -225,87 +230,87 @@ export class BlockNoteService {
   /**
    * Process a single node to markdown.
    */
-  protected processNode(node: any, indentLevel = 0): string {
+  protected processNode(node: any, indentLevel = 0, preserveMentions = false): string {
     switch (node.type) {
       case "paragraph":
-        return this.processParagraph(node);
+        return this.processParagraph(node, preserveMentions);
       case "heading":
-        return this.processHeading(node);
+        return this.processHeading(node, preserveMentions);
       case "bulletListItem":
-        return this.processBulletListItem(node, indentLevel);
+        return this.processBulletListItem(node, indentLevel, preserveMentions);
       case "numberedListItem":
-        return this.processNumberedListItem(node, indentLevel);
+        return this.processNumberedListItem(node, indentLevel, preserveMentions);
       case "checkListItem":
-        return this.processCheckListItem(node, indentLevel);
+        return this.processCheckListItem(node, indentLevel, preserveMentions);
       case "codeBlock":
-        return this.processCodeBlock(node);
+        return this.processCodeBlock(node, preserveMentions);
       default:
         return "";
     }
   }
 
-  protected processParagraph(node: any): string {
-    const content = this.processContent(node.content);
+  protected processParagraph(node: any, preserveMentions = false): string {
+    const content = this.processContent(node.content, preserveMentions);
     return `${content}\n\n`;
   }
 
-  protected processHeading(node: any): string {
+  protected processHeading(node: any, preserveMentions = false): string {
     const level = node.props.level || 1;
     const hashes = "#".repeat(level);
-    const content = this.processContent(node.content);
+    const content = this.processContent(node.content, preserveMentions);
     return `${hashes} ${content}\n\n`;
   }
 
-  protected processBulletListItem(node: any, indentLevel: number): string {
+  protected processBulletListItem(node: any, indentLevel: number, preserveMentions = false): string {
     const indent = "  ".repeat(indentLevel);
-    const content = this.processContent(node.content);
+    const content = this.processContent(node.content, preserveMentions);
     let markdown = `${indent}- ${content}\n`;
 
     if (node.children && node.children.length > 0) {
       node.children.forEach((child: any) => {
-        markdown += this.processNode(child, indentLevel + 1);
+        markdown += this.processNode(child, indentLevel + 1, preserveMentions);
       });
     }
 
     return markdown;
   }
 
-  protected processNumberedListItem(node: any, indentLevel: number): string {
+  protected processNumberedListItem(node: any, indentLevel: number, preserveMentions = false): string {
     const indent = "  ".repeat(indentLevel);
-    const content = this.processContent(node.content);
+    const content = this.processContent(node.content, preserveMentions);
     let markdown = `${indent}1. ${content}\n`;
 
     if (node.children && node.children.length > 0) {
       node.children.forEach((child: any) => {
-        markdown += this.processNode(child, indentLevel + 1);
+        markdown += this.processNode(child, indentLevel + 1, preserveMentions);
       });
     }
 
     return markdown;
   }
 
-  protected processCheckListItem(node: any, indentLevel: number): string {
+  protected processCheckListItem(node: any, indentLevel: number, preserveMentions = false): string {
     const indent = "  ".repeat(indentLevel);
     const checked = node.props.checked ? "x" : " ";
-    const content = this.processContent(node.content);
+    const content = this.processContent(node.content, preserveMentions);
     let markdown = `${indent}- [${checked}] ${content}\n`;
 
     if (node.children && node.children.length > 0) {
       node.children.forEach((child: any) => {
-        markdown += this.processCheckListItem(child, indentLevel + 1);
+        markdown += this.processCheckListItem(child, indentLevel + 1, preserveMentions);
       });
     }
 
     return markdown;
   }
 
-  protected processCodeBlock(node: any): string {
+  protected processCodeBlock(node: any, preserveMentions = false): string {
     const language = node.props.language || "";
-    const content = this.processContent(node.content);
+    const content = this.processContent(node.content, preserveMentions);
     return `\`\`\`${language}\n${content}\n\`\`\`\n\n`;
   }
 
-  protected processContent(contentArray: any[]): string {
+  protected processContent(contentArray: any[], preserveMentions = false): string {
     return contentArray
       .map((contentNode) => {
         if (contentNode.type === "text") {
@@ -314,7 +319,7 @@ export class BlockNoteService {
         } else if (contentNode.type === "relationship") {
           return this.processRelationship(contentNode);
         } else if (contentNode.type === "mention") {
-          return this.processMention(contentNode);
+          return this.processMention(contentNode, preserveMentions);
         }
         return "";
       })
@@ -322,14 +327,23 @@ export class BlockNoteService {
   }
 
   /**
-   * Render a BlockNote `mention` inline node. The editor displays
-   * `props.alias` (the human-readable name of the referenced entity); the
-   * converter emits the same alias so downstream consumers (LLM prompts,
-   * search indexes, etc.) see the entity by its readable name rather than
-   * a hole in the text.
+   * Render a BlockNote mention inline node.
+   *
+   * Default: the human-readable alias, so LLM prompts and search indexes see a
+   * name rather than a hole in the text.
+   *
+   * preserveMentions: a markdown link the mention parser can read back, so a
+   * stored message keeps its entity pointers and can be re-rendered with
+   * hovercards. Kept opt-in because the alias form is what the summariser,
+   * chunker and prompt paths want.
    */
-  protected processMention(node: any): string {
-    return node?.props?.alias ?? "";
+  protected processMention(node: any, preserveMentions = false): string {
+    const alias = node?.props?.alias ?? "";
+    if (!preserveMentions) return alias;
+    const id = node?.props?.id;
+    const entityType = node?.props?.entityType;
+    if (!id || !entityType) return alias;
+    return "[" + alias + "](mention://" + entityType + "/" + id + ")";
   }
 
   protected applyTextStyles(text: string, styles: any): string {

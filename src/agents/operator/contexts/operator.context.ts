@@ -13,6 +13,10 @@ export const OperatorContext = Annotation.Root({
   userModuleIds: Annotation<string[]>,
   contentId: Annotation<string | null>({ reducer: (_, b) => b, default: () => null }),
   contentType: Annotation<string | null>({ reducer: (_, b) => b, default: () => null }),
+  /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+  scopeId: Annotation<string | undefined>({ reducer: (_, b) => b, default: () => undefined }),
+  /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+  scopeType: Annotation<string | undefined>({ reducer: (_, b) => b, default: () => undefined }),
   question: Annotation<string>,
   toolCalls: Annotation<ToolCallRecord[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
   references: Annotation<EntityReference[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),

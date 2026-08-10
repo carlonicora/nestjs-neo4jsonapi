@@ -11,6 +11,7 @@ import {
   OperatorToolContribution,
   OperatorToolDefinition,
 } from "../interfaces/operator.tool.interface";
+import { EntityWriteTools } from "./entity-write.tools";
 import { OperatorTestActionTool } from "./operator-test-action.tool";
 import { SearchCommunitiesTool } from "./search-communities.tool";
 import { SearchDocumentsTool } from "./search-documents.tool";
@@ -19,6 +20,8 @@ import { SearchDocumentsTool } from "./search-documents.tool";
  * Composes the operator's tool set for a single turn:
  * - the five graph tools (read-only, built per request with ctx + recorder)
  * - the two retrieval tools (search_documents, search_communities)
+ * - the generic entity write tools, but only when a catalogued type the caller
+ *   can reach declares `chat.writable` — otherwise none are built
  * - the test-only destructive tool (non-production environments only)
  * - any app-contributed factories registered under the OPERATOR_TOOLS token,
  *   built per turn with the same ctx + recorder as the built-ins
@@ -35,6 +38,10 @@ export class OperatorToolRegistry {
     private readonly searchCommunitiesTool: SearchCommunitiesTool,
     private readonly operatorTestActionTool: OperatorTestActionTool,
     @Optional() @Inject(OPERATOR_TOOLS) private readonly contributed?: OperatorToolContribution[],
+    // Declared last, and optional in the type signature only, so the registry
+    // stays constructible without the write-tool provider. Nest resolves it from
+    // OperatorModule like every other built-in.
+    private readonly entityWriteTools?: EntityWriteTools,
   ) {}
 
   build(ctx: OperatorRetrievalContext, recorder: ToolCallRecord[]): OperatorToolDefinition[] {
@@ -42,6 +49,10 @@ export class OperatorToolRegistry {
       companyId: ctx.companyId,
       userId: ctx.userId,
       userModuleIds: ctx.userModuleIds,
+      // Carry the run's scope through to the graph tools, which is the only way
+      // their ScopeGuard checks can see which root this turn is confined to.
+      scopeId: ctx.scopeId,
+      scopeType: ctx.scopeType,
     };
 
     const definitions: OperatorToolDefinition[] = [
@@ -53,6 +64,12 @@ export class OperatorToolRegistry {
       { tool: this.searchDocumentsTool.build(ctx, recorder), destructive: false },
       { tool: this.searchCommunitiesTool.build(recorder), destructive: false },
     ];
+
+    // Generic write tools. buildDefinitions() returns [] unless a catalogued
+    // type the caller can reach is chat.writable, so hosts that opt none in keep
+    // exactly the read-only tool set they had before. Spliced in before the
+    // contributed spread so the duplicate-name guard below covers them too.
+    definitions.push(...(this.entityWriteTools?.buildDefinitions(ctx, recorder) ?? []));
 
     if (process.env.NODE_ENV !== "production") {
       definitions.push(this.operatorTestActionTool.buildDefinition(recorder));

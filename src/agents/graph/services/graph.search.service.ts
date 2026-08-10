@@ -4,6 +4,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphIndexManager } from "./graph.index.manager";
 import { GraphCatalogService } from "./graph.catalog.service";
+import { ScopeGuard } from "./scope.guard";
 
 export const GRAPH_EXACT_MAX_RESULTS = 10;
 export const GRAPH_FUZZY_MAX_RESULTS = 10;
@@ -21,6 +22,10 @@ export interface RunSearchParams {
   text: string;
   companyId: string;
   limit: number;
+  /** Id of the scope-root node the run is confined to. Absent = unscoped. */
+  scopeId?: string;
+  /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+  scopeType?: string;
 }
 
 export interface RankedCandidate {
@@ -34,6 +39,10 @@ export interface ResolveEntityParams {
   text: string;
   companyId: string;
   userModuleIds: string[];
+  /** Id of the scope-root node the run is confined to. Absent = unscoped. */
+  scopeId?: string;
+  /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+  scopeType?: string;
 }
 
 export interface ResolveEntityResult {
@@ -106,7 +115,30 @@ export class GraphSearchService {
     private readonly embedder: EmbedderService,
     private readonly indexNames: GraphIndexManager,
     private readonly catalog: GraphCatalogService,
+    // ScopeGuard is deliberately the LAST constructor parameter so existing
+    // positional call sites keep working. It is only consulted for a scoped
+    // run (scopeId + scopeType present).
+    private readonly scopeGuard: ScopeGuard,
   ) {}
+
+  /**
+   * Scope predicate for a tier query, or null when the run is unscoped.
+   * The clause NARROWS the existing company predicate; it never replaces it.
+   */
+  private scopeClauseFor(params: RunSearchParams): { cypher: string; params: Record<string, unknown> } | null {
+    if (!params.scopeId || !params.scopeType) return null;
+    return this.scopeGuard.buildMatchClause({
+      entity: params.entity,
+      ctx: {
+        companyId: params.companyId,
+        userId: "",
+        userModuleIds: [],
+        scopeId: params.scopeId,
+        scopeType: params.scopeType,
+      },
+      nodeAlias: "node",
+    });
+  }
 
   private getExistingIndexes(): Promise<Set<string>> {
     if (this.existingIndexesPromise) return this.existingIndexesPromise;
@@ -128,7 +160,13 @@ export class GraphSearchService {
   }
 
   async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
-    const entities = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModuleIds.includes(e.moduleId));
+    const visible = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModuleIds.includes(e.moduleId));
+
+    // Fail closed: in a scoped run, a type that cannot be chained to the run's
+    // scope root is unreachable, so it never fans out a tier query at all.
+    // Leaving it in would surface candidates from other scope roots.
+    const entities =
+      params.scopeId && params.scopeType ? visible.filter((e) => e.scope?.rootType === params.scopeType) : visible;
 
     if (!entities.length) {
       return { matchMode: "none", items: [] };
@@ -170,6 +208,8 @@ export class GraphSearchService {
             : tier === "fuzzy"
               ? GRAPH_FUZZY_MAX_RESULTS
               : GRAPH_EXACT_MAX_RESULTS,
+        scopeId: params.scopeId,
+        scopeType: params.scopeType,
       };
       const inner = tier === "semantic" ? await this.tierSemantic(runParams) : await this.tierFulltext(runParams, tier);
 
@@ -237,16 +277,27 @@ export class GraphSearchService {
     const term = mode === "substring" ? `*${escaped}*` : `${escaped}~`;
     const max = mode === "substring" ? GRAPH_EXACT_MAX_RESULTS : GRAPH_FUZZY_MAX_RESULTS;
 
+    // Scope narrows the company predicate — it is appended to it, never a
+    // replacement. Every value stays parameterised.
+    const scopeClause = this.scopeClauseFor(params);
+
     const result = await this.neo4j.read(
       `
       CALL db.index.fulltext.queryNodes($indexName, $term)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
+        ${scopeClause?.cypher ?? ""}
       RETURN node.id AS id, properties(node) AS properties, score
       ORDER BY score DESC
       LIMIT toInteger($limit)
       `,
-      { indexName, term, companyId: params.companyId, limit: Math.min(params.limit, max) },
+      {
+        indexName,
+        term,
+        companyId: params.companyId,
+        limit: Math.min(params.limit, max),
+        ...(scopeClause?.params ?? {}),
+      },
     );
 
     const items: InternalTierItem[] = (result as any).records.map((r: any) => ({
@@ -265,12 +316,17 @@ export class GraphSearchService {
     }
     const queryEmbedding = await this.embedder.vectoriseText({ text: params.text });
 
+    // Scope narrows the company predicate — it is appended to it, never a
+    // replacement. Every value stays parameterised.
+    const scopeClause = this.scopeClauseFor(params);
+
     const result = await this.neo4j.read(
       `
       CALL db.index.vector.queryNodes($indexName, toInteger($overFetch), $queryEmbedding)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
         AND score >= $minScore
+        ${scopeClause?.cypher ?? ""}
       RETURN node.id AS id, properties(node) AS properties, score
       ORDER BY score DESC
       LIMIT toInteger($limit)
@@ -282,6 +338,7 @@ export class GraphSearchService {
         companyId: params.companyId,
         minScore: GRAPH_SEMANTIC_MIN_SCORE,
         limit: Math.min(params.limit, GRAPH_SEMANTIC_MAX_RESULTS),
+        ...(scopeClause?.params ?? {}),
       },
     );
 

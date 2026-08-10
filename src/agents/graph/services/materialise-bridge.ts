@@ -3,6 +3,7 @@ import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "./graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { UserContext } from "../tools/tool.factory";
+import { ScopeGuard } from "./scope.guard";
 import { buildToolFieldsOutput } from "./field-formatting";
 
 const logger = new Logger("materialiseBridge");
@@ -30,6 +31,29 @@ export interface BridgeRecordOut {
 export interface MaterialiseBridgeDeps {
   catalog: GraphCatalogService;
   registry: EntityServiceRegistry;
+  /**
+   * Optional so pre-existing call sites keep compiling; supplied by every
+   * production call site. Only consulted for a scoped run.
+   */
+  scopeGuard?: ScopeGuard;
+}
+
+/**
+ * Drop records outside the run's scope. An unscoped run short-circuits before
+ * the guard is consulted. A scoped run without a guard is a wiring error and
+ * throws rather than silently returning cross-scope records.
+ */
+async function filterInScope(
+  type: string,
+  records: any[],
+  ctx: UserContext,
+  scopeGuard: ScopeGuard | undefined,
+): Promise<any[]> {
+  if (!ctx.scopeId || !ctx.scopeType) return records;
+  if (!scopeGuard) {
+    throw new Error("materialiseBridge: a scoped run requires deps.scopeGuard.");
+  }
+  return scopeGuard.filter({ type, records, ctx });
 }
 
 export async function materialiseBridge(params: {
@@ -79,13 +103,17 @@ export async function materialiseBridge(params: {
     }
 
     const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
-    const records: any[] = await targetSvc.findRelatedRecordsByEdge({
+    const fanned: any[] = await targetSvc.findRelatedRecordsByEdge({
       cypherLabel: rel.cypherLabel,
       cypherDirection: targetDirection,
       relatedLabel: bridge.labelName,
       relatedId: record.id,
       limit: MATERIALISE_LIMIT + 1, // overfetch by one to detect truncation cheaply
     });
+
+    // Bridge fanout is a data-access point like any other: a scoped run must
+    // not see fanned-out records from another scope root.
+    const records: any[] = await filterInScope(target.type, fanned, ctx, deps.scopeGuard);
 
     const truncated = records.length > MATERIALISE_LIMIT;
     const visible = records.slice(0, MATERIALISE_LIMIT);

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,6 +19,7 @@ import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { modelRegistry } from "../../../common/registries/registry";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AssistantAppendDto } from "../dtos/assistant-append.dto";
 import { AssistantPatchDto } from "../dtos/assistant-patch.dto";
@@ -97,8 +99,10 @@ export class AssistantController {
   @Post(assistantMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
+    const boundContent = this.resolveBoundContent(body.data.relationships?.content?.data);
     this.logger.log(
-      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}`,
+      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}` +
+        (boundContent ? ` boundTo=${boundContent.type}/${boundContent.id}` : ""),
     );
     const { assistant, userMessage, assistantMessage, toolCalls } = await this.assistants.createWithFirstMessage({
       companyId: req.user.companyId,
@@ -107,6 +111,7 @@ export class AssistantController {
       title,
       howToMode,
       limitToHowToId,
+      boundContent,
     });
     const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
     const messagesDoc = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
@@ -165,6 +170,11 @@ export class AssistantController {
   /**
    * GET /assistants — list the current user's assistant threads.
    * RBAC (company + owner) is enforced by the repository's `buildUserHasAccess` override.
+   *
+   * `boundType` + `boundId` narrow the list to the threads bound to one
+   * resource (e.g. a campaign). Both are required together: a bound id with no
+   * type is ambiguous, and a type with no id names no resource. Supplying them
+   * is a custom filter, so it bypasses the CRUD handler and calls the service.
    */
   @Get(assistantMeta.endpoint)
   async findAll(
@@ -173,8 +183,33 @@ export class AssistantController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("boundType") boundType?: string,
+    @Query("boundId") boundId?: string,
   ) {
+    if (boundType && boundId) {
+      if (!modelRegistry.getByType(boundType)) {
+        throw new BadRequestException(`Unknown resource type "${boundType}" for boundType.`);
+      }
+      const response = await this.assistants.findByBoundContent({ boundType, boundId, query });
+      reply.send(response);
+      return;
+    }
     return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
+  }
+
+  /**
+   * Validate the polymorphic `content` relationship reference against the model
+   * registry. The DTO can only assert that `type` is a non-empty string —
+   * BOUND_TO accepts any registered model, and the registry is the only place
+   * that knows the full set.
+   */
+  private resolveBoundContent(reference?: { type: string; id: string }): { type: string; id: string } | undefined {
+    if (!reference) return undefined;
+    const model = modelRegistry.getByType(reference.type);
+    if (!model) {
+      throw new BadRequestException(`Unknown resource type "${reference.type}" for the assistant's bound content.`);
+    }
+    return { type: model.type, id: reference.id };
   }
 
   /**

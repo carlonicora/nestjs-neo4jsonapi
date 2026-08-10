@@ -36,6 +36,28 @@ export interface CatalogRelationship {
   inverseKey?: string;
 }
 
+export interface CatalogScopeHop {
+  /** Descriptor relationship key on the SOURCE type of this hop. */
+  key: string;
+  /** Neo4j relationship type, e.g. "PART_OF". */
+  cypherLabel: string;
+  /** Direction from the SOURCE node's perspective. */
+  cypherDirection: "out" | "in";
+  /** Neo4j label of this hop's target, e.g. "Campaign". */
+  targetLabel: string;
+  /** JSON:API type of this hop's target, e.g. "campaigns". */
+  targetType: string;
+}
+
+export interface CatalogScope {
+  /** Ordered hops from this entity to the scope root. Empty when this entity IS the root. */
+  path: CatalogScopeHop[];
+  /** JSON:API type of the scope root, e.g. "campaigns". */
+  rootType: string;
+  /** Neo4j label of the scope root, e.g. "Campaign". */
+  rootLabel: string;
+}
+
 export interface CatalogEntity {
   type: string;
   /** Stable module UUID — matches the `(Module) {id}` node in Neo4j. */
@@ -51,4 +73,8 @@ export interface CatalogEntity {
   labelName: string;
   /** When set, the tool layer auto-materialises these relationships one hop on every read. */
   bridge?: { materialiseTo: string[] };
+  /** Compiled scope chain. Absent when the descriptor declares no chat.scope. */
+  scope?: CatalogScope;
+  /** Mirrors chat.writable. */
+  writable?: boolean;
 }

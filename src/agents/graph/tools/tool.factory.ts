@@ -7,6 +7,10 @@ export interface UserContext {
   companyId: string;
   userId: string;
   userModuleIds: string[];
+  /** Id of the scope-root node the whole run is confined to. Absent = unscoped. */
+  scopeId?: string;
+  /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
+  scopeType?: string;
 }
 
 export interface ToolCallRecord {

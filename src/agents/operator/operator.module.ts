@@ -7,6 +7,7 @@ import { GraphModule } from "../graph/graph.module";
 import { OperatorController } from "./controllers/operator.controller";
 import { OperatorCheckpointerService } from "./services/operator.checkpointer.service";
 import { OperatorService } from "./services/operator.service";
+import { EntityWriteTools } from "./tools/entity-write.tools";
 import { OperatorTestActionTool } from "./tools/operator-test-action.tool";
 import { OperatorToolRegistry } from "./tools/operator.tool.registry";
 import { SearchCommunitiesTool } from "./tools/search-communities.tool";
@@ -25,6 +26,9 @@ import { SearchDocumentsTool } from "./tools/search-documents.tool";
     SearchDocumentsTool,
     SearchCommunitiesTool,
     OperatorTestActionTool,
+    // Needs GraphCatalogService + ScopeGuard (GraphModule, imported above) and
+    // EntityServiceRegistry, which the bootstrap registers globally.
+    EntityWriteTools,
   ],
   exports: [OperatorService, OperatorToolRegistry, OperatorCheckpointerService],
 })

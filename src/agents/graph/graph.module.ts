@@ -6,6 +6,7 @@ import { GraphIndexManager } from "./services/graph.index.manager";
 import { GraphSearchService } from "./services/graph.search.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
 import { GraphCatalogService } from "./services/graph.catalog.service";
+import { ScopeGuard } from "./services/scope.guard";
 import { DescribeEntityTool } from "./tools/describe-entity.tool";
 import { ReadEntityTool } from "./tools/read-entity.tool";
 import { ResolveEntityTool } from "./tools/resolve-entity.tool";
@@ -31,6 +32,7 @@ import { TraverseTool } from "./tools/traverse.tool";
     UserModulesRepository,
     GraphIndexManager,
     GraphSearchService,
+    ScopeGuard,
   ],
   exports: [
     GraphDescriptorRegistry,
@@ -43,6 +45,7 @@ import { TraverseTool } from "./tools/traverse.tool";
     ReadEntityTool,
     TraverseTool,
     GraphSearchService,
+    ScopeGuard,
   ],
 })
 export class GraphModule {}

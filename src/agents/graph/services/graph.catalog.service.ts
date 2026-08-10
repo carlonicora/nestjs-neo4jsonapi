@@ -1,5 +1,11 @@
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
-import { CatalogEntity, CatalogField, CatalogRelationship } from "../interfaces/graph.catalog.interface";
+import {
+  CatalogEntity,
+  CatalogField,
+  CatalogRelationship,
+  CatalogScope,
+  CatalogScopeHop,
+} from "../interfaces/graph.catalog.interface";
 import { FieldKind } from "../../../common/interfaces/entity.schema.interface";
 
 const FILTERABLE_TYPES = new Set(["string", "number", "boolean", "date", "datetime"]);
@@ -37,9 +43,16 @@ export interface DescriptorSource {
         reverse?: { name: string; description: string };
       }
     >;
-    chat?: { summary?: (d: any) => string; textSearchFields?: string[] };
+    chat?: { summary?: (d: any) => string; textSearchFields?: string[]; scope?: string; writable?: boolean };
     bridge?: { materialiseTo: string[] };
   }>;
+}
+
+/** Per-type raw material the scope compiler walks. Built during catalog pass 1. */
+interface ScopeSource {
+  entity: CatalogEntity;
+  scopeKey?: string;
+  relationships: Record<string, any>;
 }
 
 @Injectable()
@@ -60,6 +73,9 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     this.renderedByModuleId.clear();
 
     const descriptors = this.source.loadAll().filter((d) => typeof d.description === "string" && d.description.length);
+
+    /** Raw scope material, keyed by JSON:API type. Consumed by pass 1b. */
+    const scopeSources = new Map<string, ScopeSource>();
 
     // Pass 1: create CatalogEntity for every described descriptor (fields + forward relationships).
     for (const d of descriptors) {
@@ -89,7 +105,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         });
       }
 
-      this.entities.set(d.model.type, {
+      const entity: CatalogEntity = {
         type: d.model.type,
         moduleId: d.moduleId,
         description: d.description!,
@@ -100,7 +116,26 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         nodeName: d.model.nodeName,
         labelName: d.model.labelName,
         ...(d.bridge ? { bridge: { materialiseTo: [...d.bridge.materialiseTo] } } : {}),
+        ...(d.chat?.writable ? { writable: true } : {}),
+      };
+
+      this.entities.set(d.model.type, entity);
+      scopeSources.set(d.model.type, {
+        entity,
+        scopeKey: d.chat?.scope,
+        relationships: d.relationships ?? {},
       });
+    }
+
+    // Pass 1b: resolve every declared chat.scope into a Cypher-ready hop chain.
+    for (const entity of this.entities.values()) {
+      entity.scope = this.compileScope(entity.type, scopeSources);
+      if (entity.writable && (entity.scope?.path.length ?? 0) !== 1) {
+        throw new Error(
+          `Entity "${entity.type}" is chat.writable but is not exactly one hop from its scope root. ` +
+            `Generic write tools inject the scope relationship directly and cannot do so across multiple hops.`,
+        );
+      }
     }
 
     // Pass 2: materialise reverse relationships on target entities.
@@ -176,6 +211,59 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     this.logger.log(
       `Graph catalog built: ${this.entities.size} entities, ${byModuleId.size} modules: ${JSON.stringify(Array.from(this.entities.values()).map((e) => ({ type: e.type, moduleId: e.moduleId, isBridge: !!e.bridge })))}`,
     );
+  }
+
+  /**
+   * Resolve `chat.scope` into a Cypher-ready chain of hops ending at a
+   * `chat.scope === "self"` root. Runs once, at catalog build time: a chain
+   * that cannot be resolved is a configuration error, and an entity that is
+   * catalogued but unscoped would be reachable across every scope root.
+   */
+  private compileScope(type: string, byType: Map<string, ScopeSource>): CatalogScope | undefined {
+    const start = byType.get(type);
+    if (!start?.scopeKey) return undefined;
+
+    if (start.scopeKey === "self") {
+      return { path: [], rootType: type, rootLabel: start.entity.labelName };
+    }
+
+    const path: CatalogScopeHop[] = [];
+    const seen = new Set<string>([type]);
+    let currentType = type;
+
+    for (;;) {
+      const current = byType.get(currentType);
+      if (!current?.scopeKey) {
+        throw new Error(
+          `Scope chain for "${type}" never reaches a scope root: "${currentType}" declares no chat.scope.`,
+        );
+      }
+      if (current.scopeKey === "self") {
+        return { path, rootType: currentType, rootLabel: current.entity.labelName };
+      }
+
+      const rel = current.relationships[current.scopeKey];
+      if (!rel) {
+        throw new Error(
+          `Scope chain for "${type}" is broken: "${currentType}" has no relationship "${current.scopeKey}".`,
+        );
+      }
+
+      const targetType: string = rel.model.type;
+      if (seen.has(targetType)) {
+        throw new Error(`Scope chain for "${type}" contains a cycle at "${targetType}".`);
+      }
+      seen.add(targetType);
+
+      path.push({
+        key: current.scopeKey,
+        cypherLabel: rel.relationship,
+        cypherDirection: rel.direction,
+        targetLabel: rel.model.labelName,
+        targetType,
+      });
+      currentType = targetType;
+    }
   }
 
   private renderModule(moduleId: string, list: CatalogEntity[]): string {
