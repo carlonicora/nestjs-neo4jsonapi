@@ -100,45 +100,11 @@ Return strictly:
 - \`questions\` — array of follow-up question strings.
 `;
 
-const outputSchema = z.object({
-  title: z.string().describe(`You should generate a short title to provide the user a quick reference`),
-  analyse: z
-    .string()
-    .describe(
-      `You should first analyse each notebook content before providing a final answer. During the analysis, consider complementary information from other notes and employ a majority voting strategy to resolve any inconsistencies.`,
-    ),
-  citations: z
-    .array(
-      z.object({
-        chunkId: z.string().describe(`The UUID of the line in your notebook`),
-        relevance: z
-          .number()
-          .describe(
-            `The relevance of the information in the line of your notebook in percentage between 0 and 100. This defines if the information is relevant to the question or not and if it will be used as a citation.`,
-          ),
-      }),
-    )
-    .describe(
-      `You should provide citations to the information you used to generate the final answer. Consider ALL the ChunkIds in your notebook. Each citation should have a relevance score. Each ChunkId should be unique. Each ChunkId should have a relevance score.`,
-    ),
-  references: z
-    .array(
-      z.object({
-        ref: z
-          .string()
-          .describe('A `[ref:N]` handle copied verbatim from the "entities for citation" block of `graphSection`'),
-        relevance: z.number().describe("Relevance of this entity to the final answer (0-100)"),
-        reason: z.string().describe("A short justification for why the entity grounds the answer"),
-      }),
-    )
-    .describe(
-      `The graph entities the answer is grounded on. Use ONLY \`ref\` handles that appear in the "entities for citation" block of \`graphSection\`, copied verbatim (e.g. "ref:0"). Never invent ref handles. If the graph branch did not run or no entities were used, return an empty array.`,
-    ),
-  questions: z
-    .array(z.string())
-    .describe(`A list of **5 follow-up or refinement questions** based on the final answer.`),
-  finalAnswer: z.string().describe(
-    `Generate a comprehensive, detailed, and well-structured final answer using only information from the notebook. If insufficient information is available, clearly state that the answer is not available in the company knowledge.
+/** Historical default for the output schema's `analyse` field description. */
+export const defaultResponderAnalyseDescription = `You should first analyse each notebook content before providing a final answer. During the analysis, consider complementary information from other notes and employ a majority voting strategy to resolve any inconsistencies.`;
+
+/** Historical default for the output schema's `finalAnswer` field description. */
+export const defaultResponderFinalAnswerDescription = `Generate a comprehensive, detailed, and well-structured final answer using only information from the notebook. If insufficient information is available, clearly state that the answer is not available in the company knowledge.
 
 Format Requirements:
 - Use proper markdown formatting with headers (##, ###) to organize content into logical sections
@@ -149,9 +115,53 @@ Format Requirements:
 - Include specific examples or details from the notebook when available
 - Ensure the answer flows logically and is educational in nature
 - Make the response comprehensive and informative, not minimalistic
-      `,
-  ),
-});
+      `;
+
+/**
+ * Builds the responder answer node's structured-output schema. The `analyse`
+ * and `finalAnswer` descriptions are overridable via
+ * `ConfigPromptsInterface.responderSchemaDescriptions`; all other fields are
+ * fixed. Called with no arguments, the schema is identical to the historical
+ * hardcoded one.
+ */
+export const buildResponderOutputSchema = (descriptions?: { analyse?: string; finalAnswer?: string }) =>
+  z.object({
+    title: z.string().describe(`You should generate a short title to provide the user a quick reference`),
+    analyse: z.string().describe(descriptions?.analyse ?? defaultResponderAnalyseDescription),
+    citations: z
+      .array(
+        z.object({
+          chunkId: z.string().describe(`The UUID of the line in your notebook`),
+          relevance: z
+            .number()
+            .describe(
+              `The relevance of the information in the line of your notebook in percentage between 0 and 100. This defines if the information is relevant to the question or not and if it will be used as a citation.`,
+            ),
+        }),
+      )
+      .describe(
+        `You should provide citations to the information you used to generate the final answer. Consider ALL the ChunkIds in your notebook. Each citation should have a relevance score. Each ChunkId should be unique. Each ChunkId should have a relevance score.`,
+      ),
+    references: z
+      .array(
+        z.object({
+          ref: z
+            .string()
+            .describe('A `[ref:N]` handle copied verbatim from the "entities for citation" block of `graphSection`'),
+          relevance: z.number().describe("Relevance of this entity to the final answer (0-100)"),
+          reason: z.string().describe("A short justification for why the entity grounds the answer"),
+        }),
+      )
+      .describe(
+        `The graph entities the answer is grounded on. Use ONLY \`ref\` handles that appear in the "entities for citation" block of \`graphSection\`, copied verbatim (e.g. "ref:0"). Never invent ref handles. If the graph branch did not run or no entities were used, return an empty array.`,
+      ),
+    questions: z
+      .array(z.string())
+      .describe(`A list of **5 follow-up or refinement questions** based on the final answer.`),
+    finalAnswer: z.string().describe(descriptions?.finalAnswer ?? defaultResponderFinalAnswerDescription),
+  });
+
+type ResponderAnswerOutput = z.infer<ReturnType<typeof buildResponderOutputSchema>>;
 
 const inputSchema = z.object({
   question: z.string().describe("The user's refined question"),
@@ -184,6 +194,8 @@ type AnswerSource = {
 export class ResponderAnswerNodeService {
   private readonly logger = new Logger(ResponderAnswerNodeService.name);
   private readonly systemPrompt: string;
+  private readonly outputSchema: ReturnType<typeof buildResponderOutputSchema>;
+  private readonly temperature: number;
 
   constructor(
     private readonly llmService: LLMService,
@@ -191,6 +203,8 @@ export class ResponderAnswerNodeService {
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.systemPrompt = prompts?.responder ?? defaultAnswerPrompt;
+    this.outputSchema = buildResponderOutputSchema(prompts?.responderSchemaDescriptions);
+    this.temperature = prompts?.responderTemperature ?? 0.1;
   }
 
   async execute(params: { state: typeof ResponderContext.State }): Promise<ResponderContextState> {
@@ -241,7 +255,7 @@ export class ResponderAnswerNodeService {
     );
     if (graphSection.length) this.logger.debug(`answer node graphSection:\n${graphSection}`);
 
-    const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+    const llmResponse = await this.llmService.call<ResponderAnswerOutput>({
       inputSchema,
       inputParams: {
         question: state.question ?? "",
@@ -251,9 +265,9 @@ export class ResponderAnswerNodeService {
         scopeSection,
         branchesUsed,
       },
-      outputSchema,
+      outputSchema: this.outputSchema,
       systemPrompts: [this.systemPrompt],
-      temperature: 0.1,
+      temperature: this.temperature,
       metadata: {
         nodeName: "answer",
         agentName: "responder",

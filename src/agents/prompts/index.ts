@@ -8,6 +8,13 @@ export { prompt as graphCreatorPrompt } from "../graph.creator/services/graph.cr
 export { defaultAnswerPrompt as defaultResponderAnswerPrompt } from "../responder/nodes/responder.answer.node.service";
 // Also exported under its own name — app-side prompt overrides reference it directly.
 export { defaultAnswerPrompt } from "../responder/nodes/responder.answer.node.service";
+// Responder answer-node structured-output description defaults — apps that
+// override `prompts.responderSchemaDescriptions` can reference these.
+export {
+  buildResponderOutputSchema,
+  defaultResponderAnalyseDescription,
+  defaultResponderFinalAnswerDescription,
+} from "../responder/nodes/responder.answer.node.service";
 
 // Contextualiser default prompts
 export { defaultQuestionRefinerPrompt } from "../contextualiser/nodes/question.refiner.node.service";
