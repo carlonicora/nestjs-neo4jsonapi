@@ -58,6 +58,14 @@ export {
 } from "./graph/services/graph.search.service";
 export { GraphDescriptorRegistry } from "./graph/services/descriptor.source";
 export { UserModulesRepository } from "./graph/repositories/user-modules.repository";
+// The graph tool builders, for app-side agents that bind the catalog tools to
+// their own LLM calls (each .build(ctx, recorder) returns a DynamicStructuredTool).
+export { ResolveEntityTool } from "./graph/tools/resolve-entity.tool";
+export { DescribeEntityTool } from "./graph/tools/describe-entity.tool";
+export { SearchEntitiesTool } from "./graph/tools/search-entities.tool";
+export { ReadEntityTool } from "./graph/tools/read-entity.tool";
+export { TraverseTool } from "./graph/tools/traverse.tool";
+export type { UserContext, ToolCallRecord } from "./graph/tools/tool.factory";
 
 // Operator
 export { OperatorModule } from "./operator/operator.module";

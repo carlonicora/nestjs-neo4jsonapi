@@ -311,6 +311,11 @@ export class BlockNoteService {
   }
 
   protected processContent(contentArray: any[], preserveMentions = false): string {
+    // BlockNote's input shorthand allows a block's content to be a bare
+    // string instead of an inline-node array, and stored blocks written that
+    // way exist in the wild; a missing content is an empty block.
+    if (typeof contentArray === "string") return contentArray;
+    if (!Array.isArray(contentArray)) return "";
     return contentArray
       .map((contentNode) => {
         if (contentNode.type === "text") {

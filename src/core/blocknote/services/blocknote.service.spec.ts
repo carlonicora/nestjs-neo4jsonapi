@@ -29,3 +29,20 @@ describe("BlockNoteService – mention links", () => {
     expect(mention?.props?.entityType).toBe("npc");
   });
 });
+
+describe("BlockNoteService – convertToMarkdown content tolerance", () => {
+  const service = new BlockNoteService();
+
+  it("accepts BlockNote shorthand where a block's content is a plain string", () => {
+    const nodes = [{ type: "paragraph", content: "Giulia stole one of the masks." }];
+    expect(service.convertToMarkdown({ nodes }).trim()).toBe("Giulia stole one of the masks.");
+  });
+
+  it("treats a block with undefined content as empty instead of crashing", () => {
+    const nodes = [
+      { type: "paragraph" },
+      { type: "paragraph", content: [{ type: "text", text: "after", styles: {} }] },
+    ];
+    expect(service.convertToMarkdown({ nodes }).trim()).toBe("after");
+  });
+});
