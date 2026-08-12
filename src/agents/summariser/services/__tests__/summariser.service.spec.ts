@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
-import { SummariserService } from "../summariser.service";
+import { SUMMARISER_MAP_CONCURRENCY, SummariserService } from "../summariser.service";
 import { ModelService } from "../../../../core/llm/services/model.service";
 import { Chunk } from "../../../../foundations/chunk/entities/chunk.entity";
 
@@ -315,6 +315,84 @@ describe("SummariserService", () => {
       // Assert - content should be stringified
       expect(typeof result.content).toBe("string");
       expect(typeof result.tldr).toBe("string");
+    });
+  });
+
+  describe("bounded map fan-out", () => {
+    it("keeps at most SUMMARISER_MAP_CONCURRENCY map calls in flight for 20 chunks", async () => {
+      // Arrange — 20 chunks, i.e. more than the bound, so an unbounded
+      // `Promise.all` would show a peak of 20.
+      const chunks: Chunk[] = Array.from(
+        { length: 20 },
+        (_, i) =>
+          ({
+            id: `chunk-${i}`,
+            content: `Chunk number ${i} content.`,
+            position: i,
+            embedding: [],
+          }) as unknown as Chunk,
+      );
+      const mockLLM = modelService.getLLM({});
+
+      let inFlight = 0;
+      let peakInFlight = 0;
+      mockLLM.invoke.mockImplementation(async () => {
+        inFlight += 1;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        inFlight -= 1;
+        return createMockLLMResponse("Summary");
+      });
+
+      // Act
+      await service.summarise({ chunks });
+
+      // Assert
+      expect(SUMMARISER_MAP_CONCURRENCY).toBe(8);
+      expect(peakInFlight).toBeLessThanOrEqual(SUMMARISER_MAP_CONCURRENCY);
+      // Guards against the fan-out collapsing to serial execution.
+      expect(peakInFlight).toBe(SUMMARISER_MAP_CONCURRENCY);
+      expect(inFlight).toBe(0);
+      // 20 map + 1 combine + 1 tldr
+      expect(mockLLM.invoke).toHaveBeenCalledTimes(22);
+    });
+
+    it("preserves chunk order in the map results despite bounded scheduling", async () => {
+      // Arrange — later chunks resolve FIRST, so any order-losing implementation
+      // would feed the combine step a scrambled transcript.
+      const chunks: Chunk[] = Array.from(
+        { length: 12 },
+        (_, i) =>
+          ({
+            id: `chunk-${i}`,
+            content: `Chunk ${i}`,
+            position: i,
+            embedding: [],
+          }) as unknown as Chunk,
+      );
+      const mockLLM = modelService.getLLM({});
+
+      // The chunk index is read back off the prompt rather than off the call
+      // order — under a bounded pool the two deliberately differ.
+      mockLLM.invoke.mockImplementation(async (prompt) => {
+        const match = /Chunk (\d+)/.exec(JSON.stringify(prompt) ?? "");
+        if (!match) return createMockLLMResponse("Combined or TLDR");
+        const index = Number(match[1]);
+        await new Promise((resolve) => setTimeout(resolve, chunks.length - index));
+        return createMockLLMResponse(`Summary ${index}.`);
+      });
+
+      // Act
+      await service.summarise({ chunks });
+
+      // Assert — the combine invocation is the one right after the 12 map calls;
+      // its prompt must list the summaries in chunk order. The trailing "." keeps
+      // "Summary 1." from matching inside "Summary 10.".
+      const combineMessages = mockLLM.invoke.mock.calls[chunks.length][0];
+      const combineText = JSON.stringify(combineMessages);
+      const positions = Array.from({ length: chunks.length }, (_, i) => combineText.indexOf(`Summary ${i}.`));
+      expect(positions.every((p) => p >= 0)).toBe(true);
+      expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     });
   });
 

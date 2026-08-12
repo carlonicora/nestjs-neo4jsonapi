@@ -2,6 +2,7 @@ import { Document } from "@langchain/core/documents";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { mapWithConcurrency } from "../../../common/helpers/map-with-concurrency";
 import { UsageMetadata } from "../../../common/interfaces/langchain.usage.interface";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
@@ -36,6 +37,14 @@ Write directly about the content subject. Use well-structured markdown with appr
 export const defaultTldrPrompt = `Create a single concise sentence (maximum 20 words) that captures the essential point of this summary:
 
 {summary}`;
+
+/**
+ * How many per-chunk map calls may be in flight at once. The map phase fans out
+ * one LLM call per chunk; unbounded, a long document opens hundreds of provider
+ * requests simultaneously (DNS bursts, and every prompt live in the heap at the
+ * same time). 8 keeps the provider saturated without either failure mode.
+ */
+export const SUMMARISER_MAP_CONCURRENCY = 8;
 
 @Injectable()
 export class SummariserService {
@@ -76,7 +85,12 @@ export class SummariserService {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
 
-    const mapPromises = documents.map(async (doc) => {
+    // BOUNDED fan-out. This used to be `Promise.all(documents.map(...))`, which
+    // opened one provider request per chunk simultaneously — the confirmed source
+    // of a 28-strong `ENOTFOUND` burst on a 760-page run, and of every prompt in
+    // the document being resident in the heap at the same instant. Results stay in
+    // document order, so the combine step is unaffected.
+    const mapResults = await mapWithConcurrency(documents, SUMMARISER_MAP_CONCURRENCY, async (doc) => {
       const prompt = await mapPrompt.invoke({ context: doc.pageContent });
       const response = await model.invoke(prompt);
 
@@ -87,8 +101,6 @@ export class SummariserService {
         outputTokens: tokens?.output_tokens || 0,
       };
     });
-
-    const mapResults = await Promise.all(mapPromises);
 
     mapResults.forEach((result) => {
       totalInputTokens += result.inputTokens;
