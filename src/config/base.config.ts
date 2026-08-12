@@ -367,7 +367,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         },
       },
     },
-    // Billing unit: credits = max(minCreditsPerRecord, round2(cost / creditCost)),
+    // Billing unit: credits = max(minCreditsPerRecord, round4(cost / creditCost)),
     // with `cost` in EUROS. CREDIT_COST unset/0 disables credits entirely.
     credits: {
       creditCost: parseFloat(process.env.CREDIT_COST || "0"),

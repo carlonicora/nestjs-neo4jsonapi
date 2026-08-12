@@ -210,7 +210,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
 
       RETURN toString(usageDate) as date,
              usageType as tokenUsageType,
-             round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 2) as totalCredits,
+             round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 4) as totalCredits,
              sum(toInteger(${tokenUsageMeta.nodeName}.inputTokens)) as totalInputTokens,
              sum(toInteger(${tokenUsageMeta.nodeName}.outputTokens)) as totalOutputTokens,
              sum(toFloat(${tokenUsageMeta.nodeName}.cost)) as totalCost,
@@ -250,7 +250,7 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
       ${params.startDate ? `WHERE ${tokenUsageMeta.nodeName}.createdAt >= datetime($startDate)` : ""}
       ${params.endDate ? `${params.startDate ? "AND" : "WHERE"} ${tokenUsageMeta.nodeName}.createdAt <= datetime($endDate)` : ""}
 
-      RETURN round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 2) as totalCredits,
+      RETURN round(sum(toFloat(${tokenUsageMeta.nodeName}.credits)), 4) as totalCredits,
              sum(toInteger(${tokenUsageMeta.nodeName}.inputTokens)) as totalInputTokens,
              sum(toInteger(${tokenUsageMeta.nodeName}.outputTokens)) as totalOutputTokens,
              sum(toFloat(${tokenUsageMeta.nodeName}.cost)) as totalCost,

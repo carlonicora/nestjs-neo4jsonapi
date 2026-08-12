@@ -579,7 +579,7 @@ describe("TokenUsageRepository", () => {
 
       await repository.findAggregatedByDateAndType({});
 
-      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 2) as totalCredits");
+      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 4) as totalCredits");
       expect(mockQuery.query).not.toContain("totalPages");
     });
 
@@ -647,7 +647,7 @@ describe("TokenUsageRepository", () => {
 
       await repository.findUsageSummary({});
 
-      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 2) as totalCredits");
+      expect(mockQuery.query).toContain("round(sum(toFloat(tokenusage.credits)), 4) as totalCredits");
       expect(mockQuery.query).not.toContain("totalPages");
     });
 

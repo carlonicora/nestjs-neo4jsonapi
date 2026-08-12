@@ -2,7 +2,7 @@
  * Credits are the billing unit exposed to customers: a fractional, tier-accurate
  * conversion of the real provider cost of an AI call.
  *
- * `credits = max(minCreditsPerRecord, round2(cost / creditCost))`, where `cost`
+ * `credits = max(minCreditsPerRecord, round4(cost / creditCost))`, where `cost`
  * is the euro figure produced by `TokenUsageService.computeCost` (or an explicit
  * `costOverride`). ALL monetary values here — and every `*_COST_PER_1M_TOKENS`
  * env value feeding `cost` — are expressed in EUROS.

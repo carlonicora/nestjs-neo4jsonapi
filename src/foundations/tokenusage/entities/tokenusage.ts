@@ -79,7 +79,7 @@ export const TokenUsageDescriptor = defineEntity<TokenUsage>()({
     credits: {
       type: "number",
       description:
-        "The number of billing credits this call consumed: max(minCreditsPerRecord, round2(cost / creditCost)). 0 when credits tracking is disabled. Fractional (2 decimals).",
+        "The number of billing credits this call consumed: max(minCreditsPerRecord, round4(cost / creditCost)). 0 when credits tracking is disabled. Fractional (4 decimals).",
     },
     tokenUsageType: {
       type: "string",

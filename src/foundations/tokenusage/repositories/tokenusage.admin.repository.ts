@@ -290,7 +290,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
       ),
       credits: round(
         tail.reduce((s, r) => s + r.credits, 0),
-        2,
+        4,
       ),
       tokensIn: tail.reduce((s, r) => s + r.tokensIn, 0),
       tokensOut: tail.reduce((s, r) => s + r.tokensOut, 0),
@@ -351,7 +351,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
     const total = {
       scope: "total",
       cost: round(customer.cost + platform.cost, 4),
-      credits: round(customer.credits + platform.credits, 2),
+      credits: round(customer.credits + platform.credits, 4),
       tokensIn: customer.tokensIn + platform.tokensIn,
       tokensOut: customer.tokensOut + platform.tokensOut,
       cached: customer.cached + platform.cached,
@@ -392,7 +392,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
   private _metrics(record: any): UsageMetrics {
     return {
       cost: round(toNumber(record.get("cost")), 4),
-      credits: round(toNumber(record.get("credits")), 2),
+      credits: round(toNumber(record.get("credits")), 4),
       tokensIn: toNumber(record.get("tokensIn")),
       tokensOut: toNumber(record.get("tokensOut")),
       cached: toNumber(record.get("cached")),

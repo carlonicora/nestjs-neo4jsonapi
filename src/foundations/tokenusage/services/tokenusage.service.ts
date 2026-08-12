@@ -88,9 +88,14 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
 
   /**
    * Persists one usage record and converts its monetary cost into billing
-   * credits: `credits = max(minCreditsPerRecord, round2(cost / creditCost))`.
+   * credits: `credits = max(minCreditsPerRecord, round4(cost / creditCost))`.
    * `creditCost` absent or 0 disables credits entirely (records store 0 and no
    * balance is deducted), so consumers without a `credits` config are unaffected.
+   *
+   * Rounded to 4 decimals (not 2): sub-cent operations (a ~144-token
+   * transcription utterance, an embedding call) previously rounded to 0.00 at
+   * this step even before the per-record floor was applied, so cheap,
+   * high-volume calls billed nothing. 4dp keeps them measurable.
    */
   async recordTokenUsage(params: {
     tokens: TokenUsageInterface;
@@ -115,7 +120,7 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     const creditsConfig = this.configService.get<ConfigCreditsInterface>("credits");
     let credits = 0;
     if (creditsConfig && creditsConfig.creditCost > 0) {
-      credits = Math.round((cost / creditsConfig.creditCost) * 100) / 100;
+      credits = Math.round((cost / creditsConfig.creditCost) * 10000) / 10000;
       if (params.applyMinimum !== false) credits = Math.max(creditsConfig.minCreditsPerRecord, credits);
     }
 
