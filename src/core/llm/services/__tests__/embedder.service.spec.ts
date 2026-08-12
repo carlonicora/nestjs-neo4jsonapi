@@ -79,7 +79,8 @@ function makeService(params: {
   /** Makes the underlying embedder reject, as RateLimitedEmbedder does when the provider errors. */
   embedderError?: Error;
 }) {
-  const embedder = params.embedder ?? (makeEmbedder(params.embedderError) as unknown as ReturnType<typeof makeTextEmbedder>);
+  const embedder =
+    params.embedder ?? (makeEmbedder(params.embedderError) as unknown as ReturnType<typeof makeTextEmbedder>);
   const modelService = { getEmbedder: () => embedder } as any;
   const aiConfig = {
     embedder: {
@@ -251,10 +252,7 @@ describe("EmbedderService usage recording", () => {
           embedderError: providerError(500),
         });
         const texts = ["alpha", "beta gamma", FOX];
-        const expected = texts.reduce(
-          (sum, t) => sum + encodingForModel("text-embedding-3-large").encode(t).length,
-          0,
-        );
+        const expected = texts.reduce((sum, t) => sum + encodingForModel("text-embedding-3-large").encode(t).length, 0);
 
         await expect(service.vectoriseTextBatch(texts, ATTRIBUTION)).rejects.toThrow("provider 500");
 

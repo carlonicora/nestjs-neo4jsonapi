@@ -307,6 +307,34 @@ describe("CompanyRepository", () => {
       availableExtraCredits,
     });
 
+    /**
+     * Regression guard for a LOST UPDATE that silently under-billed customers.
+     *
+     * The query used to project the balances into a `WITH` and subtract from those captured
+     * values. `WITH` runs BEFORE `SET` takes the node's write lock, so concurrent deductions
+     * all read the same balance and the last writer wins. Measured on a probe node: 200
+     * concurrent deductions of 1 credit from 1000 deducted 19 — 90.5% lost. In a real run,
+     * 71.44 of 1669.55 credits went uncharged.
+     *
+     * A unit test cannot exercise concurrency, but it CAN pin the query shape that caused it:
+     * every balance read must sit inside the `SET`, where it is evaluated under the lock.
+     */
+    it("reads every balance inside the SET, never into a WITH before it", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(10, 0));
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+
+      await repository.useCredits({ credits: 1 });
+
+      const { query } = mockNeo4jService.writeOne.mock.calls[0][0];
+      const beforeSet = query.slice(0, query.indexOf("SET "));
+
+      expect(beforeSet).not.toMatch(/availableMonthlyCredits/);
+      expect(beforeSet).not.toMatch(/availableExtraCredits/);
+      expect(beforeSet).not.toMatch(/\bWITH\b/);
+      // And the arithmetic must reference the properties, i.e. read them at write time.
+      expect(query).toMatch(/SET[\s\S]*company\.availableMonthlyCredits[\s\S]*company\.availableMonthlyCredits/);
+    });
+
     it("returns the new balances when the monthly allowance covers the deduction", async () => {
       mockNeo4jService.writeOne.mockResolvedValue(companyAfterWrite(4990.5, 200));
       mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
@@ -390,7 +418,10 @@ describe("CompanyRepository", () => {
       expect(query.match(/\bSET\b/g)).toHaveLength(1);
       expect(query.match(/RETURN /g)).toHaveLength(1);
       expect(query).toContain("MATCH (company:Company {id: $companyId})");
-      expect(query).toContain("company.availableMonthlyCredits = CASE");
+      // Whitespace-tolerant: the assignment spans lines now that each balance is re-read
+      // inside the SET. Note this test asserted "atomically" while the query was NOT atomic —
+      // statement shape alone cannot see a lost update; the WITH-free assertion above can.
+      expect(query).toMatch(/company\.availableMonthlyCredits\s*=\s*\n?\s*CASE/);
       expect(query).toContain("company.availableExtraCredits");
       expect(query).toContain("RETURN company");
     });

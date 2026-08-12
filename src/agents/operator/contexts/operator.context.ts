@@ -66,5 +66,4 @@ type OperatorAttributionState = Pick<CallerAttributionState, "scopeLabel" | "ass
  */
 export type OperatorGraphState = typeof OperatorContext.State;
 
-export type OperatorContextState = Omit<OperatorGraphState, keyof OperatorAttributionState> &
-  OperatorAttributionState;
+export type OperatorContextState = Omit<OperatorGraphState, keyof OperatorAttributionState> & OperatorAttributionState;

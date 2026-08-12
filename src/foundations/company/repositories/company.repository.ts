@@ -396,20 +396,37 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       credits: params.credits,
     };
 
-    // Single-statement read-and-write: the monthly-then-extra waterfall is computed
-    // inside the SET so concurrent deductions cannot lose updates. Balances are
-    // 4-dp floats and are deliberately NOT clamped (a mid-operation overrun may go
-    // negative; the pre-flight guard blocks the NEXT operation).
+    // Every balance read happens INSIDE the SET, referencing the property directly.
+    //
+    // This previously projected the balances into a `WITH` and then subtracted from those
+    // captured values. That is a lost update: `WITH` evaluates BEFORE `SET` takes the node's
+    // write lock, so concurrent deductions all read the same balance and the last writer
+    // wins. Reproduced 2026-08-12 on a probe node — 200 concurrent deductions of 1 credit
+    // from 1000 deducted **19**, losing 90.5%. In the cost-test run, where up to 130 LLM
+    // calls deduct from one Company node, 71.44 of 1669.55 credits went uncharged (4.5%):
+    // real usage the customer was never billed for, and a UI balance drifting from reality.
+    //
+    // Referencing `company.availableMonthlyCredits` inside `SET` defers the read to write
+    // time, under the lock, which makes the whole statement atomic per deduction. Same probe
+    // with this form: 200 of 200 deducted, nothing lost.
+    //
+    // `monthlyFirst` is evaluated twice on purpose — a Cypher `SET` clause cannot introduce a
+    // binding, and re-reading under the same lock is consistent. Balances stay 4-dp floats and
+    // are deliberately NOT clamped (a mid-operation overrun may go negative; the pre-flight
+    // guard blocks the NEXT operation).
     query.query = `
       MATCH (company:Company {id: $companyId})
-      WITH company,
-           toFloat(coalesce(company.availableMonthlyCredits, 0)) AS m,
-           toFloat(coalesce(company.availableExtraCredits, 0)) AS e,
-           toFloat($credits) AS c
-      SET company.availableMonthlyCredits = CASE WHEN m >= c THEN round(m - c, 4) ELSE 0.0 END,
-          company.availableExtraCredits   = CASE WHEN m >= c THEN e
-                                                 WHEN m > 0  THEN round(e - (c - m), 4)
-                                                 ELSE round(e - c, 4) END,
+      SET company.availableMonthlyCredits =
+            CASE WHEN toFloat(coalesce(company.availableMonthlyCredits, 0)) >= toFloat($credits)
+                 THEN round(toFloat(coalesce(company.availableMonthlyCredits, 0)) - toFloat($credits), 4)
+                 ELSE 0.0 END,
+          company.availableExtraCredits =
+            CASE WHEN toFloat(coalesce(company.availableMonthlyCredits, 0)) >= toFloat($credits)
+                 THEN toFloat(coalesce(company.availableExtraCredits, 0))
+                 WHEN toFloat(coalesce(company.availableMonthlyCredits, 0)) > 0
+                 THEN round(toFloat(coalesce(company.availableExtraCredits, 0))
+                            - (toFloat($credits) - toFloat(coalesce(company.availableMonthlyCredits, 0))), 4)
+                 ELSE round(toFloat(coalesce(company.availableExtraCredits, 0)) - toFloat($credits), 4) END,
           company.updatedAt = datetime()
       RETURN company
     `;

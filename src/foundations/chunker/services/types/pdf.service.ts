@@ -22,12 +22,12 @@ const tesseract = require("node-tesseract-ocr");
 const sharp = require("sharp");
 
 /**
- * Hard ceiling on how many pages of a single PDF are OCR'd. The value is
- * deliberately unchanged — what changes is that a truncated OCR is now named,
- * logged and reported back to the caller through `pagesProcessed` instead of
- * silently returning a fraction of the document.
+ * Page count past which a scanned PDF is logged as a slow job.
+ *
+ * PURELY a warning. Nothing is skipped — OCR is CPU-bound and a large scan takes a long
+ * time, and the operator should know that from the logs rather than from a support ticket.
  */
-const MAX_OCR_PAGES = 20;
+const OCR_SLOW_PAGE_WARNING = 20;
 
 @Injectable()
 export class PdfService {
@@ -174,7 +174,8 @@ export class PdfService {
    * `totalPages` is always the document's real page count, whichever route won.
    * `pagesProcessed` is only present when the OCR route won and reports how many
    * pages that route actually read — fewer than `totalPages` means the returned
-   * text covers only part of the document (see `MAX_OCR_PAGES`).
+   * text covers only part of the document — now possible ONLY when individual pages fail
+   * to render, never by design: OCR no longer truncates.
    */
   async extractPdfContent(
     pdfPath: string,
@@ -269,9 +270,11 @@ export class PdfService {
           const ocrText = ocrResult.map((block) => block.content).join("\n");
           this.logger.log(`✅ SUCCESS: OCR extracted ${ocrText.length} chars from ${ocrResult.length} blocks`);
           if (pagesProcessed < totalPages) {
-            this.logger.warn(
-              `⚠️  OCR TRUNCATED: read ${pagesProcessed} of ${totalPages} pages ` +
-                `(MAX_OCR_PAGES=${MAX_OCR_PAGES}) — the extracted text covers only part of this document`,
+            // No longer a policy truncation — OCR reads every page. Reaching here means
+            // individual pages FAILED to render, which is a defect worth an error, not a warning.
+            this.logger.error(
+              `OCR INCOMPLETE: read ${pagesProcessed} of ${totalPages} pages — ` +
+                `${totalPages - pagesProcessed} page(s) failed to render and their content is missing`,
             );
           }
           this.logger.log("##############################################################");
@@ -850,8 +853,8 @@ export class PdfService {
 
   /**
    * `pagesProcessed` is the number of pages that were actually rendered and read
-   * by OCR. It is lower than the document's page count whenever `MAX_OCR_PAGES`
-   * truncates the job or a page fails to render, and it is what lets the caller
+   * by OCR. Every page is attempted, so this equals the document's page count unless a
+   * page FAILS to render; a shortfall is a defect, not policy. It is what lets the caller
    * tell "a 50-page scan" from "20 pages of a 50-page scan".
    */
   private async extractWithOCR(
@@ -1012,15 +1015,24 @@ export class PdfService {
       const buffer = fs.readFileSync(pdfPath);
       parser = new PDFParse({ data: buffer });
       const infoResult = await parser.getInfo();
-      // While this read was wrong every scan reported 1 page, so `maxPages` was 1:
-      // OCR rendered a single page of every document and the cap warning never fired.
+      // While this read was wrong every scan reported 1 page, so only a single page of
+      // every document was ever rendered.
       const pageCount = this.numPagesFromInfo(infoResult) || 1;
 
-      // Limit pages based on file size and configuration
-      const maxPages = Math.min(pageCount, MAX_OCR_PAGES); // Hard limit for performance
+      // EVERY page is OCR'd. There used to be a `MAX_OCR_PAGES = 20` ceiling here, applied
+      // "for performance": pages 21+ of any scanned PDF were never rendered, produced no
+      // text, no chunks and no cost, and the document still completed. A 50-page scanned
+      // report was silently turned into a 20-page one, and everything downstream — findings,
+      // summary, counterparts, strategy — reasoned about a document it had only partly read.
+      // A partial read of a legal document is not a performance optimisation, it is a wrong
+      // answer delivered quickly. If OCR of a large scan is slow, that is a throughput problem
+      // to solve in the queue, not by discarding the user's content.
+      const maxPages = pageCount;
 
-      if (pageCount > MAX_OCR_PAGES) {
-        this.logger.warn(`PDF has ${pageCount} pages, limiting OCR to first ${maxPages} pages for performance`);
+      if (pageCount > OCR_SLOW_PAGE_WARNING) {
+        this.logger.warn(
+          `PDF has ${pageCount} pages — OCR renders every one of them and is CPU-bound, so this job will be slow. Not truncating.`,
+        );
       }
 
       const imageBuffers: Buffer[] = [];
