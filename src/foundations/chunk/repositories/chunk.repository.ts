@@ -1,9 +1,10 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { AiStatus } from "../../../common/enums/ai.status";
+import { unwrapNeo4jIntegers } from "../../../common/helpers/unwrap-neo4j-integer";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
-import { EmbedderService } from "../../../core";
+import { EmbedderAttribution, EmbedderService } from "../../../core";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
@@ -13,6 +14,15 @@ import { reciprocalRankFusion } from "../services/reciprocal-rank-fusion";
 
 @Injectable()
 export class ChunkRepository implements OnModuleInit {
+  /**
+   * Chunks embedded (and written) per round-trip in `enrichContentAndEmbedBatch`.
+   * A whole document's worth of vectors held at once is what pushed the worker past
+   * its heap on large uploads: 760 pages ≈ 2.5k chunks × 3072 floats. Slicing bounds
+   * the peak to one slice's vectors while keeping batching's latency win (one embedder
+   * call per 50 chunks, not per chunk).
+   */
+  private static readonly EMBED_SLICE = 50;
+
   constructor(
     private readonly neo4j: Neo4jService,
     private readonly modelService: ModelService,
@@ -229,6 +239,24 @@ export class ChunkRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Pipeline hydration of a content node's chunks — deliberately WITHOUT `embedding`.
+   *
+   * A :Chunk node carries a full embedding vector (3072 floats ≈ 24 KB raw, far more
+   * once the driver has boxed it). Returning the whole node made every pipeline guard
+   * pull the entire document's vectors into the worker heap even though NO consumer
+   * reads `chunk.embedding` — that is what killed the worker on a 760-page matrix.
+   *
+   * The rows are therefore returned as an explicit `{ labels, properties }` map instead
+   * of a Node: `EntityFactory.createOrMerge` treats any column with a `labels` key as a
+   * node and maps `data.properties`, so a hand-built map of the same shape hydrates
+   * identically (a bare map projection would NOT — it has no `labels`/`properties` and
+   * the factory would drop the row).
+   *
+   * The projected property list is exactly the descriptor's own fields (minus
+   * `embedding`) plus the `Entity` base fields, so nothing is lost: the descriptor's
+   * auto-generated mapper only ever reads those keys anyway.
+   */
   async findChunks(params: { id: string; nodeType: string }): Promise<Chunk[]> {
     const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
 
@@ -238,9 +266,26 @@ export class ChunkRepository implements OnModuleInit {
     };
 
     query.query += `
-      MATCH (chunk_type:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunk:Chunk)
-      RETURN chunk, chunk_type
-      ORDER BY chunk.position
+      MATCH (:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunkNode:Chunk)
+      WITH chunkNode
+      ORDER BY chunkNode.position
+      RETURN {
+        labels: labels(chunkNode),
+        properties: chunkNode {
+          .id,
+          .content,
+          .heading,
+          .position,
+          .aiStatus,
+          .nodeId,
+          .nodeType,
+          .imagePath,
+          .dates,
+          .propagatedDates,
+          .createdAt,
+          .updatedAt
+        }
+      } AS chunk
     `;
 
     return this.neo4j.readMany(query);
@@ -258,7 +303,12 @@ export class ChunkRepository implements OnModuleInit {
   }): Promise<void> {
     const query = this.neo4j.initQuery();
 
-    const vector = await this.embedderService.vectoriseText({ text: params.content });
+    // Cost attribution: the chunk's parent node owns the embedding spend, so the
+    // usage record is billed against it (nodeId/nodeType are already required here).
+    const vector = await this.embedderService.vectoriseText({
+      text: params.content,
+      attribution: { relationshipId: params.nodeId, relationshipType: params.nodeType },
+    });
 
     query.queryParams = {
       ...query.queryParams,
@@ -342,37 +392,50 @@ export class ChunkRepository implements OnModuleInit {
 
   async enrichContentAndEmbedBatch(
     items: { chunkId: string; enrichedContent: string; propagatedDates?: string }[],
+    attribution?: EmbedderAttribution,
   ): Promise<void> {
     if (items.length === 0) return;
 
-    // One Azure round-trip for the whole set — per-call latency dominates batch size, so
-    // embedding chunks individually (vectoriseText per chunk) is far slower than batching.
-    // RateLimitedEmbedder.embedDocuments splits internally if the batch exceeds maxBatchTokens.
-    const vectors = await this.embedderService.vectoriseTextBatch(items.map((item) => item.enrichedContent));
+    for (let start = 0; start < items.length; start += ChunkRepository.EMBED_SLICE) {
+      // Everything below is scoped to this iteration, so the previous slice's vectors
+      // and rows become unreachable as soon as the next slice starts.
+      const slice = items.slice(start, start + ChunkRepository.EMBED_SLICE);
 
-    const rows = items.map((item, index) => ({
-      chunkId: item.chunkId,
-      enrichedContent: item.enrichedContent,
-      vector: vectors[index],
-      propagatedDates: item.propagatedDates ?? null,
-    }));
+      // One Azure round-trip per slice — per-call latency dominates batch size, so
+      // embedding chunks individually (vectoriseText per chunk) is far slower.
+      // RateLimitedEmbedder.embedDocuments splits internally if the slice exceeds maxBatchTokens.
+      // `attribution` is optional: without it the embedder records no usage (opt-in by design).
+      // Attribution is forwarded per slice: each slice's usage record carries its own
+      // token count, so the totals are identical to the single-batch version.
+      const vectors = await this.embedderService.vectoriseTextBatch(
+        slice.map((item) => item.enrichedContent),
+        attribution,
+      );
 
-    const query = this.neo4j.initQuery();
-    query.queryParams = {
-      ...query.queryParams,
-      rows,
-    };
+      const rows = slice.map((item, index) => ({
+        chunkId: item.chunkId,
+        enrichedContent: item.enrichedContent,
+        vector: vectors[index],
+        propagatedDates: item.propagatedDates ?? null,
+      }));
 
-    query.query = `
-      UNWIND $rows AS row
-      MATCH (chunk:Chunk {id: row.chunkId})
-      SET chunk.content = row.enrichedContent,
-          chunk.embedding = row.vector,
-          chunk.updatedAt = datetime(),
-          chunk.propagatedDates = row.propagatedDates
-    `;
+      const query = this.neo4j.initQuery();
+      query.queryParams = {
+        ...query.queryParams,
+        rows,
+      };
 
-    await this.neo4j.writeOne(query);
+      query.query = `
+        UNWIND $rows AS row
+        MATCH (chunk:Chunk {id: row.chunkId})
+        SET chunk.content = row.enrichedContent,
+            chunk.embedding = row.vector,
+            chunk.updatedAt = datetime(),
+            chunk.propagatedDates = row.propagatedDates
+      `;
+
+      await this.neo4j.writeOne(query);
+    }
   }
 
   async markChunksCompleted(params: { id: string; nodeType: string }): Promise<void> {
@@ -381,6 +444,106 @@ export class ChunkRepository implements OnModuleInit {
     query.query += `
       MATCH (nodeType:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunk:Chunk)
       SET chunk.aiStatus = $aiStatus, chunk.updatedAt = datetime()
+    `;
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Count of chunks not yet completed for a content node. Replaces full hydration in
+   * pipeline guards: they only ever asked "are any chunks still pending?", and hydrating
+   * every chunk (embedding vectors included) to answer it is what made the guard
+   * quadratic in a document's chunk count.
+   *
+   * Returns a scalar, so it cannot go through `readOne`/`readMany` (those map entity
+   * columns). Same raw-scalar read as `TokenUsageRepository.findUsageSummary` — the
+   * package's precedent for non-entity aggregate reads.
+   */
+  async countChunksInProgress(params: { id: string; nodeType: string }): Promise<number> {
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      id: params.id,
+      aiStatus: [AiStatus.InProgress, AiStatus.Pending],
+    };
+
+    query.query += `
+      MATCH (:${params.nodeType} {id: $id})-[:HAS_CHUNK]->(chunk:Chunk)
+      WHERE chunk.aiStatus IN $aiStatus
+      RETURN count(chunk) AS count
+    `;
+
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    if (result.records.length === 0) return 0;
+
+    // Cypher `count()` arrives as a neo4j-driver Integer; the package's own unwrap helper
+    // turns it into a plain JS number (and passes real numbers through untouched).
+    const count = unwrapNeo4jIntegers<number | null>(result.records[0].get("count"));
+    return count ?? 0;
+  }
+
+  /**
+   * Single-winner claim on a content node's post-chunking pipeline.
+   *
+   * `countChunksInProgress` alone CANNOT gate finalisation. It answers "are any chunks
+   * still pending?", never "has finalisation already run?", and `ChunkService.generateGraph`
+   * enqueues one finalise job per chunk — so a 25-chunk document gets 25 jobs. Once the last
+   * chunk lands, every remaining queued job passes a pending-count check and re-runs the whole
+   * pipeline (measured 2026-08-12: summariser ran 25× on one document, 100.91 credits; ~70% of
+   * that run's spend was duplicated work).
+   *
+   * The `SET n.finalisationClaimedAt = n.finalisationClaimedAt` is a deliberate no-op write: it
+   * takes the node's write lock BEFORE the predicate is evaluated. A concurrent claimer blocks
+   * there, and re-reads the committed value afterwards (Neo4j reads are read-committed, not
+   * repeatable), so it sees the winner's timestamp and its `WHERE` fails. Without the lock both
+   * transactions evaluate the predicate on the pre-write state and both claim.
+   *
+   * Re-ingestion re-arms the claim via `clearFinalisationClaim` in `ChunkService.createChunks`.
+   */
+  async claimContentFinalisation(params: { id: string; nodeType: string }): Promise<boolean> {
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      id: params.id,
+      pendingStatus: [AiStatus.InProgress, AiStatus.Pending],
+    };
+
+    query.query += `
+      MATCH (nodeType:${params.nodeType} {id: $id})
+      SET nodeType.finalisationClaimedAt = nodeType.finalisationClaimedAt
+      WITH nodeType
+      WHERE nodeType.finalisationClaimedAt IS NULL
+        AND NOT EXISTS {
+          MATCH (nodeType)-[:HAS_CHUNK]->(chunk:Chunk)
+          WHERE chunk.aiStatus IN $pendingStatus
+        }
+      SET nodeType.finalisationClaimedAt = datetime()
+      RETURN nodeType.id AS id
+    `;
+
+    // `executeInTransaction` (not `writeOne`) because the claim must READ its own outcome:
+    // `writeOne` returns null without a serialiser, and the lock has to be held for the whole
+    // transaction for the re-read to be meaningful. Same id-keyed, label-scoped match as
+    // `countChunksInProgress` above — no company scope, by design: this is an internal
+    // pipeline latch keyed on a UUID the caller already resolved.
+    const [result] = await this.neo4j.executeInTransaction([{ query: query.query, params: query.queryParams }]);
+
+    return result.records.length > 0;
+  }
+
+  /**
+   * Re-arms `claimContentFinalisation` for a content node whose chunks are being (re)built.
+   * Called from `ChunkService.createChunks`, the single entry point every ingestion and
+   * rebuild path goes through — without it a re-ingested document would keep the stale claim
+   * and skip finalisation silently.
+   */
+  async clearFinalisationClaim(params: { id: string; nodeType: string }): Promise<void> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, id: params.id };
+    query.query += `
+      MATCH (nodeType:${params.nodeType} {id: $id})
+      REMOVE nodeType.finalisationClaimedAt
     `;
     await this.neo4j.writeOne(query);
   }

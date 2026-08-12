@@ -7,7 +7,9 @@ import { SecurityService } from "../../../../core/security/services/security.ser
 import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
-import { Chunk } from "../../entities/chunk.entity";
+import { EntityFactory } from "../../../../core/neo4j/factories/entity.factory";
+import { TokenResolverService } from "../../../../core/neo4j/services/token-resolver.service";
+import { Chunk, ChunkDescriptor } from "../../entities/chunk.entity";
 import { AiStatus } from "../../../../common/enums/ai.status";
 
 // Test IDs
@@ -37,6 +39,8 @@ const createMockModelService = () => ({
 
 const createMockEmbedderService = () => ({
   vectoriseText: vi.fn().mockResolvedValue(MOCK_EMBEDDING),
+  // One vector per input text, tagged with the text so slice ordering is assertable.
+  vectoriseTextBatch: vi.fn(async (texts: string[]) => texts.map((text) => [`vector:${text}`])),
 });
 
 const createMockSecurityService = () => ({
@@ -336,9 +340,9 @@ describe("ChunkRepository", () => {
       });
 
       expect(mockQuery.queryParams.id).toBe(TEST_IDS.contentId);
-      expect(mockQuery.query).toContain("(chunk_type:Content {id: $id})");
-      expect(mockQuery.query).toContain("[:HAS_CHUNK]->(chunk:Chunk)");
-      expect(mockQuery.query).toContain("ORDER BY chunk.position");
+      expect(mockQuery.query).toContain("MATCH (:Content {id: $id})");
+      expect(mockQuery.query).toContain("[:HAS_CHUNK]->(chunkNode:Chunk)");
+      expect(mockQuery.query).toContain("ORDER BY chunkNode.position");
       expect(result).toEqual([MOCK_CHUNK]);
     });
 
@@ -353,6 +357,73 @@ describe("ChunkRepository", () => {
       });
 
       expect(result).toEqual([]);
+    });
+
+    // Heap guard: a :Chunk node carries a full embedding vector and NO consumer of
+    // findChunks reads it, so the projection must not return it.
+    it("projects chunk properties WITHOUT the embedding (and drops the dead chunk_type binding)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findChunks({ id: TEST_IDS.contentId, nodeType: "Content" });
+
+      expect(mockQuery.query).not.toContain("embedding");
+      expect(mockQuery.query).not.toContain("chunk_type");
+      // Aliased back to the descriptor's nodeName so EntityFactory still finds the column.
+      expect(mockQuery.query).toContain("} AS chunk");
+      expect(mockQuery.query).toContain("labels: labels(chunkNode)");
+      expect(mockQuery.query).toContain("properties: chunkNode {");
+    });
+  });
+
+  // C2 mapper-compat proof: findChunks returns a hand-built `{ labels, properties }` map
+  // rather than a Node. EntityFactory keys "is this a node?" off the `labels` field and
+  // maps `properties`, so the projected shape must hydrate exactly like a real node did.
+  describe("findChunks projection — descriptor mapper compatibility", () => {
+    const makeRecord = (cols: Record<string, unknown>): any => ({
+      keys: Object.keys(cols),
+      has: (key: string) => key in cols,
+      get: (key: string) => cols[key],
+    });
+
+    // Mirrors the RETURN of findChunks: labels + the descriptor's own properties, no embedding.
+    const projectedChunkRow = {
+      labels: ["Chunk"],
+      properties: {
+        id: TEST_IDS.chunkId,
+        content: "Test chunk content",
+        heading: "Articolo 3",
+        position: 2,
+        aiStatus: AiStatus.Completed,
+        nodeId: TEST_IDS.contentId,
+        nodeType: "Content",
+        imagePath: null,
+        dates: JSON.stringify([{ date: "2024-03-01", description: "udienza" }]),
+        propagatedDates: null,
+        createdAt: "2025-01-01T00:00:00Z",
+        updatedAt: "2025-01-02T00:00:00Z",
+      },
+    };
+
+    it("hydrates content/heading/position/dates and leaves embedding undefined", () => {
+      const factory = new EntityFactory(new TokenResolverService());
+
+      const [chunk] = factory.createGraphList({
+        model: ChunkDescriptor.model,
+        records: [makeRecord({ chunk: projectedChunkRow })],
+      });
+
+      expect(chunk.id).toBe(TEST_IDS.chunkId);
+      expect(chunk.type).toBe("chunk");
+      expect(chunk.content).toBe("Test chunk content");
+      expect(chunk.heading).toBe("Articolo 3");
+      expect(chunk.position).toBe(2);
+      expect(chunk.dates).toEqual([{ date: "2024-03-01", description: "udienza" }]);
+      expect(chunk.createdAt).toEqual(new Date("2025-01-01T00:00:00Z"));
+
+      // The whole point of the projection.
+      expect(chunk.embedding).toBeUndefined();
     });
   });
 
@@ -370,7 +441,10 @@ describe("ChunkRepository", () => {
         position: 0,
       });
 
-      expect(embedderService.vectoriseText).toHaveBeenCalledWith({ text: "Test chunk content" });
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith({
+        text: "Test chunk content",
+        attribution: { relationshipId: TEST_IDS.contentId, relationshipType: "Content" },
+      });
       expect(mockQuery.queryParams).toMatchObject({
         id: TEST_IDS.chunkId,
         content: "Test chunk content",
@@ -421,6 +495,28 @@ describe("ChunkRepository", () => {
       expect(mockQuery.queryParams.previousChunkId).toBe(TEST_IDS.nextChunkId);
       expect(mockQuery.query).toContain("MATCH (previous:Chunk {id: $previousChunkId})");
       expect(mockQuery.query).toContain("MERGE (previous)-[:NEXT]->(chunk)");
+    });
+
+    // Cost attribution: the upload path must bill the embedding to the chunk's parent
+    // node, so EmbedderService writes a TokenUsage record against it.
+    it("attributes the embedding to the parent node (nodeId/nodeType)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createChunk({
+        id: TEST_IDS.chunkId,
+        nodeId: "doc-1",
+        nodeType: "Document",
+        content: "Test chunk content",
+        position: 0,
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: { relationshipId: "doc-1", relationshipType: "Document" },
+        }),
+      );
     });
 
     it("should handle embedding errors", async () => {
@@ -497,6 +593,142 @@ describe("ChunkRepository", () => {
       expect(mockQuery.query).toContain("(chunk_type:Content {id: $id})");
       expect(mockQuery.query).toContain("WHERE chunk.aiStatus IN $aiStatus");
       expect(result).toEqual([MOCK_CHUNK]);
+    });
+  });
+
+  // Pipeline guards only ever asked "is anything still pending?" — hydrating every
+  // chunk (embeddings included) to answer that is what made the guard quadratic.
+  describe("countChunksInProgress", () => {
+    const makeCountResult = (value: unknown) => ({
+      records: [{ get: (key: string) => (key === "count" ? value : undefined) }],
+    });
+
+    it("issues a count() query filtered to pending/in-progress chunks", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue(makeCountResult(7));
+
+      const result = await repository.countChunksInProgress({
+        id: TEST_IDS.contentId,
+        nodeType: "Content",
+      });
+
+      expect(mockQuery.queryParams.id).toBe(TEST_IDS.contentId);
+      expect(mockQuery.queryParams.aiStatus).toEqual([AiStatus.InProgress, AiStatus.Pending]);
+
+      const [cypher] = neo4jService.read.mock.calls[0] as [string, Record<string, unknown>];
+      expect(cypher).toContain("MATCH (:Content {id: $id})");
+      expect(cypher).toContain("[:HAS_CHUNK]->(chunk:Chunk)");
+      expect(cypher).toContain("WHERE chunk.aiStatus IN $aiStatus");
+      expect(cypher).toContain("count(chunk) AS count");
+      // Never hydrates entities — that is the whole point.
+      expect(neo4jService.readMany).not.toHaveBeenCalled();
+
+      expect(result).toBe(7);
+    });
+
+    it("unwraps a neo4j-driver Integer count", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue(makeCountResult({ low: 12, high: 0, toNumber: () => 12 }));
+
+      const result = await repository.countChunksInProgress({
+        id: TEST_IDS.contentId,
+        nodeType: "Content",
+      });
+
+      expect(result).toBe(12);
+    });
+
+    it("returns 0 when the query yields no rows", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      const result = await repository.countChunksInProgress({
+        id: TEST_IDS.contentId,
+        nodeType: "Content",
+      });
+
+      expect(result).toBe(0);
+    });
+  });
+
+  // Heap guard: a whole document's vectors held at once is what pushed the worker
+  // past its heap, so the batch is embedded and written in fixed slices.
+  describe("enrichContentAndEmbedBatch", () => {
+    const makeItems = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        chunkId: `chunk-${index}`,
+        enrichedContent: `content-${index}`,
+      }));
+
+    it("does nothing when there are no items", async () => {
+      await repository.enrichContentAndEmbedBatch([]);
+
+      expect(embedderService.vectoriseTextBatch).not.toHaveBeenCalled();
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
+    });
+
+    it("embeds and writes in slices of 50, preserving input order", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      const items = makeItems(130);
+
+      await repository.enrichContentAndEmbedBatch(items, {
+        relationshipId: "doc-1",
+        relationshipType: "Document",
+      });
+
+      // 50 / 50 / 30
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledTimes(3);
+      expect(embedderService.vectoriseTextBatch.mock.calls.map((call: any[]) => call[0].length)).toEqual([50, 50, 30]);
+      expect(neo4jService.writeOne).toHaveBeenCalledTimes(3);
+
+      const writtenRows = neo4jService.writeOne.mock.calls.flatMap(
+        (call: any[]) => call[0].queryParams.rows as { chunkId: string; vector: unknown; propagatedDates: unknown }[],
+      );
+      expect(writtenRows).toHaveLength(130);
+      expect(writtenRows.map((row) => row.chunkId)).toEqual(items.map((item) => item.chunkId));
+      // Each row keeps the vector produced for its own text (no cross-slice offset bug).
+      expect(writtenRows[0].vector).toEqual(["vector:content-0"]);
+      expect(writtenRows[49].vector).toEqual(["vector:content-49"]);
+      expect(writtenRows[50].vector).toEqual(["vector:content-50"]);
+      expect(writtenRows[129].vector).toEqual(["vector:content-129"]);
+      expect(writtenRows[0].propagatedDates).toBeNull();
+    });
+
+    it("forwards the attribution on every slice (one usage record per slice)", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.enrichContentAndEmbedBatch(makeItems(130), {
+        relationshipId: "doc-1",
+        relationshipType: "Document",
+      });
+
+      for (const call of embedderService.vectoriseTextBatch.mock.calls as any[][]) {
+        expect(call[1]).toEqual({ relationshipId: "doc-1", relationshipType: "Document" });
+      }
+    });
+
+    it("writes propagated dates when present", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.enrichContentAndEmbedBatch([
+        { chunkId: "chunk-a", enrichedContent: "content-a", propagatedDates: '[{"date":"2024-03-01"}]' },
+      ]);
+
+      const [query] = neo4jService.writeOne.mock.calls[0] as any[];
+      expect(query.queryParams.rows).toEqual([
+        {
+          chunkId: "chunk-a",
+          enrichedContent: "content-a",
+          vector: ["vector:content-a"],
+          propagatedDates: '[{"date":"2024-03-01"}]',
+        },
+      ]);
+      expect(query.query).toContain("SET chunk.content = row.enrichedContent");
+      expect(query.query).toContain("chunk.embedding = row.vector");
     });
   });
 
@@ -694,7 +926,10 @@ describe("ChunkRepository", () => {
         position: 0,
       });
 
-      expect(embedderService.vectoriseText).toHaveBeenCalledWith({ text: "Test content" });
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith({
+        text: "Test content",
+        attribution: { relationshipId: TEST_IDS.contentId, relationshipType: "Content" },
+      });
     });
   });
 });
