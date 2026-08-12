@@ -7,7 +7,8 @@ export type TokenUsageType =
   | "analyser"
   | "strategy"
   | "text_generation"
-  | "embedding";
+  | "embedding"
+  | "image_analysis";
 
 export const TokenUsageType = {
   GraphCreator: "graph_creator",
@@ -19,4 +20,5 @@ export const TokenUsageType = {
   Strategy: "strategy",
   TextGeneration: "text_generation",
   Embedding: "embedding",
+  ImageAnalysis: "image_analysis",
 } as const;

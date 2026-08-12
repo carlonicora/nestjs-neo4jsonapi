@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
-import { EmbedderService, ModelService } from "../../../core";
+import { EmbedderAttribution, EmbedderService, ModelService } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { KeyConcept } from "../../keyconcept/entities/key.concept.entity";
@@ -215,8 +215,12 @@ export class KeyConceptRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
-  async createOrphanKeyConcepts(params: { keyConceptValues: string[] }): Promise<void> {
-    const vectors = await this.embedderService.vectoriseTextBatch(params.keyConceptValues);
+  async createOrphanKeyConcepts(params: {
+    keyConceptValues: string[];
+    attribution?: EmbedderAttribution;
+  }): Promise<void> {
+    // `attribution` is optional: without it the embedder records no usage (opt-in by design).
+    const vectors = await this.embedderService.vectoriseTextBatch(params.keyConceptValues, params.attribution);
 
     const data = params.keyConceptValues.map((keyConceptId: string, index: number) => ({
       query: `MERGE (keyconcept: KeyConcept {value: $keyConceptId}) ON CREATE SET keyconcept.id="${randomUUID()}", keyconcept.embedding = $vector`,

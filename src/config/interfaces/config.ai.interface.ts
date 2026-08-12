@@ -121,7 +121,7 @@ export interface ConfigAiInterface {
   requestWatchdogMs: number;
   /**
    * Mistral Document AI (OCR) on Azure AI Foundry — see DocumentAiService.
-   * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION}.
+   * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION,COST_PER_PAGE}.
    */
   documentAi: {
     enabled: boolean;
@@ -130,6 +130,15 @@ export interface ConfigAiInterface {
     model: string;
     url: string;
     apiVersion?: string;
+    /**
+     * € per OCR page, driven by DOCUMENT_AI_COST_PER_PAGE. OCR is billed per page and
+     * returns no token counts, so callers charge `pages * costPerPage` as the
+     * `costOverride` on the usage record. Like every monetary value in this config it is
+     * expressed in EUROS (see `config.credits.interface.ts` — "ALL monetary values here …
+     * are expressed in EUROS"). 0 or unset → OCR pages are free and no usage record is
+     * written for them.
+     */
+    costPerPage?: number;
   };
   /** Normal tier — the default model. */
   ai: AiTierConfig;

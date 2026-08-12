@@ -322,7 +322,9 @@ describe("KeyConceptRepository", () => {
         keyConceptValues: ["Concept 1", "Concept 2"],
       });
 
-      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledWith(["Concept 1", "Concept 2"]);
+      // `attribution` is the additive-optional positional arg 2 — undefined here means
+      // the embedder records no usage (opt-in cost attribution).
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledWith(["Concept 1", "Concept 2"], undefined);
       expect(neo4jService.executeInTransaction).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
