@@ -2,13 +2,19 @@ import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
+import { CHUNK_QUEUE_CONCURRENCY } from "../../../config/base.config";
 import { QueueId } from "../../../config/enums/queue.id";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { ChunkService } from "../../chunk/services/chunk.service";
 
-@Processor(QueueId.CHUNK, { concurrency: 50, lockDuration: 1000 * 60 })
+// Concurrency comes from `CHUNK_QUEUE_CONCURRENCY` (default 50 — unchanged from
+// the literal that used to sit here). `@Processor` options are evaluated at
+// DECORATION time, so this cannot be injected: it must be a module-level
+// constant, and that constant resolves the env var inside `base.config.ts`,
+// the one file allowed to read `process.env`.
+@Processor(QueueId.CHUNK, { concurrency: CHUNK_QUEUE_CONCURRENCY, lockDuration: 1000 * 60 })
 export class ChunkProcessor extends WorkerHost {
   private readonly chunkJobName: string;
 

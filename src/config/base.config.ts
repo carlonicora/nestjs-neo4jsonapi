@@ -66,6 +66,29 @@ const buildAiTier = (suffix: string): AiTierConfig => {
 };
 
 /**
+ * How many chunk jobs the CHUNK worker processes at once. Default 50 —
+ * historically a hardcoded literal on `ChunkProcessor`'s `@Processor` decorator.
+ *
+ * Exported as a MODULE-LEVEL CONSTANT rather than only as a config field because
+ * `@Processor(queue, { concurrency })` options are evaluated at DECORATION time,
+ * i.e. when the class is first loaded — long before NestJS instantiates
+ * `ConfigService`, so the processor cannot inject the value it needs. Resolving
+ * it here keeps the sole `process.env` read inside this file, which is the only
+ * place in the codebase allowed to touch the environment directly.
+ *
+ * The read is safe at import time: applications call `dotenv.config(...)` before
+ * importing the package (see `bootstrap`'s docblock), and TypeScript's CommonJS
+ * emit preserves that statement order.
+ *
+ * A non-numeric or non-positive value falls back to the default rather than
+ * producing `NaN`, which BullMQ would silently treat as unbounded.
+ */
+export const CHUNK_QUEUE_CONCURRENCY: number = (() => {
+  const parsed = parseInt(process.env.CHUNK_QUEUE_CONCURRENCY || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
+})();
+
+/**
  * Options for createBaseConfig
  */
 export interface BaseConfigOptions {
@@ -265,6 +288,9 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         model: process.env.DOCUMENT_AI_MODEL || "",
         url: process.env.DOCUMENT_AI_URL || "",
         apiVersion: process.env.DOCUMENT_AI_API_VERSION || "",
+        // € per OCR page (OCR is billed per page, not per token). Euros, like every
+        // other monetary value in this config — see config.credits.interface.ts.
+        costPerPage: Number(process.env.DOCUMENT_AI_COST_PER_PAGE) || 0,
       },
       ai: buildAiTier(""),
       aiLite: buildAiTier("_LITE"),
@@ -416,7 +442,9 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       ocrLanguage: process.env.OCR_LANGUAGE || "eng",
       targetChars: parseInt(process.env.CHUNKER_TARGET_CHARS || "1500"),
     },
-    chunkQueues: options?.chunkQueues ?? { queueIds: [] },
+    // `concurrency` is reported, never consumed: the CHUNK worker's decorator has
+    // already been evaluated by the time this runs (see CHUNK_QUEUE_CONCURRENCY).
+    chunkQueues: { ...(options?.chunkQueues ?? { queueIds: [] }), concurrency: CHUNK_QUEUE_CONCURRENCY },
     contentTypes: options?.contentTypes ?? { types: [] },
     jobNames: options?.jobNames ?? { process: {}, notifications: {} },
   };
