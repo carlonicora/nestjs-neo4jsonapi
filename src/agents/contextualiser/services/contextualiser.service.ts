@@ -1,6 +1,5 @@
-import { END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
+import { END, START, StateGraph } from "@langchain/langgraph";
 import { Injectable, Logger } from "@nestjs/common";
-import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import {
   ContextualiserContext,
@@ -187,9 +186,7 @@ export class ContextualiserService {
       .addConditionalEdges("chunks", (state: ContextualiserContextState) => returnState({ state }))
       .addEdge("answer", END);
 
-    const threadId = randomUUID();
-    const checkpointer = new MemorySaver();
-    const app = workflow.compile({ checkpointer: checkpointer });
+    const app = workflow.compile();
 
     const initialState: ContextualiserContextState = this.contextualiserContextFactoryService.create({
       companyId: params.companyId,
@@ -210,7 +207,6 @@ export class ContextualiserService {
 
     try {
       finalState = await app.invoke(initialState, {
-        configurable: { thread_id: threadId },
         recursionLimit: maxHops + 2,
       } as any);
 

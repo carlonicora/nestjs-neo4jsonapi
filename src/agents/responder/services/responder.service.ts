@@ -1,7 +1,6 @@
-import { END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
+import { END, START, StateGraph } from "@langchain/langgraph";
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "crypto";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigResponderInterface } from "../../../config/interfaces/config.responder.interface";
 import { ContextualiserService } from "../../contextualiser/services/contextualiser.service";
@@ -249,10 +248,8 @@ export class ResponderService {
         .addEdge("answer", END);
     }
 
-    const threadId = randomUUID();
-    const app = workflow.compile({ checkpointer: new MemorySaver() });
+    const app = workflow.compile();
     const finalState = (await app.invoke(initialState, {
-      configurable: { thread_id: threadId },
       recursionLimit: 100,
     } as any)) as ResponderContextState;
 

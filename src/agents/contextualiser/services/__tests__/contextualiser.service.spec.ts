@@ -15,6 +15,10 @@ import { ContextualiserContextState } from "../../contexts/contextualiser.contex
 // Create mock invoke function that can be controlled by tests
 const mockInvoke = vi.fn();
 
+// Records the arguments compile() was called with, so tests can assert the
+// graph is compiled WITHOUT a checkpointer
+const mockCompile = vi.fn();
+
 // Mock LangGraph modules
 vi.mock("@langchain/langgraph", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@langchain/langgraph")>();
@@ -30,22 +34,19 @@ vi.mock("@langchain/langgraph", async (importOriginal) => {
     addConditionalEdges() {
       return this;
     }
-    compile() {
+    compile(...args: unknown[]) {
+      mockCompile(...args);
       return {
         invoke: mockInvoke,
       };
     }
   }
 
-  // Create a proper class for MemorySaver
-  class MockMemorySaver {}
-
   return {
     ...actual,
     START: "START",
     END: "END",
     StateGraph: MockStateGraph,
-    MemorySaver: MockMemorySaver,
   };
 });
 
@@ -399,12 +400,30 @@ describe("ContextualiserService", () => {
       expect(mockInvoke).toHaveBeenCalledWith(
         initialState,
         expect.objectContaining({
-          configurable: expect.objectContaining({
-            thread_id: expect.any(String),
-          }),
           recursionLimit: 22,
         }),
       );
+      expect(mockInvoke.mock.calls[0][1]).not.toHaveProperty("configurable");
+    });
+
+    it("should compile the graph without a checkpointer", async () => {
+      // Arrange
+      const initialState = createMockInitialState();
+      contextFactory.create.mockReturnValue(initialState);
+      mockInvoke.mockResolvedValue(initialState);
+
+      // Act
+      await service.run({
+        companyId: TEST_IDS.companyId,
+        contentId: TEST_IDS.contentId,
+        contentType: "Document",
+        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        messages: [],
+        question: "What is this?",
+      });
+
+      // Assert — one-shot graphs must not retain state after the run
+      expect(mockCompile).toHaveBeenCalledWith();
     });
   });
 });

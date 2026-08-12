@@ -1,6 +1,5 @@
-import { END, MemorySaver, START, StateGraph } from "@langchain/langgraph";
+import { END, START, StateGraph } from "@langchain/langgraph";
 import { Injectable } from "@nestjs/common";
-import { randomUUID } from "crypto";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
 import { Community } from "../../../foundations/community/entities/community.entity";
@@ -114,9 +113,7 @@ export class DriftSearchService {
       .addConditionalEdges("followup", (state: DriftContextState) => returnState(state))
       .addEdge("synthesis", END);
 
-    const threadId = randomUUID();
-    const checkpointer = new MemorySaver();
-    const app = workflow.compile({ checkpointer });
+    const app = workflow.compile();
 
     const initialState: DriftContextState = {
       question: params.question,
@@ -144,7 +141,6 @@ export class DriftSearchService {
     let finalState: DriftContextState;
     try {
       finalState = await app.invoke(initialState, {
-        configurable: { thread_id: threadId },
         recursionLimit: maxHops + 5,
       } as any);
 
