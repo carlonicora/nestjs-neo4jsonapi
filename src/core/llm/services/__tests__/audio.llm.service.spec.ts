@@ -9,6 +9,8 @@ import { AudioLLMService } from "../audio.llm.service";
 import { LLMCallDumper } from "../llm-call-dumper.service";
 import { ModelService } from "../model.service";
 import { transcodeForDirect } from "../audio/ffmpeg-transcode";
+import { TOKEN_USAGE_RECORDER } from "../../../../common/tokens";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 
 // Mock the ffmpeg helper so we never actually run ffmpeg in tests.
 vi.mock("../audio/ffmpeg-transcode", () => ({
@@ -459,6 +461,291 @@ describe("AudioLLMService", () => {
 
       const result = await service.call({ audioPath: "/tmp/stem.ogg", prompt: "p" });
       expect(result.text).toBe("");
+    });
+  });
+
+  // ─────────────── Token usage recording (billing) ───────────────
+
+  describe("token usage recording", () => {
+    let recordTokenUsage: Mock;
+
+    /**
+     * Builds a service with a usage sink bound. `via` picks which seam the sink
+     * is bound to — the application-provided TOKEN_USAGE_RECORDER token or the
+     * module-local TokenUsageService class.
+     */
+    const buildServiceWithRecorder = async (via: "token" | "class" = "token"): Promise<AudioLLMService> => {
+      const sink = { recordTokenUsage };
+      const moduleRef: TestingModule = await Test.createTestingModule({
+        providers: [
+          AudioLLMService,
+          { provide: ConfigService, useValue: configService },
+          { provide: ModelService, useValue: modelService },
+          { provide: LLMCallDumper, useValue: dumper },
+          via === "token"
+            ? { provide: TOKEN_USAGE_RECORDER, useValue: sink }
+            : { provide: TokenUsageService, useValue: sink },
+        ],
+      }).compile();
+      return moduleRef.get(AudioLLMService);
+    };
+
+    const mockChatInvoke = (tokens: { input: number; output: number }) => {
+      modelService.getAudioLLM.mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "transcribed",
+          usage_metadata: { input_tokens: tokens.input, output_tokens: tokens.output },
+        }),
+      });
+    };
+
+    beforeEach(() => {
+      recordTokenUsage = vi.fn().mockResolvedValue(undefined);
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: undefined,
+          inputCostPer1MTokens: 0.1,
+          outputCostPer1MTokens: 0.4,
+        }),
+      });
+    });
+
+    it("records transcription usage against the caller's entity", async () => {
+      mockChatInvoke({ input: 1000, output: 500 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        tokenUsageType: "transcription",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "transcription",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+          costOverride: expect.any(Number),
+        }),
+      );
+    });
+
+    it("records floor-exempt — a session's hundreds of utterances must not each pay the credits floor", async () => {
+      mockChatInvoke({ input: 1000, output: 500 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(expect.objectContaining({ applyMinimum: false }));
+    });
+
+    it("computes the cost from the audio config block, not the text tiers", async () => {
+      mockChatInvoke({ input: 1_000_000, output: 1_000_000 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      const [recorded] = recordTokenUsage.mock.calls[0];
+      expect(recorded.tokens).toEqual({ input: 1_000_000, output: 1_000_000 });
+      // 1M input @ 0.1 + 1M output @ 0.4 per 1M tokens.
+      expect(recorded.costOverride).toBeCloseTo(0.5, 10);
+    });
+
+    it("defaults tokenUsageType to 'transcription' when the caller names no category", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(expect.objectContaining({ type: "transcription" }));
+    });
+
+    it("records nothing when the caller passes no attribution (opt-in contract)", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({ audioPath: "/tmp/x.wav", prompt: "p" });
+
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it("records nothing when relationshipType is given without relationshipId", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipType: "Session",
+      });
+
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it("records nothing for a zero-token call — the direct /audio/transcriptions path must not invent a charge", async () => {
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: "https://example.test/v1/audio/transcriptions",
+          apiKey: "k",
+          model: "whisper-1",
+          inputCostPer1MTokens: 0.1,
+          outputCostPer1MTokens: 0.4,
+        }),
+      });
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ text: "spoken words" }),
+        text: () => Promise.resolve("{}"),
+      } as unknown as Response);
+      vi.stubGlobal("fetch", fetchMock);
+      const billed = await buildServiceWithRecorder();
+
+      const result = await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(result.tokenUsage).toEqual({ input: 0, output: 0 });
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it("records nothing on a failed call (no branch reports the tokens it burned)", async () => {
+      modelService.getAudioLLM.mockImplementation(() => {
+        throw new Error("boom");
+      });
+      const billed = await buildServiceWithRecorder();
+
+      await expect(
+        billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        }),
+      ).rejects.toThrow("Audio LLM service error: boom");
+
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it("never lets a recorder failure break the transcription", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      recordTokenUsage.mockRejectedValue(new Error("neo4j down"));
+      const billed = await buildServiceWithRecorder();
+
+      const result = await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(result.text).toBe("transcribed");
+    });
+
+    it("falls back to the module-local TokenUsageService when TOKEN_USAGE_RECORDER is unbound", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder("class");
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it("warns loudly (once) that the direct STT engine leaves transcription unbilled", async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig({
+          directUrl: "https://openrouter.ai/api/v1/audio/transcriptions",
+          apiKey: "k",
+          model: "whisper-large-v3-turbo",
+        }),
+      });
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ text: "spoken words" }),
+        text: () => Promise.resolve("{}"),
+      } as unknown as Response);
+      vi.stubGlobal("fetch", fetchMock);
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      const warnings = warnSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("audio-billing"));
+      // Throttled to once per process — never one per utterance.
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("TRANSCRIPTION USAGE IS NOT BEING BILLED");
+      expect(warnings[0]).toContain("AUDIO_DIRECT_URL=https://openrouter.ai/api/v1/audio/transcriptions");
+
+      warnSpy.mockRestore();
+      vi.unstubAllGlobals();
+    });
+
+    it("does NOT warn on the chat path — that engine reports real tokens and bills normally", async () => {
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(warnSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("audio-billing"))).toHaveLength(0);
+      warnSpy.mockRestore();
+    });
+
+    it("records nothing — and does not throw — when no usage sink is bound at all", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+
+      // `service` is the suite-level instance, built with neither optional dep.
+      const result = await service.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      expect(result.text).toBe("transcribed");
     });
   });
 });

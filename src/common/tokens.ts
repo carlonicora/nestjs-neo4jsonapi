@@ -59,7 +59,8 @@ export interface AuthContextHookInterface {
  * go through this token (`@Optional() @Inject(TOKEN_USAGE_RECORDER)` with the
  * same `?? tokenUsageService` fallback) rather than injecting
  * `TokenUsageService` directly. Injecting the class re-opens the bypass this
- * seam closes. `LLMService` is currently the only such caller.
+ * seam closes. Current callers: `LLMService`, `EmbedderService` and
+ * `AudioLLMService`.
  */
 export const TOKEN_USAGE_RECORDER = Symbol("TOKEN_USAGE_RECORDER");
 

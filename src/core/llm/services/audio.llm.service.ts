@@ -1,11 +1,16 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
+import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { transcodeForDirect, type TranscodeOptions, type TranscodeResult } from "./audio/ffmpeg-transcode";
 import { DumpSession, LLMCallDumper } from "./llm-call-dumper.service";
 import { ModelService } from "./model.service";
+
+/** Default `tokenUsageType` written when a caller attributes a call but names no category. */
+const DEFAULT_AUDIO_TOKEN_USAGE_TYPE = "transcription";
 
 /**
  * Parameters for AudioLLMService.call. Engine-agnostic: the service decides
@@ -27,6 +32,19 @@ export interface AudioCallParams {
    * (high-pass, silence trim). Omit for the plain resample. See TranscodeOptions.
    */
   transcode?: TranscodeOptions;
+  /**
+   * Cost-attribution category written to the usage record. Free-form so each
+   * application owns its own vocabulary; defaults to "transcription".
+   */
+  tokenUsageType?: string;
+  /**
+   * Opt-in cost attribution, exactly like `LLMCallParams`: BOTH of these must
+   * be present or no usage record is written at all. The package stays
+   * domain-agnostic — the caller decides what the transcription is billed
+   * against (narr8: the Session the recording belongs to).
+   */
+  relationshipId?: string;
+  relationshipType?: string;
 }
 
 export interface TranscriptionResult {
@@ -93,6 +111,11 @@ export class AudioLLMService {
     private readonly modelService: ModelService,
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly dumper: LLMCallDumper,
+    // Both usage dependencies are @Optional() — same shape as EmbedderService —
+    // so consumers that never mount the tokenusage module (and apps that bind
+    // no TOKEN_USAGE_RECORDER) keep booting and simply record nothing.
+    @Optional() private readonly tokenUsageService?: TokenUsageService,
+    @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
   ) {}
 
   async call(params: AudioCallParams): Promise<TranscriptionResult> {
@@ -120,13 +143,119 @@ export class AudioLLMService {
     );
 
     try {
-      return audio.directUrl
+      const result = audio.directUrl
         ? await this.callDirect(params, audio, transcode)
         : await this.callChat(params, audio, transcode);
+      this.warnIfDirectPathUnbilled(audio, result.tokenUsage);
+      await this.persistUsage(params, result.tokenUsage);
+      return result;
+    } catch (error) {
+      // A failed transcription is not a free call in principle, but neither
+      // branch surfaces the tokens it burned before throwing (LangChain drops
+      // usage_metadata on error; /audio/transcriptions never reports any), so
+      // this is {0,0} today and the zero-token rule in persistUsage skips it.
+      // Wired anyway so partial usage is billed the day a branch can report it.
+      await this.persistUsage(params, { input: 0, output: 0 });
+      throw error;
     } finally {
       await transcode.cleanup().catch((err) => {
         this.logger.warn(`audio-transcode: cleanup failed for ${transcode.path}: ${(err as Error).message}`);
       });
+    }
+  }
+
+  /**
+   * True once the "direct STT reports no tokens" warning has been emitted by
+   * this instance. The audio service is a singleton, so this throttles the
+   * warning to once per process instead of once per utterance.
+   */
+  private directPathUnbilledWarned = false;
+
+  /**
+   * Makes an unbillable engine LOUD instead of silent.
+   *
+   * The direct `/audio/transcriptions` engine (AUDIO_DIRECT_URL) reports no
+   * token counts at all, and the zero-token rule in {@link persistUsage} then
+   * writes no usage record — so switching an application to that engine
+   * silently turns transcription back into completely unbilled work. There is
+   * no per-minute rate to fall back on (`audioSeconds` is available on the
+   * result, but no price for it is configured anywhere), and inventing a token
+   * count would be a lie, so the honest fix is a warning that names the
+   * consequence. Emitted once per process — never in the hot per-utterance
+   * path beyond a boolean check.
+   */
+  private warnIfDirectPathUnbilled(audio: ConfigAiInterface["audio"], tokens: { input: number; output: number }): void {
+    if (!audio.directUrl) return;
+    if (tokens.input + tokens.output > 0) return;
+    if (this.directPathUnbilledWarned) return;
+    this.directPathUnbilledWarned = true;
+    this.logger.warn(
+      `audio-billing: TRANSCRIPTION USAGE IS NOT BEING BILLED — the direct STT endpoint ` +
+        `(AUDIO_DIRECT_URL=${audio.directUrl}, model=${audio.model}) returns no token counts, so every ` +
+        `transcription records zero usage and deducts no credits. Billing this engine needs a ` +
+        `per-duration rate (the call already measures audioSeconds); until one exists this cost is ` +
+        `invisible. Unset AUDIO_DIRECT_URL to use the chat engine, which reports real tokens and bills ` +
+        `normally. Logged once per process.`,
+    );
+  }
+
+  /**
+   * Records transcription usage. Attribution is opt-in — same contract as
+   * `LLMService.persistUsage`: no relationship, no record, so the package stays
+   * domain-agnostic. Cost comes from the `audio` config block rather than
+   * `computeCost()`, which only knows the text tiers (`configForWeight` never
+   * looks at `ai.audio`), hence `costOverride`.
+   *
+   * ZERO-TOKEN RULE (mirrors `LLMService.persistUsageOnFailure`): a call that
+   * reports no tokens records NOTHING. `recordTokenUsage` floors every row at
+   * `minCreditsPerRecord`, so a 0/0 row would invent a charge for tokens nobody
+   * spent. This is what the direct `/audio/transcriptions` path always hits —
+   * it returns no token counts by design — so that engine bills nothing until
+   * the endpoint reports usage (and says so loudly: see
+   * {@link warnIfDirectPathUnbilled}). The chat path (AUDIO_DIRECT_URL unset)
+   * returns real counts and is billed normally.
+   *
+   * FLOOR-EXEMPT (`applyMinimum: false`), same rationale as EmbedderService:
+   * transcription is per-utterance, not per-request. A session averages a few
+   * hundred segments and can exceed a thousand, each truly worth a fraction of
+   * a credit, so applying the per-record floor to every one of them would bill
+   * a large multiple of the real cost. The floor exists to stop sub-cent REAL
+   * usage rounding to nothing on a handful of records, not to price a thousand
+   * of them.
+   *
+   * Writes through the application-provided `TOKEN_USAGE_RECORDER` when one is
+   * bound, falling back to the module-local `TokenUsageService` otherwise (see
+   * the token's docblock for why package code must use this seam).
+   *
+   * Never throws: a persistence failure logs a warning and the transcription
+   * result stands.
+   */
+  private async persistUsage(
+    params: { tokenUsageType?: string; relationshipId?: string; relationshipType?: string },
+    tokens: { input: number; output: number },
+  ): Promise<void> {
+    if (!params.relationshipId || !params.relationshipType) return;
+    if (tokens.input + tokens.output === 0) return;
+
+    const recorder = this.tokenUsageRecorder ?? this.tokenUsageService;
+    if (!recorder) return;
+
+    const audio = this.config.get<ConfigAiInterface>("ai")?.audio;
+    const cost =
+      (tokens.input * (audio?.inputCostPer1MTokens ?? 0) + tokens.output * (audio?.outputCostPer1MTokens ?? 0)) /
+      1_000_000;
+
+    try {
+      await recorder.recordTokenUsage({
+        tokens,
+        type: params.tokenUsageType ?? DEFAULT_AUDIO_TOKEN_USAGE_TYPE,
+        relationshipId: params.relationshipId,
+        relationshipType: params.relationshipType,
+        costOverride: cost,
+        applyMinimum: false,
+      });
+    } catch (err) {
+      this.logger.warn(`Transcription usage persistence failed — continuing: ${String(err)}`);
     }
   }
 

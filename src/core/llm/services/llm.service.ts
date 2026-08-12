@@ -56,6 +56,14 @@ const DEFAULT_REQUEST_WATCHDOG_MS = 30_000;
 const DEFAULT_REQUEST_DEADLINE_ATTEMPTS = 3;
 /** Grace on top of the budgeted attempts, covering backoff between retries. */
 const DEADLINE_SLACK_MS = 15_000;
+/**
+ * How long a FAILED stream may wait for its `usage` promise before giving up on
+ * it. Unlike `call()`, a stream's `result` promise runs under no outer deadline,
+ * so an unbounded await in its catch would replace a settled rejection with a
+ * caller that hangs forever. Two seconds is generous for a promise the SDK has
+ * normally already settled, and irrelevant to the happy path.
+ */
+const USAGE_SETTLE_TIMEOUT_MS = 2_000;
 
 /**
  * Waits before each EXTRA attempt of the transient-network retry, in ms — two
@@ -293,6 +301,39 @@ export class LLMService {
   }
 
   /**
+   * Reads a stream's `usage` promise WITHOUT ever hanging on it.
+   *
+   * Used only from the streaming error paths. `streamObject`/`streamText`
+   * usually settle `usage` even when `object`/`text` reject — a schema-invalid
+   * or aborted generation is still billed — so it is worth awaiting. But the
+   * `result` promise those catches belong to has no outer deadline (unlike
+   * `call()`, which runs under `runBounded`), so if the SDK ever rejected the
+   * content promise while leaving `usage` pending, an unbounded await would turn
+   * a prompt rejection into a caller that waits forever. Rejection is handled by
+   * `.catch`; PENDENCY is handled by the race. The loser's timer is cleared, so
+   * a settled call leaves no timer behind.
+   *
+   * @returns the usage object, or undefined if it rejected or did not settle in time
+   */
+  private async readUsageBounded<T>(
+    usage: PromiseLike<T>,
+    timeoutMs: number = USAGE_SETTLE_TIMEOUT_MS,
+  ): Promise<T | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race<T | undefined>([
+        Promise.resolve(usage).catch(() => undefined),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), timeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
    * Runs one provider call under a WATCHDOG and an ABSOLUTE DEADLINE.
    *
    * Why this exists (game e51493e4 r002, 2026-07-26): a plotter request was
@@ -482,6 +523,18 @@ export class LLMService {
    * is the ONLY token-usage write inside the package; any future package caller
    * MUST use the same token rather than injecting `TokenUsageService` directly
    * (see the token's docblock for why).
+   *
+   * ZERO-TOKEN SUCCESS RULE: a call that SUCCEEDED but reported no usage at all
+   * (the provider omitted `usage_metadata`) is still recorded — the call really
+   * happened and must stay visible — but with `applyMinimum: false`, so it
+   * costs 0 credits instead of being floored to `minCreditsPerRecord`. Flooring
+   * exists to stop sub-cent REAL usage rounding to nothing, not to invent a
+   * charge for tokens nobody measured. A success carrying real counts keeps the
+   * floor exactly as before.
+   *
+   * This is deliberately NOT the same rule as the zero-token FAILURE rule in
+   * {@link persistUsageOnFailure}, which writes nothing at all: there the
+   * provider was never reached, so there is no call to make visible.
    */
   private async persistUsage(
     params: {
@@ -496,6 +549,7 @@ export class LLMService {
     // recorded against. With no relationship, there is nothing to attribute to,
     // so we skip — the package stays domain-agnostic.
     if (!params.relationshipId || !params.relationshipType) return;
+    const measured = tokens.input + tokens.output + (tokens.cached ?? 0) > 0;
     try {
       await (this.tokenUsageRecorder ?? this.tokenUsageService).recordTokenUsage({
         tokens,
@@ -503,10 +557,41 @@ export class LLMService {
         relationshipId: params.relationshipId,
         relationshipType: params.relationshipType,
         modelWeight: params.modelWeight,
+        ...(measured ? {} : { applyMinimum: false }),
       });
     } catch (err) {
       this.logger.warn(`TokenUsage persistence failed — continuing: ${String(err)}`);
     }
+  }
+
+  /**
+   * Records what a FAILED call already burned. A failure is not a free call:
+   * the provider bills every round it served, so a tool loop that dies on its
+   * final structured invocation has already been charged for six figures of
+   * input tokens. Billing only successful calls understates real spend.
+   *
+   * ZERO-TOKEN RULE: a failure that consumed nothing (the provider was never
+   * reached — input validation, an unreachable host, an immediate abort) is NOT
+   * recorded. `recordTokenUsage` floors every record at `minCreditsPerRecord`,
+   * so writing a 0/0 row would invent a charge for tokens nobody spent; the
+   * floor exists to stop sub-cent REAL usage rounding to nothing, not to price
+   * a call that never happened. Such failures remain fully visible through the
+   * dump session, which closes with `finalStatus: "error"`.
+   *
+   * Never throws (delegates to {@link persistUsage}), so it can sit in a catch
+   * block without masking the original error.
+   */
+  private async persistUsageOnFailure(
+    params: {
+      tokenUsageType?: string;
+      relationshipId?: string;
+      relationshipType?: string;
+      modelWeight?: ModelWeight;
+    },
+    tokens: { input: number; output: number; cached?: number },
+  ): Promise<void> {
+    if (tokens.input + tokens.output + (tokens.cached ?? 0) === 0) return;
+    await this.persistUsage(params, tokens);
   }
 
   /**
@@ -879,6 +964,19 @@ export class LLMService {
         warnings,
         parseFallbacks,
       });
+      // The provider charged for everything spent up to the failure — a timeout
+      // mid tool-loop can burn six figures of input tokens, all of them already
+      // reported through `addTokens` by the time we get here. Never throws, so
+      // this cannot mask the original error.
+      await this.persistUsageOnFailure(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input: totalInput, output: totalOutput, cached: totalCached },
+      );
       console.error("[LLMService] Error calling LLM:", error);
       // The message text is load-bearing — callers match on "LLM service error:"
       // — so it stays byte-for-byte identical, and the original error rides along
@@ -1050,12 +1148,21 @@ export class LLMService {
             `tools=[${requestedTools.join(",") || "none"}]`,
         );
 
-        // Track token usage
+        // Track token usage. Reported to the caller AS IT IS SPENT, not at the
+        // end: this iteration is already billed by the provider, and a later
+        // failure (a timeout on the final structured call, an unparseable
+        // answer) must not make those tokens disappear from `call()`'s totals.
+        // The final return therefore adds only ITS OWN delta — see `addTokens`
+        // at the return sites below.
         const responseUsage = (toolResponse as unknown as LLMRawResponse).usage_metadata;
         if (responseUsage) {
-          totalInputTokens += responseUsage.input_tokens ?? 0;
-          totalOutputTokens += responseUsage.output_tokens ?? 0;
-          totalCachedTokens += responseUsage.input_token_details?.cache_read ?? 0;
+          const iterationInput = responseUsage.input_tokens ?? 0;
+          const iterationOutput = responseUsage.output_tokens ?? 0;
+          const iterationCached = responseUsage.input_token_details?.cache_read ?? 0;
+          totalInputTokens += iterationInput;
+          totalOutputTokens += iterationOutput;
+          totalCachedTokens += iterationCached;
+          addTokens(iterationInput, iterationOutput, iterationCached);
         }
 
         // Check for tool calls
@@ -1291,9 +1398,15 @@ export class LLMService {
       },
       finishReason: raw?.response_metadata?.finish_reason,
     });
-    const input = totalInputTokens + (raw?.usage_metadata?.input_tokens ?? 0);
-    const output = totalOutputTokens + (raw?.usage_metadata?.output_tokens ?? 0);
-    const cached = totalCachedTokens + (raw?.usage_metadata?.input_token_details?.cache_read ?? 0);
+    // The final structured response's OWN usage. Reported separately from the
+    // totals because the tool loop has already handed its share to `addTokens`;
+    // re-reporting the sum would bill every tool iteration twice.
+    const finalInput = raw?.usage_metadata?.input_tokens ?? 0;
+    const finalOutput = raw?.usage_metadata?.output_tokens ?? 0;
+    const finalCached = raw?.usage_metadata?.input_token_details?.cache_read ?? 0;
+    const input = totalInputTokens + finalInput;
+    const output = totalOutputTokens + finalOutput;
+    const cached = totalCachedTokens + finalCached;
 
     /**
      * One summary line per completed call, emitted at EVERY return site — the
@@ -1350,7 +1463,7 @@ export class LLMService {
           console.warn("[LLMService] Fallback tool_calls parsing succeeded");
 
           logCallSummary("fallback:tool_calls");
-          addTokens(input, output, cached);
+          addTokens(finalInput, finalOutput, finalCached);
           return {
             ...(validated as T),
             tokenUsage: { input, output, cached },
@@ -1392,7 +1505,7 @@ export class LLMService {
             console.warn("[LLMService] Lenient tool_calls parsing succeeded");
 
             logCallSummary("fallback:lenient");
-            addTokens(input, output, cached);
+            addTokens(finalInput, finalOutput, finalCached);
             return {
               ...(validated as T),
               tokenUsage: { input, output, cached },
@@ -1413,7 +1526,7 @@ export class LLMService {
         console.warn("[LLMService] Fallback parsing succeeded");
 
         logCallSummary("fallback:raw");
-        addTokens(input, output, cached);
+        addTokens(finalInput, finalOutput, finalCached);
         return {
           ...(validated as T),
           tokenUsage: { input, output, cached },
@@ -1433,7 +1546,7 @@ export class LLMService {
                 `(finishReason=${finishReason}, ${rawContent.length}→${repaired.length} chars)`,
             );
             logCallSummary("fallback:truncation-repair");
-            addTokens(input, output, cached);
+            addTokens(finalInput, finalOutput, finalCached);
             return {
               ...(validated as T),
               tokenUsage: { input, output, cached },
@@ -1443,6 +1556,11 @@ export class LLMService {
             // the diagnostic below, which reports the ORIGINAL failure.
           }
         }
+        // Every salvage attempt failed, so this call is about to throw — but the
+        // unparseable answer was generated and billed like any other. Report it
+        // before unwinding, so `call()`'s catch can record it. No return site
+        // follows this one, so nothing is counted twice.
+        addTokens(finalInput, finalOutput, finalCached);
         throw new Error(
           `LLM failed to return structured output. ` +
             `Finish reason: ${finishReason}. ` +
@@ -1476,7 +1594,7 @@ export class LLMService {
     }
 
     logCallSummary("clean");
-    addTokens(input, output, cached);
+    addTokens(finalInput, finalOutput, finalCached);
     return {
       ...result,
       tokenUsage: {
@@ -1700,14 +1818,33 @@ export class LLMService {
             clearTimeout(attempt.timeoutId);
             const message = error instanceof Error ? error.message : String(error);
             const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+            // `streamObject` may have settled `usage` even though `object`
+            // rejected (a schema-invalid payload is still a billed generation).
+            // Read it defensively so the session and the ledger report the real
+            // figures instead of the hard-coded 0/0 this used to close with.
+            // Bounded: this promise has no outer deadline, so a `usage` that never
+            // settles must not stop `result` from rejecting (see readUsageBounded).
+            const usage = await this.readUsageBounded(attempt.handle.usage);
+            const input = usage?.inputTokens ?? 0;
+            const output = usage?.outputTokens ?? 0;
+            const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
             session.close({
               finalStatus: "error",
               errorMessage: message,
               errorStack: stack,
-              totalTokens: { input: 0, output: 0 },
+              totalTokens: { input, output, cached },
               warnings: [],
               parseFallbacks: [],
             });
+            await this.persistUsageOnFailure(
+              {
+                tokenUsageType: params.tokenUsageType,
+                relationshipId: params.relationshipId,
+                relationshipType: params.relationshipType,
+                modelWeight,
+              },
+              { input, output, cached },
+            );
             console.error("[LLMService.streamCall] Error:", error);
             const wrapped = new Error(`LLM streamCall error: ${message}`);
             (wrapped as Error & { cause?: unknown }).cause = error;
@@ -1915,14 +2052,30 @@ export class LLMService {
           clearTimeout(attempt.timeoutId);
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+          // A narration that streamed for 20s and then broke was still generated
+          // and still billed — read whatever usage settled (see streamCall), under
+          // the same bound so `result` always settles.
+          const usage = await this.readUsageBounded(attempt.handle.usage);
+          const input = usage?.inputTokens ?? 0;
+          const output = usage?.outputTokens ?? 0;
+          const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
           session.close({
             finalStatus: "error",
             errorMessage: message,
             errorStack: stack,
-            totalTokens: { input: 0, output: 0 },
+            totalTokens: { input, output, cached },
             warnings: [],
             parseFallbacks: [],
           });
+          await this.persistUsageOnFailure(
+            {
+              tokenUsageType: params.tokenUsageType,
+              relationshipId: params.relationshipId,
+              relationshipType: params.relationshipType,
+              modelWeight,
+            },
+            { input, output, cached },
+          );
           console.error("[LLMService.streamText] Error:", error);
           const wrapped = new Error(`LLM streamText error: ${message}`);
           (wrapped as Error & { cause?: unknown }).cause = error;
@@ -2030,6 +2183,12 @@ export class LLMService {
     });
 
     const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
+    // Hoisted above the try so the catch can bill the attempts the provider
+    // already served before the failure. Accumulated (not overwritten) across
+    // attempts: the nudge retry is a SECOND request and is charged as one.
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCachedTokens = 0;
     try {
       const model = this.modelService.getLLM({
         modelWeight,
@@ -2120,10 +2279,20 @@ export class LLMService {
       // second request and gets its own budget, not the leftovers of the first —
       // and each is retried on a transient network failure, with its own fresh
       // abort controller per attempt.
-      const invokeBounded = async (messages: BaseMessage[], attempt: string): Promise<AIMessage> =>
-        (await this.runWithTransientRetry(`extractViaTool:${params.tool.name}:${attempt}`, attemptTimeoutMs, (signal) =>
-          bound.invoke(messages, { signal }),
+      const invokeBounded = async (messages: BaseMessage[], attempt: string): Promise<AIMessage> => {
+        const response = (await this.runWithTransientRetry(
+          `extractViaTool:${params.tool.name}:${attempt}`,
+          attemptTimeoutMs,
+          (signal) => bound.invoke(messages, { signal }),
         )) as AIMessage;
+        // Bill as we go: an attempt that answered is charged whether or not its
+        // payload turns out to be usable.
+        const usage = (response as unknown as LLMRawResponse).usage_metadata;
+        totalInputTokens += usage?.input_tokens ?? 0;
+        totalOutputTokens += usage?.output_tokens ?? 0;
+        totalCachedTokens += usage?.input_token_details?.cache_read ?? 0;
+        return response;
+      };
 
       let response = await invokeBounded(baseMessages, "attempt-1");
       let parsed = tryExtract(response);
@@ -2142,9 +2311,11 @@ export class LLMService {
 
       if (parsed === null) throw new Error("extractViaTool: model did not call the tool");
 
+      // The winning response's OWN usage — what the dump's response entry
+      // describes. The session total and the ledger use the accumulated figures
+      // instead, so a nudge retry bills both requests rather than only the last.
       const inputTokens = (response as unknown as LLMRawResponse).usage_metadata?.input_tokens ?? 0;
       const outputTokens = (response as unknown as LLMRawResponse).usage_metadata?.output_tokens ?? 0;
-      const cachedTokens = (response as unknown as LLMRawResponse).usage_metadata?.input_token_details?.cache_read ?? 0;
 
       session.recordResponse({
         content: JSON.stringify(parsed),
@@ -2153,7 +2324,7 @@ export class LLMService {
       });
       session.close({
         finalStatus: "success",
-        totalTokens: { input: inputTokens, output: outputTokens, cached: cachedTokens },
+        totalTokens: { input: totalInputTokens, output: totalOutputTokens, cached: totalCachedTokens },
         warnings: [],
         parseFallbacks: [],
       });
@@ -2164,7 +2335,7 @@ export class LLMService {
           relationshipType: params.relationshipType,
           modelWeight,
         },
-        { input: inputTokens, output: outputTokens, cached: cachedTokens },
+        { input: totalInputTokens, output: totalOutputTokens, cached: totalCachedTokens },
       );
       // Write-through on a miss so the next identical cacheable call hits.
       if (cacheKey && this.cache) await this.cache.set<T>(cacheKey, parsed as T);
@@ -2174,10 +2345,21 @@ export class LLMService {
       session.close({
         finalStatus: "error",
         errorMessage: message,
-        totalTokens: { input: 0, output: 0 },
+        totalTokens: { input: totalInputTokens, output: totalOutputTokens, cached: totalCachedTokens },
         warnings: [],
         parseFallbacks: [],
       });
+      // Two refusals still cost two generations — bill what was served before
+      // giving up. Never throws, so the original error survives untouched.
+      await this.persistUsageOnFailure(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input: totalInputTokens, output: totalOutputTokens, cached: totalCachedTokens },
+      );
       console.error("[LLMService.extractViaTool] Error:", error);
       throw error instanceof Error ? error : new Error(message);
     }
@@ -2196,8 +2378,12 @@ export class LLMService {
    * checkpointed state is untouched either way.
    *
    * Reuses {@link call}'s model construction (`modelService.getLLM` +
-   * `bindTools`) and `LLMCallDumper` hooks. Token usage for the step is
-   * returned to the caller (which aggregates it) rather than tracked here.
+   * `bindTools`) and `LLMCallDumper` hooks. The step's token usage is still
+   * RETURNED to the caller (so an agent can keep its own running total), and —
+   * when `relationshipId`/`relationshipType` are supplied — is now also
+   * persisted here, exactly like every other provider call in this service.
+   * A caller that omits the attribution gets the previous behaviour: nothing is
+   * written. Each step is billed once, by whichever path completes it.
    *
    * @param params.systemPrompts - System prompts, prepended (in order) as
    *                               SystemMessages before `messages`
@@ -2205,6 +2391,9 @@ export class LLMService {
    * @param params.tools - Tools to bind (NOT executed by this method)
    * @param params.temperature - Optional temperature override
    * @param params.metadata - Optional metadata for dump-session tracking
+   * @param params.tokenUsageType - Optional usage type for the recorded row
+   * @param params.relationshipId - Optional entity this usage is attributed to
+   * @param params.relationshipType - Optional entity type for the attribution
    *
    * @returns The raw AIMessage (tool_calls intact) plus this call's token usage
    */
@@ -2214,6 +2403,9 @@ export class LLMService {
     tools: DynamicStructuredTool[];
     temperature?: number;
     metadata?: Record<string, unknown>;
+    tokenUsageType?: string;
+    relationshipId?: string;
+    relationshipType?: string;
   }): Promise<{ message: AIMessage; tokenUsage: { input: number; output: number } }> {
     const modelWeight = ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
@@ -2244,6 +2436,16 @@ export class LLMService {
     // treatment as `call()`, plus the transient-network retry.
     const attemptTimeoutMs = this.attemptTimeoutMs();
     const label = `llm.callStep:${aiConfig.model}`;
+    // Hoisted above the try so the catch reports and bills whatever the step
+    // managed to consume before it threw.
+    let input = 0;
+    let output = 0;
+    // Prompt-cache hits, priced at `cachedInputCostPer1MTokens` by `computeCost`.
+    // The operator re-sends its whole conversation every step, so a cache hit is
+    // the NORM here: dropping this would price the entire prompt at the uncached
+    // rate and over-bill every operator row. Credited exactly as `call()` and
+    // `streamCall` credit theirs.
+    let cached = 0;
     try {
       const baseModel = this.modelService.getLLM({
         temperature: params.temperature,
@@ -2267,8 +2469,9 @@ export class LLMService {
       )) as AIMessage;
 
       const raw = response as unknown as LLMRawResponse;
-      const input = raw.usage_metadata?.input_tokens ?? 0;
-      const output = raw.usage_metadata?.output_tokens ?? 0;
+      input = raw.usage_metadata?.input_tokens ?? 0;
+      output = raw.usage_metadata?.output_tokens ?? 0;
+      cached = raw.usage_metadata?.input_token_details?.cache_read ?? 0;
 
       session.recordResponse({
         content: typeof (response as any).content === "string" ? (response as any).content : "",
@@ -2283,10 +2486,20 @@ export class LLMService {
 
       session.close({
         finalStatus: "success",
-        totalTokens: { input, output },
+        totalTokens: { input, output, cached },
         warnings: [],
         parseFallbacks: [],
       });
+
+      await this.persistUsage(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input, output, cached },
+      );
 
       return { message: response, tokenUsage: { input, output } };
     } catch (error) {
@@ -2296,10 +2509,19 @@ export class LLMService {
         finalStatus: "error",
         errorMessage: message,
         errorStack: stack,
-        totalTokens: { input: 0, output: 0 },
+        totalTokens: { input, output, cached },
         warnings: [],
         parseFallbacks: [],
       });
+      await this.persistUsageOnFailure(
+        {
+          tokenUsageType: params.tokenUsageType,
+          relationshipId: params.relationshipId,
+          relationshipType: params.relationshipType,
+          modelWeight,
+        },
+        { input, output, cached },
+      );
       console.error("[LLMService.callStep] Error:", error);
       throw error instanceof Error ? error : new Error(message);
     }

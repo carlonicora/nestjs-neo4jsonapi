@@ -194,7 +194,9 @@ describe("LLMService.callStep", () => {
     expect(session.close).toHaveBeenCalledWith(
       expect.objectContaining({
         finalStatus: "success",
-        totalTokens: { input: 100, output: 40 },
+        // `cached` is reported so a prompt-cache hit is not priced at the
+        // uncached rate — see llm.service.spec.ts for the billing assertion.
+        totalTokens: { input: 100, output: 40, cached: 0 },
       }),
     );
   });
@@ -214,7 +216,49 @@ describe("LLMService.callStep", () => {
 
     expect(session.close).toHaveBeenCalledTimes(1);
     expect(session.close).toHaveBeenCalledWith(
-      expect.objectContaining({ finalStatus: "error", errorMessage: expect.stringContaining("model exploded") }),
+      expect.objectContaining({
+        finalStatus: "error",
+        errorMessage: expect.stringContaining("model exploded"),
+        // Nothing was served, so the zero-token failure rule applies — but the
+        // field is still reported rather than dropped.
+        totalTokens: { input: 0, output: 0, cached: 0 },
+      }),
+    );
+  });
+
+  it("carries the CACHED tokens into the FAILURE path when the step dies after the provider replied", async () => {
+    // The provider answered (and charged, cache-discounted) and the step then
+    // threw. `cached` is read off the response before the throw, so the error
+    // path must report and bill it — not silently reprice the prompt at the
+    // uncached rate.
+    const tool = makeTool("do_thing");
+    const { svc, session } = makeService({
+      content: "",
+      tool_calls: [],
+      usage_metadata: {
+        input_tokens: 1000,
+        output_tokens: 40,
+        input_token_details: { cache_read: 900 },
+      },
+      response_metadata: { finish_reason: "stop" },
+    });
+    session.recordResponse.mockImplementation(() => {
+      throw new Error("dump write failed");
+    });
+
+    await expect(
+      svc.callStep({
+        systemPrompts: ["sys"],
+        messages: [new HumanMessage("hi")],
+        tools: [tool],
+      }),
+    ).rejects.toThrow(/dump write failed/);
+
+    expect(session.close).toHaveBeenCalledWith(
+      expect.objectContaining({
+        finalStatus: "error",
+        totalTokens: { input: 1000, output: 40, cached: 900 },
+      }),
     );
   });
 });

@@ -2,6 +2,7 @@ import { Logger } from "@nestjs/common";
 import { encodingForModel } from "js-tiktoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmbedderService } from "../embedder.service";
+import { EmbedderBucketStarvedError } from "../rate-limited-embedder";
 
 /**
  * EmbedderService writes ONE token-usage record per invocation, and only when
@@ -18,7 +19,16 @@ const FOX_TIKTOKEN_TOKENS = 10;
 
 const ATTRIBUTION = { relationshipId: "entity-id", relationshipType: "Document" };
 
-function makeEmbedder() {
+function makeEmbedder(failWith?: Error) {
+  if (failWith)
+    return {
+      embedQuery: vi.fn(async () => {
+        throw failWith;
+      }),
+      embedDocuments: vi.fn(async (_texts: string[]) => {
+        throw failWith;
+      }),
+    };
   return {
     embedQuery: vi.fn(async () => [0.1, 0.2]),
     embedDocuments: vi.fn(async (texts: string[]) => texts.map(() => [0.1, 0.2])),
@@ -66,8 +76,10 @@ function makeService(params: {
   recorder?: { recordTokenUsage: ReturnType<typeof vi.fn> };
   tokenUsageService?: { recordTokenUsage: ReturnType<typeof vi.fn> };
   embedder?: ReturnType<typeof makeTextEmbedder>;
+  /** Makes the underlying embedder reject, as RateLimitedEmbedder does when the provider errors. */
+  embedderError?: Error;
 }) {
-  const embedder = params.embedder ?? (makeEmbedder() as unknown as ReturnType<typeof makeTextEmbedder>);
+  const embedder = params.embedder ?? (makeEmbedder(params.embedderError) as unknown as ReturnType<typeof makeTextEmbedder>);
   const modelService = { getEmbedder: () => embedder } as any;
   const aiConfig = {
     embedder: {
@@ -213,6 +225,174 @@ describe("EmbedderService usage recording", () => {
     await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).resolves.toEqual([0.1, 0.2]);
     expect(embedder.embedQuery).toHaveBeenCalledTimes(1);
     expect(recorder.recordTokenUsage).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A FAILED call bills ONLY when the rejection is evidence the provider did
+   * work — a 5xx it reported. Everything else records nothing: the token counts
+   * here are computed locally with tiktoken, so they exist even when nothing was
+   * ever sent, and billing them would charge the customer for OUR outages. These
+   * calls run inside BullMQ jobs with `attempts: 3`, so a single transient local
+   * failure could otherwise bill the same batch four times.
+   */
+  describe("failed embedding calls", () => {
+    /** A rejection carrying a provider-reported HTTP status, as the OpenAI/Azure client raises. */
+    const providerError = (status: number, message = `provider ${status}`) =>
+      Object.assign(new Error(message), { status });
+
+    describe("provider-side faults (5xx) — the provider served part of the batch", () => {
+      it("bills what a failed batch already burned and rethrows", async () => {
+        // A large batch whose last provider sub-batch 500s: the provider charged
+        // for every sub-batch it served, so recording nothing understates spend.
+        const rate = 0.13;
+        const { service } = makeService({
+          inputCostPer1MTokens: rate,
+          recorder,
+          embedderError: providerError(500),
+        });
+        const texts = ["alpha", "beta gamma", FOX];
+        const expected = texts.reduce(
+          (sum, t) => sum + encodingForModel("text-embedding-3-large").encode(t).length,
+          0,
+        );
+
+        await expect(service.vectoriseTextBatch(texts, ATTRIBUTION)).rejects.toThrow("provider 500");
+
+        expect(recorder.recordTokenUsage).toHaveBeenCalledTimes(1);
+        const call = recorder.recordTokenUsage.mock.calls[0][0];
+        expect(call.tokens).toEqual({ input: expected, output: 0 });
+        expect(call.relationshipId).toBe("entity-id");
+        expect(call.relationshipType).toBe("Document");
+        expect(call.applyMinimum).toBe(false);
+        expect(call.costOverride).toBe((expected * rate) / 1_000_000);
+      });
+
+      it("bills what a failed single-text call already burned and rethrows", async () => {
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: providerError(503),
+        });
+
+        await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).rejects.toThrow("provider 503");
+
+        expect(recorder.recordTokenUsage).toHaveBeenCalledTimes(1);
+        expect(recorder.recordTokenUsage.mock.calls[0][0].tokens).toEqual({ input: FOX_TIKTOKEN_TOKENS, output: 0 });
+      });
+
+      it("reads the status off error.response too", async () => {
+        const nested = Object.assign(new Error("gateway"), { response: { status: 502 } });
+        const { service } = makeService({ inputCostPer1MTokens: 0.13, recorder, embedderError: nested });
+
+        await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).rejects.toThrow("gateway");
+
+        expect(recorder.recordTokenUsage).toHaveBeenCalledTimes(1);
+      });
+
+      it("records NOTHING when the failed operation burned zero tokens", async () => {
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: providerError(500),
+        });
+
+        // An empty STRING still travels to the provider (one zero-token input);
+        // an empty ARRAY would short-circuit before any provider call.
+        await expect(service.vectoriseTextBatch([""], ATTRIBUTION)).rejects.toThrow("provider 500");
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+
+      it("records nothing on failure when the caller passed no attribution", async () => {
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: providerError(500),
+        });
+
+        await expect(service.vectoriseText({ text: FOX })).rejects.toThrow("provider 500");
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+
+      it("rethrows the ORIGINAL provider error even when the recorder also throws", async () => {
+        recorder.recordTokenUsage.mockRejectedValue(new Error("neo4j down"));
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: providerError(500),
+        });
+
+        await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).rejects.toThrow("provider 500");
+      });
+    });
+
+    describe("pre-provider failures — nothing was served, so nothing is billed", () => {
+      it("records NOTHING when our own token bucket starves the call", async () => {
+        // `RateLimitedEmbedder` throws this BEFORE any HTTP request: our bucket
+        // could not grant within maxWaitMs. Zero provider work — billing it
+        // would charge the customer for our own rate limiter.
+        const starved = new EmbedderBucketStarvedError(1234, 60_000);
+        const { service } = makeService({ inputCostPer1MTokens: 0.13, recorder, embedderError: starved });
+
+        await expect(service.vectoriseTextBatch(["alpha", FOX], ATTRIBUTION)).rejects.toThrow(starved);
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+
+      it("records NOTHING on a connection-style failure (no HTTP exchange happened)", async () => {
+        const refused = Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:443"), { code: "ECONNREFUSED" });
+        const { service } = makeService({ inputCostPer1MTokens: 0.13, recorder, embedderError: refused });
+
+        await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).rejects.toThrow("ECONNREFUSED");
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+
+      it("records NOTHING for a bare Error carrying no provider status", async () => {
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: new Error("something went wrong"),
+        });
+
+        await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).rejects.toThrow(
+          "something went wrong",
+        );
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("provider REFUSED the request (4xx) — it served none of this input", () => {
+      it.each([
+        [400, "malformed request"],
+        [401, "auth failure"],
+        [403, "forbidden"],
+        [413, "payload too large"],
+        [429, "rate limit, retries exhausted"],
+      ])("records NOTHING on %i (%s)", async (status) => {
+        const { service } = makeService({
+          inputCostPer1MTokens: 0.13,
+          recorder,
+          embedderError: providerError(status),
+        });
+
+        await expect(service.vectoriseTextBatch(["alpha", FOX], ATTRIBUTION)).rejects.toThrow(`provider ${status}`);
+
+        expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
+      });
+    });
+
+    it("still returns vectors and bills normally when nothing fails", async () => {
+      // Guards the guard: the gate above must not have made the SUCCESS path
+      // conditional on an error that is never there.
+      const { service } = makeService({ inputCostPer1MTokens: 0.13, recorder });
+
+      await expect(service.vectoriseText({ text: FOX, attribution: ATTRIBUTION })).resolves.toEqual([0.1, 0.2]);
+
+      expect(recorder.recordTokenUsage).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

@@ -46,31 +46,41 @@ export class EmbedderService {
   ) {}
 
   async vectoriseText(params: { text: string; attribution?: EmbedderAttribution }): Promise<any> {
-    const result = await this.embedGuarded(params.text, params.attribution);
-    await this.persistUsage([params.text], params.attribution);
-    return result;
+    try {
+      const result = await this.embedGuarded(params.text, params.attribution);
+      await this.persistUsage([params.text], params.attribution);
+      return result;
+    } catch (error) {
+      await this.persistUsageOnFailure([params.text], params.attribution, error);
+      throw error;
+    }
   }
 
   async vectoriseTextBatch(texts: string[], attribution?: EmbedderAttribution): Promise<any[]> {
-    const sliced = texts.map((text) => this.splitByTokenBudget(text));
-    const withinBudget: number[] = [];
-    const oversized: number[] = [];
-    sliced.forEach((slices, index) => (slices.length === 1 ? withinBudget : oversized).push(index));
+    try {
+      const sliced = texts.map((text) => this.splitByTokenBudget(text));
+      const withinBudget: number[] = [];
+      const oversized: number[] = [];
+      sliced.forEach((slices, index) => (slices.length === 1 ? withinBudget : oversized).push(index));
 
-    const result: any[] = new Array(texts.length);
-    // The texts that fit still travel as ONE provider batch, in input order —
-    // batching is why vectoriseTextBatch exists (chunk.repository.ts:405).
-    if (withinBudget.length > 0) {
-      const vectors = await this.modelService.getEmbedder().embedDocuments(withinBudget.map((index) => texts[index]));
-      withinBudget.forEach((index, position) => (result[index] = vectors[position]));
-    }
-    for (const index of oversized) {
-      this.warnOversizedInput(texts[index], sliced[index].length, attribution);
-      result[index] = this.meanPool(await this.embedSlices(sliced[index]));
-    }
+      const result: any[] = new Array(texts.length);
+      // The texts that fit still travel as ONE provider batch, in input order —
+      // batching is why vectoriseTextBatch exists (chunk.repository.ts:405).
+      if (withinBudget.length > 0) {
+        const vectors = await this.modelService.getEmbedder().embedDocuments(withinBudget.map((index) => texts[index]));
+        withinBudget.forEach((index, position) => (result[index] = vectors[position]));
+      }
+      for (const index of oversized) {
+        this.warnOversizedInput(texts[index], sliced[index].length, attribution);
+        result[index] = this.meanPool(await this.embedSlices(sliced[index]));
+      }
 
-    await this.persistUsage(texts, attribution);
-    return result;
+      await this.persistUsage(texts, attribution);
+      return result;
+    } catch (error) {
+      await this.persistUsageOnFailure(texts, attribution, error);
+      throw error;
+    }
   }
 
   /**
@@ -196,7 +206,12 @@ export class EmbedderService {
    * opt-in exactly like LLMService.persistUsage, floor-exempt (applyMinimum
    * false): sub-cent embedding calls must never floor to 0.1 credits.
    */
-  private async persistUsage(texts: string[], attribution?: EmbedderAttribution): Promise<void> {
+  private async persistUsage(
+    texts: string[],
+    attribution?: EmbedderAttribution,
+    /** Failure path only: a zero-token operation records nothing. See {@link persistUsageOnFailure}. */
+    skipWhenZeroTokens = false,
+  ): Promise<void> {
     if (!attribution?.relationshipId || !attribution?.relationshipType) return;
     const embedderConfig = this.config.get<ConfigAiInterface>("ai")?.embedder;
     const rate = embedderConfig?.inputCostPer1MTokens ?? 0;
@@ -205,6 +220,7 @@ export class EmbedderService {
     if (!recorder) return;
     try {
       const tokens = this.countTokens(texts, embedderConfig);
+      if (skipWhenZeroTokens && tokens === 0) return;
       await recorder.recordTokenUsage({
         tokens: { input: tokens, output: 0 },
         type: attribution.tokenUsageType ?? TokenUsageType.Embedding,
@@ -216,6 +232,84 @@ export class EmbedderService {
     } catch (err) {
       this.logger.warn(`Embedding usage persistence failed — continuing: ${String(err)}`);
     }
+  }
+
+  /**
+   * Records what a FAILED embedding call already burned — but ONLY when the
+   * rejection is evidence the provider actually did work.
+   *
+   * A failure is not automatically a free call: a batch that dies on the
+   * provider's LAST internal sub-batch has still been charged for every chunk
+   * the provider served, and `RateLimitedEmbedder` surfaces that as a single
+   * rejection. Recording nothing there understates real spend.
+   *
+   * BUT the counts here are computed LOCALLY with tiktoken, never read off a
+   * provider response, so they exist even when the provider was never reached.
+   * Billing every rejection would therefore charge the customer for OUR
+   * outages, inverting the very rule this path claims parity with:
+   * `LLMService.persistUsageOnFailure` bills provider-REPORTED tokens, which
+   * are 0 when nothing was served. The damage would be real —
+   * `RateLimitedEmbedder` rejects with `EmbedderBucketStarvedError` before any
+   * HTTP request when our own token bucket cannot grant within `maxWaitMs`, and
+   * these calls sit inside BullMQ jobs with `attempts: 3`, so one transient
+   * local failure could bill the same batch up to four times.
+   *
+   * So the local count is only trusted when {@link providerServedWork} says the
+   * rejection carries positive evidence of provider-side work. See that method
+   * for the signal and for the residual over-billing it knowingly accepts.
+   *
+   * ZERO-TOKEN RULE, as everywhere else on this path: an operation that burned
+   * nothing records NOTHING — a 0-token row would assert a call that never
+   * happened.
+   *
+   * Never throws: it sits in a catch block and must not mask the original error.
+   */
+  private async persistUsageOnFailure(
+    texts: string[],
+    attribution?: EmbedderAttribution,
+    error?: unknown,
+  ): Promise<void> {
+    if (!this.providerServedWork(error)) return;
+    await this.persistUsage(texts, attribution, true);
+  }
+
+  /**
+   * Does this rejection carry positive evidence that the provider did billable
+   * work? Nothing is billed unless it does.
+   *
+   * THE SIGNAL: a SERVER-side HTTP status (5xx) reported by the provider. That
+   * is the only class of rejection in which the provider accepted the request
+   * and failed during or after processing it — the case the failure-billing
+   * exists for (a multi-sub-batch call whose last sub-batch 500s, after earlier
+   * sub-batches were served and charged).
+   *
+   * Everything else records NOTHING, because in every other case the provider
+   * demonstrably served none of this input:
+   *  - NO status at all — raised locally before or without any HTTP exchange:
+   *    `EmbedderBucketStarvedError` (our own bucket refusing to grant), DNS
+   *    failures, connection refused, aborts and client-side timeouts. This is
+   *    the "our outage must not charge the customer" case.
+   *  - A 4xx — the provider REFUSED the request rather than serving it: 401/403
+   *    auth, 400/422 malformed, 413 too large, 429 rate-limited (including the
+   *    retry-exhausted path). Providers do not charge for a request they
+   *    rejected, so neither do we.
+   *
+   * RESIDUAL OVER-BILLING, KNOWINGLY ACCEPTED: on a 5xx this bills the WHOLE
+   * submitted input, including sub-batches the provider never got to.
+   * `RateLimitedEmbedder.embedDocuments` splits the input into sequential
+   * sub-batches and is all-or-nothing to its caller — it returns vectors or it
+   * throws, never a partial result — so this service cannot know how many
+   * sub-batches were served. Over-billing is bounded by the batch size and only
+   * on provider-side faults; the alternative (recording nothing) silently
+   * under-bills every genuinely-served chunk. Narrowing this needs
+   * `RateLimitedEmbedder` to report served-sub-batch counts, which would change
+   * its published surface.
+   */
+  private providerServedWork(error?: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+    const candidate = error as { status?: unknown; statusCode?: unknown; response?: { status?: unknown } };
+    const status = candidate.status ?? candidate.statusCode ?? candidate.response?.status;
+    return typeof status === "number" && status >= 500 && status <= 599;
   }
 
   /**

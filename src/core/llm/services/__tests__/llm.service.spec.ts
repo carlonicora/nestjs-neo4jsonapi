@@ -858,4 +858,448 @@ describe("LLMService", () => {
       warnSpy.mockRestore();
     });
   });
+
+  /**
+   * A failed call is NOT a free call. The provider bills every round it already
+   * served — a tool loop that times out on its final structured invocation has
+   * been measured at six figures of input tokens — so each failure path records
+   * what was actually burned before it threw.
+   *
+   * The one exception is a failure that consumed NOTHING (the provider was never
+   * reached): recording it would write a record floored to `minCreditsPerRecord`,
+   * i.e. invent a charge for tokens nobody spent.
+   */
+  describe("failure-path token billing", () => {
+    const outputSchema = z.object({ response: z.string() });
+
+    it("call() records the tokens burned before a failure", async () => {
+      const tool: any = {
+        name: "lookup",
+        description: "looks things up",
+        schema: z.object({ id: z.string() }),
+        invoke: vi.fn().mockResolvedValue("{}"),
+      };
+      // Iteration 1 asks for a tool, iteration 2 answers in prose — both already
+      // billed by the provider — and only then does the final structured
+      // invocation blow up.
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi
+          .fn()
+          .mockResolvedValueOnce({
+            content: "",
+            tool_calls: [{ id: "c1", name: "lookup", args: { id: "npc-1" } }],
+            usage_metadata: { input_tokens: 100_000, output_tokens: 500 },
+          })
+          .mockResolvedValueOnce({
+            content: "draft",
+            tool_calls: [],
+            usage_metadata: { input_tokens: 2_000, output_tokens: 100 },
+          }),
+      });
+      mockStructuredLLM.invoke.mockRejectedValueOnce(new Error("boom"));
+
+      await expect(
+        service.call({
+          inputParams: { message: "Hello" },
+          outputSchema,
+          systemPrompts: ["You are a helpful assistant"],
+          tools: [tool],
+          tokenUsageType: "text_generation",
+          relationshipId: "content-1",
+          relationshipType: "Content",
+        }),
+      ).rejects.toThrow();
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          type: "text_generation",
+          relationshipId: "content-1",
+          relationshipType: "Content",
+          tokens: { input: 102_000, output: 600, cached: 0 },
+        }),
+      );
+    });
+
+    it("call() still bills exactly once — not twice — when the same call succeeds", async () => {
+      // Guards the split introduced for the failure path: the tool loop now
+      // reports its own usage, so the final return must only add its delta.
+      const tool: any = {
+        name: "lookup",
+        description: "looks things up",
+        schema: z.object({ id: z.string() }),
+        invoke: vi.fn().mockResolvedValue("{}"),
+      };
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 2_000, output_tokens: 100 },
+        }),
+      });
+
+      const result = await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+        tools: [tool],
+        relationshipId: "content-1",
+        relationshipType: "Content",
+      });
+
+      // 2000/100 from the single tool-loop turn + 100/50 from the structured call.
+      expect(result.tokenUsage).toEqual({ input: 2_100, output: 150, cached: 0 });
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 2_100, output: 150, cached: 0 });
+    });
+
+    it("call() records the unparseable answer the provider still charged for", async () => {
+      // Every salvage attempt fails, so the call throws — but the generation
+      // happened and was billed.
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          content: "not json at all",
+          usage_metadata: { input_tokens: 800, output_tokens: 60 },
+          response_metadata: { finish_reason: "length" },
+        },
+      });
+
+      await expect(
+        service.call({
+          inputParams: { message: "Hello" },
+          outputSchema,
+          systemPrompts: ["You are a helpful assistant"],
+          relationshipId: "content-1",
+          relationshipType: "Content",
+        }),
+      ).rejects.toThrow(/failed to return structured output/);
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 800, output: 60, cached: 0 });
+    });
+
+    it("call() records NOTHING when the failure burned no tokens at all", async () => {
+      // NOT a transient network error: those are retried (and a retry that
+      // succeeds bills its success normally). A provider rejection is terminal.
+      mockStructuredLLM.invoke.mockRejectedValueOnce(new Error("provider rejected the request"));
+
+      await expect(
+        service.call({
+          inputParams: { message: "Hello" },
+          outputSchema,
+          systemPrompts: ["You are a helpful assistant"],
+          relationshipId: "content-1",
+          relationshipType: "Content",
+        }),
+      ).rejects.toThrow();
+
+      expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("streamCall() records the usage that settled even though the object rejected", async () => {
+      streamObjectMock.mockReturnValue({
+        object: Promise.reject(new Error("stream blew up")),
+        usage: Promise.resolve({ inputTokens: 900, outputTokens: 40 }),
+        finishReason: Promise.resolve("error"),
+        partialObjectStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamCall({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["sys"],
+        tokenUsageType: "custom_stream",
+        relationshipId: "r7",
+        relationshipType: "Round",
+      });
+
+      await expect(result).rejects.toThrow(/stream blew up/);
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 900, output: 40, cached: 0 });
+      expect(arg.type).toBe("custom_stream");
+      // The dump session must report the same figures, not a hard-coded 0/0.
+      expect(closeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ finalStatus: "error", totalTokens: { input: 900, output: 40, cached: 0 } }),
+      );
+    });
+
+    it("streamText() records the usage that settled even though the text rejected", async () => {
+      streamTextMock.mockReturnValue({
+        text: Promise.reject(new Error("upstream boom")),
+        reasoningText: Promise.resolve(""),
+        usage: Promise.resolve({ inputTokens: 300, outputTokens: 20 }),
+        finishReason: Promise.resolve("error"),
+        fullStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamText({
+        systemPrompts: ["sys"],
+        prompt: "go",
+        tokenUsageType: "custom_narrate",
+        relationshipId: "r7",
+        relationshipType: "Round",
+      });
+
+      await expect(result).rejects.toThrow(/upstream boom/);
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 300, output: 20, cached: 0 });
+    });
+
+    // The failure-path `usage` read must be BOUNDED. `result` runs under no outer
+    // deadline (unlike `call()`, which runs inside `runBounded`), so an SDK that
+    // rejects the content promise while leaving `usage` pending would turn a
+    // prompt rejection into a caller that waits forever. Both tests below would
+    // hang indefinitely against an unbounded `await streamResult.usage`.
+    it("streamCall() still settles when usage never resolves", async () => {
+      vi.useFakeTimers();
+      try {
+        streamObjectMock.mockReturnValue({
+          object: Promise.reject(new Error("stream blew up")),
+          // Never settles — neither resolved nor rejected.
+          usage: new Promise(() => {}),
+          finishReason: Promise.resolve("error"),
+          partialObjectStream: (async function* () {})(),
+        });
+
+        const { result } = await service.streamCall({
+          inputParams: { message: "Hello" },
+          outputSchema,
+          systemPrompts: ["sys"],
+          relationshipId: "r7",
+          relationshipType: "Round",
+        });
+        const settled = expect(result).rejects.toThrow(/stream blew up/);
+
+        // Only the usage bound (2s) needs to elapse; the caller is not left waiting
+        // on the provider's stalled promise.
+        await vi.advanceTimersByTimeAsync(2_000);
+        await settled;
+
+        // Nothing is known to have been consumed, so nothing is billed.
+        expect(recordTokenUsageMock).not.toHaveBeenCalled();
+        expect(closeMock).toHaveBeenCalledWith(
+          expect.objectContaining({ finalStatus: "error", totalTokens: { input: 0, output: 0, cached: 0 } }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("streamText() still settles when usage never resolves", async () => {
+      vi.useFakeTimers();
+      try {
+        streamTextMock.mockReturnValue({
+          text: Promise.reject(new Error("upstream boom")),
+          reasoningText: Promise.resolve(""),
+          usage: new Promise(() => {}),
+          finishReason: Promise.resolve("error"),
+          fullStream: (async function* () {})(),
+        });
+
+        const { result } = await service.streamText({
+          systemPrompts: ["sys"],
+          prompt: "go",
+          relationshipId: "r7",
+          relationshipType: "Round",
+        });
+        const settled = expect(result).rejects.toThrow(/upstream boom/);
+
+        await vi.advanceTimersByTimeAsync(2_000);
+        await settled;
+
+        expect(recordTokenUsageMock).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("extractViaTool() records every attempt the provider served before it gave up", async () => {
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi
+          .fn()
+          .mockResolvedValueOnce({
+            tool_calls: [],
+            content: "I'm not able to help with that.",
+            usage_metadata: { input_tokens: 250, output_tokens: 80 },
+          })
+          .mockResolvedValueOnce({
+            tool_calls: [],
+            content: "still no.",
+            usage_metadata: { input_tokens: 100, output_tokens: 20 },
+          }),
+      });
+
+      await expect(
+        service.extractViaTool({
+          systemPrompts: ["sys"],
+          prompt: "extract this",
+          tool: { name: "extract", description: "d", schema: z.object({ value: z.string() }) },
+          tokenUsageType: "custom_extract",
+          relationshipId: "g1",
+          relationshipType: "Game",
+        }),
+      ).rejects.toThrow(/did not call the tool/);
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 350, output: 100, cached: 0 });
+    });
+
+    it("callStep() records usage on the success path when attribution is supplied", async () => {
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 100, output_tokens: 40 },
+        }),
+      });
+
+      await service.callStep({
+        systemPrompts: ["sys"],
+        messages: [],
+        tools: [{ name: "do_thing", description: "d", schema: {} } as any],
+        tokenUsageType: "operator_step",
+        relationshipId: "op-1",
+        relationshipType: "Operation",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 100, output: 40, cached: 0 });
+      expect(arg.type).toBe("operator_step");
+      expect(arg.relationshipId).toBe("op-1");
+      expect(arg.relationshipType).toBe("Operation");
+    });
+
+    it("callStep() credits cached prompt tokens so a cache hit is not billed at the uncached rate", async () => {
+      // The operator re-sends its whole conversation every step, so a prompt-cache
+      // hit is the norm here. Dropping `cached` prices the ENTIRE prompt at the
+      // uncached rate (`computeCost`) and over-bills every operator row.
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "",
+          tool_calls: [],
+          usage_metadata: {
+            input_tokens: 1000,
+            output_tokens: 40,
+            input_token_details: { cache_read: 900 },
+          },
+        }),
+      });
+
+      await service.callStep({
+        systemPrompts: ["sys"],
+        messages: [],
+        tools: [{ name: "do_thing", description: "d", schema: {} } as any],
+        tokenUsageType: "operator_step",
+        relationshipId: "op-1",
+        relationshipType: "Operation",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 1000, output: 40, cached: 900 });
+    });
+
+    it("callStep() exempts a zero-token SUCCESS from the credits floor", async () => {
+      // A provider that answered but reported no usage at all. The call really
+      // happened, so the row is written — but flooring it would invent a charge
+      // for tokens nobody measured.
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({ content: "", tool_calls: [] }),
+      });
+
+      await service.callStep({
+        systemPrompts: ["sys"],
+        messages: [],
+        tools: [{ name: "do_thing", description: "d", schema: {} } as any],
+        tokenUsageType: "operator_step",
+        relationshipId: "op-1",
+        relationshipType: "Operation",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 0, output: 0, cached: 0 });
+      expect(arg.applyMinimum).toBe(false);
+    });
+
+    it("callStep() keeps the credits floor on a token-bearing success", async () => {
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 1, output_tokens: 0 },
+        }),
+      });
+
+      await service.callStep({
+        systemPrompts: ["sys"],
+        messages: [],
+        tools: [{ name: "do_thing", description: "d", schema: {} } as any],
+        tokenUsageType: "operator_step",
+        relationshipId: "op-1",
+        relationshipType: "Operation",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].applyMinimum).toBeUndefined();
+    });
+
+    it("call() exempts a zero-token SUCCESS from the credits floor", async () => {
+      mockStructuredLLM.invoke = vi.fn().mockResolvedValue({
+        parsed: { response: "test response" },
+        raw: { response_metadata: { finish_reason: "stop" }, content: '{"response": "test response"}' },
+      });
+
+      await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema: z.object({ response: z.string() }),
+        systemPrompts: ["sys"],
+        tokenUsageType: "responder",
+        relationshipId: "campaign-1",
+        relationshipType: "Campaign",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      const arg = recordTokenUsageMock.mock.calls[0][0];
+      expect(arg.tokens).toEqual({ input: 0, output: 0, cached: 0 });
+      expect(arg.applyMinimum).toBe(false);
+    });
+
+    it("call() keeps the credits floor on a token-bearing success", async () => {
+      await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema: z.object({ response: z.string() }),
+        systemPrompts: ["sys"],
+        tokenUsageType: "responder",
+        relationshipId: "campaign-1",
+        relationshipType: "Campaign",
+      });
+
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].applyMinimum).toBeUndefined();
+    });
+
+    it("callStep() records nothing when the step failed without reaching the provider", async () => {
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockRejectedValue(new Error("model exploded")),
+      });
+
+      await expect(
+        service.callStep({
+          systemPrompts: ["sys"],
+          messages: [],
+          tools: [{ name: "do_thing", description: "d", schema: {} } as any],
+          tokenUsageType: "operator_step",
+          relationshipId: "op-1",
+          relationshipType: "Operation",
+        }),
+      ).rejects.toThrow(/model exploded/);
+
+      expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+  });
 });
