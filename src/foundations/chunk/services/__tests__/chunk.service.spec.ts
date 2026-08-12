@@ -90,10 +90,13 @@ describe("ChunkService", () => {
   const createMockChunkRepository = () => ({
     findChunkById: vi.fn(),
     findChunks: vi.fn(),
+    findParentName: vi.fn(),
     createChunk: vi.fn(),
     deleteChunksByNodeType: vi.fn(),
     updateStatus: vi.fn(),
     updateDates: vi.fn(),
+    enrichContentAndEmbedBatch: vi.fn(),
+    clearFinalisationClaim: vi.fn(),
   });
 
   const createMockAtomicFactService = () => ({
@@ -230,6 +233,27 @@ describe("ChunkService", () => {
         nodeType: "content",
       });
       expect(result).toBe(expectedChunks);
+    });
+
+    // The create path returns whatever findChunks hydrates, and findChunks is lean by
+    // design (no embedding vectors) — see the repository spec's mapper-compat proof.
+    it("returns the lean chunks from findChunks (no embeddings on the create path)", async () => {
+      // Arrange
+      const documents: Document[] = [{ pageContent: "Content 1", metadata: {}, id: undefined }];
+      const leanChunks = [{ id: "chunk-1", content: "Content 1", heading: "H", position: 0, dates: [] }];
+      chunkRepository.createChunk.mockResolvedValue(undefined);
+      chunkRepository.findChunks.mockResolvedValue(leanChunks);
+
+      // Act
+      const result = await service.createChunks({
+        id: TEST_IDS.contentId,
+        nodeType: "content",
+        data: documents,
+      });
+
+      // Assert
+      expect(result).toBe(leanChunks);
+      expect(result.every((chunk) => (chunk as { embedding?: number[] }).embedding === undefined)).toBe(true);
     });
 
     it("should link chunks sequentially with previousChunkId", async () => {
@@ -376,6 +400,39 @@ describe("ChunkService", () => {
       expect(tracer.endSpan).toHaveBeenCalled();
     });
 
+    // Cost attribution: the orphan key-concept embeddings are billed against the
+    // content being analysed, not left unattributed.
+    it("attributes the orphan key-concept embeddings to the analysed content", async () => {
+      // Arrange
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      chunkRepository.findChunkById.mockResolvedValue(mockChunk);
+      chunkRepository.updateStatus.mockResolvedValue(undefined);
+      chunkRepository.updateDates.mockResolvedValue(undefined);
+      graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
+      keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
+      keyConceptRepository.updateKeyConceptDescriptions.mockResolvedValue(undefined);
+      atomicFactService.createAtomicFact.mockResolvedValue(undefined);
+      keyConceptService.addKeyConceptRelationships.mockResolvedValue(undefined);
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+      mockQueue.add.mockResolvedValue(undefined);
+
+      // Act
+      await service.generateGraph({
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        chunkId: TEST_IDS.chunkId,
+        id: TEST_IDS.contentId,
+        type: "content",
+      });
+
+      // Assert
+      expect(keyConceptRepository.createOrphanKeyConcepts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: { relationshipId: TEST_IDS.contentId, relationshipType: "content" },
+        }),
+      );
+    });
+
     it("should retry on graph generation failure and return empty fallback", { timeout: 30000 }, async () => {
       // Arrange
       const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
@@ -456,6 +513,9 @@ describe("ChunkService", () => {
       });
 
       // Assert
+      // No jobId, deliberately — a stable one makes BullMQ drop every add after the first,
+      // including the last chunk's, which is the one that actually finalises the content.
+      // Duplicate jobs are rejected by ChunkRepository.claimContentFinalisation instead.
       expect(mockQueue.add).toHaveBeenCalledWith("process-content", {
         id: TEST_IDS.contentId,
         companyId: TEST_IDS.companyId,
@@ -551,6 +611,29 @@ describe("ChunkService", () => {
           type: "unknown",
         }),
       ).rejects.toThrow(/No queue found for type unknown/);
+    });
+  });
+
+  // Cost attribution: the batched re-embedding of a document's chunks is billed
+  // against the parent node (id/nodeType), so the upload path is fully measured.
+  describe("propagateAndEmbedDates", () => {
+    it("attributes the batched embedding to the parent node", async () => {
+      // Arrange
+      chunkRepository.findChunks.mockResolvedValue([
+        { id: "chunk-1", content: "First chunk", dates: [] },
+        { id: "chunk-2", content: "Second chunk", dates: [] },
+      ]);
+      chunkRepository.findParentName.mockResolvedValue("Atto di citazione");
+      chunkRepository.enrichContentAndEmbedBatch.mockResolvedValue(undefined);
+
+      // Act
+      await service.propagateAndEmbedDates({ id: "doc-1", nodeType: "Document" });
+
+      // Assert
+      expect(chunkRepository.enrichContentAndEmbedBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ chunkId: "chunk-1" })]),
+        { relationshipId: "doc-1", relationshipType: "Document" },
+      );
     });
   });
 });

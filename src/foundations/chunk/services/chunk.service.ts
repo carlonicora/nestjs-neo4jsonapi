@@ -149,6 +149,14 @@ export class ChunkService {
   }
 
   async createChunks(params: { id: string; nodeType: string; data: Document[] }): Promise<Chunk[]> {
+    // Re-arm the finalisation latch. Every ingest and rebuild path reaches chunking through
+    // here, so this is the one place that can guarantee a re-ingested node finalises again
+    // instead of silently skipping on a stale claim from its previous pass.
+    await this.chunkRepository.clearFinalisationClaim({
+      id: params.id,
+      nodeType: params.nodeType,
+    });
+
     let previousChunkId = undefined;
     let position = 0;
 
@@ -212,6 +220,17 @@ export class ChunkService {
 
     this.tracer.addSpanEvent("Read Chunk");
 
+    // A queued job can outlive its chunk: re-uploading a document version deletes the
+    // old chunks (deleteChunks) while their process_chunk jobs may still sit in the
+    // queue, and a stale queue can reference a recreated database. Without this guard
+    // the null dereferences below turn one missing chunk into a retry storm
+    // (4× "reading 'content'" + a failed job per chunk). Nothing to process — done.
+    if (!chunk) {
+      this.tracer.endSpan();
+      this.logger.warn(`Chunk ${params.chunkId} no longer exists (deleted or stale job) — skipping graph generation`);
+      return;
+    }
+
     await this.chunkRepository.updateStatus({
       id: params.chunkId,
       aiStatus: AiStatus.InProgress,
@@ -249,6 +268,9 @@ export class ChunkService {
 
           await this.keyConceptRepository.createOrphanKeyConcepts({
             keyConceptValues: Array.from(keyConcepts),
+            // Cost attribution: the key-concept embeddings belong to the content
+            // being analysed, so their usage is billed against it.
+            attribution: { relationshipId: params.id, relationshipType: params.type },
           });
 
           this.tracer.addSpanEvent("Write Key Concepts in Database");
@@ -336,6 +358,22 @@ export class ChunkService {
     }
 
     const queue = this.selectQueue(params.type);
+
+    // DELIBERATELY no deterministic jobId here. One finalise job per chunk looks wasteful, and
+    // a stable `finalise:<type>:<id>` does collapse the fan-out — but it silently breaks the
+    // pipeline, because BullMQ drops an add() whose jobId already exists in ANY state:
+    //
+    //   chunk 1 completes → job enqueued → runs at once → chunks still pending, declines the
+    //   claim, returns, and sits in the completed set → chunks 2..N add the same id → all
+    //   ignored → the LAST chunk's enqueue, the one that would finalise, never happens.
+    //
+    // Measured 2026-08-12: 63 of 68 documents wedged in `in_progress` with zero pending chunks
+    // and no claim. `removeOnComplete` narrows the window but does not close it — an ACTIVE
+    // job's id is taken too, so the early-returning job can still swallow the last chunk's add.
+    //
+    // Duplicate jobs are harmless now: `ChunkRepository.claimContentFinalisation` rejects all
+    // but one in a single Cypher round-trip. What made run 4 expensive was duplicates running
+    // the FULL pipeline, not their number — the claim fixes that, the jobId never had to.
     await queue.add(nextJobType, {
       id: params.id,
       companyId: params.companyId,
@@ -347,6 +385,9 @@ export class ChunkService {
     const temporalContextLabel = this.embeddingContext.temporalContextLabel ?? DEFAULT_TEMPORAL_CONTEXT_LABEL;
     const temporalReferencesLabel = this.embeddingContext.temporalReferencesLabel ?? DEFAULT_TEMPORAL_REFERENCES_LABEL;
 
+    // `findChunks` deliberately hydrates chunks WITHOUT their embedding vectors; this
+    // pass only ever reads `heading`, `content` and `dates` (and writes fresh vectors
+    // back through the repository), so the old ones would be pure heap cost here.
     const chunks = await this.chunkRepository.findChunks({
       id: params.id,
       nodeType: params.nodeType,
@@ -411,7 +452,11 @@ export class ChunkService {
 
     // Single batched embed for the whole document — per-call Azure latency dominates batch
     // size, so one round-trip for all chunks is far cheaper than one call per chunk.
-    await this.chunkRepository.enrichContentAndEmbedBatch(items);
+    // Cost attribution: the parent node owns the re-embedding spend.
+    await this.chunkRepository.enrichContentAndEmbedBatch(items, {
+      relationshipId: params.id,
+      relationshipType: params.nodeType,
+    });
   }
 
   /**

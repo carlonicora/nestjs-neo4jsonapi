@@ -60,22 +60,34 @@ export class HowToProcessor extends WorkerHost {
   }
 
   private async _processHowTo(params: { howToId: string }): Promise<void> {
-    const pendingChunks = await this.chunkRepository.getChunksInProgress({
+    // Single-winner latch: ChunkService enqueues one finalise job per chunk, so a pending-chunk
+    // count only rejects jobs that run WHILE chunking is in flight — under a backlog the rest
+    // all re-run the pipeline. The claim subsumes the pending-chunk check.
+    // Mark completed when all chunks are done.
+    const claimed = await this.chunkRepository.claimContentFinalisation({
       id: params.howToId,
       nodeType: howToMeta.labelName,
     });
 
-    await this.howToService.updateAiStatus({
-      id: params.howToId,
-      aiStatus: AiStatus.InProgress,
-    });
+    if (!claimed) return;
 
-    // Mark completed when all chunks are done
-    if (pendingChunks.length === 0) {
+    try {
+      await this.howToService.updateAiStatus({
+        id: params.howToId,
+        aiStatus: AiStatus.InProgress,
+      });
+
       await this.howToService.updateAiStatus({
         id: params.howToId,
         aiStatus: AiStatus.Completed,
       });
+    } catch (error) {
+      // Release the latch taken above, or a BullMQ retry would find it held and no-op.
+      await this.chunkRepository.clearFinalisationClaim({
+        id: params.howToId,
+        nodeType: howToMeta.labelName,
+      });
+      throw error;
     }
   }
 }
