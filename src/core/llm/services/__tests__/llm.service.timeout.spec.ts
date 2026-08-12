@@ -195,6 +195,72 @@ describe("LLMService request bounds", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a transient DNS failure, on a FRESH abort controller", async () => {
+    // The crash this exists for: 28 ENOTFOUND failures under load, every one of
+    // them already through LangChain's ~6 fast internal retries.
+    const enotfound = Object.assign(new Error("getaddrinfo ENOTFOUND api.openrouter.ai"), { code: "ENOTFOUND" });
+    const signals: Array<AbortSignal | undefined> = [];
+    const invoke = vi.fn((_msgs: unknown, options: any) => {
+      signals.push(options?.signal);
+      return signals.length === 1 ? Promise.reject(enotfound) : Promise.resolve({ parsed: { ok: true }, raw: {} });
+    });
+    const { svc } = harness({ invoke: invoke as any });
+
+    const pending = svc.call(callParams);
+    // The outer wait is LONG on purpose — the fast retries are already spent.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect((await pending).ok).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    // A controller that has aborted stays aborted: reusing the first one would
+    // make every retry abort before sending a byte.
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+  });
+
+  it("gives up after two extra attempts and keeps the original error as `cause`", async () => {
+    const enotfound = Object.assign(new Error("getaddrinfo ENOTFOUND api.openrouter.ai"), { code: "ENOTFOUND" });
+    const invoke = vi.fn().mockRejectedValue(enotfound);
+    const { svc } = harness({ invoke: invoke as any });
+
+    const failure = svc.call(callParams).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const error = await failure;
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    // The message stays byte-for-byte what callers already match on…
+    expect(error.message).toBe("LLM service error: getaddrinfo ENOTFOUND api.openrouter.ai");
+    // …and the diagnosis is no longer thrown away with the original error.
+    expect((error.cause as any).code).toBe("ENOTFOUND");
+  });
+
+  it("retries a 429, which is the same kind of transient as a socket failure", async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
+      .mockResolvedValueOnce({ parsed: { ok: true }, raw: {} });
+    const { svc } = harness({ invoke: invoke as any });
+
+    const pending = svc.call(callParams);
+    await vi.advanceTimersByTimeAsync(7_000);
+
+    expect((await pending).ok).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a provider refusal, and still preserves its cause", async () => {
+    const refusal = Object.assign(new Error("402 insufficient credits"), { status: 402 });
+    const invoke = vi.fn().mockRejectedValue(refusal);
+    const { svc } = harness({ invoke: invoke as any });
+
+    const error = await svc.call(callParams).catch((e) => e);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(error.cause).toBe(refusal);
+  });
+
   it("bounds extractViaTool the same way", async () => {
     const { svc, modelService } = harness({ invoke: () => new Promise(() => {}) });
 

@@ -29,6 +29,12 @@ export class DocumentAiService {
     confidence: number;
     tokenUsage: { input: number; output: number };
     ocrText: string;
+    /**
+     * Number of pages the OCR provider actually processed. OCR is billed PER PAGE, not
+     * per token, so this is the only usable cost signal for this call — callers multiply
+     * it by `ai.documentAi.costPerPage` and record it as a `costOverride`.
+     */
+    pages: number;
   }> {
     const cfg = this.config.get<ConfigAiInterface>("ai").documentAi;
     // Accept either the resource base host or the full OCR URL in DOCUMENT_AI_URL.
@@ -91,6 +97,7 @@ export class DocumentAiService {
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : 90,
       tokenUsage: { input: 0, output: 0 }, // OCR is billed per page, not tokens
       ocrText,
+      pages: json?.pages?.length ?? 0,
     };
   }
 }

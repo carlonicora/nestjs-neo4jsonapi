@@ -27,6 +27,7 @@ import {
   stripSyntheticNulls,
 } from "../../llm/utils/schema.utils";
 import { mockFromZodSchema } from "../utils/mock-from-zod";
+import { repairTruncatedJson } from "../utils/repair-truncated-json";
 import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
@@ -55,6 +56,34 @@ const DEFAULT_REQUEST_WATCHDOG_MS = 30_000;
 const DEFAULT_REQUEST_DEADLINE_ATTEMPTS = 3;
 /** Grace on top of the budgeted attempts, covering backoff between retries. */
 const DEADLINE_SLACK_MS = 15_000;
+
+/**
+ * Waits before each EXTRA attempt of the transient-network retry, in ms — two
+ * extras, so three attempts in total.
+ *
+ * Deliberately LONG. LangChain's `AsyncCaller` already retries roughly six times
+ * FAST underneath every `.invoke(...)`, so by the time a failure surfaces here
+ * the quick retries are spent and the fault has lasted seconds, not
+ * milliseconds — a DNS outage, a provider brown-out, a saturated egress NAT.
+ * Retrying fast again would burn both extra attempts inside the same bad second
+ * and change nothing. (Evidence: a crashed worker run with 28 `ENOTFOUND` DNS
+ * failures under load, every one of them already through LangChain's fast
+ * retries.)
+ */
+const TRANSIENT_RETRY_WAITS_MS = [5_000, 15_000];
+
+/**
+ * Network-level error codes that say "the request never reached a working
+ * provider" — the class of failure another attempt can actually fix.
+ */
+const TRANSIENT_ERROR_CODES: ReadonlySet<string> = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "EPIPE",
+]);
 
 /**
  * True for the abort a request timeout raises, whichever layer raised it — the
@@ -328,6 +357,118 @@ export class LLMService {
     } finally {
       if (watchdog) clearInterval(watchdog);
       if (deadline) clearTimeout(deadline);
+    }
+  }
+
+  /**
+   * True for a failure that means the request never reached a working provider,
+   * and is therefore worth another attempt: a DNS/socket-level error code, an
+   * HTTP 429 or 5xx, or the message text either of those arrives as.
+   *
+   * All three are checked because the same failure wears different clothes per
+   * transport: undici puts the code on `error.cause.code` behind a bare
+   * `TypeError: fetch failed`, the OpenAI SDK puts the status on the error and
+   * the code in the message, and LangChain re-wraps both in a plain `Error`.
+   *
+   * Deliberately NOT transient: a stall that burned its whole deadline
+   * ({@link LLMTimeoutError}), a refusal (402/403), a malformed request (400) or
+   * a parse failure. Those either already had their retry (`call()` re-issues a
+   * timed-out attempt once, escalating the OpenRouter pin) or will fail
+   * identically forever. The 429 vocabulary matches the one
+   * `VisionLLMService.isRateLimitError` retries on, so the two agree on what a
+   * rate limit looks like.
+   */
+  private isTransientNetworkError(err: unknown): boolean {
+    if (err === undefined || err === null) return false;
+    const candidate = err as {
+      code?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+      response?: { status?: unknown };
+      cause?: unknown;
+    };
+    const cause = candidate.cause as { code?: unknown; status?: unknown } | undefined;
+
+    const codes = [candidate.code, cause?.code];
+    if (codes.some((code) => typeof code === "string" && TRANSIENT_ERROR_CODES.has(code))) return true;
+
+    const statuses = [candidate.status, candidate.statusCode, candidate.response?.status, cause?.status];
+    if (statuses.some((status) => typeof status === "number" && (status === 429 || (status >= 500 && status <= 599))))
+      return true;
+
+    const own = err instanceof Error ? err.message : String(err);
+    const causeMessage = cause instanceof Error ? cause.message : "";
+    const haystack = `${own} ${causeMessage}`.toLowerCase();
+
+    for (const code of TRANSIENT_ERROR_CODES) if (haystack.includes(code.toLowerCase())) return true;
+
+    return (
+      haystack.includes("socket hang up") ||
+      haystack.includes("fetch failed") ||
+      haystack.includes("network error") ||
+      haystack.includes("econnaborted") ||
+      // 429 / rate limiting — matched as a whole word so a token count never
+      // reads as a status code.
+      /\b429\b/.test(haystack) ||
+      haystack.includes("rate limit") ||
+      haystack.includes("resource exhausted") ||
+      haystack.includes("too many requests") ||
+      // 5xx. Only the codes providers actually emit, again whole-word: a blanket
+      // /5\d\d/ would retry "context length 512 exceeded" forever.
+      /\b(500|502|503|504|529)\b/.test(haystack) ||
+      haystack.includes("internal server error") ||
+      haystack.includes("bad gateway") ||
+      haystack.includes("service unavailable") ||
+      haystack.includes("gateway timeout") ||
+      haystack.includes("overloaded")
+    );
+  }
+
+  /**
+   * Sleeps the jittered backoff for one transient retry and says so in the log.
+   * ±20% jitter so a fleet of workers knocked out by the same DNS blip does not
+   * come back in lockstep and knock it out again.
+   */
+  private async waitBeforeTransientRetry(label: string, attempt: number, error: unknown): Promise<void> {
+    const base = TRANSIENT_RETRY_WAITS_MS[attempt];
+    const waitMs = Math.round(base * (0.8 + Math.random() * 0.4));
+    this.logger.warn(
+      `[${label}] transient network failure on attempt ${attempt + 1}/${TRANSIENT_RETRY_WAITS_MS.length + 1} — ` +
+        `retrying in ${Math.round(waitMs / 1000)}s: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, waitMs);
+      timer.unref?.();
+    });
+  }
+
+  /**
+   * Runs a provider call under {@link runBounded}, retrying it when — and only
+   * when — it failed for a transient network reason
+   * ({@link isTransientNetworkError}). Two extra attempts, with the long
+   * jittered waits {@link TRANSIENT_RETRY_WAITS_MS} explains.
+   *
+   * Owns a FRESH AbortController per attempt: a controller that has already
+   * aborted stays aborted forever, so re-using one would make every retry abort
+   * before it sent a byte. `work` therefore receives the signal rather than
+   * capturing one from the caller.
+   */
+  private async runWithTransientRetry<T>(
+    label: string,
+    attemptTimeoutMs: number,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController();
+      try {
+        return await this.runBounded(label, attemptTimeoutMs, controller, () => work(controller.signal));
+      } catch (error) {
+        if (attempt >= TRANSIENT_RETRY_WAITS_MS.length || !this.isTransientNetworkError(error)) throw error;
+        // The attempt is over; release whatever socket it may still hold before
+        // waiting out the backoff.
+        controller.abort();
+        await this.waitBeforeTransientRetry(label, attempt, error);
+      }
     }
   }
 
@@ -690,10 +831,11 @@ export class LLMService {
     // reports it while it is still open, and the deadline guarantees this
     // promise settles even if the provider never answers.
     const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
-    const controller = new AbortController();
     const label = `${(params.metadata?.nodeName as string) ?? "llm.call"}:${aiConfig.model}`;
     try {
-      const result = await this.runBounded(label, attemptTimeoutMs, controller, () =>
+      // The abort signal now comes from the retry wrapper, which owns a fresh
+      // controller per attempt — a reused one would abort every retry instantly.
+      const result = await this.runWithTransientRetry(label, attemptTimeoutMs, (signal) =>
         this._invokeOriginal<T>(
           params,
           session,
@@ -704,7 +846,7 @@ export class LLMService {
           },
           (kind) => parseFallbacks.push(kind),
           (w) => warnings.push(w),
-          { attemptTimeoutMs, signal: controller.signal, label },
+          { attemptTimeoutMs, signal, label },
         ),
       );
       session.close({
@@ -738,7 +880,15 @@ export class LLMService {
         parseFallbacks,
       });
       console.error("[LLMService] Error calling LLM:", error);
-      throw new Error(`LLM service error: ${message}`);
+      // The message text is load-bearing — callers match on "LLM service error:"
+      // — so it stays byte-for-byte identical, and the original error rides along
+      // as `cause`. Without it every network diagnosis stopped at this wrapper:
+      // the ENOTFOUND / status / stack that explained the failure was thrown
+      // away here. Assigned rather than passed as `new Error(msg, { cause })`
+      // because this package targets ES2021, whose Error takes one argument.
+      const wrapped = new Error(`LLM service error: ${message}`);
+      (wrapped as Error & { cause?: unknown }).cause = error;
+      throw wrapped;
     }
   }
 
@@ -1152,7 +1302,9 @@ export class LLMService {
      * provider honouring the structured-output contract, anything else means the
      * declared schema came back unparseable and was salvaged.
      */
-    const logCallSummary = (outcome: "clean" | "fallback:tool_calls" | "fallback:lenient" | "fallback:raw") => {
+    const logCallSummary = (
+      outcome: "clean" | "fallback:tool_calls" | "fallback:lenient" | "fallback:raw" | "fallback:truncation-repair",
+    ) => {
       this.logger.log(
         `[${label}] complete (${outcome}): ${iterationsUsed} tool iteration(s), ${failedToolCalls} failed tool call(s), ` +
           `in=${input} out=${output} cached=${cached} ` +
@@ -1267,6 +1419,30 @@ export class LLMService {
           tokenUsage: { input, output, cached },
         };
       } catch (fallbackError) {
+        // Last rung. A MAX_TOKENS truncation (`finish_reason: "length"`) stops
+        // the payload mid-value, so every rung above — all of which need the
+        // whole document to parse — rejects a response whose completed elements
+        // were perfectly good. Trim to the last complete value, close the open
+        // containers, and validate exactly as the raw rung does.
+        const repaired = repairTruncatedJson(rawContent);
+        if (repaired !== null) {
+          try {
+            const validated = params.outputSchema.parse(normaliseStrictOutput(JSON.parse(repaired)));
+            this.logger.warn(
+              `[${label}] parseFallback: "truncation-repair" — recovered a truncated payload ` +
+                `(finishReason=${finishReason}, ${rawContent.length}→${repaired.length} chars)`,
+            );
+            logCallSummary("fallback:truncation-repair");
+            addTokens(input, output, cached);
+            return {
+              ...(validated as T),
+              tokenUsage: { input, output, cached },
+            };
+          } catch {
+            // Repaired text still does not satisfy the schema — fall through to
+            // the diagnostic below, which reports the ORIGINAL failure.
+          }
+        }
         throw new Error(
           `LLM failed to return structured output. ` +
             `Finish reason: ${finishReason}. ` +
@@ -1437,25 +1613,42 @@ export class LLMService {
     // Avoids widening the dumper's union type for a single call site.
     session.startIteration("final-structured", []);
 
-    // Abort the stream if the provider stalls, so a hung connection can't pin
-    // the session open indefinitely. The AbortError surfaces as a rejection on
-    // the awaited promises below (caught + logged).
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.attemptTimeoutMs(params.timeout));
+    const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
+    const label = `${(params.metadata?.nodeName as string) ?? "llm.streamCall"}:${aiConfig.model}`;
 
+    // One attempt = one abort controller + one whole-stream timeout, so a hung
+    // connection can't pin the session open indefinitely. The bound is NOT
+    // `runWithTransientRetry`'s per-attempt deadline: a stream outlives its
+    // first byte, so its timer must stay armed until the stream finishes.
+    //
     // Schema cast: `streamObject`'s typing is a conditional union over the
     // output mode (`object` / `enum` / `array` / `no-schema`). Our T is always
     // a Zod object schema; the runtime call is correct.
-    const streamResult = streamObject({
-      model,
-      schema: params.outputSchema as any,
-      system,
-      prompt: finalInstructions,
-      temperature: params.temperature,
-      maxOutputTokens: params.maxTokens,
-      maxRetries: 2,
-      abortSignal: controller.signal,
-    });
+    const startAttempt = () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+      timeoutId.unref?.();
+      return {
+        controller,
+        timeoutId,
+        handle: streamObject({
+          model,
+          schema: params.outputSchema as any,
+          system,
+          prompt: finalInstructions,
+          temperature: params.temperature,
+          maxOutputTokens: params.maxTokens,
+          maxRetries: 2,
+          abortSignal: controller.signal,
+        }),
+      };
+    };
+    let attempt = startAttempt();
+    // Set the instant the caller starts reading the stream. Past that point a
+    // restart would REPLAY output the consumer has already seen, so the
+    // transient retry below only ever fires while the consumer is still idle —
+    // which is precisely the window in which a DNS/connect failure lands.
+    let consumerStarted = false;
 
     // Build the result Promise that closes the session once the stream finishes.
     // This is awaitable independently of consuming the streams — `streamObject`
@@ -1463,50 +1656,63 @@ export class LLMService {
     // affect `result` resolution.
     const resultPromise: Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> =
       (async () => {
-        try {
-          const finalObject = (await streamResult.object) as T;
-          const usage = await streamResult.usage;
-          const input = usage?.inputTokens ?? 0;
-          const output = usage?.outputTokens ?? 0;
-          const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
+        for (let retry = 0; ; retry++) {
+          try {
+            const finalObject = (await attempt.handle.object) as T;
+            const usage = await attempt.handle.usage;
+            const input = usage?.inputTokens ?? 0;
+            const output = usage?.outputTokens ?? 0;
+            const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
-          session.recordResponse({
-            content: JSON.stringify(finalObject),
-            tokenUsage: { input, output },
-            finishReason: String(await streamResult.finishReason),
-          });
-          session.close({
-            finalStatus: "success",
-            totalTokens: { input, output, cached },
-            warnings: [],
-            parseFallbacks: [],
-          });
-          await this.persistUsage(
-            {
-              tokenUsageType: params.tokenUsageType,
-              relationshipId: params.relationshipId,
-              relationshipType: params.relationshipType,
-              modelWeight,
-            },
-            { input, output, cached },
-          );
+            session.recordResponse({
+              content: JSON.stringify(finalObject),
+              tokenUsage: { input, output },
+              finishReason: String(await attempt.handle.finishReason),
+            });
+            session.close({
+              finalStatus: "success",
+              totalTokens: { input, output, cached },
+              warnings: [],
+              parseFallbacks: [],
+            });
+            clearTimeout(attempt.timeoutId);
+            await this.persistUsage(
+              {
+                tokenUsageType: params.tokenUsageType,
+                relationshipId: params.relationshipId,
+                relationshipType: params.relationshipType,
+                modelWeight,
+              },
+              { input, output, cached },
+            );
 
-          return { ...(finalObject as any), tokenUsage: { input, output }, modelWeight };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
-          session.close({
-            finalStatus: "error",
-            errorMessage: message,
-            errorStack: stack,
-            totalTokens: { input: 0, output: 0 },
-            warnings: [],
-            parseFallbacks: [],
-          });
-          console.error("[LLMService.streamCall] Error:", error);
-          throw new Error(`LLM streamCall error: ${message}`);
-        } finally {
-          clearTimeout(timeoutId);
+            return { ...(finalObject as any), tokenUsage: { input, output }, modelWeight };
+          } catch (error) {
+            // Restartable only while nothing has been delivered — see
+            // `consumerStarted`.
+            if (!consumerStarted && retry < TRANSIENT_RETRY_WAITS_MS.length && this.isTransientNetworkError(error)) {
+              clearTimeout(attempt.timeoutId);
+              attempt.controller.abort();
+              await this.waitBeforeTransientRetry(label, retry, error);
+              attempt = startAttempt();
+              continue;
+            }
+            clearTimeout(attempt.timeoutId);
+            const message = error instanceof Error ? error.message : String(error);
+            const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+            session.close({
+              finalStatus: "error",
+              errorMessage: message,
+              errorStack: stack,
+              totalTokens: { input: 0, output: 0 },
+              warnings: [],
+              parseFallbacks: [],
+            });
+            console.error("[LLMService.streamCall] Error:", error);
+            const wrapped = new Error(`LLM streamCall error: ${message}`);
+            (wrapped as Error & { cause?: unknown }).cause = error;
+            throw wrapped;
+          }
         }
       })();
 
@@ -1514,8 +1720,18 @@ export class LLMService {
     // awaits `result` — e.g. on abort/timeout or an unreachable provider.
     resultPromise.catch((err) => this.logger.warn(`streamCall result rejected: ${String(err)}`));
 
+    // Wrapped rather than handed over directly so that (a) the consumer's first
+    // pull marks the stream unrestartable, and (b) the `partialObjectStream`
+    // getter — one of three getters that lock the source on first access — is
+    // touched only if the consumer actually reads, and on whichever attempt
+    // finally connected.
+    async function* partialObjects(): AsyncGenerator<Partial<T>> {
+      consumerStarted = true;
+      for await (const partial of attempt.handle.partialObjectStream) yield partial as Partial<T>;
+    }
+
     return {
-      partialObjectStream: streamResult.partialObjectStream as AsyncIterable<Partial<T>>,
+      partialObjectStream: partialObjects(),
       result: resultPromise,
     };
   }
@@ -1619,20 +1835,34 @@ export class LLMService {
 
     session.startIteration("final-structured", []);
 
-    // Abort the stream if the provider stalls (see streamCall). The AbortError
-    // surfaces as a rejection on the awaited promises below (caught + logged).
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.attemptTimeoutMs(params.timeout));
+    const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
+    const label = `${(params.metadata?.nodeName as string) ?? "llm.streamText"}:${aiConfig.model}`;
 
-    const streamResult = streamText({
-      model,
-      system,
-      prompt: params.prompt,
-      temperature: params.temperature,
-      maxOutputTokens: params.maxTokens,
-      maxRetries: 2,
-      abortSignal: controller.signal,
-    });
+    // One attempt = one abort controller + one whole-stream timeout (see
+    // streamCall). The AbortError surfaces as a rejection on the awaited
+    // promises below (caught + logged).
+    const startAttempt = () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+      timeoutId.unref?.();
+      return {
+        controller,
+        timeoutId,
+        handle: streamText({
+          model,
+          system,
+          prompt: params.prompt,
+          temperature: params.temperature,
+          maxOutputTokens: params.maxTokens,
+          maxRetries: 2,
+          abortSignal: controller.signal,
+        }),
+      };
+    };
+    let attempt = startAttempt();
+    // See streamCall: a stream may only be restarted while the consumer has not
+    // yet read a single part.
+    let consumerStarted = false;
 
     const resultPromise: Promise<{
       text: string;
@@ -1640,51 +1870,64 @@ export class LLMService {
       tokenUsage: { input: number; output: number };
       modelWeight: ModelWeight;
     }> = (async () => {
-      try {
-        const text = await streamResult.text;
-        const reasoning = (await streamResult.reasoningText) ?? "";
-        const usage = await streamResult.usage;
-        const input = usage?.inputTokens ?? 0;
-        const output = usage?.outputTokens ?? 0;
-        const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
+      for (let retry = 0; ; retry++) {
+        try {
+          const text = await attempt.handle.text;
+          const reasoning = (await attempt.handle.reasoningText) ?? "";
+          const usage = await attempt.handle.usage;
+          const input = usage?.inputTokens ?? 0;
+          const output = usage?.outputTokens ?? 0;
+          const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
-        session.recordResponse({
-          content: text,
-          tokenUsage: { input, output },
-          finishReason: String(await streamResult.finishReason),
-        });
-        session.close({
-          finalStatus: "success",
-          totalTokens: { input, output, cached },
-          warnings: [],
-          parseFallbacks: [],
-        });
-        await this.persistUsage(
-          {
-            tokenUsageType: params.tokenUsageType,
-            relationshipId: params.relationshipId,
-            relationshipType: params.relationshipType,
-            modelWeight,
-          },
-          { input, output, cached },
-        );
+          session.recordResponse({
+            content: text,
+            tokenUsage: { input, output },
+            finishReason: String(await attempt.handle.finishReason),
+          });
+          session.close({
+            finalStatus: "success",
+            totalTokens: { input, output, cached },
+            warnings: [],
+            parseFallbacks: [],
+          });
+          clearTimeout(attempt.timeoutId);
+          await this.persistUsage(
+            {
+              tokenUsageType: params.tokenUsageType,
+              relationshipId: params.relationshipId,
+              relationshipType: params.relationshipType,
+              modelWeight,
+            },
+            { input, output, cached },
+          );
 
-        return { text, reasoning, tokenUsage: { input, output }, modelWeight };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
-        session.close({
-          finalStatus: "error",
-          errorMessage: message,
-          errorStack: stack,
-          totalTokens: { input: 0, output: 0 },
-          warnings: [],
-          parseFallbacks: [],
-        });
-        console.error("[LLMService.streamText] Error:", error);
-        throw new Error(`LLM streamText error: ${message}`);
-      } finally {
-        clearTimeout(timeoutId);
+          return { text, reasoning, tokenUsage: { input, output }, modelWeight };
+        } catch (error) {
+          // Restartable only while nothing has been delivered — see
+          // `consumerStarted`.
+          if (!consumerStarted && retry < TRANSIENT_RETRY_WAITS_MS.length && this.isTransientNetworkError(error)) {
+            clearTimeout(attempt.timeoutId);
+            attempt.controller.abort();
+            await this.waitBeforeTransientRetry(label, retry, error);
+            attempt = startAttempt();
+            continue;
+          }
+          clearTimeout(attempt.timeoutId);
+          const message = error instanceof Error ? error.message : String(error);
+          const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+          session.close({
+            finalStatus: "error",
+            errorMessage: message,
+            errorStack: stack,
+            totalTokens: { input: 0, output: 0 },
+            warnings: [],
+            parseFallbacks: [],
+          });
+          console.error("[LLMService.streamText] Error:", error);
+          const wrapped = new Error(`LLM streamText error: ${message}`);
+          (wrapped as Error & { cause?: unknown }).cause = error;
+          throw wrapped;
+        }
       }
     })();
 
@@ -1693,7 +1936,11 @@ export class LLMService {
     // resolve. Reasoning-capable models interleave `reasoning-delta` parts (e.g.
     // Ollama emits the full thinking trace before answer content).
     async function* normalizedStream(): AsyncGenerator<{ type: "text" | "reasoning"; delta: string }> {
-      for await (const part of streamResult.fullStream) {
+      // The first pull marks the stream unrestartable (see `consumerStarted`),
+      // and reads `attempt` late so a consumer that starts after a transient
+      // retry gets the stream that actually connected.
+      consumerStarted = true;
+      for await (const part of attempt.handle.fullStream) {
         if (part.type === "text-delta") {
           yield { type: "text", delta: part.text };
         } else if (part.type === "reasoning-delta") {
@@ -1870,16 +2117,13 @@ export class LLMService {
       };
 
       // Each provider invocation is bounded independently — the nudge retry is a
-      // second request and gets its own budget, not the leftovers of the first.
-      const invokeBounded = async (messages: BaseMessage[], attempt: string): Promise<AIMessage> => {
-        const controller = new AbortController();
-        return (await this.runBounded(
-          `extractViaTool:${params.tool.name}:${attempt}`,
-          attemptTimeoutMs,
-          controller,
-          () => bound.invoke(messages, { signal: controller.signal }),
+      // second request and gets its own budget, not the leftovers of the first —
+      // and each is retried on a transient network failure, with its own fresh
+      // abort controller per attempt.
+      const invokeBounded = async (messages: BaseMessage[], attempt: string): Promise<AIMessage> =>
+        (await this.runWithTransientRetry(`extractViaTool:${params.tool.name}:${attempt}`, attemptTimeoutMs, (signal) =>
+          bound.invoke(messages, { signal }),
         )) as AIMessage;
-      };
 
       let response = await invokeBounded(baseMessages, "attempt-1");
       let parsed = tryExtract(response);
@@ -1942,10 +2186,14 @@ export class LLMService {
   /**
    * Single-step model invocation with tools bound — the durable-checkpointing
    * counterpart to {@link call}'s internal tool loop. Performs exactly ONE
-   * model invocation (no tool execution, no loop, no retries, no structured
-   * output) and returns the raw AIMessage with any `tool_calls` untouched, so
-   * the caller (e.g. the operator agent) can checkpoint state and execute the
-   * tool calls itself.
+   * model STEP (no tool execution, no loop, no structured output) and returns
+   * the raw AIMessage with any `tool_calls` untouched, so the caller (e.g. the
+   * operator agent) can checkpoint state and execute the tool calls itself.
+   *
+   * "One step" is not "one socket": the step is bounded like every other call
+   * (per-attempt budget, watchdog, deadline) and re-issued on a transient
+   * network failure. What it never does is re-run the AGENT — the caller's
+   * checkpointed state is untouched either way.
    *
    * Reuses {@link call}'s model construction (`modelService.getLLM` +
    * `bindTools`) and `LLMCallDumper` hooks. Token usage for the step is
@@ -1989,10 +2237,18 @@ export class LLMService {
       outputSchemaName: "callStep",
     });
 
+    // This method used to be the ONE provider call in the service with no bound
+    // of any kind: no per-attempt budget on the model, no watchdog, no deadline.
+    // A stalled operator step therefore hung its durable run forever, which is
+    // exactly the failure `runBounded` exists to end — so it gets the same
+    // treatment as `call()`, plus the transient-network retry.
+    const attemptTimeoutMs = this.attemptTimeoutMs();
+    const label = `llm.callStep:${aiConfig.model}`;
     try {
       const baseModel = this.modelService.getLLM({
         temperature: params.temperature,
         modelWeight,
+        timeoutMs: attemptTimeoutMs,
       });
       const modelWithTools = params.tools.length > 0 ? baseModel.bindTools(params.tools) : baseModel;
 
@@ -2003,9 +2259,12 @@ export class LLMService {
 
       session.startIteration("tool-loop", conversationMessages);
 
-      const response = (await (params.metadata
-        ? modelWithTools.invoke(conversationMessages, { metadata: params.metadata })
-        : modelWithTools.invoke(conversationMessages))) as AIMessage;
+      const response = (await this.runWithTransientRetry(label, attemptTimeoutMs, (signal) =>
+        modelWithTools.invoke(
+          conversationMessages,
+          params.metadata ? { metadata: params.metadata, signal } : { signal },
+        ),
+      )) as AIMessage;
 
       const raw = response as unknown as LLMRawResponse;
       const input = raw.usage_metadata?.input_tokens ?? 0;

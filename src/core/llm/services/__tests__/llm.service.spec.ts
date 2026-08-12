@@ -380,6 +380,31 @@ describe("LLMService", () => {
       ).rejects.toThrow("LLM failed to return structured output");
     });
 
+    it("salvages a MAX_TOKENS truncation instead of losing the whole response", async () => {
+      // finish_reason "length" cuts the payload mid-value, so every JSON.parse
+      // rung above rejects a response whose completed entries were fine.
+      const listSchema = z.object({ facts: z.array(z.object({ text: z.string() })) });
+      const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          usage_metadata: { input_tokens: 100, output_tokens: 50 },
+          response_metadata: { finish_reason: "length" },
+          content: '{"facts":[{"text":"one"},{"text":"two"},{"text":"thr',
+        },
+      });
+
+      const result = await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema: listSchema,
+        systemPrompts: ["You are a helpful assistant"],
+      });
+
+      expect(result.facts).toEqual([{ text: "one" }, { text: "two" }]);
+      expect(warnSpy.mock.calls.some((c) => /truncation-repair/.test(String(c[0])))).toBe(true);
+      warnSpy.mockRestore();
+    });
+
     it("should handle tools when provided", async () => {
       const mockTool = {
         name: "test_tool",

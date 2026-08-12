@@ -395,3 +395,65 @@ describe("ModelService.supportsStrictStructuredOutput", () => {
     expect(svc.supportsStrictStructuredOutput(ModelWeight.Lite)).toBe(false);
   });
 });
+
+// === LLM client cache =====================================================
+describe("ModelService.getLLM client cache", () => {
+  const svcWith = (over: any = {}) => makeService({ ai: tier(over), aiLite: tier(), aiLarge: tier() });
+
+  it("returns the SAME instance for identical parameters", () => {
+    // getLLM used to build a fresh ChatOpenAI — and a fresh OpenAI SDK client
+    // with it — on every LLM call, which under worker load is thousands of
+    // short-lived clients on the heap.
+    const svc = svcWith();
+
+    expect(svc.getLLM({ temperature: 0.4 })).toBe(svc.getLLM({ temperature: 0.4 }));
+  });
+
+  it("keys on every parameter that is baked into the client", () => {
+    const svc = svcWith();
+    const base = svc.getLLM({ temperature: 0.4 });
+
+    expect(svc.getLLM({ temperature: 0.5 })).not.toBe(base);
+    // timeoutMs is baked into the client's own request budget — sharing across
+    // budgets would silently give a caller someone else's timeout.
+    expect(svc.getLLM({ temperature: 0.4, timeoutMs: 30_000 })).not.toBe(base);
+    expect(svc.getLLM({ temperature: 0.4, maxOutputTokens: 512 })).not.toBe(base);
+    expect(svc.getLLM({ temperature: 0.4, frequencyPenalty: 0.5 })).not.toBe(base);
+  });
+
+  it("keys on the RESOLVED reasoning effort, so both spellings share one entry", () => {
+    const svc = svcWith();
+
+    expect(svc.getLLM({ disableThinking: true })).toBe(svc.getLLM({ reasoningEffort: "none" }));
+  });
+
+  it("keeps the tiers apart", () => {
+    const svc = makeService({
+      ai: tier({ model: "normal" }),
+      aiLite: tier({ model: "lite" }),
+      aiLarge: tier({ model: "large" }),
+    });
+
+    expect(svc.getLLM({ modelWeight: ModelWeight.Lite })).not.toBe(svc.getLLM());
+  });
+
+  it("never shares a MOCK_AI model — FakeListChatModel walks a response list", () => {
+    const svc = makeService({ mock: true, ai: tier(), aiLite: tier(), aiLarge: tier() });
+
+    expect(svc.getLLM()).not.toBe(svc.getLLM());
+  });
+
+  it("never shares a region-pinned OpenRouter client — its escalating fetch is per call", () => {
+    // Attempt 1 hard-pins the provider and retries allow fallbacks; a shared
+    // instance would stay escalated for every later call.
+    const svc = svcWith({ provider: "openrouter", region: "together" });
+
+    expect(svc.getLLM()).not.toBe(svc.getLLM());
+  });
+
+  it("caches an unpinned OpenRouter client", () => {
+    const svc = svcWith({ provider: "openrouter", region: undefined });
+
+    expect(svc.getLLM()).toBe(svc.getLLM());
+  });
+});

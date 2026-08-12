@@ -140,9 +140,40 @@ interface LLMParameters {
   timeout?: number;
 }
 
+/**
+ * Safety valve for {@link ModelService.llmCache}. A key is built from a bounded
+ * set of resolved parameters (provider/endpoint/model/temperature/…), so the map
+ * cannot grow without bound in normal operation. Should a caller nevertheless
+ * sweep a continuous parameter (a per-call temperature, say), the cache would
+ * turn into the leak it exists to prevent — so past this many entries it is
+ * emptied and the anomaly is logged rather than silently retained.
+ */
+const LLM_CACHE_MAX_ENTRIES = 100;
+
 @Injectable()
 export class ModelService implements OnModuleInit {
   private cachedEmbedder?: EmbeddingsInterface;
+
+  /**
+   * Chat models built by {@link getLLM}, keyed on every parameter that is BAKED
+   * INTO the instance (see the key built there).
+   *
+   * Why: `getLLM` used to construct a fresh `ChatOpenAI` — and with it a fresh
+   * OpenAI SDK client, its agent and its fetch middleware — on every single LLM
+   * call. Under a worker load that is thousands of short-lived clients, which is
+   * heap the process never gets back quickly enough.
+   *
+   * Two constructions are deliberately NOT cached (both handled in `getLLM`):
+   * MOCK_AI's `FakeListChatModel` (stateful — it walks a response list, so
+   * sharing one across calls changes what tests see), and an OpenRouter tier
+   * with a pinned `region` (its `openRouterEscalatingFetch` closure is per-call
+   * BY DESIGN: attempt 1 hard-pins, retries allow fallbacks — sharing it would
+   * leave every later call permanently escalated).
+   *
+   * `unsupportedParamFetch` is share-safe: its learned verdicts live in a
+   * module-level map keyed by deployment, with no per-call state.
+   */
+  private readonly llmCache = new Map<string, BaseChatModel>();
 
   constructor(
     private readonly clsService: ClsService,
@@ -228,6 +259,11 @@ export class ModelService implements OnModuleInit {
    * Each model weight resolves its own full config block (provider, apiKey,
    * url, model, …), so different tiers can live on different providers.
    *
+   * Instances are CACHED per resolved parameter set (see {@link llmCache}) —
+   * identical parameters return the same client instead of building a new SDK
+   * client per call. MOCK_AI and region-pinned OpenRouter tiers always get a
+   * fresh instance; see the cache's docblock for why.
+   *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.2)
    *                             Lower = more deterministic, Higher = more creative
@@ -267,15 +303,55 @@ export class ModelService implements OnModuleInit {
       params?.reasoningEffort ??
       (params?.disableThinking ? "none" : undefined) ??
       normaliseConfiguredReasoningEffort(cfg.reasoningEffort);
-    return this.buildChatModel(cfg, {
+    const timeoutMs = params?.timeoutMs ?? this.aiConfig.requestTimeoutMs;
+
+    // An OpenRouter tier with a pinned region gets a FRESH instance every call:
+    // its escalating fetch is a per-call closure (attempt 1 hard-pins, retries
+    // allow fallbacks), so a shared instance would stay escalated forever.
+    const shareable = !(cfg.provider === "openrouter" && cfg.region);
+    // Keyed on the RESOLVED effort, never the raw disableThinking/reasoningEffort
+    // pair — two different spellings of the same effort must hit the same entry.
+    // `timeoutMs` and `frequencyPenalty` are part of the key because both are
+    // baked into the constructed client, not passed per invocation.
+    const cacheKey = [
+      cfg.provider,
+      cfg.instance ?? cfg.url,
+      cfg.model,
+      temperature,
+      maxOutputTokens ?? "",
+      params?.frequencyPenalty ?? "",
+      resolvedReasoningEffort ?? "",
+      timeoutMs,
+    ].join("|");
+
+    if (shareable) {
+      const cached = this.llmCache.get(cacheKey);
+      if (cached) return cached;
+    }
+
+    const model = this.buildChatModel(cfg, {
       temperature,
       maxOutputTokens,
       frequencyPenalty: params?.frequencyPenalty,
       credentialFileTag: "llm",
       disableThinking: params?.disableThinking,
       reasoningEffort: resolvedReasoningEffort,
-      timeoutMs: params?.timeoutMs ?? this.aiConfig.requestTimeoutMs,
+      timeoutMs,
     });
+
+    if (shareable) {
+      this.llmCache.set(cacheKey, model);
+      if (this.llmCache.size > LLM_CACHE_MAX_ENTRIES) {
+        this.llmCache.clear();
+        const warning =
+          `[ModelService] LLM client cache exceeded ${LLM_CACHE_MAX_ENTRIES} entries and was cleared — ` +
+          `a caller is varying a cached parameter (temperature / maxOutputTokens / frequencyPenalty / timeoutMs) per call`;
+        if (this.logger) this.logger.warn(warning, ModelService.name);
+        else console.warn(warning);
+      }
+    }
+
+    return model;
   }
 
   /**
