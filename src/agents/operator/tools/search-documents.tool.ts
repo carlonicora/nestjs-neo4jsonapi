@@ -1,6 +1,8 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { buildCallerAttribution } from "../../common/usage-attribution";
 import { ContextualiserService } from "../../contextualiser/services/contextualiser.service";
 import { ScopeGuard } from "../../graph/services/scope.guard";
 import { ToolCallRecord, ToolFactory } from "../../graph/tools/tool.factory";
@@ -55,6 +57,9 @@ export class SearchDocumentsTool {
             dataLimits: ctx.dataLimits,
             messages: ctx.messages,
             question: input.question,
+            // The contextualiser is a sub-agent: this spend is the OPERATOR's,
+            // billed to the operator's category against the turn's entity.
+            attribution: buildCallerAttribution({ tokenUsageType: TokenUsageType.Operator, source: ctx }),
           });
 
           const notebook = await this.dropOutOfScope(state.notebook ?? [], ctx);

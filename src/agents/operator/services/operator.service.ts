@@ -8,6 +8,8 @@ import { MessageInterface } from "../../../common/interfaces/message.interface";
 import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { buildScopeAttribution } from "../../common/usage-attribution";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
 import type { EntityReference } from "../../responder/interfaces/entity.reference.interface";
 import { OperatorCitation, OperatorContext, OperatorContextState } from "../contexts/operator.context";
@@ -101,6 +103,10 @@ export class OperatorService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** Neo4j label of the scope root, e.g. "Campaign". Present iff scopeId is. */
+    scopeLabel?: string;
+    /** Id of the `Assistant` (thread) node — the cost-attribution fallback for an unscoped turn. */
+    assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
   }): Promise<OperatorRunResult> {
@@ -115,6 +121,10 @@ export class OperatorService {
         messages: params.messages,
         scopeId: params.scopeId,
         scopeType: params.scopeType,
+        scopeLabel: params.scopeLabel,
+        // Completes the attribution the retrieval tools hand down to the
+        // contextualiser / DRIFT, so an unscoped turn still bills its thread.
+        assistantId: params.assistantId,
       },
       params.seedContexts,
     );
@@ -128,6 +138,8 @@ export class OperatorService {
       contentType: params.contentType ?? null,
       scopeId: params.scopeId,
       scopeType: params.scopeType,
+      scopeLabel: params.scopeLabel,
+      assistantId: params.assistantId,
       question: params.question,
     };
 
@@ -152,11 +164,20 @@ export class OperatorService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** Neo4j label of the scope root, e.g. "Campaign". Present iff scopeId is. */
+    scopeLabel?: string;
+    /** Id of the `Assistant` (thread) node — the cost-attribution fallback for an unscoped turn. */
+    assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
   }): Promise<OperatorRunResult> {
     // The resumed run rebuilds its tools from this context, so the scope must
     // be supplied again — the frozen checkpoint does not carry the closures.
+    // That includes the cost attribution: the operator's OWN calls read
+    // scopeLabel/assistantId back off the restored state, but the retrieval
+    // tools are rebuilt from this context alone, so without these two a resumed
+    // unscoped turn would lose the thread fallback for its SUB-AGENT spend
+    // while billing its own spend fine.
     const app = await this.compileGraph(
       {
         companyId: params.companyId,
@@ -168,6 +189,8 @@ export class OperatorService {
         messages: params.messages ?? [],
         scopeId: params.scopeId,
         scopeType: params.scopeType,
+        scopeLabel: params.scopeLabel,
+        assistantId: params.assistantId,
       },
       params.seedContexts,
     );
@@ -209,6 +232,13 @@ export class OperatorService {
           // instead of retrying (observed live with gemini-2.5-flash-lite).
           temperature: 0,
           metadata: { agent: "operator", node: "agent", companyId: state.companyId },
+          ...buildScopeAttribution({
+            tokenUsageType: TokenUsageType.Operator,
+            scopeId: state.scopeId,
+            scopeType: state.scopeType,
+            scopeLabel: state.scopeLabel,
+            assistantId: state.assistantId,
+          }),
         });
         return {
           messages: [response.message],
@@ -337,6 +367,13 @@ export class OperatorService {
             "If the conversation contains no tool results that answer the question, `answer` must say plainly that the information could not be found — do not guess and do not invent records. " +
             "Never state that an action was performed (created, updated, deleted, executed) unless a tool result in the conversation confirms that exact action.",
           metadata: { agent: "operator", node: "finalise", companyId: state.companyId },
+          ...buildScopeAttribution({
+            tokenUsageType: TokenUsageType.Operator,
+            scopeId: state.scopeId,
+            scopeType: state.scopeType,
+            scopeLabel: state.scopeLabel,
+            assistantId: state.assistantId,
+          }),
         });
 
         return {

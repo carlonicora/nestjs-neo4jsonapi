@@ -4,6 +4,7 @@ import { ContextualiserResponseInterface } from "../../contextualiser/interfaces
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
+import { CallerAttributionState } from "../../common/usage-attribution";
 
 @Injectable()
 export class ContextualiserContextFactoryService {
@@ -19,11 +20,22 @@ export class ContextualiserContextFactoryService {
     finalPrompt?: string;
     previousMessages: MessageInterface[];
     preselectedChunks?: string[];
+    /**
+     * Cost attribution INHERITED from the calling agent — its ledger category
+     * and its entity. Optional: a consumer that supplies none still runs, its
+     * spend is simply not recorded (same opt-in rule as the rest of the package).
+     */
+    attribution?: CallerAttributionState;
   }): ContextualiserContextState {
     const response: ContextualiserContextState = {
       companyId: params.companyId,
       contentId: params.contentId,
       contentType: params.contentType,
+      tokenUsageType: params.attribution?.tokenUsageType,
+      scopeId: params.attribution?.scopeId,
+      scopeType: params.attribution?.scopeType,
+      scopeLabel: params.attribution?.scopeLabel,
+      assistantId: params.attribution?.assistantId,
       hops: 0,
       previousAnalysis: "",
       previousAnswer: "",

@@ -15,6 +15,7 @@ import {
 } from "../../contextualiser/contexts/contextualiser.context";
 import { NotebookContext } from "../../contextualiser/contexts/notebook.context";
 import { CONTEXTUALISER_TOOLS } from "../interfaces/retrieval.source.interface";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultChunkPrompt = `
 As an intelligent assistant, your primary objective is to assess a specific **text chunk** and determine whether the available information suffices to answer the question.
@@ -171,6 +172,9 @@ export class ChunkNodeService {
           systemPrompts: [this.systemPrompt],
           temperature: 0.1,
           ...(this.contributedTools?.length ? { tools: this.contributedTools } : {}),
+          // Billed to the CALLING agent: its ledger category, its entity. Spread
+          // LAST so nothing above can overwrite the attribution.
+          ...buildInheritedAttribution(params.state),
         });
 
         if (params.state.contentType === "Conversation")

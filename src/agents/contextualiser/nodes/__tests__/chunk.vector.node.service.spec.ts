@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextualiserContextState } from "../../contexts/contextualiser.context";
 import { RetrievalSourceContribution } from "../../interfaces/retrieval.source.interface";
 import { ChunkVectorNodeService } from "../chunk.vector.node.service";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 const MOCK_COMPANY_ID = "550e8400-e29b-41d4-a716-446655440000";
 const MOCK_CONTENT_ID = "660e8400-e29b-41d4-a716-446655440001";
@@ -140,5 +141,40 @@ describe("ChunkVectorNodeService", () => {
 
     expect(result.notebook).toHaveLength(1);
     expect(result.tokens).toEqual({ input: 1, output: 1 });
+  });
+  // Embedding cost attribution (Task 8). The question embedding this node
+  // triggers is billed to the scope the retrieval searches.
+  describe("embedding cost attribution", () => {
+    it("bills the retrieval to the content the run is bound to", async () => {
+      modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as never);
+
+      await build().execute({ state: createState({ contentId: "campaign-1", contentType: "campaigns" }) });
+
+      expect(chunkRepository.findPotentialChunks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: { relationshipId: "campaign-1", relationshipType: "Campaign" },
+        }),
+      );
+    });
+
+    it("bills a help-mode retrieval to the HowTo it is limited to", async () => {
+      await build().execute({
+        state: createState({ contentId: "", contentType: "", limits: { howToMode: true, limitToHowToId: "howto-1" } }),
+      });
+
+      expect(chunkRepository.findPotentialChunks).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: { relationshipId: "howto-1", relationshipType: "HowTo" },
+        }),
+      );
+    });
+
+    it("records nothing for an unbound company-wide retrieval", async () => {
+      await build().execute({ state: createState({ contentId: "", contentType: "", limits: {} }) });
+
+      expect(chunkRepository.findPotentialChunks).toHaveBeenCalledWith(
+        expect.objectContaining({ attribution: undefined }),
+      );
+    });
   });
 });

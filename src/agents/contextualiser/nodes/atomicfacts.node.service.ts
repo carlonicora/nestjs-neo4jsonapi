@@ -14,6 +14,7 @@ import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultAtomicFactsPrompt = `
 As an intelligent assistant, your primary objective is to evaluate the atomic facts provided, to determine whether they are contextually relevant to the user question.
@@ -166,6 +167,9 @@ export class AtomicFactsNodeService {
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],
           temperature: 0.1,
+          // Billed to the CALLING agent: its ledger category, its entity. Spread
+          // LAST so nothing above can overwrite the attribution.
+          ...buildInheritedAttribution(params.state),
         });
 
         const chunkIds = new Set<string>();

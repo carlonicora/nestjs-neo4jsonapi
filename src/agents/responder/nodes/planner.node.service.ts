@@ -3,6 +3,8 @@ import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { buildScopeAttribution } from "../../common/usage-attribution";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { ResponderContextState } from "../contexts/responder.context";
 
@@ -82,6 +84,13 @@ export class PlannerNodeService {
           agentName: "responder",
           userQuestion: state.rawQuestion,
         },
+        ...buildScopeAttribution({
+          tokenUsageType: TokenUsageType.Responder,
+          scopeId: state.scopeId,
+          scopeType: state.scopeType,
+          scopeLabel: state.scopeLabel,
+          assistantId: state.assistantId,
+        }),
       });
 
       const branchPlan = {

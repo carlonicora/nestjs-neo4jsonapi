@@ -20,6 +20,14 @@ export const ResponderContext = Annotation.Root({
   scopeId: Annotation<string | undefined>,
   /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
   scopeType: Annotation<string | undefined>,
+  /** Neo4j label of the scope root, e.g. "Campaign". Present iff scopeId is. */
+  scopeLabel: Annotation<string | undefined>,
+  /**
+   * Id of the `Assistant` (thread) node this turn belongs to. Cost attribution
+   * falls back to it when the turn has no scope root, so an unscoped turn still
+   * bills. Absent only for callers that drive the responder outside a thread.
+   */
+  assistantId: Annotation<string | undefined>,
   /** App-provided context blocks guaranteed present this turn (seed-context providers). */
   seedContexts: Annotation<AssistantSeedContext[] | undefined>,
   dataLimits: Annotation<DataLimits>(),

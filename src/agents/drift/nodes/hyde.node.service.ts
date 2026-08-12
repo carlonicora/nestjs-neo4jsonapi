@@ -7,6 +7,7 @@ import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
 import { DriftContext, DriftContextState } from "../contexts/drift.context";
+import { buildInheritedAttribution, buildInheritedEmbedderAttribution } from "../../common/usage-attribution";
 
 export const defaultHydePrompt = `
 You are a knowledge synthesis expert. Given a question, generate a hypothetical answer
@@ -88,11 +89,18 @@ export class HydeNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.5,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(params.state),
     });
 
-    // Generate embedding for the hypothetical answer
+    // Generate embedding for the hypothetical answer. Task 8 left this site
+    // unattributed because the DRIFT state held nothing to bill it to; it now
+    // carries the caller's, so the embedding lands on the same entity as the
+    // LLM call above. Absent attribution => `undefined` => nothing recorded.
     const embedding = await this.embedderService.vectoriseText({
       text: llmResponse.hypotheticalAnswer,
+      attribution: buildInheritedEmbedderAttribution(params.state),
     });
 
     this.logger.debug(

@@ -30,6 +30,14 @@ export interface OperatorRetrievalContext extends UserContext {
   contentType?: string;
   dataLimits: DataLimits;
   messages: MessageInterface[];
+  /**
+   * Id of the `Assistant` (thread) node this turn belongs to. `UserContext`
+   * already carries the scope triple; this completes the attribution the
+   * retrieval tools hand DOWN to the contextualiser / DRIFT, which bill their
+   * caller. Optional — an absent one falls back to the scope root, and an
+   * absent scope root means the sub-agent's spend is not recorded.
+   */
+  assistantId?: string;
 }
 
 /**

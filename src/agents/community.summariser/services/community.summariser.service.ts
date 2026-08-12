@@ -6,7 +6,9 @@ import { EmbedderService } from "../../../core";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Community } from "../../../foundations/community/entities/community.entity";
+import { communityMeta } from "../../../foundations/community/entities/community.meta";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 
 export const prompt = `
 You are an expert knowledge analyst tasked with summarizing a community of related entities from a knowledge graph.
@@ -131,11 +133,21 @@ export class CommunitySummariserService {
       outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.3,
+      tokenUsageType: TokenUsageType.CommunitySummariser,
+      relationshipId: community.id,
+      relationshipType: communityMeta.labelName,
     });
 
-    // Generate embedding for the summary
+    // Generate embedding for the summary. Same ledger category as the call above so one
+    // community's summary reads as one cost; billed against the community itself — this
+    // agent is cron-driven with no calling agent to inherit attribution from.
     const embedding = await this.embedderService.vectoriseText({
       text: `${llmResponse.title}\n\n${llmResponse.summary}`,
+      attribution: {
+        relationshipId: community.id,
+        relationshipType: communityMeta.labelName,
+        tokenUsageType: TokenUsageType.CommunitySummariser,
+      },
     });
 
     // Update the community with summary and embedding

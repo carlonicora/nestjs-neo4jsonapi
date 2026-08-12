@@ -11,6 +11,12 @@ export interface UserContext {
   scopeId?: string;
   /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
   scopeType?: string;
+  /**
+   * Neo4j label of the scope root, e.g. "Campaign". Carried alongside
+   * `scopeType` (the catalog resolves both at build time) so cost attribution
+   * does not have to re-derive it through the model registry.
+   */
+  scopeLabel?: string;
 }
 
 export interface ToolCallRecord {

@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { GraphSearchService, buildResolveRecommendation, RankedCandidate } from "../graph.search.service";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 function makeEntity(type: string, labelName: string, moduleId: string, summary?: (d: any) => string) {
   return {
@@ -361,5 +362,78 @@ describe("buildResolveRecommendation", () => {
       "exact",
     );
     expect(out).toMatch(/literal phrase/);
+  });
+  // Embedding cost attribution (Task 8). The semantic tier embeds the user's
+  // text; that spend is billed to the run's SCOPE ROOT. `scopeType` is a
+  // JSON:API type and a TokenUsage record's USED_FOR edge is matched on the
+  // Neo4j LABEL, so it must be translated through the registry.
+  describe("embedding cost attribution", () => {
+    const semanticOnlyNeo4j = () => ({
+      read: vi.fn().mockImplementation(async (cypher: string) => {
+        if (cypher.includes("db.index.vector.queryNodes")) {
+          return {
+            records: [{ get: (k: string) => (({ id: "a3", properties: { name: "ACME" }, score: 0.82 }) as any)[k] }],
+          };
+        }
+        return { records: [] };
+      }),
+    });
+
+    it("bills the query embedding to the run's scope root, as a Neo4j label", async () => {
+      modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as never);
+      const scoped = makeEntity("accounts", "Account", "11111111-1111-1111-1111-111111111111", (d: any) => d.name);
+      scoped.scope = { rootType: "campaigns", path: [] };
+      const scopedCatalog: any = { getAllChatEnabledEntities: vi.fn(() => [scoped]) };
+
+      const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
+      const scopeGuard = {
+        filterToScope: vi.fn(async (items: unknown[]) => items),
+        scopeClauseFor: vi.fn(() => undefined),
+      };
+      const svc = new GraphSearchService(
+        semanticOnlyNeo4j() as any,
+        embedder as any,
+        indexNames as any,
+        scopedCatalog,
+        scopeGuard as any,
+      );
+
+      await svc.resolveEntity({
+        text: "the German guys",
+        companyId: "co1",
+        userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+        scopeId: "campaign-1",
+        scopeType: "campaigns",
+      });
+
+      expect(embedder.vectoriseText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: expect.objectContaining({ relationshipId: "campaign-1", relationshipType: "Campaign" }),
+        }),
+      );
+    });
+
+    it("records nothing for an unscoped run — there is no entity to bill", async () => {
+      const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
+      const unscopedCatalog: any = {
+        getAllChatEnabledEntities: vi.fn(() => [
+          makeEntity("accounts", "Account", "11111111-1111-1111-1111-111111111111", (d: any) => d.name),
+        ]),
+      };
+      const svc = new GraphSearchService(
+        semanticOnlyNeo4j() as any,
+        embedder as any,
+        indexNames as any,
+        unscopedCatalog,
+      );
+
+      await svc.resolveEntity({
+        text: "the German guys",
+        companyId: "co1",
+        userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+      });
+
+      expect(embedder.vectoriseText).toHaveBeenCalledWith({ text: "the German guys", attribution: undefined });
+    });
   });
 });

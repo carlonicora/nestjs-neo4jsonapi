@@ -512,4 +512,143 @@ describe("DriftSearchService", () => {
       );
     });
   });
+
+  /**
+   * The SEEDING junction (Task 10). The node specs prove each node applies the
+   * attribution it finds on its state; this proves `search()` is what PUTS it
+   * there. Without these, deleting the five assignments in `initialState` breaks
+   * billing in production and fails no test.
+   */
+  describe("caller attribution seeding", () => {
+    const driveToEnd = () => {
+      hydeNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ hydeEmbedding: [], nextStep: "community_search" }, state),
+      );
+      communitySearchNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ matchedCommunities: [], nextStep: "primer_answer" }, state),
+      );
+      primerAnswerNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ nextStep: "synthesis", confidence: 0.5 }, state),
+      );
+      synthesisNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ finalAnswer: "Answer", nextStep: "end" }, state),
+      );
+    };
+
+    it("seeds the caller's attribution into the state every node receives", async () => {
+      driveToEnd();
+
+      await service.search({
+        question: "Test",
+        attribution: {
+          tokenUsageType: "responder",
+          scopeId: "campaign-1",
+          scopeType: "campaigns",
+          scopeLabel: "Campaign",
+          assistantId: "assistant-1",
+        },
+      });
+
+      // Asserted on EVERY node, not just the first: the channels must survive
+      // the reducers for the whole run, or later nodes bill nothing.
+      for (const node of [hydeNode, communitySearchNode, primerAnswerNode, synthesisNode]) {
+        expect(node.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            state: expect.objectContaining({
+              tokenUsageType: "responder",
+              scopeId: "campaign-1",
+              scopeType: "campaigns",
+              scopeLabel: "Campaign",
+              assistantId: "assistant-1",
+            }),
+          }),
+        );
+      }
+    });
+
+    it("leaves the attribution channels undefined when the caller supplies none", async () => {
+      driveToEnd();
+
+      await service.search({ question: "Test" });
+
+      const state = hydeNode.execute.mock.calls[0][0].state;
+      expect(state.tokenUsageType).toBeUndefined();
+      expect(state.scopeId).toBeUndefined();
+      expect(state.assistantId).toBeUndefined();
+    });
+
+    it("forwards the attribution through quickSearch too", async () => {
+      driveToEnd();
+
+      await service.quickSearch({ question: "Test", attribution: { scopeId: "campaign-1", scopeLabel: "Campaign" } });
+
+      expect(hydeNode.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({ scopeId: "campaign-1", scopeLabel: "Campaign" }),
+        }),
+      );
+    });
+  });
+
+  /**
+   * Logging must be PROPORTIONATE: an MCP tool call names no entity on every
+   * single request and is right to, so it must not warn. A caller that names
+   * something unbillable is a real fault and must.
+   */
+  describe("unattributed-run logging", () => {
+    const driveToEnd = () => {
+      hydeNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ nextStep: "community_search" }, state),
+      );
+      communitySearchNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ matchedCommunities: [], nextStep: "primer_answer" }, state),
+      );
+      primerAnswerNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ nextStep: "synthesis" }, state),
+      );
+      synthesisNode.execute.mockImplementation(async ({ state }) =>
+        createPartialState({ finalAnswer: "A", nextStep: "end" }, state),
+      );
+    };
+
+    it("does NOT warn when the caller names no entity at all (the MCP path)", async () => {
+      driveToEnd();
+
+      await service.search({ question: "Test", attribution: { tokenUsageType: "operator" } });
+
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("no cost attribution"), "DriftSearchService");
+    });
+
+    it("does not warn for a completely absent attribution either", async () => {
+      driveToEnd();
+
+      await service.search({ question: "Test" });
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("WARNS when the caller names an entity that cannot be billed", async () => {
+      driveToEnd();
+
+      // A scopeId whose type no model claims: looks attributed, records nothing.
+      await service.search({
+        question: "Test",
+        attribution: { tokenUsageType: "responder", scopeId: "widget-1", scopeType: "widgets" },
+      });
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("UNRESOLVABLE cost attribution"),
+        "DriftSearchService",
+      );
+    });
+
+    it("does not warn on a billable run", async () => {
+      driveToEnd();
+
+      await service.search({ question: "Test", attribution: { scopeId: "campaign-1", scopeLabel: "Campaign" } });
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
 });

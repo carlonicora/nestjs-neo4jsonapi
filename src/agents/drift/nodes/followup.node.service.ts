@@ -6,6 +6,7 @@ import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
 import { DriftContext, DriftContextState, FollowUpAnswer } from "../contexts/drift.context";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultFollowupPrompt = `
 You are a knowledge analyst conducting a detailed investigation.
@@ -109,6 +110,9 @@ export class FollowUpNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.3,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(state),
     });
 
     // Create the follow-up answer record

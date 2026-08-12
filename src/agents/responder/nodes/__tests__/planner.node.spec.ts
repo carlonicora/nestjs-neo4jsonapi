@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { PlannerNodeService, defaultPlannerPrompt } from "../planner.node.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 describe("PlannerNodeService", () => {
   const llm = { call: vi.fn() } as unknown as LLMService;
@@ -111,6 +112,73 @@ describe("PlannerNodeService", () => {
     const promptBlob = JSON.stringify(callArgs);
     expect(promptBlob).toContain("projects");
     expect(promptBlob).toContain("abc-123");
+  });
+
+  describe("usage attribution", () => {
+    beforeEach(() => {
+      modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
+    });
+
+    it("bills the planner call to the run's scope root, translated to its Neo4j label", async () => {
+      (llm.call as unknown as Mock).mockResolvedValue({
+        runGraph: true,
+        runContextualiser: false,
+        runDrift: false,
+        reasoning: "r",
+        refinedQuestion: "q",
+      });
+
+      await service.execute({
+        state: { userModuleIds: [], chatHistory: [], rawQuestion: "q", scopeId: "campaign-1", scopeType: "campaigns" },
+      } as any);
+
+      expect(llm.call).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenUsageType: "responder",
+          relationshipId: "campaign-1",
+          relationshipType: "Campaign",
+        }),
+      );
+    });
+
+    it("falls back to the assistant thread when the turn has no scope root", async () => {
+      (llm.call as unknown as Mock).mockResolvedValue({
+        runGraph: true,
+        runContextualiser: false,
+        runDrift: false,
+        reasoning: "r",
+        refinedQuestion: "q",
+      });
+
+      await service.execute({
+        state: { userModuleIds: [], chatHistory: [], rawQuestion: "q", assistantId: "assistant-1" },
+      } as any);
+
+      expect(llm.call).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenUsageType: "responder",
+          relationshipId: "assistant-1",
+          relationshipType: "Assistant",
+        }),
+      );
+    });
+
+    it("leaves the relationship unset when there is neither a scope nor a thread", async () => {
+      (llm.call as unknown as Mock).mockResolvedValue({
+        runGraph: true,
+        runContextualiser: false,
+        runDrift: false,
+        reasoning: "r",
+        refinedQuestion: "q",
+      });
+
+      await service.execute({ state: { userModuleIds: [], chatHistory: [], rawQuestion: "q" } } as any);
+
+      const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+      expect(callArgs.tokenUsageType).toBe("responder");
+      expect(callArgs.relationshipId).toBeUndefined();
+      expect(callArgs.relationshipType).toBeUndefined();
+    });
   });
 
   describe("prompt slot", () => {

@@ -5,6 +5,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { DriftContext, DriftContextState } from "../contexts/drift.context";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultPrimerPrompt = `
 You are a knowledge synthesis expert analyzing community reports from a knowledge graph.
@@ -85,6 +86,9 @@ export class PrimerAnswerNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.3,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(params.state),
     });
 
     this.logger.debug(

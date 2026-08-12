@@ -3,6 +3,8 @@ import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { buildScopeAttribution } from "../../common/usage-attribution";
 import { ResponderContext, ResponderContextState } from "../../responder/contexts/responder.context";
 import type { EntityReference } from "../interfaces/entity.reference.interface";
 
@@ -304,6 +306,13 @@ export class ResponderAnswerNodeService {
         agentName: "responder",
         userQuestion: state.question,
       },
+      ...buildScopeAttribution({
+        tokenUsageType: TokenUsageType.Responder,
+        scopeId: state.scopeId,
+        scopeType: state.scopeType,
+        scopeLabel: state.scopeLabel,
+        assistantId: state.assistantId,
+      }),
     });
 
     // Sources — chunks from the contextualiser branch

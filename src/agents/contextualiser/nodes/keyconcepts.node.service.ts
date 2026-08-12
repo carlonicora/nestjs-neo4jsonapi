@@ -7,6 +7,7 @@ import { LLMService } from "../../../core/llm/services/llm.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { KeyConcept } from "../../../foundations/keyconcept/entities/key.concept.entity";
 import { KeyConceptRepository } from "../../../foundations/keyconcept/repositories/keyconcept.repository";
+import { buildInheritedAttribution, buildRetrievalAttribution } from "../../common/usage-attribution";
 import {
   ContextualiserContext,
   ContextualiserContextState,
@@ -99,6 +100,13 @@ export class KeyConceptsNodeService {
       keyConcepts = await this.keyConceptRepository.findPotentialKeyConcepts({
         question: params.state.question,
         dataLimits: params.state.limits,
+        // Billed to the scope this retrieval searches — see chunk.vector.node.service.
+        attribution: buildRetrievalAttribution({
+          contentId: params.state.contentId,
+          contentType: params.state.contentType,
+          dataLimits: params.state.limits,
+          scope: params.state,
+        }),
       });
       this.logger.log(
         `findPotentialKeyConcepts → ${keyConcepts.length} concepts ` +
@@ -155,6 +163,9 @@ export class KeyConceptsNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(params.state),
     });
 
     if (params.state.contentType === "Conversation")

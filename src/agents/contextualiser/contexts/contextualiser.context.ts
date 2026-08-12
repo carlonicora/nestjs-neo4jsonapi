@@ -6,11 +6,44 @@ import { PromptContext } from "../../contextualiser/contexts/prompt.context";
 import { RequestContext } from "../../contextualiser/contexts/request.context";
 import { TokenUsageContext } from "../../../common/contexts/tokenusage.context";
 import { DataLimits } from "../../../common/types/data.limits";
+import { CallerAttributionState } from "../../common/usage-attribution";
 
 export const ContextualiserContext = Annotation.Root({
   companyId: Annotation<string>({
     default: () => undefined,
     reducer: (current) => current,
+  }),
+  // ---------------------------------------------------------------------------
+  // Cost attribution INHERITED from the calling agent. The contextualiser is a
+  // sub-agent: it never bills on its own behalf, so it carries the caller's
+  // ledger category and the caller's entity and applies them at every LLM call
+  // it makes. All four are absent when a consumer drives the contextualiser
+  // directly without attribution — its spend is then simply not recorded.
+  // ---------------------------------------------------------------------------
+  /** Ledger category of the CALLING agent, e.g. `TokenUsageType.Responder`. */
+  tokenUsageType: Annotation<string | undefined>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
+  }),
+  /** Id of the caller's scope-root node. Absent = the caller ran unscoped. */
+  scopeId: Annotation<string | undefined>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
+  }),
+  /** JSON:API type of the caller's scope root, e.g. "campaigns". */
+  scopeType: Annotation<string | undefined>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
+  }),
+  /** Neo4j label of the caller's scope root, e.g. "Campaign". */
+  scopeLabel: Annotation<string | undefined>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
+  }),
+  /** Id of the caller's `Assistant` (thread) node — the unscoped fallback. */
+  assistantId: Annotation<string | undefined>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
   }),
   contentId: Annotation<string>({
     default: () => undefined,
@@ -195,4 +228,18 @@ export const ContextualiserContext = Annotation.Root({
   }),
 });
 
-export type ContextualiserContextState = typeof ContextualiserContext.State;
+/**
+ * LangGraph's `StateType` makes EVERY channel a required property, so adding a
+ * channel to the root above would add a required key to this published type and
+ * break any consumer that builds a state literal. The attribution channels are
+ * therefore re-declared through {@link CallerAttributionState}, where they are
+ * optional — the state still carries them, existing literals still compile.
+ *
+ * {@link ContextualiserGraphState} is the un-widened shape LangGraph itself
+ * hands to a node callback; the graph wiring uses it so the callback signatures
+ * still match `StateGraph`'s required-property view.
+ */
+export type ContextualiserGraphState = typeof ContextualiserContext.State;
+
+export type ContextualiserContextState = Omit<ContextualiserGraphState, keyof CallerAttributionState> &
+  CallerAttributionState;

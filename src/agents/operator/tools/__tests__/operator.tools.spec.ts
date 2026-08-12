@@ -61,6 +61,15 @@ describe("SearchDocumentsTool", () => {
       dataLimits: ctx.dataLimits,
       messages: ctx.messages,
       question: "When did Acme sign?",
+      // The contextualiser bills its CALLER: the operator's category, the
+      // operator turn's entity (Task 10).
+      attribution: {
+        tokenUsageType: "operator",
+        scopeId: undefined,
+        scopeType: undefined,
+        scopeLabel: undefined,
+        assistantId: undefined,
+      },
     });
   });
 
@@ -152,9 +161,23 @@ describe("SearchCommunitiesTool", () => {
     const tool = new SearchCommunitiesTool(factory, { search } as any);
     const recorder: ToolCallRecord[] = [];
 
-    const answer = await tool.invoke({ question: "What do communities say?" }, recorder);
+    const answer = await tool.invoke({ question: "What do communities say?" }, recorder, {
+      ...ctx,
+      scopeId: "campaign-1",
+      scopeLabel: "Campaign",
+    });
 
-    expect(search).toHaveBeenCalledWith({ question: "What do communities say?" });
+    // DRIFT bills its CALLER: the operator's category, the operator turn's entity (Task 10).
+    expect(search).toHaveBeenCalledWith({
+      question: "What do communities say?",
+      attribution: {
+        tokenUsageType: "operator",
+        scopeId: "campaign-1",
+        scopeType: undefined,
+        scopeLabel: "Campaign",
+        assistantId: undefined,
+      },
+    });
     expect(answer).toBe("Communities say hello.");
     expect(recorder).toHaveLength(1);
     expect(recorder[0].tool).toBe("search_communities");

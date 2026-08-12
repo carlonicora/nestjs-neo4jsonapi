@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { EmbedderService } from "../../../core/llm/services/embedder.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { buildEmbedderAttribution } from "../../common/usage-attribution";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphIndexManager } from "./graph.index.manager";
 import { GraphCatalogService } from "./graph.catalog.service";
@@ -314,7 +315,15 @@ export class GraphSearchService {
     if (existing.size > 0 && !existing.has(indexName)) {
       return { matchMode: "semantic", items: [] };
     }
-    const queryEmbedding = await this.embedder.vectoriseText({ text: params.text });
+    // Query-time embedding: billed to the run's SCOPE ROOT, which `runSearch`
+    // already carries. `scopeType` is a JSON:API type ("campaigns") and the
+    // `USED_FOR` edge is matched on the label ("Campaign"), so it goes through
+    // the registry. An unscoped run has no honest entity to name, and
+    // `persistUsage` then records nothing.
+    const queryEmbedding = await this.embedder.vectoriseText({
+      text: params.text,
+      attribution: buildEmbedderAttribution({ entityId: params.scopeId, entityIdentifier: params.scopeType }),
+    });
 
     // Scope narrows the company predicate — it is appended to it, never a
     // replacement. Every value stays parameterised.

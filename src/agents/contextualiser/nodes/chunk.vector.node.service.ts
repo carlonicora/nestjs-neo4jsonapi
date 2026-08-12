@@ -7,6 +7,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { ChunkRepository } from "../../../foundations/chunk/repositories/chunk.repository";
+import { buildInheritedAttribution, buildRetrievalAttribution } from "../../common/usage-attribution";
 import {
   ContextualiserContext,
   ContextualiserContextState,
@@ -103,6 +104,17 @@ export class ChunkVectorNodeService {
       this.chunkRepository.findPotentialChunks({
         question: params.state.question,
         dataLimits: params.state.limits,
+        // The question embedding is billed to the scope this retrieval searches.
+        // Task 10 threaded the CALLING agent's own attribution through this
+        // state, and it is now the first branch of the derivation: when another
+        // agent confined the turn to a scope root, its embedding spend lands on
+        // the same entity as its LLM spend instead of on a second one.
+        attribution: buildRetrievalAttribution({
+          contentId: params.state.contentId,
+          contentType: params.state.contentType,
+          dataLimits: params.state.limits,
+          scope: params.state,
+        }),
       }),
       Promise.all(
         (this.retrievalSources ?? []).map((source) =>
@@ -164,6 +176,9 @@ export class ChunkVectorNodeService {
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],
           temperature: 0.1,
+          // Billed to the CALLING agent: its ledger category, its entity. Spread
+          // LAST so nothing above can overwrite the attribution.
+          ...buildInheritedAttribution(params.state),
         });
 
         if (params.state.contentType === "Conversation")

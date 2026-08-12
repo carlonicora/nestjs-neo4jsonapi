@@ -3,6 +3,7 @@ import { Test } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { ResponderAnswerNodeService } from "../responder.answer.node.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 interface LLMResponse {
   title: string;
@@ -126,6 +127,46 @@ describe("ResponderAnswerNodeService.execute", () => {
       ],
     }).compile();
     service = moduleRef.get(ResponderAnswerNodeService);
+  });
+
+  it("bills the answer node to the conversation scope, translated to its Neo4j label", async () => {
+    modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({ state: buildState({ scopeId: "campaign-1", scopeType: "campaigns" }) });
+
+    expect(llm.call).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenUsageType: "responder",
+        relationshipId: "campaign-1",
+        relationshipType: "Campaign",
+      }),
+    );
+  });
+
+  it("falls back to the assistant thread when the turn has no scope root", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({ state: buildState({ assistantId: "assistant-1" }) });
+
+    expect(llm.call).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenUsageType: "responder",
+        relationshipId: "assistant-1",
+        relationshipType: "Assistant",
+      }),
+    );
+  });
+
+  it("leaves the answer node's relationship unset when there is neither a scope nor a thread", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({ state: buildState({}) });
+
+    const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+    expect(callArgs.tokenUsageType).toBe("responder");
+    expect(callArgs.relationshipId).toBeUndefined();
+    expect(callArgs.relationshipType).toBeUndefined();
   });
 
   it("graph-only: graphSection uses [ref:N] handles + JSON fields; refs map back to (type,id)", async () => {

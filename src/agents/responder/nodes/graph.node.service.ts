@@ -3,6 +3,8 @@ import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { LLMService } from "../../../core/llm/services/llm.service";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { buildScopeAttribution } from "../../common/usage-attribution";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { ToolFactory, ToolCallRecord } from "../../graph/tools/tool.factory";
 import { ResolveEntityTool } from "../../graph/tools/resolve-entity.tool";
@@ -151,6 +153,7 @@ export class GraphNodeService {
         maxToolIterations: MAX_TOOL_ITERATIONS,
         temperature: 0.1,
         metadata: this.buildMetadata(state),
+        ...this.attribution(state),
       });
 
       // Zero-tool-call retry: the first attempt produced no searches at all.
@@ -170,6 +173,7 @@ export class GraphNodeService {
           maxToolIterations: MAX_TOOL_ITERATIONS,
           temperature: 0.1,
           metadata: this.buildMetadata(state),
+          ...this.attribution(state),
         });
       }
 
@@ -203,6 +207,7 @@ If the error lists valid fields or relationships, pick one of those and retry no
           maxToolIterations: MAX_TOOL_ITERATIONS,
           temperature: 0.1,
           metadata: this.buildMetadata(state),
+          ...this.attribution(state),
         });
       }
 
@@ -241,6 +246,7 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
           maxToolIterations: MAX_TOOL_ITERATIONS,
           temperature: 0.1,
           metadata: this.buildMetadata(state),
+          ...this.attribution(state),
         });
       }
 
@@ -334,6 +340,21 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
       tokens: out.tokens,
       ...(materialisedBridges.length ? { materialisedBridges } : {}),
     };
+  }
+
+  /**
+   * Cost attribution for EVERY llm.call this node makes. The retries below the
+   * first pass are billed by the provider exactly like the first one, so each
+   * carries the same attribution.
+   */
+  private attribution(state: ResponderContextState) {
+    return buildScopeAttribution({
+      tokenUsageType: TokenUsageType.Responder,
+      scopeId: state.scopeId,
+      scopeType: state.scopeType,
+      scopeLabel: state.scopeLabel,
+      assistantId: state.assistantId,
+    });
   }
 
   private buildMetadata(state: ResponderContextState) {

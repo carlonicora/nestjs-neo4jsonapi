@@ -7,6 +7,8 @@ import { EmbedderService } from "../../../../core";
 import { CommunityRepository } from "../../../../foundations/community/repositories/community.repository";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { Community } from "../../../../foundations/community/entities/community.entity";
+import { communityMeta } from "../../../../foundations/community/entities/community.meta";
+import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
 
 describe("CommunitySummariserService", () => {
   let service: CommunitySummariserService;
@@ -314,7 +316,49 @@ describe("CommunitySummariserService", () => {
       // Assert
       expect(embedderService.vectoriseText).toHaveBeenCalledWith({
         text: "Test Title\n\nTest Summary Content",
+        attribution: {
+          relationshipId: TEST_IDS.communityId,
+          relationshipType: communityMeta.labelName,
+          tokenUsageType: TokenUsageType.CommunitySummariser,
+        },
       });
+    });
+
+    it("bills both the summary call and its embedding to the community", async () => {
+      // Arrange
+      const community = createMockCommunity();
+      const members = [{ id: "kc1", value: "Concept 1" }];
+
+      communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
+      communityRepository.findMemberRelationships.mockResolvedValue([]);
+      llmService.call.mockResolvedValue({
+        title: "Test Title",
+        summary: "Test Summary",
+        rating: 75,
+      });
+      embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
+      communityRepository.updateSummary.mockResolvedValue(undefined);
+
+      // Act
+      await service.generateSummary(community);
+
+      // Assert
+      expect(llmService.call).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenUsageType: TokenUsageType.CommunitySummariser,
+          relationshipId: TEST_IDS.communityId,
+          relationshipType: "Community",
+        }),
+      );
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: expect.objectContaining({
+            tokenUsageType: TokenUsageType.CommunitySummariser,
+            relationshipId: TEST_IDS.communityId,
+            relationshipType: "Community",
+          }),
+        }),
+      );
     });
 
     it("should truncate title to 50 characters", async () => {

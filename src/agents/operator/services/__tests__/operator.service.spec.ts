@@ -11,8 +11,10 @@ import { OperatorCheckpointerService } from "../operator.checkpointer.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
+import type { OperatorContextState } from "../../contexts/operator.context";
 import type { OperatorToolCallRecord, OperatorToolDefinition } from "../../interfaces/operator.tool.interface";
 import type { ToolCallRecord } from "../../../graph/tools/tool.factory";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 function aiMessageWithToolCall(name: string, args: Record<string, unknown>, id = "call_1"): AIMessage {
   return new AIMessage({
@@ -162,6 +164,58 @@ describe("OperatorService", () => {
     expect(finaliseArgs.instructions).toContain("{conversation}");
     expect(finaliseArgs.inputParams).toHaveProperty("question");
     expect(finaliseArgs.inputParams).toHaveProperty("conversation");
+  });
+
+  describe("usage attribution", () => {
+    beforeEach(() => {
+      modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
+    });
+
+    const completeOneTurn = async (scope: { scopeId?: string; scopeType?: string; assistantId?: string }) => {
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
+      llmCall.mockResolvedValueOnce({
+        answer: "done",
+        questions: [],
+        tokenUsage: { input: 5, output: 5 },
+        modelWeight: ModelWeight.Normal,
+      });
+      await service.run({ ...baseParams, ...scope });
+    };
+
+    it("bills both the agent step and the finalise call to the run's scope root", async () => {
+      await completeOneTurn({ scopeId: "campaign-1", scopeType: "campaigns" });
+
+      const expected = {
+        tokenUsageType: "operator",
+        relationshipId: "campaign-1",
+        relationshipType: "Campaign",
+      };
+      expect(callStep).toHaveBeenCalledWith(expect.objectContaining(expected));
+      expect(llmCall).toHaveBeenCalledWith(expect.objectContaining(expected));
+    });
+
+    it("falls back to the assistant thread when the turn has no scope root", async () => {
+      await completeOneTurn({ assistantId: "assistant-1" });
+
+      const expected = {
+        tokenUsageType: "operator",
+        relationshipId: "assistant-1",
+        relationshipType: "Assistant",
+      };
+      expect(callStep).toHaveBeenCalledWith(expect.objectContaining(expected));
+      expect(llmCall).toHaveBeenCalledWith(expect.objectContaining(expected));
+    });
+
+    it("leaves the relationship unset when there is neither a scope nor a thread", async () => {
+      await completeOneTurn({});
+
+      for (const mock of [callStep, llmCall]) {
+        const args = mock.mock.calls[0][0];
+        expect(args.tokenUsageType).toBe("operator");
+        expect(args.relationshipId).toBeUndefined();
+        expect(args.relationshipType).toBeUndefined();
+      }
+    });
   });
 
   it("freezes on a destructive tool and resumes approved, executing it exactly once", async () => {
@@ -470,5 +524,104 @@ describe("OperatorService", () => {
     expect(second.references[0]).toMatchObject({ type: "documents", id: "doc-1" });
     expect(second.citations).toHaveLength(1);
     expect(second.citations[0]).toMatchObject({ chunkId: "chunk-1", relevance: 90 });
+  });
+
+  /**
+   * Task 10, fix round 1. `resume()` rebuilds its retrieval tools from the
+   * context it is GIVEN — the checkpoint does not carry the tool closures — so
+   * the cost attribution has to be supplied again. Without scopeLabel and
+   * assistantId a resumed unscoped turn loses the thread fallback for its
+   * SUB-AGENT spend (contextualiser / DRIFT) while its own spend bills fine.
+   */
+  it("resume rebuilds the tool context with the cost attribution, not just the scope ids", async () => {
+    callStep.mockResolvedValueOnce({
+      message: aiMessageWithToolCall("operator_test_action", { note: "first" }, "call_a"),
+      tokenUsage: { input: 1, output: 1 },
+    });
+
+    await service.run(baseParams);
+
+    callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+    llmCall.mockResolvedValueOnce({
+      answer: "done",
+      questions: [],
+      tokenUsage: { input: 1, output: 1 },
+      modelWeight: ModelWeight.Normal,
+    });
+
+    await service.resume({
+      threadId: baseParams.threadId,
+      approved: true,
+      companyId: baseParams.companyId,
+      userId: baseParams.userId,
+      userModuleIds: baseParams.userModuleIds,
+      scopeId: "campaign-1",
+      scopeType: "campaigns",
+      scopeLabel: "Campaign",
+      assistantId: "assistant-1",
+    });
+
+    const resumeCtx = registryBuild.mock.calls[1][0];
+    expect(resumeCtx).toMatchObject({
+      scopeId: "campaign-1",
+      scopeType: "campaigns",
+      scopeLabel: "Campaign",
+      assistantId: "assistant-1",
+    });
+  });
+
+  it("resume without a scope root still carries the thread, so sub-agent spend bills", async () => {
+    callStep.mockResolvedValueOnce({
+      message: aiMessageWithToolCall("operator_test_action", { note: "first" }, "call_a"),
+      tokenUsage: { input: 1, output: 1 },
+    });
+
+    await service.run(baseParams);
+
+    callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+    llmCall.mockResolvedValueOnce({
+      answer: "done",
+      questions: [],
+      tokenUsage: { input: 1, output: 1 },
+      modelWeight: ModelWeight.Normal,
+    });
+
+    await service.resume({
+      threadId: baseParams.threadId,
+      approved: true,
+      companyId: baseParams.companyId,
+      userId: baseParams.userId,
+      userModuleIds: baseParams.userModuleIds,
+      assistantId: "assistant-1",
+    });
+
+    expect(registryBuild.mock.calls[1][0]).toMatchObject({ assistantId: "assistant-1" });
+  });
+
+  it("keeps OperatorContextState constructible without the attribution keys", () => {
+    // `OperatorContextState` is re-exported from `agents/index.ts`, so a consumer
+    // can build one. LangGraph's `StateType` makes EVERY channel required, so this
+    // only COMPILES while `scopeLabel` / `assistantId` are re-declared optional —
+    // the regression adding them as plain annotations would have caused.
+    const preTask: OperatorContextState = {
+      messages: [],
+      companyId: "company-1",
+      userId: "user-1",
+      userModuleIds: [],
+      contentId: null,
+      contentType: null,
+      scopeId: undefined,
+      scopeType: undefined,
+      question: "q",
+      toolCalls: [],
+      references: [],
+      citations: [],
+      iterations: 0,
+      tokens: { input: 0, output: 0 },
+      finalAnswer: null,
+    };
+
+    expect(preTask.scopeLabel).toBeUndefined();
+    expect(preTask.assistantId).toBeUndefined();
   });
 });

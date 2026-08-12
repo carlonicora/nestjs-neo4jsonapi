@@ -9,6 +9,7 @@ import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultQuestionRefinerPrompt = `
 Your task: Create a single, focused question that captures the user's current intent based on the conversation history.
@@ -110,6 +111,9 @@ export class QuestionRefinerNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(params.state),
     });
 
     if (params.state.contentType === "Conversation")

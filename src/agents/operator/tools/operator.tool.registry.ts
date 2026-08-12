@@ -62,7 +62,8 @@ export class OperatorToolRegistry {
       { tool: this.readEntityTool.build(userCtx, recorder), destructive: false },
       { tool: this.traverseTool.build(userCtx, recorder), destructive: false },
       { tool: this.searchDocumentsTool.build(ctx, recorder), destructive: false },
-      { tool: this.searchCommunitiesTool.build(recorder), destructive: false },
+      // ctx carries the turn's cost attribution down into the DRIFT sub-agent.
+      { tool: this.searchCommunitiesTool.build(recorder, ctx), destructive: false },
     ];
 
     // Generic write tools. buildDefinitions() returns [] unless a catalogued

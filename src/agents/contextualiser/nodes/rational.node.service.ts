@@ -9,6 +9,7 @@ import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
+import { buildInheritedAttribution } from "../../common/usage-attribution";
 
 export const defaultRationalPlanPrompt = `
 As an intelligent assistant, your primary objective is to answer the question by gathering supporting facts from a given article.
@@ -83,6 +84,9 @@ export class RationalNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      // Billed to the CALLING agent: its ledger category, its entity. Spread
+      // LAST so nothing above can overwrite the attribution.
+      ...buildInheritedAttribution(params.state),
     });
 
     if (params.state.contentType === "Conversation")

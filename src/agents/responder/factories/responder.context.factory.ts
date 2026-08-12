@@ -18,6 +18,10 @@ export class ResponderContextFactoryService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** Neo4j label of the scope root, e.g. "Campaign". Present iff scopeId is. */
+    scopeLabel?: string;
+    /** Id of the `Assistant` (thread) node — the cost-attribution fallback for an unscoped turn. */
+    assistantId?: string;
   }): ResponderContextState {
     return {
       companyId: params.companyId,
@@ -25,6 +29,8 @@ export class ResponderContextFactoryService {
       contentType: params.contentType,
       scopeId: params.scopeId,
       scopeType: params.scopeType,
+      scopeLabel: params.scopeLabel,
+      assistantId: params.assistantId,
       dataLimits: params.dataLimits,
       driftContext: undefined,
       context: undefined,

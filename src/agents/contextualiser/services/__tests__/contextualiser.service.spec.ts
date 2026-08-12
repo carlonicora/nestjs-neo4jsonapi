@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { Logger } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { ContextualiserService } from "../contextualiser.service";
 import { ContextualiserContextFactoryService } from "../../factories/contextualiser.context.factory";
@@ -424,6 +425,119 @@ describe("ContextualiserService", () => {
 
       // Assert — one-shot graphs must not retain state after the run
       expect(mockCompile).toHaveBeenCalledWith();
+    });
+  });
+
+  /**
+   * The SEEDING junction (Task 10). The node specs prove each node applies the
+   * attribution it finds on its state; this proves `run()` is what HANDS it to
+   * the factory. Without this, deleting `attribution: params.attribution` from
+   * the factory call breaks billing in production and fails no test.
+   */
+  describe("caller attribution seeding", () => {
+    const runWith = async (attribution?: Parameters<typeof service.run>[0]["attribution"]) => {
+      const initialState = createMockInitialState();
+      contextFactory.create.mockReturnValue(initialState);
+      mockInvoke.mockResolvedValue(initialState);
+
+      await service.run({
+        companyId: TEST_IDS.companyId,
+        contentId: TEST_IDS.contentId,
+        contentType: "Document",
+        dataLimits: {},
+        messages: [],
+        question: "What is this?",
+        attribution,
+      });
+    };
+
+    it("hands the caller's attribution to the context factory", async () => {
+      await runWith({
+        tokenUsageType: "responder",
+        scopeId: "campaign-1",
+        scopeType: "campaigns",
+        scopeLabel: "Campaign",
+        assistantId: "assistant-1",
+      });
+
+      expect(contextFactory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: {
+            tokenUsageType: "responder",
+            scopeId: "campaign-1",
+            scopeType: "campaigns",
+            scopeLabel: "Campaign",
+            assistantId: "assistant-1",
+          },
+        }),
+      );
+    });
+
+    it("passes undefined through when the caller supplies no attribution", async () => {
+      await runWith(undefined);
+
+      expect(contextFactory.create).toHaveBeenCalledWith(expect.objectContaining({ attribution: undefined }));
+    });
+  });
+
+  /**
+   * Logging must be PROPORTIONATE: an MCP `search_documents` call names no
+   * entity on every single request and is right to, so it must not warn. A
+   * caller that names something unbillable is a real fault and must.
+   */
+  describe("unattributed-run logging", () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    let debug: ReturnType<typeof vi.spyOn>;
+
+    const runWith = async (attribution?: Parameters<typeof service.run>[0]["attribution"]) => {
+      const initialState = createMockInitialState();
+      contextFactory.create.mockReturnValue(initialState);
+      mockInvoke.mockResolvedValue(initialState);
+      await service.run({
+        companyId: TEST_IDS.companyId,
+        contentId: TEST_IDS.contentId,
+        contentType: "Document",
+        dataLimits: {},
+        messages: [],
+        question: "q",
+        attribution,
+      });
+    };
+
+    beforeEach(() => {
+      warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+      debug.mockRestore();
+    });
+
+    it("does NOT warn when the caller names no entity at all (the MCP path)", async () => {
+      await runWith({ tokenUsageType: "operator" });
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining("no cost attribution"));
+    });
+
+    it("does not warn for a completely absent attribution either", async () => {
+      await runWith(undefined);
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("WARNS when the caller names an entity that cannot be billed", async () => {
+      // A scopeId whose type no model claims: looks attributed, records nothing.
+      await runWith({ tokenUsageType: "responder", scopeId: "widget-1", scopeType: "widgets" });
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("UNRESOLVABLE cost attribution"));
+    });
+
+    it("does not warn on a billable run", async () => {
+      await runWith({ tokenUsageType: "responder", scopeId: "campaign-1", scopeLabel: "Campaign" });
+
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 });

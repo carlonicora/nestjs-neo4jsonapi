@@ -4,6 +4,7 @@ import { ClsService } from "nestjs-cls";
 import {
   ContextualiserContext,
   ContextualiserContextState,
+  ContextualiserGraphState,
 } from "../../contextualiser/contexts/contextualiser.context";
 import { ContextualiserContextFactoryService } from "../../contextualiser/factories/contextualiser.context.factory";
 import { AtomicFactsNodeService } from "../../contextualiser/nodes/atomicfacts.node.service";
@@ -15,6 +16,7 @@ import { RationalNodeService } from "../../contextualiser/nodes/rational.node.se
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
+import { CallerAttributionState, classifyCallerAttribution } from "../../common/usage-attribution";
 
 /**
  * Picks the graph entry node for a turn.
@@ -50,8 +52,30 @@ export class ContextualiserService {
     dataLimits: DataLimits;
     messages: MessageInterface[];
     question?: string;
+    /**
+     * Cost attribution INHERITED from the calling agent. The contextualiser is
+     * a sub-agent — it bills the caller's ledger category against the caller's
+     * entity, and owns neither. Optional, so existing consumers are unaffected.
+     */
+    attribution?: CallerAttributionState;
   }): Promise<ContextualiserContextState> {
     const maxHops = 20;
+
+    // Log proportionately. A caller that named NOTHING is opting out — MCP tool
+    // calls do this on every single request and are right to — so it gets a
+    // debug line, not a warning. A caller that named something unusable is a
+    // fault: it looks attributed and bills nothing, and that must be loud.
+    const attributionState = classifyCallerAttribution(params.attribution);
+    if (attributionState === "unresolvable") {
+      this.logger.warn(
+        `contextualiser invoked with an UNRESOLVABLE cost attribution ` +
+          `(scopeId=${params.attribution?.scopeId ?? "none"} scopeType=${params.attribution?.scopeType ?? "none"} ` +
+          `scopeLabel=${params.attribution?.scopeLabel ?? "none"} assistantId=${params.attribution?.assistantId ?? "none"}) — ` +
+          `the caller named an entity that cannot be billed, so every LLM call in this run will be unbilled.`,
+      );
+    } else if (attributionState === "none") {
+      this.logger.debug(`contextualiser invoked with no cost attribution — this run's LLM spend will not be recorded.`);
+    }
 
     const mainPrompt: string | undefined = undefined;
     const finalPrompt: string | undefined = undefined;
@@ -90,7 +114,7 @@ export class ContextualiserService {
     };
 
     const workflow = new StateGraph(ContextualiserContext)
-      .addNode("question_refiner", async (state: ContextualiserContextState) => {
+      .addNode("question_refiner", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: question_refiner - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -100,7 +124,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("rational_plan", async (state: ContextualiserContextState) => {
+      .addNode("rational_plan", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: rational_plan - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -110,7 +134,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("key_concepts", async (state: ContextualiserContextState) => {
+      .addNode("key_concepts", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: key_concepts - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -122,7 +146,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("atomic_facts", async (state: ContextualiserContextState) => {
+      .addNode("atomic_facts", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: atomic_facts - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -134,7 +158,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("chunk_vector", async (state: ContextualiserContextState) => {
+      .addNode("chunk_vector", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: chunk_vector - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -142,7 +166,7 @@ export class ContextualiserService {
         this.tracer.addSpanEvent(`Node: chunk_vector complete - hop ${state.hops}/${maxHops}`);
         return result;
       })
-      .addNode("chunks", async (state: ContextualiserContextState) => {
+      .addNode("chunks", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: chunks - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -154,7 +178,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("neighbouring_nodes", async (state: ContextualiserContextState) => {
+      .addNode("neighbouring_nodes", async (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: neighbouring_nodes - hop ${state.hops}/${maxHops}`, {
           hopCount: state.hops,
         });
@@ -166,7 +190,7 @@ export class ContextualiserService {
         });
         return result;
       })
-      .addNode("answer", (state: ContextualiserContextState) => {
+      .addNode("answer", (state: ContextualiserGraphState) => {
         this.tracer.addSpanEvent(`Node: answer - hop ${state.hops}/${maxHops} (final)`, {
           hopCount: state.hops,
         });
@@ -175,15 +199,15 @@ export class ContextualiserService {
       .addEdge(START, initial)
       .addEdge("question_refiner", "rational_plan")
       .addEdge("rational_plan", "chunk_vector")
-      .addConditionalEdges("chunk_vector", (state: ContextualiserContextState) => returnState({ state }))
-      .addConditionalEdges("key_concepts", (state: ContextualiserContextState) =>
+      .addConditionalEdges("chunk_vector", (state: ContextualiserGraphState) => returnState({ state }))
+      .addConditionalEdges("key_concepts", (state: ContextualiserGraphState) =>
         returnState({ state: state, forceNextStep: "atomic_facts" }),
       )
-      .addConditionalEdges("atomic_facts", (state: ContextualiserContextState) => returnState({ state }))
-      .addConditionalEdges("neighbouring_nodes", (state: ContextualiserContextState) =>
+      .addConditionalEdges("atomic_facts", (state: ContextualiserGraphState) => returnState({ state }))
+      .addConditionalEdges("neighbouring_nodes", (state: ContextualiserGraphState) =>
         returnState({ state: state, forceNextStep: "atomic_facts" }),
       )
-      .addConditionalEdges("chunks", (state: ContextualiserContextState) => returnState({ state }))
+      .addConditionalEdges("chunks", (state: ContextualiserGraphState) => returnState({ state }))
       .addEdge("answer", END);
 
     const app = workflow.compile();
@@ -198,6 +222,7 @@ export class ContextualiserService {
       finalPrompt: finalPrompt,
       previousMessages: params.messages,
       preselectedChunks: [],
+      attribution: params.attribution,
     });
 
     this.tracer.addSpanEvent("Workflow Executing");

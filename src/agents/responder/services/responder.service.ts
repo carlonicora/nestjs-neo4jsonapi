@@ -15,6 +15,8 @@ import { MessageInterface } from "../../../common/interfaces/message.interface";
 import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { DataLimits } from "../../../common/types/data.limits";
+import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { CallerAttributionState, buildCallerAttribution } from "../../common/usage-attribution";
 
 export interface BranchToggles {
   graph?: boolean;
@@ -61,6 +63,10 @@ export class ResponderService {
     scopeId?: string;
     /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
     scopeType?: string;
+    /** Neo4j label of the scope root, e.g. "Campaign". Present iff scopeId is. */
+    scopeLabel?: string;
+    /** Id of the `Assistant` (thread) node — the cost-attribution fallback for an unscoped turn. */
+    assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
   }): Promise<ResponderResponseInterface> {
@@ -79,6 +85,8 @@ export class ResponderService {
       dataLimits: params.dataLimits,
       scopeId: params.scopeId,
       scopeType: params.scopeType,
+      scopeLabel: params.scopeLabel,
+      assistantId: params.assistantId,
     });
     initialState.userId = params.userId;
     initialState.userModuleIds = params.userModuleIds;
@@ -113,6 +121,10 @@ export class ResponderService {
             dataLimits: params.dataLimits,
             messages: params.messages,
             question: state.question,
+            // The contextualiser is a sub-agent: its spend is the RESPONDER's
+            // spend, billed to the responder's category against the responder's
+            // entity. It invents neither.
+            attribution: this.attribution(state),
           });
           return {
             context: ctx,
@@ -201,7 +213,12 @@ export class ResponderService {
         .addNode("graph", async (state) => this.graphNode.execute({ state }))
         .addNode("drift", async (state) => {
           try {
-            const result = await this.driftSearchService.search({ question: state.question });
+            const result = await this.driftSearchService.search({
+              question: state.question,
+              // Same rule as the contextualiser above: DRIFT's spend is the
+              // responder's spend.
+              attribution: this.attribution(state),
+            });
             return {
               driftContext: result,
               trace: {
@@ -254,5 +271,20 @@ export class ResponderService {
     } as any)) as ResponderContextState;
 
     return this.factory.createAnswer({ state: finalState });
+  }
+
+  /**
+   * The attribution the responder hands DOWN to the sub-agents it invokes.
+   *
+   * `tokenUsageType` is the responder's own — the owner's ruling is that the
+   * agent that CALLS a sub-agent is the agent that records its usage, so the
+   * ledger shows one category per turn instead of one per internal component.
+   * The scope triple is passed through untranslated: `scopeLabel` is already the
+   * Neo4j label, and `scopeType` is only ever the registry's fallback input —
+   * neither is ever written into Cypher as a label without going through
+   * `buildScopeAttribution` first.
+   */
+  private attribution(state: ResponderContextState): CallerAttributionState {
+    return buildCallerAttribution({ tokenUsageType: TokenUsageType.Responder, source: state });
   }
 }
