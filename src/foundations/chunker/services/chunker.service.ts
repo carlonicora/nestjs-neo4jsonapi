@@ -3,15 +3,18 @@ import { BaseDocumentLoader } from "@langchain/core/document_loaders/base";
 import { Document } from "@langchain/core/documents";
 import { HumanMessage } from "@langchain/core/messages";
 import { MarkdownTextSplitter, RecursiveCharacterTextSplitter, TokenTextSplitter } from "@langchain/textsplitters";
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigAiInterface } from "../../../config/interfaces/config.ai.interface";
 import { ConfigChunkerInterface } from "../../../config/interfaces/config.chunker.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { S3Service } from "../../s3/services/s3.service";
+import { TokenUsageType } from "../../tokenusage/enums/tokenusage.type";
+import { TokenUsageService } from "../../tokenusage/services/tokenusage.service";
 import { isImageFile } from "../constants/file.types";
 import { JSONLinesLoader, JSONLoader } from "../loaders/json.loader";
 import { TextLoader } from "../loaders/text.loader";
@@ -22,6 +25,37 @@ import { PdfService } from "./types/pdf.service";
 import { PptxService } from "./types/pptx.service";
 import { SemanticSplitterService } from "./types/semanticsplitter.service";
 import { XlsxService } from "./types/xlsx.service";
+
+/**
+ * Opt-in cost attribution for the LLM calls the chunker makes while reading a
+ * file (today: image analysis). Without both `relationshipId` and
+ * `relationshipType` no usage record is written — the package stays
+ * domain-agnostic and the caller decides what the usage is billed against.
+ * Mirrors `EmbedderAttribution`.
+ */
+export interface ChunkerAttribution {
+  relationshipId: string;
+  relationshipType: string;
+}
+
+/** Words per page used to estimate page counts for formats that have no real pagination. */
+const WORDS_PER_ESTIMATED_PAGE = 500;
+
+/**
+ * Hard ceiling on the size of a chunk leaving the chunker. A splitter that fails
+ * to find a boundary can emit a chunk far past its target, which then blows the
+ * embedding model's context window at the far end of the pipeline. Anything
+ * longer is split (with a WARN) rather than passed on.
+ */
+const MAX_CHUNK_CHARS = 24_000;
+
+/**
+ * A PDF that reports one page but holds more than this many estimated pages of
+ * text is not believed: the reported count is treated as broken metadata and the
+ * estimate is used instead. Three pages of slack keeps genuinely short documents
+ * (a one-page letter whose estimate rounds to 2) on their real count.
+ */
+const IMPLAUSIBLE_SINGLE_PAGE_ESTIMATE = 3;
 
 @Injectable()
 export class ChunkerService {
@@ -41,6 +75,11 @@ export class ChunkerService {
     private readonly s3Service: S3Service,
     private readonly emailParserService: EmailParserService,
     private readonly config: ConfigService<BaseConfigInterface>,
+    // Both usage dependencies are @Optional() so consumers that never mount the
+    // tokenusage module (and apps that bind no TOKEN_USAGE_RECORDER) keep
+    // booting and simply record nothing.
+    @Optional() private readonly tokenUsageService?: TokenUsageService,
+    @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
   ) {
     const chunker = this.config.get<ConfigChunkerInterface>("chunker");
     this.splitter = chunker?.strategy === "semantic" ? this.semanticSplitterService : this.markdownChunkingService;
@@ -80,17 +119,107 @@ export class ChunkerService {
     return tempFilePath;
   }
 
-  async generateContentStructureFromFile(params: { fileType: string; filePath: string }): Promise<Document[]> {
+  /**
+   * Page count for formats that carry no pagination of their own (everything
+   * except PDFs and images). Deliberately coarse — it exists so per-page costs
+   * (OCR, document AI) can be attributed to a document of any format.
+   */
+  private _estimatePageCountFromText(text: string): number {
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return Math.max(1, Math.round(words / WORDS_PER_ESTIMATED_PAGE));
+  }
+
+  private _estimatePageCount(docs: Document[]): number {
+    return this._estimatePageCountFromText(docs.map((doc) => doc.pageContent ?? "").join(" "));
+  }
+
+  /**
+   * Stamps the document's page count on every chunk it produced. The count
+   * travels on metadata because the return type of the public entry point is
+   * `Document[]` and must stay that way for existing callers. `extra` carries the
+   * optional read-quality flags (today: `ocrTruncated`) alongside it.
+   */
+  private _stampTotalPages(docs: Document[], totalPages: number, extra?: Record<string, unknown>): Document[] {
+    for (const doc of docs) {
+      doc.metadata = { ...doc.metadata, ...extra, totalPages };
+    }
+    return docs;
+  }
+
+  /**
+   * Enforces `MAX_CHUNK_CHARS` on the chunks about to leave the chunker.
+   *
+   * Splitters are best-effort: given text with no separator near the target size
+   * they emit a single huge chunk, which only fails much later (embedding call,
+   * LLM context). Splitting here is the last point where the oversize is still
+   * cheap to fix. `splitDocuments` carries the metadata onto the pieces, so the
+   * page count stamped upstream survives; the slice is a guarantee for text with
+   * no boundary to split on at all.
+   */
+  private async _capChunkChars(docs: Document[]): Promise<Document[]> {
+    if (!docs.some((doc) => (doc.pageContent?.length ?? 0) > MAX_CHUNK_CHARS)) return docs;
+
+    const splitter = new RecursiveCharacterTextSplitter({
+      chunkSize: MAX_CHUNK_CHARS,
+      chunkOverlap: 0,
+    });
+
+    const capped: Document[] = [];
+    for (const doc of docs) {
+      const length = doc.pageContent?.length ?? 0;
+      if (length <= MAX_CHUNK_CHARS) {
+        capped.push(doc);
+        continue;
+      }
+
+      const partsBefore = capped.length;
+      const pieces = await splitter.splitDocuments([doc]);
+      for (const piece of pieces) {
+        if (piece.pageContent.length <= MAX_CHUNK_CHARS) {
+          capped.push(piece);
+          continue;
+        }
+        for (let offset = 0; offset < piece.pageContent.length; offset += MAX_CHUNK_CHARS) {
+          capped.push(
+            new Document({
+              pageContent: piece.pageContent.slice(offset, offset + MAX_CHUNK_CHARS),
+              metadata: { ...piece.metadata },
+            }),
+          );
+        }
+      }
+
+      this.logger.warn(
+        `Chunk of ${length} chars exceeds MAX_CHUNK_CHARS=${MAX_CHUNK_CHARS} — ` +
+          `split into ${capped.length - partsBefore} parts`,
+      );
+    }
+
+    return capped;
+  }
+
+  async generateContentStructureFromFile(params: {
+    fileType: string;
+    filePath: string;
+    attribution?: ChunkerAttribution;
+  }): Promise<Document[]> {
     if (this.config.get<ConfigAiInterface>("ai").mock) {
       return [
         new Document({
           pageContent: "mock chunk content for smoke testing",
-          metadata: { source: params.filePath, mock: true },
+          metadata: { source: params.filePath, mock: true, totalPages: 1 },
         }),
       ];
     }
 
-    if (isImageFile(params.fileType)) return this._createChunksFromImage(params);
+    if (isImageFile(params.fileType)) {
+      const imageDocs = await this._createChunksFromImage({
+        filePath: params.filePath,
+        fileType: params.fileType,
+        attribution: params.attribution,
+      });
+      return this._capChunkChars(this._stampTotalPages(imageDocs, 1));
+    }
 
     const localFilePath = await this._downloadFile({
       url: params.filePath,
@@ -99,23 +228,40 @@ export class ChunkerService {
 
     // Email files need special handling (attachment extraction)
     if (params.fileType.toLowerCase() === "eml" || params.fileType.toLowerCase() === "msg") {
-      return this._createFromEmail({
+      const emailDocs = await this._createFromEmail({
         filePath: params.filePath,
         localFilePath,
         fileType: params.fileType.toLowerCase(),
+        attribution: params.attribution,
       });
+      return this._capChunkChars(emailDocs);
     }
 
-    const docs = await this._processLocalFile({
-      localFilePath,
-      fileType: params.fileType,
-      filePath: params.filePath,
-    });
+    const docs = await this._capChunkChars(
+      await this._processLocalFile({
+        localFilePath,
+        fileType: params.fileType,
+        filePath: params.filePath,
+      }),
+    );
     this._logChunkResult(params.fileType, docs);
     return docs;
   }
 
   private async _processLocalFile(params: {
+    localFilePath: string;
+    fileType: string;
+    filePath: string;
+  }): Promise<Document[]> {
+    const docs = await this._loadLocalFileDocuments(params);
+    // PDFs already carry their real page count (stamped by `_createFromPdf`);
+    // every other format has none to read, so it is estimated from the text.
+    const stamped = docs.find((doc) => typeof doc.metadata?.totalPages === "number");
+    const totalPages = stamped ? (stamped.metadata.totalPages as number) : this._estimatePageCount(docs);
+    return this._stampTotalPages(docs, totalPages);
+  }
+
+  private async _loadLocalFileDocuments(params: {
     localFilePath: string;
     fileType: string;
     filePath: string;
@@ -163,6 +309,7 @@ export class ChunkerService {
     filePath: string;
     localFilePath: string;
     fileType: string;
+    attribution?: ChunkerAttribution;
   }): Promise<Document[]> {
     try {
       const buffer = await fs.readFile(params.localFilePath);
@@ -177,7 +324,7 @@ export class ChunkerService {
 
       for (const att of parsed.attachments) {
         try {
-          const content = await this._extractAttachmentContent(att);
+          const content = await this._extractAttachmentContent(att, 0, params.attribution);
           if (content) {
             attachmentContents.push({ filename: att.filename, content });
           }
@@ -199,7 +346,10 @@ export class ChunkerService {
           chunkSize: this.targetChars,
           chunkOverlap: 200,
         });
-        return await splitter.createDocuments([markdown]);
+        const emailDocs = await splitter.createDocuments([markdown]);
+        // Emails have no pagination: estimate from the assembled markdown itself
+        // (chunk overlap would otherwise inflate a count taken from the chunks).
+        return this._stampTotalPages(emailDocs, this._estimatePageCountFromText(markdown));
       }
 
       return [];
@@ -212,6 +362,7 @@ export class ChunkerService {
   private async _extractAttachmentContent(
     attachment: { filename: string; contentType: string; content: Buffer },
     depth: number = 0,
+    attribution?: ChunkerAttribution,
   ): Promise<string | null> {
     if (depth >= 3) {
       this.logger.warn(`Max email nesting depth reached for ${attachment.filename}`);
@@ -229,7 +380,7 @@ export class ChunkerService {
 
       const nestedAttContents: { filename: string; content: string }[] = [];
       for (const att of parsed.attachments) {
-        const content = await this._extractAttachmentContent(att, depth + 1);
+        const content = await this._extractAttachmentContent(att, depth + 1, attribution);
         if (content) nestedAttContents.push({ filename: att.filename, content });
       }
 
@@ -241,7 +392,7 @@ export class ChunkerService {
       const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
       await fs.writeFile(tempPath, attachment.content);
       try {
-        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension });
+        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension, attribution });
         return docs.map((d) => d.pageContent).join("\n\n");
       } finally {
         await fs.unlink(tempPath).catch(() => {});
@@ -327,7 +478,37 @@ export class ChunkerService {
     }
   }
 
-  private async _createChunksFromImage(params: { filePath: string; fileType: string }): Promise<Document[]> {
+  /**
+   * Image analysis is a vision LLM call made inside the package, so — exactly
+   * like `EmbedderService.persistUsage` — its usage is written through the
+   * optional `TOKEN_USAGE_RECORDER` seam, attribution is opt-in, and a failure
+   * to record never fails the chunking itself.
+   */
+  private async _persistImageUsage(params: {
+    tokens: { input: number; output: number };
+    attribution?: ChunkerAttribution;
+  }): Promise<void> {
+    if (!params.attribution?.relationshipId || !params.attribution?.relationshipType) return;
+    const recorder = this.tokenUsageRecorder ?? this.tokenUsageService;
+    if (!recorder) return;
+    try {
+      await recorder.recordTokenUsage({
+        tokens: params.tokens,
+        type: TokenUsageType.ImageAnalysis,
+        relationshipId: params.attribution.relationshipId,
+        relationshipType: params.attribution.relationshipType,
+        useVisionCosts: true,
+      });
+    } catch (err) {
+      this.logger.warn(`Image analysis usage persistence failed — continuing: ${String(err)}`);
+    }
+  }
+
+  private async _createChunksFromImage(params: {
+    filePath: string;
+    fileType: string;
+    attribution?: ChunkerAttribution;
+  }): Promise<Document[]> {
     try {
       const imageUrl = params.filePath.toLowerCase().startsWith("http")
         ? params.filePath
@@ -357,6 +538,13 @@ export class ChunkerService {
           ],
         }),
       ]);
+
+      const usage = (imageDescription as { usage_metadata?: { input_tokens?: number; output_tokens?: number } })
+        ?.usage_metadata;
+      await this._persistImageUsage({
+        tokens: { input: usage?.input_tokens ?? 0, output: usage?.output_tokens ?? 0 },
+        attribution: params.attribution,
+      });
 
       if (imageDescription?.content) {
         // Create chunks from the image description
@@ -506,9 +694,30 @@ export class ChunkerService {
     return response;
   }
 
+  /**
+   * A PDF's own page count is authoritative — except when it clearly is not.
+   * Broken or unreadable document metadata surfaces as "1 page", and a 50-page
+   * PDF billed as one page under-reports per-page cost by a factor of 50, so a
+   * reported single page carrying pages of text is replaced by the estimate.
+   */
+  private _resolvePdfPageCount(params: { reported: number; estimated: number; source: string }): number {
+    if (params.reported <= 1 && params.estimated > IMPLAUSIBLE_SINGLE_PAGE_ESTIMATE) {
+      this.logger.warn(
+        `PDF reported ${params.reported} page(s) but holds ~${params.estimated} pages of text — ` +
+          `reported count is implausible, using the estimate (${params.source})`,
+      );
+      return params.estimated;
+    }
+    return params.reported;
+  }
+
   private async _createFromPdf(params: { filePath: string; localFilePath: string }): Promise<Document[]> {
     try {
-      const pdfContent = await this.pdfService.extractPdfContent(params.localFilePath);
+      const {
+        content: pdfContent,
+        totalPages: reportedPages,
+        pagesProcessed,
+      } = await this.pdfService.extractPdfContent(params.localFilePath);
 
       const markdownContent = pdfContent
         .map((block) => {
@@ -522,19 +731,39 @@ export class ChunkerService {
         })
         .join("\n\n");
 
+      const totalPages = this._resolvePdfPageCount({
+        reported: reportedPages,
+        estimated: this._estimatePageCountFromText(markdownContent),
+        source: params.filePath,
+      });
+
+      // Only the OCR route reports `pagesProcessed`; reading fewer pages than the
+      // document has means the extracted text — and every cost derived from it —
+      // covers only part of the document.
+      const ocrTruncated = typeof pagesProcessed === "number" && pagesProcessed < totalPages;
+      if (ocrTruncated) {
+        this.logger.warn(
+          `OCR read ${pagesProcessed} of ${totalPages} pages for ${params.filePath} — ` +
+            `chunks are flagged ocrTruncated`,
+        );
+      }
+      const readQuality = ocrTruncated ? { ocrTruncated: true } : undefined;
+
       if (markdownContent && markdownContent.trim()) {
         try {
-          return await this.splitter.splitMarkdownToChunks({
+          const chunks = await this.splitter.splitMarkdownToChunks({
             content: markdownContent,
             title: undefined,
           });
+          return this._stampTotalPages(chunks, totalPages, readQuality);
         } catch (error) {
           this.logger.error("Presentation processing failed:", error);
           const splitter = new MarkdownTextSplitter({
             chunkSize: this.targetChars,
             chunkOverlap: 200,
           });
-          return await splitter.createDocuments([markdownContent]);
+          const chunks = await splitter.createDocuments([markdownContent]);
+          return this._stampTotalPages(chunks, totalPages, readQuality);
         }
       }
 
@@ -546,6 +775,8 @@ export class ChunkerService {
             pageContent: element.content,
             metadata: {
               type: element.type,
+              ...readQuality,
+              totalPages,
             },
           }),
       );

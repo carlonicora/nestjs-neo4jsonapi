@@ -10,6 +10,7 @@ import { PptxService } from "./services/types/pptx.service";
 import { SemanticSplitterService } from "./services/types/semanticsplitter.service";
 import { XlsxService } from "./services/types/xlsx.service";
 import { S3Module } from "../s3/s3.module";
+import { TokenUsageModule } from "../tokenusage/tokenusage.module";
 
 @Module({
   providers: [
@@ -24,6 +25,8 @@ import { S3Module } from "../s3/s3.module";
     XlsxService,
   ],
   exports: [ChunkerService, ImageExtractorService, EmailParserService],
-  imports: [LLMModule, S3Module],
+  // TokenUsageModule provides the module-local TokenUsageService fallback used by
+  // ChunkerService when no application binds TOKEN_USAGE_RECORDER (mirrors LLMModule).
+  imports: [LLMModule, S3Module, TokenUsageModule],
 })
 export class ChunkerModule {}

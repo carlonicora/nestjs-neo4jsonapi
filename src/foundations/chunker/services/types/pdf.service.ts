@@ -16,10 +16,18 @@ import {
 import { PdfLayoutElement, PdfProcessingOptions } from "./pdf/interfaces/pdf-layout.interface";
 
 import { Document } from "@langchain/core/documents";
-import { PDFParse } from "pdf-parse";
+import { type InfoResult, PDFParse } from "pdf-parse";
 const pdf2pic = require("pdf2pic");
 const tesseract = require("node-tesseract-ocr");
 const sharp = require("sharp");
+
+/**
+ * Hard ceiling on how many pages of a single PDF are OCR'd. The value is
+ * deliberately unchanged — what changes is that a truncated OCR is now named,
+ * logged and reported back to the caller through `pagesProcessed` instead of
+ * silently returning a fraction of the document.
+ */
+const MAX_OCR_PAGES = 20;
 
 @Injectable()
 export class PdfService {
@@ -118,11 +126,66 @@ export class PdfService {
     return markdownRows.join("\n");
   }
 
-  async extractPdfContent(pdfPath: string, options?: Partial<PdfProcessingOptions>): Promise<PdfContent[]> {
+  /**
+   * Real page count of a PDF, read straight from the document info dictionary.
+   *
+   * Extraction can succeed through any of three paths (intelligent, basic, OCR)
+   * and each one discards the page count it happens to see, so the count is read
+   * once here and returned alongside whichever path wins. Never throws: a PDF we
+   * cannot introspect still counts as one page.
+   */
+  private async readPageCount(pdfPath: string): Promise<number> {
+    let parser: PDFParse | null = null;
+    try {
+      const buffer = fs.readFileSync(pdfPath);
+      parser = new PDFParse({ data: buffer });
+      const numPages = this.numPagesFromInfo(await parser.getInfo());
+      if (!numPages) {
+        this.logger.warn(`Unable to read PDF page count (no total in document info), defaulting to 1: ${pdfPath}`);
+        return 1;
+      }
+      this.logger.log(`→ PDF page count: ${numPages}`);
+      return numPages;
+    } catch (error) {
+      this.logger.warn("Unable to read PDF page count, defaulting to 1:", error);
+      return 1;
+    } finally {
+      if (parser) {
+        await parser.destroy();
+      }
+    }
+  }
+
+  /**
+   * The one place that knows where pdf-parse keeps the page count.
+   *
+   * pdf-parse v2 builds its result as `new InfoResult(doc.numPages)`, so the
+   * count lives on `InfoResult.total`. `InfoResult.info` is the PDF *Info
+   * dictionary* (title, author, producer, dates) and has no page count at all —
+   * reading `info.numPages` therefore yielded `undefined` for every PDF ever
+   * parsed here and every caller fell back to 1. Returns 0 when the count
+   * genuinely cannot be determined so callers can log their own fallback.
+   */
+  private numPagesFromInfo(infoResult: InfoResult): number {
+    return infoResult.total || infoResult.info?.numPages || 0;
+  }
+
+  /**
+   * `totalPages` is always the document's real page count, whichever route won.
+   * `pagesProcessed` is only present when the OCR route won and reports how many
+   * pages that route actually read — fewer than `totalPages` means the returned
+   * text covers only part of the document (see `MAX_OCR_PAGES`).
+   */
+  async extractPdfContent(
+    pdfPath: string,
+    options?: Partial<PdfProcessingOptions>,
+  ): Promise<{ content: PdfContent[]; totalPages: number; pagesProcessed?: number }> {
     this.logger.log("##############################################################");
     this.logger.log("## PDF EXTRACTION START");
     this.logger.log(`## File: ${pdfPath}`);
     this.logger.log("##############################################################");
+
+    const totalPages = await this.readPageCount(pdfPath);
 
     const processingOptions = {
       ...this.defaultProcessingOptions,
@@ -153,7 +216,7 @@ export class PdfService {
         if (!isScanned) {
           this.logger.log(`✅ SUCCESS: Using intelligent parsing result`);
           this.logger.log("##############################################################");
-          return result;
+          return { content: result, totalPages };
         } else {
           this.logger.log("⚠️  Scanned PDF detected, will try OCR...");
         }
@@ -179,7 +242,7 @@ export class PdfService {
         if (!isScanned) {
           this.logger.log(`✅ SUCCESS: Using basic parsing result`);
           this.logger.log("##############################################################");
-          return basicResult;
+          return { content: basicResult, totalPages };
         } else {
           extractedText = basicText;
 
@@ -200,13 +263,19 @@ export class PdfService {
     if (processingOptions.enableOCR) {
       this.logger.log(`\n[ATTEMPT 3] Trying OCR extraction (enableOCR=${processingOptions.enableOCR})...`);
       try {
-        const ocrResult = await this.extractWithOCR(pdfPath, processingOptions);
+        const { content: ocrResult, pagesProcessed } = await this.extractWithOCR(pdfPath, processingOptions);
 
         if (ocrResult && ocrResult.length > 0) {
           const ocrText = ocrResult.map((block) => block.content).join("\n");
           this.logger.log(`✅ SUCCESS: OCR extracted ${ocrText.length} chars from ${ocrResult.length} blocks`);
+          if (pagesProcessed < totalPages) {
+            this.logger.warn(
+              `⚠️  OCR TRUNCATED: read ${pagesProcessed} of ${totalPages} pages ` +
+                `(MAX_OCR_PAGES=${MAX_OCR_PAGES}) — the extracted text covers only part of this document`,
+            );
+          }
           this.logger.log("##############################################################");
-          return ocrResult;
+          return { content: ocrResult, totalPages, pagesProcessed };
         } else {
           this.logger.warn("❌ OCR extraction did not yield any content (all pages rejected)");
         }
@@ -221,12 +290,12 @@ export class PdfService {
     if (result && result.length > 0) {
       this.logger.warn("⚠️  FALLBACK: Returning partial extraction result");
       this.logger.log("##############################################################");
-      return result;
+      return { content: result, totalPages };
     }
 
     this.logger.error("❌ FAILURE: All PDF extraction methods failed, returning empty content");
     this.logger.log("##############################################################");
-    return [];
+    return { content: [], totalPages };
   }
 
   private async extractWithIntelligentParsing(pdfPath: string): Promise<PdfContent[]> {
@@ -244,7 +313,9 @@ export class PdfService {
       }
 
       const infoResult = await parser.getInfo();
-      const numPages = infoResult.info?.numPages || 1;
+      // Page count drives the page grouping below: while this read was wrong every
+      // element was clamped onto page 1 and the whole document analysed as one page.
+      const numPages = this.numPagesFromInfo(infoResult) || 1;
 
       // Create layout elements from the extracted text
       // This is a simplified version - in a real implementation you'd use a proper PDF parser
@@ -777,9 +848,18 @@ export class PdfService {
     }
   }
 
-  private async extractWithOCR(pdfPath: string, options: PdfProcessingOptions): Promise<PdfContent[]> {
+  /**
+   * `pagesProcessed` is the number of pages that were actually rendered and read
+   * by OCR. It is lower than the document's page count whenever `MAX_OCR_PAGES`
+   * truncates the job or a page fails to render, and it is what lets the caller
+   * tell "a 50-page scan" from "20 pages of a 50-page scan".
+   */
+  private async extractWithOCR(
+    pdfPath: string,
+    options: PdfProcessingOptions,
+  ): Promise<{ content: PdfContent[]; pagesProcessed: number }> {
     if (!options.enableOCR) {
-      return [];
+      return { content: [], pagesProcessed: 0 };
     }
 
     const startTime = Date.now();
@@ -798,11 +878,15 @@ export class PdfService {
       }
 
       // Convert PDF pages to images
-      const images = await this.convertPdfToImages(pdfPath);
+      const { images, pageCount } = await this.convertPdfToImages(pdfPath);
 
       if (images.length === 0) {
         this.logger.warn("No images extracted from PDF for OCR");
-        return [];
+        return { content: [], pagesProcessed: 0 };
+      }
+
+      if (images.length < pageCount) {
+        this.logger.warn(`OCR will read ${images.length} of this document's ${pageCount} pages`);
       }
 
       // Process each image with OCR
@@ -868,13 +952,13 @@ export class PdfService {
           .join("; ");
 
         this.logger.warn(`OCR failure details: ${failureReasons}`);
-        return [];
+        return { content: [], pagesProcessed: processedPages };
       }
 
       // Process OCR text through the same intelligent analysis pipeline
       const structuredContent = this.analyzeAndStructureText(combinedText);
 
-      return structuredContent;
+      return { content: structuredContent, pagesProcessed: processedPages };
     } catch (error) {
       const totalTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -895,11 +979,15 @@ export class PdfService {
         );
       }
 
-      return [];
+      return { content: [], pagesProcessed: processedPages };
     }
   }
 
-  private async convertPdfToImages(pdfPath: string): Promise<Buffer[]> {
+  /**
+   * Renders the pages OCR will read. `pageCount` is the document's real page
+   * count, so a caller can see how much of the document `images` covers.
+   */
+  private async convertPdfToImages(pdfPath: string): Promise<{ images: Buffer[]; pageCount: number }> {
     const startTime = Date.now();
     let parser: PDFParse | null = null;
 
@@ -924,12 +1012,14 @@ export class PdfService {
       const buffer = fs.readFileSync(pdfPath);
       parser = new PDFParse({ data: buffer });
       const infoResult = await parser.getInfo();
-      const pageCount = infoResult.info?.numPages || 1;
+      // While this read was wrong every scan reported 1 page, so `maxPages` was 1:
+      // OCR rendered a single page of every document and the cap warning never fired.
+      const pageCount = this.numPagesFromInfo(infoResult) || 1;
 
       // Limit pages based on file size and configuration
-      const maxPages = Math.min(pageCount, 20); // Hard limit for performance
+      const maxPages = Math.min(pageCount, MAX_OCR_PAGES); // Hard limit for performance
 
-      if (pageCount > 20) {
+      if (pageCount > MAX_OCR_PAGES) {
         this.logger.warn(`PDF has ${pageCount} pages, limiting OCR to first ${maxPages} pages for performance`);
       }
 
@@ -980,7 +1070,7 @@ export class PdfService {
         this.logger.warn(`${failedPages} pages failed to convert to images`);
       }
 
-      return imageBuffers;
+      return { images: imageBuffers, pageCount };
     } catch (error) {
       const totalTime = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -998,7 +1088,7 @@ export class PdfService {
         );
       }
 
-      return [];
+      return { images: [], pageCount: 0 };
     } finally {
       if (parser) {
         await parser.destroy();
@@ -1518,7 +1608,7 @@ export class PdfService {
   }
 
   async getRawElements(filePath: string, options?: Partial<PdfProcessingOptions>): Promise<any[]> {
-    const contentBlocks = await this.extractPdfContent(filePath, options);
+    const { content: contentBlocks } = await this.extractPdfContent(filePath, options);
 
     return contentBlocks.map((block) => ({
       type: block.type,
@@ -1527,7 +1617,7 @@ export class PdfService {
   }
 
   async load(params: { filePath: string }, options?: Partial<PdfProcessingOptions>): Promise<Document[]> {
-    const contentBlocks = await this.extractPdfContent(params.filePath, options);
+    const { content: contentBlocks } = await this.extractPdfContent(params.filePath, options);
 
     return contentBlocks.map(
       (block) =>
