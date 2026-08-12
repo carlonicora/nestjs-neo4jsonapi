@@ -622,6 +622,11 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         contentType: contentScope?.contentType,
         scopeId: resumeCtx.scopeId,
         scopeType: resumeCtx.scopeType,
+        // Cost attribution, mirroring the run path (buildOperatorRun): without
+        // these the resumed turn's retrieval tools hand the contextualiser /
+        // DRIFT no entity, and an unscoped resume loses its thread fallback.
+        scopeLabel: resumeCtx.scopeLabel,
+        assistantId,
         seedContexts,
         messages,
       });
@@ -744,6 +749,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     if (scope && scope.path.length === 0 && scope.rootType === bound.type) {
       ctx.scopeId = bound.id;
       ctx.scopeType = bound.type;
+      // The catalog already resolved the root's Neo4j label; carrying it means
+      // cost attribution never has to re-derive it from the JSON:API type.
+      ctx.scopeLabel = scope.rootLabel;
     } else {
       this.assistantLogger.warn(
         `buildTurnContext: bound type "${bound.type}" is not a catalogued scope root — the turn runs unscoped.`,
@@ -992,6 +1000,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentType: params.contentScope.contentType,
       scopeId: params.ctx.scopeId,
       scopeType: params.ctx.scopeType,
+      scopeLabel: params.ctx.scopeLabel,
+      assistantId: params.assistantId,
       messages,
       question: params.question,
       threadId: params.threadId,
@@ -1164,6 +1174,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentType: params.contentScope.contentType,
       scopeId: params.ctx.scopeId,
       scopeType: params.ctx.scopeType,
+      scopeLabel: params.ctx.scopeLabel,
+      assistantId: params.assistantId,
       dataLimits: {
         howToMode: params.howToMode,
         limitToHowToId: params.limitToHowToId,

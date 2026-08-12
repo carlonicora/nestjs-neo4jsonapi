@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { buildEmbedderAttribution } from "../../../agents/common/usage-attribution";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { unwrapNeo4jIntegers } from "../../../common/helpers/unwrap-neo4j-integer";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
@@ -97,8 +98,22 @@ export class ChunkRepository implements OnModuleInit {
     });
   }
 
-  async findPotentialChunks(params: { question: string; dataLimits: DataLimits }): Promise<Chunk[]> {
-    const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
+  /**
+   * `attribution` is OPTIONAL and opt-in: this is a QUERY-time embedding, so
+   * the repository has no entity of its own to bill it to. The retrieval scope
+   * lives with the caller (the contextualiser knows which content the run is
+   * bound to), which is why it is passed down rather than derived here. Absent,
+   * `EmbedderService.persistUsage` records nothing.
+   */
+  async findPotentialChunks(params: {
+    question: string;
+    dataLimits: DataLimits;
+    attribution?: EmbedderAttribution;
+  }): Promise<Chunk[]> {
+    const queryEmbedding = await this.embedderService.vectoriseText({
+      text: params.question,
+      attribution: params.attribution,
+    });
 
     // Lucene special-character escape so user questions can't break the fulltext query.
     const term = params.question.replace(/([+\-!(){}\[\]^"~*?:\\\/]|&&|\|\|)/g, "\\$1");
@@ -303,11 +318,14 @@ export class ChunkRepository implements OnModuleInit {
   }): Promise<void> {
     const query = this.neo4j.initQuery();
 
-    // Cost attribution: the chunk's parent node owns the embedding spend, so the
-    // usage record is billed against it (nodeId/nodeType are already required here).
+    // Ingestion-time embedding: the chunk being created belongs to `nodeId`, so
+    // the spend is billed to that entity. `nodeType` is already the Neo4j label
+    // the Cypher below interpolates; `buildEmbedderAttribution` normalises it
+    // through the registry so a caller holding the JSON:API type still bills to
+    // the label the `USED_FOR` edge is matched on.
     const vector = await this.embedderService.vectoriseText({
       text: params.content,
-      attribution: { relationshipId: params.nodeId, relationshipType: params.nodeType },
+      attribution: buildEmbedderAttribution({ entityId: params.nodeId, entityIdentifier: params.nodeType }),
     });
 
     query.queryParams = {
@@ -390,10 +408,22 @@ export class ChunkRepository implements OnModuleInit {
     await this.neo4j.writeOne(query);
   }
 
+  /**
+   * `attribution` is OPTIONAL (added second, positionally, so existing callers
+   * keep compiling). One usage record is written per embedded slice — see
+   * `EmbedderService.persistUsage`. That is honest here because every item in
+   * the batch is a chunk of the SAME parent entity: the only caller,
+   * `ChunkService.propagateAndEmbedDates`, builds `items` from
+   * `findChunks({ id, nodeType })`.
+   */
   async enrichContentAndEmbedBatch(
     items: { chunkId: string; enrichedContent: string; propagatedDates?: string }[],
     attribution?: EmbedderAttribution,
   ): Promise<void> {
+    // Also the zero-token guard: an empty batch embeds nothing, and an operation
+    // that records ZERO tokens must record NOTHING. `persistUsage` has no
+    // zero-token guard of its own, so returning here is what prevents a
+    // 0-token/0-cost row now that this site supplies an attribution.
     if (items.length === 0) return;
 
     for (let start = 0; start < items.length; start += ChunkRepository.EMBED_SLICE) {

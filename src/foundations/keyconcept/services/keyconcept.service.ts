@@ -1,11 +1,16 @@
 import { Injectable } from "@nestjs/common";
+import { EmbedderAttribution } from "../../../core/llm/services/embedder.service";
 import { KeyConceptRepository } from "../../keyconcept/repositories/keyconcept.repository";
 
 @Injectable()
 export class KeyConceptService {
   constructor(private readonly keyConceptRepository: KeyConceptRepository) {}
 
-  async createOrphanKeyConcepts(params: { keyConceptValues: string[] }): Promise<void> {
+  /** `attribution` is OPTIONAL — see `KeyConceptRepository.createOrphanKeyConcepts`. */
+  async createOrphanKeyConcepts(params: {
+    keyConceptValues: string[];
+    attribution?: EmbedderAttribution;
+  }): Promise<void> {
     const availableKeyConcepts = await this.keyConceptRepository.findKeyConceptsByValues({
       keyConceptValues: params.keyConceptValues,
     });
@@ -16,10 +21,16 @@ export class KeyConceptService {
 
     await this.keyConceptRepository.createOrphanKeyConcepts({
       keyConceptValues: missingKeyConcepts,
+      attribution: params.attribution,
     });
   }
 
-  async createKeyConcept(params: { content: string; atomicFactId: string }): Promise<void> {
+  /** `attribution` is OPTIONAL — see `KeyConceptRepository.createKeyConcept`. */
+  async createKeyConcept(params: {
+    content: string;
+    atomicFactId: string;
+    attribution?: EmbedderAttribution;
+  }): Promise<void> {
     const keyConcept = await this.keyConceptRepository.findKeyConceptByValue({
       keyConceptValue: params.content,
     });
@@ -28,6 +39,7 @@ export class KeyConceptService {
       await this.keyConceptRepository.createKeyConcept({
         keyConceptValue: params.content,
         atomicFactId: params.atomicFactId,
+        attribution: params.attribution,
       });
     } else {
       await this.keyConceptRepository.createKeyConceptRelation({

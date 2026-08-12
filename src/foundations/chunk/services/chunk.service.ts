@@ -6,6 +6,7 @@ import { ModuleRef } from "@nestjs/core";
 import { Queue } from "bullmq";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { buildEmbedderAttribution } from "../../../agents/common/usage-attribution";
 import { GraphCreatorService } from "../../../agents/graph.creator/services/graph.creator.service";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.creator.interface";
@@ -252,6 +253,16 @@ export class ChunkService {
 
     this.tracer.addSpanEvent("Generate Graph");
 
+    // Every embedding this graph-generation pass triggers (key-concept values,
+    // one per new concept plus one batch) is spend caused by ingesting THIS
+    // entity, so it is billed to it. `params.type` is the Neo4j label (the job
+    // registry documents it as such, and `generateGraph`'s own queue lookup
+    // relies on it); the helper normalises it through the registry anyway.
+    const ingestionAttribution = buildEmbedderAttribution({
+      entityId: params.id,
+      entityIdentifier: params.type,
+    });
+
     if (chunkAnalysis) {
       this.logger.debug("Chunk analysis successful, processing results", "ChunkService", {
         chunkId: params.chunkId,
@@ -268,9 +279,7 @@ export class ChunkService {
 
           await this.keyConceptRepository.createOrphanKeyConcepts({
             keyConceptValues: Array.from(keyConcepts),
-            // Cost attribution: the key-concept embeddings belong to the content
-            // being analysed, so their usage is billed against it.
-            attribution: { relationshipId: params.id, relationshipType: params.type },
+            attribution: ingestionAttribution,
           });
 
           this.tracer.addSpanEvent("Write Key Concepts in Database");
@@ -288,6 +297,7 @@ export class ChunkService {
               chunkId: chunk.id,
               content: atomicFact.content,
               keyConcepts: atomicFact.keyConcepts,
+              attribution: ingestionAttribution,
             });
           }
           this.tracer.addSpanEvent("Write Atomic Facts in Database");
@@ -452,11 +462,12 @@ export class ChunkService {
 
     // Single batched embed for the whole document — per-call Azure latency dominates batch
     // size, so one round-trip for all chunks is far cheaper than one call per chunk.
-    // Cost attribution: the parent node owns the re-embedding spend.
-    await this.chunkRepository.enrichContentAndEmbedBatch(items, {
-      relationshipId: params.id,
-      relationshipType: params.nodeType,
-    });
+    // Every chunk in `items` came from `findChunks({ id, nodeType })` above, so the
+    // batch's usage records are honestly billed to that one parent entity.
+    await this.chunkRepository.enrichContentAndEmbedBatch(
+      items,
+      buildEmbedderAttribution({ entityId: params.id, entityIdentifier: params.nodeType }),
+    );
   }
 
   /**

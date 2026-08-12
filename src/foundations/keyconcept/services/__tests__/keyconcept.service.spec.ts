@@ -280,4 +280,36 @@ describe("KeyConceptService", () => {
       await expect(service.deleteDisconnectedKeyConcepts()).rejects.toThrow("Delete error");
     });
   });
+  // Embedding cost attribution (Task 8): the service only FORWARDS what
+  // ChunkService.generateGraph supplies — it never invents an attribution.
+  describe("embedding cost attribution", () => {
+    const ATTRIBUTION = { relationshipId: "npc-1", relationshipType: "Npc" };
+
+    it("forwards the ingestion attribution to createOrphanKeyConcepts", async () => {
+      keyConceptRepository.findKeyConceptsByValues.mockResolvedValue([]);
+
+      await service.createOrphanKeyConcepts({ keyConceptValues: ["concept1"], attribution: ATTRIBUTION });
+
+      expect(keyConceptRepository.createOrphanKeyConcepts).toHaveBeenCalledWith({
+        keyConceptValues: ["concept1"],
+        attribution: ATTRIBUTION,
+      });
+    });
+
+    it("forwards the ingestion attribution to createKeyConcept", async () => {
+      keyConceptRepository.findKeyConceptByValue.mockResolvedValue(null);
+
+      await service.createKeyConcept({
+        content: "concept1",
+        atomicFactId: TEST_IDS.atomicFactId,
+        attribution: ATTRIBUTION,
+      });
+
+      expect(keyConceptRepository.createKeyConcept).toHaveBeenCalledWith({
+        keyConceptValue: "concept1",
+        atomicFactId: TEST_IDS.atomicFactId,
+        attribution: ATTRIBUTION,
+      });
+    });
+  });
 });

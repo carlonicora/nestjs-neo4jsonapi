@@ -124,10 +124,22 @@ export class KeyConceptRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
-  async findPotentialKeyConcepts(params: { question: string; dataLimits: DataLimits }): Promise<KeyConcept[]> {
+  /**
+   * `attribution` is OPTIONAL and opt-in: this is a QUERY-time embedding, so
+   * the repository has no entity of its own to bill it to — the retrieval scope
+   * lives with the caller (see `findPotentialChunks` for the same rationale).
+   */
+  async findPotentialKeyConcepts(params: {
+    question: string;
+    dataLimits: DataLimits;
+    attribution?: EmbedderAttribution;
+  }): Promise<KeyConcept[]> {
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
 
-    const queryEmbedding = await this.embedderService.vectoriseText({ text: params.question });
+    const queryEmbedding = await this.embedderService.vectoriseText({
+      text: params.question,
+      attribution: params.attribution,
+    });
 
     const scope = this.aiSourceQuery.build({
       dataLimits: params.dataLimits,
@@ -215,11 +227,30 @@ export class KeyConceptRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * `attribution` is OPTIONAL. ONE usage record covers the whole batch, and
+   * that is honest here: every value in it was extracted from a SINGLE chunk of
+   * a SINGLE entity during that entity's ingestion (`ChunkService.generateGraph`),
+   * so one entity caused the whole cost. KeyConcept nodes are globally
+   * de-duplicated by `MERGE (keyconcept:KeyConcept {value})` and are therefore
+   * not owned by that entity — billing follows who INCURRED the spend, not who
+   * ends up sharing the node.
+   */
   async createOrphanKeyConcepts(params: {
     keyConceptValues: string[];
     attribution?: EmbedderAttribution;
   }): Promise<void> {
     // `attribution` is optional: without it the embedder records no usage (opt-in by design).
+    // Zero-token guard, mirroring `ChunkRepository.enrichContentAndEmbedBatch`.
+    // An empty batch is routine — `ChunkService.generateGraph` calls this
+    // unconditionally, and a chunk that yields no key concepts (or the empty
+    // fallback analysis returned when graph generation fails) produces an empty
+    // array. Embedding nothing costs nothing, and an operation that records ZERO
+    // tokens must record NOTHING; `EmbedderService.persistUsage` has no
+    // zero-token guard of its own, so without this an attributed empty batch
+    // would write a 0-token/0-cost TokenUsage row.
+    if (params.keyConceptValues.length === 0) return;
+
     const vectors = await this.embedderService.vectoriseTextBatch(params.keyConceptValues, params.attribution);
 
     const data = params.keyConceptValues.map((keyConceptId: string, index: number) => ({
@@ -251,7 +282,18 @@ export class KeyConceptRepository implements OnModuleInit {
     await this.neo4j.executeInTransaction(data);
   }
 
-  async createKeyConcept(params: { keyConceptValue: string; atomicFactId: string }): Promise<void> {
+  /**
+   * `attribution` is OPTIONAL and threaded down from `ChunkService.generateGraph`
+   * — the entity whose ingestion produced this atomic fact. Deriving it locally
+   * from `atomicFactId` was rejected: an `AtomicFact` is an internal graph node
+   * with no owner, so a `USED_FOR` edge to it tells a cost report nothing about
+   * which entity the spend belongs to.
+   */
+  async createKeyConcept(params: {
+    keyConceptValue: string;
+    atomicFactId: string;
+    attribution?: EmbedderAttribution;
+  }): Promise<void> {
     const queryCheck = this.neo4j.initQuery({ serialiser: KeyConceptModel, fetchAll: true });
 
     queryCheck.queryParams = {
@@ -269,6 +311,7 @@ export class KeyConceptRepository implements OnModuleInit {
     if (!existingNode.length) {
       vector = await this.embedderService.vectoriseText({
         text: params.keyConceptValue,
+        attribution: params.attribution,
       });
     }
 

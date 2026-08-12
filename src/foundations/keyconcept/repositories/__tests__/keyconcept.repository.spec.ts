@@ -338,6 +338,70 @@ describe("KeyConceptRepository", () => {
     });
   });
 
+  // Embedding cost attribution (Task 8). Attribution is opt-in and threaded down
+  // from `ChunkService.generateGraph` — the entity whose ingestion caused the
+  // spend. `relationshipType` is always the Neo4j LABEL.
+  describe("embedding cost attribution", () => {
+    const ATTRIBUTION = { relationshipId: "npc-1", relationshipType: "Npc" };
+
+    it("bills one orphan-key-concept batch to the entity being ingested", async () => {
+      neo4jService.executeInTransaction.mockResolvedValue(undefined);
+
+      await repository.createOrphanKeyConcepts({
+        keyConceptValues: ["Concept 1", "Concept 2"],
+        attribution: ATTRIBUTION,
+      });
+
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledTimes(1);
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledWith(["Concept 1", "Concept 2"], ATTRIBUTION);
+    });
+
+    it("records NOTHING for an empty batch — zero tokens must write no row", async () => {
+      // An operation that records zero tokens records nothing. `persistUsage` has
+      // no zero-token guard, so without the repository's early return an attributed
+      // empty batch would write a 0-token/0-cost TokenUsage row. This is routine:
+      // `ChunkService.generateGraph` calls this unconditionally, and a chunk with no
+      // key concepts (or the empty fallback analysis) supplies an empty array.
+      await repository.createOrphanKeyConcepts({ keyConceptValues: [], attribution: ATTRIBUTION });
+
+      expect(embedderService.vectoriseTextBatch).not.toHaveBeenCalled();
+      expect(neo4jService.executeInTransaction).not.toHaveBeenCalled();
+    });
+
+    it("bills a new key concept's embedding to the entity being ingested", async () => {
+      neo4jService.initQuery.mockReturnValueOnce(createMockQuery()).mockReturnValueOnce(createMockQuery());
+      neo4jService.readMany.mockResolvedValue([]);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createKeyConcept({
+        keyConceptValue: "New Concept",
+        atomicFactId: TEST_IDS.atomicFactId,
+        attribution: ATTRIBUTION,
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith({
+        text: "New Concept",
+        attribution: ATTRIBUTION,
+      });
+    });
+
+    it("forwards the caller's attribution on a query-time embedding", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findPotentialKeyConcepts({
+        question: "test question",
+        dataLimits: {},
+        attribution: { relationshipId: "campaign-1", relationshipType: "Campaign" },
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith({
+        text: "test question",
+        attribution: { relationshipId: "campaign-1", relationshipType: "Campaign" },
+      });
+    });
+  });
+
   describe("updateKeyConceptDescriptions", () => {
     it("should update descriptions for key concepts", async () => {
       neo4jService.executeInTransaction.mockResolvedValue(undefined);

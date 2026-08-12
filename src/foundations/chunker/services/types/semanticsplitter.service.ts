@@ -143,7 +143,22 @@ export class SemanticSplitterService {
 
   private async generateAndAttachEmbeddings(sentencesArray: SentenceObject[]): Promise<SentenceObject[]> {
     try {
-      /* Create embedding instance */
+      /*
+       * NO USAGE IS RECORDED HERE, DELIBERATELY.
+       *
+       * This splitter takes the raw embedder from `ModelService` and calls
+       * `embedDocuments` on it directly, bypassing `EmbedderService` — the only
+       * place embedding spend is metered. It also receives no entity id or type:
+       * it is handed plain text by the chunker, so there is nothing to attribute
+       * the spend TO even if it were routed through `EmbedderService`. Recording
+       * would therefore need a signature change up the chunker chain, which is
+       * out of scope for this branch.
+       *
+       * DORMANT, NOT DEAD: this splitter only runs when `CHUNKER_STRATEGY` selects
+       * the semantic strategy. narr8 leaves it unset (→ `markdown-structural`), so
+       * no narr8 embedding spend goes unrecorded today — but it is one env var away.
+       * Same applies to the two `embedDocuments` calls in `mergeSmallChunks` below.
+       */
       const embeddings = this.modelService.getEmbedder();
 
       // Deep copy the sentencesArray to ensure purity
@@ -338,7 +353,12 @@ export class SemanticSplitterService {
     }
 
     try {
-      // Generate embeddings for all chunks in a single batch call
+      // Generate embeddings for all chunks in a single batch call.
+      // Records NO usage, deliberately — same reason as
+      // `generateAndAttachEmbeddings` above: the raw embedder is used directly
+      // (bypassing `EmbedderService`, the only metered path) and no entity is in
+      // scope to attribute the spend to. Dormant unless `CHUNKER_STRATEGY`
+      // selects the semantic splitter; narr8 leaves it unset.
       const embeddings = this.modelService.getEmbedder();
       const chunkEmbeddings = await embeddings.embedDocuments(chunks);
 
@@ -400,7 +420,8 @@ export class SemanticSplitterService {
           }
         }
 
-        // Batch re-embed all merged chunks in a single API call
+        // Batch re-embed all merged chunks in a single API call.
+        // Also unrecorded, deliberately — see the note at the top of this method.
         if (needsReembedding.length > 0) {
           const textsToEmbed = needsReembedding.map((idx) => newChunks[idx]);
           const batchEmbeddings = await embeddings.embedDocuments(textsToEmbed);

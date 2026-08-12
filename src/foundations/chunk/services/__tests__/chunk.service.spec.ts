@@ -14,6 +14,7 @@ import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.servic
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { TracingService } from "../../../../core/tracing/services/tracing.service";
 import { AiStatus } from "../../../../common/enums/ai.status";
+import { modelRegistry } from "../../../../common/registries/registry";
 
 // Mock crypto
 vi.mock("crypto", async () => {
@@ -95,6 +96,7 @@ describe("ChunkService", () => {
     deleteChunksByNodeType: vi.fn(),
     updateStatus: vi.fn(),
     updateDates: vi.fn(),
+    findParentName: vi.fn(),
     enrichContentAndEmbedBatch: vi.fn(),
     clearFinalisationClaim: vi.fn(),
   });
@@ -634,6 +636,61 @@ describe("ChunkService", () => {
         expect.arrayContaining([expect.objectContaining({ chunkId: "chunk-1" })]),
         { relationshipId: "doc-1", relationshipType: "Document" },
       );
+    });
+  });
+
+  // Embedding cost attribution (Task 8). Ingestion embeddings are billed to the
+  // entity being ingested; `relationshipType` is always the Neo4j LABEL, which
+  // is what a TokenUsage record's USED_FOR edge is matched on.
+  describe("embedding cost attribution", () => {
+    beforeEach(() => {
+      modelRegistry.register({ nodeName: "content", labelName: "Content", type: "contents" } as never);
+      modelRegistry.register({ nodeName: "npc", labelName: "Npc", type: "npcs" } as never);
+    });
+
+    it("bills key-concept embeddings to the entity being ingested", async () => {
+      chunkRepository.findChunkById.mockResolvedValue({ id: TEST_IDS.chunkId, content: "Test content" });
+      graphCreatorService.generateGraph.mockResolvedValue({
+        atomicFacts: [{ content: "Fact 1", keyConcepts: ["concept1"] }],
+        keyConceptsRelationships: [],
+        keyConceptDescriptions: [],
+        dates: [],
+        tokens: { input: 0, output: 0 },
+      });
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+      mockQueue.add.mockResolvedValue(undefined);
+
+      await service.generateGraph({
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        chunkId: TEST_IDS.chunkId,
+        id: "content-1",
+        // The job registry documents `type` as the Neo4j label (PascalCase);
+        // "Content" is the only label the mocked jobNames config registers.
+        type: "Content",
+      });
+
+      const attribution = { relationshipId: "content-1", relationshipType: "Content" };
+      expect(keyConceptRepository.createOrphanKeyConcepts).toHaveBeenCalledWith(
+        expect.objectContaining({ attribution }),
+      );
+      expect(atomicFactService.createAtomicFact).toHaveBeenCalledWith(expect.objectContaining({ attribution }));
+    });
+
+    it("bills the whole re-embed batch to the document's parent entity", async () => {
+      chunkRepository.findChunks.mockResolvedValue([
+        { id: "c1", content: "one", dates: [] },
+        { id: "c2", content: "two", dates: [] },
+      ]);
+      chunkRepository.findParentName.mockResolvedValue("Bartender");
+
+      await service.propagateAndEmbedDates({ id: "npc-1", nodeType: "Npc" });
+
+      expect(chunkRepository.enrichContentAndEmbedBatch).toHaveBeenCalledTimes(1);
+      expect(chunkRepository.enrichContentAndEmbedBatch).toHaveBeenCalledWith(expect.any(Array), {
+        relationshipId: "npc-1",
+        relationshipType: "Npc",
+      });
     });
   });
 });

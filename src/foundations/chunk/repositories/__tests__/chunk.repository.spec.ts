@@ -5,6 +5,7 @@ import { ChunkRepository } from "../chunk.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
+import { modelRegistry } from "../../../../common/registries/registry";
 import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
 import { EntityFactory } from "../../../../core/neo4j/factories/entity.factory";
@@ -929,6 +930,98 @@ describe("ChunkRepository", () => {
       expect(embedderService.vectoriseText).toHaveBeenCalledWith({
         text: "Test content",
         attribution: { relationshipId: TEST_IDS.contentId, relationshipType: "Content" },
+      });
+    });
+  });
+
+  // Embedding cost attribution (Task 8). `relationshipType` MUST be the Neo4j
+  // LABEL — a TokenUsage record's USED_FOR edge is matched on the label, so a
+  // JSON:API type passed verbatim writes a record that is billed against nothing.
+  describe("embedding cost attribution", () => {
+    beforeEach(() => {
+      modelRegistry.register({ nodeName: "npc", labelName: "Npc", type: "npcs" } as never);
+    });
+
+    it("attributes a chunk embedding to the chunk's owning entity", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createChunk({
+        id: TEST_IDS.chunkId,
+        nodeId: "npc-1",
+        nodeType: "Npc",
+        content: "x",
+        position: 0,
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: expect.objectContaining({ relationshipId: "npc-1", relationshipType: "Npc" }),
+        }),
+      );
+    });
+
+    it("translates a JSON:API nodeType into its Neo4j label", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createChunk({
+        id: TEST_IDS.chunkId,
+        nodeId: "npc-1",
+        nodeType: "npcs",
+        content: "x",
+        position: 0,
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attribution: expect.objectContaining({ relationshipId: "npc-1", relationshipType: "Npc" }),
+        }),
+      );
+    });
+
+    it("forwards the caller's attribution on a query-time embedding", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findPotentialChunks({
+        question: "test question",
+        dataLimits: {},
+        attribution: { relationshipId: "campaign-1", relationshipType: "Campaign" },
+      });
+
+      expect(embedderService.vectoriseText).toHaveBeenCalledWith({
+        text: "test question",
+        attribution: { relationshipId: "campaign-1", relationshipType: "Campaign" },
+      });
+    });
+
+    it("records NOTHING for an empty batch — zero tokens must write no row", async () => {
+      await repository.enrichContentAndEmbedBatch([], { relationshipId: "npc-1", relationshipType: "Npc" });
+
+      expect(embedderService.vectoriseTextBatch).not.toHaveBeenCalled();
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
+    });
+
+    it("records ONE attributed batch for the parent entity's chunks", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.enrichContentAndEmbedBatch(
+        [
+          { chunkId: "c1", enrichedContent: "a" },
+          { chunkId: "c2", enrichedContent: "b" },
+        ],
+        { relationshipId: "npc-1", relationshipType: "Npc" },
+      );
+
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledTimes(1);
+      expect(embedderService.vectoriseTextBatch).toHaveBeenCalledWith(["a", "b"], {
+        relationshipId: "npc-1",
+        relationshipType: "Npc",
       });
     });
   });

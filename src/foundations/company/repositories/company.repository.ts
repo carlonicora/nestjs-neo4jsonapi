@@ -381,7 +381,7 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
    * then the extra top-up balance).
    *
    * @param params - Parameters
-   * @param params.credits - Credits to deduct (fractional, 2 decimals)
+   * @param params.credits - Credits to deduct (fractional, 4 decimals)
    * @param params.companyId - Company identifier; defaults to the CLS company
    */
   async useCredits(params: {
@@ -398,7 +398,7 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
 
     // Single-statement read-and-write: the monthly-then-extra waterfall is computed
     // inside the SET so concurrent deductions cannot lose updates. Balances are
-    // 2-dp floats and are deliberately NOT clamped (a mid-operation overrun may go
+    // 4-dp floats and are deliberately NOT clamped (a mid-operation overrun may go
     // negative; the pre-flight guard blocks the NEXT operation).
     query.query = `
       MATCH (company:Company {id: $companyId})
@@ -406,10 +406,10 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
            toFloat(coalesce(company.availableMonthlyCredits, 0)) AS m,
            toFloat(coalesce(company.availableExtraCredits, 0)) AS e,
            toFloat($credits) AS c
-      SET company.availableMonthlyCredits = CASE WHEN m >= c THEN round(m - c, 2) ELSE 0.0 END,
+      SET company.availableMonthlyCredits = CASE WHEN m >= c THEN round(m - c, 4) ELSE 0.0 END,
           company.availableExtraCredits   = CASE WHEN m >= c THEN e
-                                                 WHEN m > 0  THEN round(e - (c - m), 2)
-                                                 ELSE round(e - c, 2) END,
+                                                 WHEN m > 0  THEN round(e - (c - m), 4)
+                                                 ELSE round(e - c, 4) END,
           company.updatedAt = datetime()
       RETURN company
     `;
@@ -799,7 +799,7 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
 
     query.query = `
       MATCH (company:Company {id: $companyId})
-      SET company.availableExtraCredits = round(COALESCE(company.availableExtraCredits, 0) + $credits, 2),
+      SET company.availableExtraCredits = round(COALESCE(company.availableExtraCredits, 0) + $credits, 4),
           company.updatedAt = datetime()
     `;
 

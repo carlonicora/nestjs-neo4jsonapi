@@ -258,4 +258,19 @@ describe("AtomicFactService", () => {
       await expect(service.deleteDisconnectedAtomicFacts()).rejects.toThrow("KeyConcept delete failed");
     });
   });
+  // Embedding cost attribution (Task 8): creating an atomic fact costs nothing,
+  // but each key concept it introduces is embedded — that spend belongs to the
+  // entity whose ingestion produced the fact, so the attribution is forwarded.
+  describe("embedding cost attribution", () => {
+    it("forwards the ingestion attribution to every key concept it creates", async () => {
+      const attribution = { relationshipId: "npc-1", relationshipType: "Npc" };
+
+      await service.createAtomicFact({ ...TEST_DATA, attribution });
+
+      expect(keyConceptService.createKeyConcept).toHaveBeenCalledTimes(TEST_DATA.keyConcepts.length);
+      for (const call of keyConceptService.createKeyConcept.mock.calls) {
+        expect(call[0]).toEqual(expect.objectContaining({ attribution }));
+      }
+    });
+  });
 });

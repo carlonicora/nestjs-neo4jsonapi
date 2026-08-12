@@ -519,6 +519,20 @@ export class ChunkerService {
         extension: params.fileType,
       });
 
+      /*
+       * NO USAGE IS RECORDED FOR THIS CALL, DELIBERATELY.
+       *
+       * It takes the raw model from `ModelService` and calls `invoke` on it
+       * directly, bypassing `LLMService` — the only place LLM spend is metered.
+       * It is also handed nothing to attribute the spend to: file chunking
+       * receives a path and a file type, no entity id or label, so a usage row
+       * written here would carry no `USED_FOR` edge and bill nobody.
+       *
+       * UNREACHABLE FROM narr8, which never ingests files through the chunker,
+       * so no narr8 spend goes unrecorded. It IS live for library consumers that
+       * do ingest files; metering it needs an attribution parameter threaded
+       * through the chunker's public entry points, which is out of scope here.
+       */
       const model = this.modelService.getLLM({ temperature: 0.2 });
 
       // Analyze the image directly using the LLM
