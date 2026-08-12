@@ -4,6 +4,11 @@ export { AgentsModule } from "./agents.modules";
 // Default prompts for reference
 export * from "./prompts";
 
+// Cost attribution shared by the agents. `CallerAttributionState` appears in the
+// public signatures of `ContextualiserService.run` and `DriftSearchService.search`
+// (both sub-agents bill their caller), so consumers must be able to name it.
+export type { CallerAttributionState, ScopeAttribution } from "./common/usage-attribution";
+
 // Community Detector (DRIFT)
 export { CommunityDetectorModule } from "./community.detector/community.detector.module";
 export { CommunityDetectorService } from "./community.detector/services/community.detector.service";
