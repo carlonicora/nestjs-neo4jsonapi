@@ -151,11 +151,13 @@ export class AuthGoogleService {
       },
     });
 
+    // The `~` prefix marks the avatar as an absolute external URL so the user
+    // entity transform returns it as-is instead of signing it as an S3 key.
     return {
       id: response.data.id,
       email: response.data.email,
       name: response.data.name,
-      picture: response.data.picture ?? null,
+      picture: response.data.picture ? `~${response.data.picture}` : null,
     };
   }
 }
