@@ -47,12 +47,14 @@ export class StripePromotionCodeApiService {
   }): Promise<PromotionCodeValidationResult> {
     const stripe = this.stripeService.getClient();
 
-    // 1. Look up promotion code with expanded coupon
+    // 1. Look up promotion code with expanded coupon.
+    // The coupon hangs off `promotion`, not off the promotion code itself. Expanding "data.coupon"
+    // instead is silently ignored by the API - it raises no error and expands nothing.
     const promotionCodes = await stripe.promotionCodes.list({
       code: params.code,
       active: true,
       limit: 1,
-      expand: ["data.coupon"],
+      expand: ["data.promotion.coupon"],
     });
 
     if (promotionCodes.data.length === 0) {
@@ -65,10 +67,10 @@ export class StripePromotionCodeApiService {
 
     const promoCode = promotionCodes.data[0] as any;
 
-    // Get the coupon directly from the promotion code object
-    // Note: TypeScript types may not include coupon, but Stripe API returns it
-    const coupon = promoCode.coupon as Stripe.Coupon;
-    if (!coupon) {
+    // Expanded above, so this is the coupon object. It stays an id string if the expansion was
+    // dropped, which carries none of the fields the checks below need - treat that as unresolved.
+    const coupon = promoCode.promotion?.coupon as Stripe.Coupon;
+    if (!coupon || typeof coupon !== "object") {
       return this.createResponse({
         valid: false,
         code: params.code,

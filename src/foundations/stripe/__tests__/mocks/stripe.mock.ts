@@ -117,6 +117,14 @@ export const createMockStripeClient = () => ({
     list: vi.fn(),
   },
 
+  // Promotion code methods
+  promotionCodes: {
+    create: vi.fn(),
+    retrieve: vi.fn(),
+    update: vi.fn(),
+    list: vi.fn(),
+  },
+
   // Refund methods
   refunds: {
     create: vi.fn(),
