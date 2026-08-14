@@ -5,6 +5,7 @@ import { createWorkerProvider } from "../../common/decorators/conditional-servic
 import { modelRegistry } from "../../common/registries/registry";
 import { LLMModule } from "../../core/llm/llm.module";
 import { AtomicFactModule } from "../atomicfact/atomicfact.module";
+import { CompanyModule } from "../company/company.module";
 import { KeyConceptModule } from "../keyconcept/keyconcept.module";
 import { S3Module } from "../s3/s3.module";
 import { TokenUsageModule } from "../tokenusage/tokenusage.module";
@@ -37,6 +38,7 @@ import { ChunkService } from "./services/chunk.service";
   exports: [ChunkService, ChunkRepository],
   imports: [
     AtomicFactModule,
+    CompanyModule,
     GraphCreatorModule,
     KeyConceptModule,
     S3Module,

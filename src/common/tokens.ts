@@ -85,3 +85,23 @@ export interface TokenUsageRecorderInterface {
     costOverride?: number;
   }): Promise<void>;
 }
+
+/**
+ * Application-provided seam for gating AI operations on available company
+ * credits. Mirrors `TOKEN_USAGE_RECORDER` above: package code that needs to
+ * enforce the credit gate resolves this OPTIONAL token rather than injecting
+ * `CompanyService` directly, so consumers that never register a provider see
+ * unchanged (ungated) behaviour.
+ *
+ * `validateCredits` MUST throw `HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED)`
+ * when the company has no available credits, and MUST be a no-op (never throw)
+ * when credits are disabled (`creditCost <= 0`).
+ */
+export const CREDIT_VALIDATOR = Symbol("CREDIT_VALIDATOR");
+
+/**
+ * Contract implemented by an application-provided credit validator.
+ */
+export interface CreditValidatorInterface {
+  validateCredits(params: { companyId: string }): Promise<void>;
+}

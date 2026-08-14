@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HttpException, HttpStatus } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Test, TestingModule } from "@nestjs/testing";
 import { getQueueToken } from "@nestjs/bullmq";
 import { ModuleRef } from "@nestjs/core";
@@ -31,6 +32,7 @@ describe("CompanyService", () => {
   let mockVersionService: vi.Mocked<VersionService>;
   let mockModuleRef: vi.Mocked<ModuleRef>;
   let mockWebSocketService: vi.Mocked<WebSocketService>;
+  let mockConfigService: vi.Mocked<ConfigService>;
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_COMPANY: Company = {
@@ -85,6 +87,12 @@ describe("CompanyService", () => {
       sendMessageToCompany: vi.fn(),
     } as any;
 
+    // Credits enabled by default (creditCost > 0) so the pre-existing cases keep
+    // exercising the gated behaviour; individual cases override this.
+    mockConfigService = {
+      get: vi.fn().mockReturnValue({ creditCost: 0.01, minCreditsPerRecord: 0.1 }),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CompanyService,
@@ -96,6 +104,7 @@ describe("CompanyService", () => {
         { provide: VersionService, useValue: mockVersionService },
         { provide: ModuleRef, useValue: mockModuleRef },
         { provide: WebSocketService, useValue: mockWebSocketService },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 

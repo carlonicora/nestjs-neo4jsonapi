@@ -15,6 +15,7 @@ export * from "./auth";
 export * from "./chunk";
 export * from "./chunker";
 export * from "./company";
+export * from "./community";
 export * from "./content";
 export * from "./discord";
 export * from "./discord-user";

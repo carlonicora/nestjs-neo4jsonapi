@@ -6,7 +6,9 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Logger,
+  Optional,
   Param,
   Patch,
   Post,
@@ -20,6 +22,7 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { modelRegistry } from "../../../common/registries/registry";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AssistantAppendDto } from "../dtos/assistant-append.dto";
 import { AssistantPatchDto } from "../dtos/assistant-patch.dto";
@@ -86,6 +89,7 @@ export class AssistantController {
   constructor(
     private readonly assistants: AssistantService,
     private readonly jsonApi: JsonApiService,
+    @Optional() @Inject(CREDIT_VALIDATOR) private readonly creditValidator?: CreditValidatorInterface,
   ) {}
 
   /**
@@ -98,6 +102,9 @@ export class AssistantController {
    */
   @Post(assistantMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
+    if (this.creditValidator && req.user?.companyId)
+      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
     const boundContent = this.resolveBoundContent(body.data.relationships?.content?.data);
     this.logger.log(
@@ -148,6 +155,9 @@ export class AssistantController {
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
+    if (this.creditValidator && req.user?.companyId)
+      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+
     const { content, howToMode, limitToHowToId } = body.data.attributes;
     this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);
     const { userMessage, assistantMessage, toolCalls } = await this.assistants.appendMessage({

@@ -4,6 +4,7 @@ import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { EmbedderService } from "../../../core";
+import { CompanyService } from "../../company/services/company.service";
 import { ChunkRepository } from "../repositories/chunk.repository";
 
 const EMBEDDING_CHUNKS_QUEUE = "embedding-chunks";
@@ -16,6 +17,7 @@ export class ChunkEmbeddingProcessor extends WorkerHost {
     private readonly clsService: ClsService,
     private readonly chunkRepository: ChunkRepository,
     private readonly embedderService: EmbedderService,
+    private readonly companyService: CompanyService,
     configService: ConfigService<BaseConfigInterface>,
   ) {
     super();
@@ -47,6 +49,10 @@ export class ChunkEmbeddingProcessor extends WorkerHost {
       this.clsService.set("companyId", job.data.companyId);
       this.clsService.set("userId", job.data.userId);
       this.clsService.set("isAutomatedJob", true);
+
+      if (!(await this.companyService.hasAvailableCredits({ companyId: job.data.companyId }))) {
+        return { processed: 0 }; // admin re-embed is maintenance; skip cleanly, no marker
+      }
 
       // 1. Recreate vector index with new dimensions
       await this.chunkRepository.recreateVectorIndex();

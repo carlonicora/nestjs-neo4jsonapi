@@ -156,6 +156,66 @@ export class CommunityRepository implements OnModuleInit {
   }
 
   /**
+   * Mark a community as deferred for lack of credits — the summariser cron
+   * skips it (via `findAllStaleCommunities`'s WHERE clause) until approval
+   * clears the flag (spec §2: a fresh top-up must not be silently eaten).
+   */
+  async markPendingCredits(communityId: string): Promise<void> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, communityId };
+    query.query += `
+      MATCH (community:Community { id: $communityId })-[:BELONGS_TO]->(company)
+      SET community.pendingCredits = true, community.updatedAt = datetime()
+    `;
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Approval: clear the flag for the current company (from CLS); returns the
+   * cleared community ids so the caller can re-enqueue them.
+   */
+  async clearPendingCredits(): Promise<string[]> {
+    // Read the ids first, then clear the flag. A single `SET ... RETURN` cannot
+    // go through `neo4j.read()` (Neo4j rejects writes in a read transaction:
+    // "Writing in read access mode not allowed"), and the public write helpers
+    // only return rows when given a serialiser — which this projection has no
+    // use for.
+    const readQuery = this.neo4j.initQuery();
+    readQuery.query += `
+      MATCH (community:Community { pendingCredits: true })-[:BELONGS_TO]->(company)
+      RETURN community.id AS communityId
+    `;
+    const result = await this.neo4j.read(readQuery.query, readQuery.queryParams);
+    const communityIds = result.records.map((record) => record.get("communityId") as string);
+    if (communityIds.length === 0) return [];
+
+    const writeQuery = this.neo4j.initQuery();
+    writeQuery.queryParams = { ...writeQuery.queryParams, communityIds };
+    writeQuery.query += `
+      MATCH (community:Community)-[:BELONGS_TO]->(company)
+      WHERE community.id IN $communityIds
+      SET community.pendingCredits = false, community.updatedAt = datetime()
+    `;
+    await this.neo4j.writeOne(writeQuery);
+
+    return communityIds;
+  }
+
+  /**
+   * Backlog count for the current company (from CLS) — mirrors countStaleCommunities.
+   */
+  async countPendingCredits(): Promise<number> {
+    const query = this.neo4j.initQuery();
+    query.query += `
+      MATCH (community:Community { pendingCredits: true })-[:BELONGS_TO]->(company)
+      RETURN COUNT(community) AS count
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    const count = result.records[0]?.get("count");
+    return count?.toNumber?.() ?? count ?? 0;
+  }
+
+  /**
    * Count stale communities for the current company (from CLS)
    */
   async countStaleCommunities(): Promise<number> {
@@ -177,6 +237,7 @@ export class CommunityRepository implements OnModuleInit {
     const query = this.neo4j.initQuery();
     query.query += `
       MATCH (community:Community {isStale: true})-[:BELONGS_TO]->(company)
+      WHERE community.pendingCredits IS NULL OR community.pendingCredits = false
       RETURN community.id AS communityId, company.id AS companyId
       ORDER BY community.staleSince ASC
     `;
@@ -214,6 +275,7 @@ export class CommunityRepository implements OnModuleInit {
           community.rating = $rating,
           community.isStale = false,
           community.staleSince = null,
+          community.pendingCredits = false,
           community.lastProcessedAt = datetime(),
           community.updatedAt = datetime()
     `;

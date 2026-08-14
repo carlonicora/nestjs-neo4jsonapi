@@ -1,10 +1,12 @@
 import { InjectQueue } from "@nestjs/bullmq";
 import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { OnEvent } from "@nestjs/event-emitter";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../../tokenusage/events/tokenusage.events";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
+import { BaseConfigInterface, ConfigCreditsInterface } from "../../../config/interfaces";
 import { QueueId } from "../../../config/enums/queue.id";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
@@ -42,6 +44,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     private readonly versionService: VersionService,
     private readonly moduleRef: ModuleRef,
     private readonly webSocketService: WebSocketService,
+    private readonly configService: ConfigService<BaseConfigInterface>,
     @Optional()
     @Inject(COMPANY_DELETION_HANDLER)
     private readonly deletionHandler?: CompanyDeletionHandler,
@@ -57,7 +60,15 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     if (!company) throw new HttpException("Company not found", HttpStatus.UNAUTHORIZED);
   }
 
+  /** creditCost <= 0 disables credits entirely (spec §5; mirrors tokenusage.service.ts:120-124). */
+  private get creditsEnabled(): boolean {
+    const credits = this.configService.get<ConfigCreditsInterface>("credits");
+    return !!credits && credits.creditCost > 0;
+  }
+
   async validateCompanyCredits(params: { companyId: string }) {
+    if (!this.creditsEnabled) return;
+
     const company = await this.companyRepository.findByCompanyId({
       companyId: params.companyId,
     });
@@ -70,10 +81,12 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
   }
 
   async hasAvailableCredits(params: { companyId: string }): Promise<boolean> {
+    if (!this.creditsEnabled) return true;
+
     const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
     return (
-      (company.availableMonthlyCredits && company.availableMonthlyCredits > 0) ||
-      (company.availableExtraCredits && company.availableExtraCredits > 0)
+      (!!company.availableMonthlyCredits && company.availableMonthlyCredits > 0) ||
+      (!!company.availableExtraCredits && company.availableExtraCredits > 0)
     );
   }
 

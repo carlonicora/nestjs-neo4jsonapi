@@ -3,6 +3,9 @@ import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
+import { CompanyService } from "../../../foundations/company/services/company.service";
+import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
 import { CommunitySummariserService } from "../services/community.summariser.service";
 
 interface CommunitySummariserJobData {
@@ -16,6 +19,9 @@ export class CommunitySummariserProcessor extends WorkerHost {
     private readonly summariserService: CommunitySummariserService,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
+    private readonly companyService: CompanyService,
+    private readonly communityRepository: CommunityRepository,
+    private readonly webSocketService: WebSocketService,
   ) {
     super();
   }
@@ -42,6 +48,24 @@ export class CommunitySummariserProcessor extends WorkerHost {
 
     await this.cls.run(async () => {
       this.cls.set("companyId", companyId);
+
+      if (!(await this.companyService.hasAvailableCredits({ companyId }))) {
+        // Leave isStale set; flag pendingCredits so the 10-minute cron stops
+        // re-enqueueing it (spec §2: a fresh top-up must not be silently eaten).
+        await this.communityRepository.markPendingCredits(communityId);
+
+        // Deferrals happen without spend, so the frontend needs this push (spec §4.5).
+        await this.webSocketService.sendMessageToCompany(companyId, "company:ai_backlog_updated", {
+          type: "company:ai_backlog_updated",
+          companyId,
+        });
+
+        this.logger.log(
+          `Deferred community summarisation for community ${communityId} (company ${companyId}) — no available credits`,
+          "CommunitySummariserProcessor",
+        );
+        return;
+      }
 
       this.logger.log(
         `Starting community summarisation for community ${communityId} (company ${companyId})`,

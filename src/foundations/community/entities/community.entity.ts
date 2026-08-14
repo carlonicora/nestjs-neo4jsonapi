@@ -12,6 +12,8 @@ export type Community = Entity & {
   isStale: boolean;
   staleSince?: Date;
   lastProcessedAt?: Date;
+  /** Deferred for lack of credits — the summariser cron skips these until approval clears the flag (spec §2). */
+  pendingCredits?: boolean;
 
   company: Company;
   keyconcept: KeyConcept[];

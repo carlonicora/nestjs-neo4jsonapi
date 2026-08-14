@@ -14,6 +14,7 @@ export const mapCommunity = (params: { data: any; record: any; entityFactory: En
     isStale: params.data.isStale,
     staleSince: params.data.staleSince,
     lastProcessedAt: params.data.lastProcessedAt,
+    pendingCredits: params.data.pendingCredits,
 
     company: undefined,
     keyconcept: [],
