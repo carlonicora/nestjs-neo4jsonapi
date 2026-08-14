@@ -15,6 +15,7 @@ import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfac
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { ModelWeight } from "../enums/model.weight";
 import { ReasoningEffort } from "../enums/reasoning.effort";
+import { vertexLocationParams } from "../utils/vertex.utils";
 import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 import { RateLimitedEmbedder } from "./rate-limited-embedder";
@@ -537,6 +538,10 @@ export class ModelService implements OnModuleInit {
           model: cfg.model,
           temperature,
           location: cfg.region,
+          // `region` accepts a region ("europe-west4"), a jurisdictional
+          // multi-region ("eu"/"us"), or "global". LangChain only builds the
+          // first and third correctly — see vertexLocationParams.
+          ...vertexLocationParams(cfg.region),
           ...(maxOutputTokens ? { maxOutputTokens } : {}),
         });
       }
@@ -687,6 +692,8 @@ export class ModelService implements OnModuleInit {
         response = new VertexAIEmbeddings({
           model: embedderConfig.model,
           location: embedderConfig.region,
+          // EMBEDDER_REGION accepts a region or a multi-region, same as AI_REGION.
+          ...vertexLocationParams(embedderConfig.region),
           dimensions: embedderConfig.dimensions,
         });
         break;

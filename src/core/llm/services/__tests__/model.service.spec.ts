@@ -282,6 +282,27 @@ describe("ModelService vertex credentials env contract", () => {
     expect(fsMock.writeFileSync).toHaveBeenCalled();
     expect(process.env.GOOGLE_APPLICATION_CREDENTIALS).toBeDefined();
   });
+
+  const vertexSvc = (region: string) =>
+    makeService({
+      ai: tier({ provider: "vertex", model: "gemini-2.5-flash", region }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+
+  it("routes a multi-region location through the .rep. endpoint", () => {
+    // Without this, LangChain builds "eu-aiplatform.googleapis.com" — not a
+    // Vertex endpoint (404). See utils/vertex.utils.ts.
+    const llm = vertexSvc("eu").getLLM() as any;
+    expect(llm.opts.location).toBe("eu");
+    expect(llm.opts.endpoint).toBe("aiplatform.eu.rep.googleapis.com");
+  });
+
+  it("leaves a regional location on LangChain's computed endpoint", () => {
+    const llm = vertexSvc("europe-west4").getLLM() as any;
+    expect(llm.opts.location).toBe("europe-west4");
+    expect(llm.opts.endpoint).toBeUndefined();
+  });
 });
 
 // === TASK 1: reasoning effort + strict structured-output capability ======
