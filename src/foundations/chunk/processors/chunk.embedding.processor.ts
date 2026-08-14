@@ -1,10 +1,12 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
+import { Inject, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
+import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { EmbedderService } from "../../../core";
-import { CompanyService } from "../../company/services/company.service";
 import { ChunkRepository } from "../repositories/chunk.repository";
 
 const EMBEDDING_CHUNKS_QUEUE = "embedding-chunks";
@@ -17,8 +19,11 @@ export class ChunkEmbeddingProcessor extends WorkerHost {
     private readonly clsService: ClsService,
     private readonly chunkRepository: ChunkRepository,
     private readonly embedderService: EmbedderService,
-    private readonly companyService: CompanyService,
     configService: ConfigService<BaseConfigInterface>,
+    /** See ChunkProcessor: seam, not CompanyService — CompanyModule would mount `companies/*` here. */
+    @Optional()
+    @Inject(CREDIT_VALIDATOR)
+    private readonly creditValidator?: CreditValidatorInterface,
   ) {
     super();
     this.rebuildChunksJobName =
@@ -50,7 +55,7 @@ export class ChunkEmbeddingProcessor extends WorkerHost {
       this.clsService.set("userId", job.data.userId);
       this.clsService.set("isAutomatedJob", true);
 
-      if (!(await this.companyService.hasAvailableCredits({ companyId: job.data.companyId }))) {
+      if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))) {
         return { processed: 0 }; // admin re-embed is maintenance; skip cleanly, no marker
       }
 

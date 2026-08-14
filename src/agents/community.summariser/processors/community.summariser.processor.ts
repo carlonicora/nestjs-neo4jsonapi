@@ -1,10 +1,12 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
+import { Inject, Optional } from "@nestjs/common";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
+import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
-import { CompanyService } from "../../../foundations/company/services/company.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
 import { CommunitySummariserService } from "../services/community.summariser.service";
 
@@ -19,9 +21,12 @@ export class CommunitySummariserProcessor extends WorkerHost {
     private readonly summariserService: CommunitySummariserService,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
-    private readonly companyService: CompanyService,
     private readonly communityRepository: CommunityRepository,
     private readonly webSocketService: WebSocketService,
+    /** See ChunkProcessor: seam, not CompanyService — CompanyModule would mount `companies/*` here. */
+    @Optional()
+    @Inject(CREDIT_VALIDATOR)
+    private readonly creditValidator?: CreditValidatorInterface,
   ) {
     super();
   }
@@ -49,7 +54,7 @@ export class CommunitySummariserProcessor extends WorkerHost {
     await this.cls.run(async () => {
       this.cls.set("companyId", companyId);
 
-      if (!(await this.companyService.hasAvailableCredits({ companyId }))) {
+      if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId }))) {
         // Leave isStale set; flag pendingCredits so the 10-minute cron stops
         // re-enqueueing it (spec §2: a fresh top-up must not be silently eaten).
         await this.communityRepository.markPendingCredits(communityId);

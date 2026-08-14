@@ -96,6 +96,37 @@ export interface TokenUsageRecorderInterface {
  * `validateCredits` MUST throw `HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED)`
  * when the company has no available credits, and MUST be a no-op (never throw)
  * when credits are disabled (`creditCost <= 0`).
+ *
+ * ## THE GATE FAILS OPEN — read this before relying on it
+ *
+ * Background job processors (`ChunkProcessor`, `ChunkEmbeddingProcessor`,
+ * `CommunitySummariserProcessor`) consult this seam through
+ * `hasAvailableCreditsVia` (`common/helpers/credit-gate.ts`), which turns the
+ * throwing contract above into the non-throwing boolean a processor needs in
+ * order to DEFER rather than fail. Its semantics:
+ *
+ * | Situation                                   | Result                                        |
+ * |---------------------------------------------|-----------------------------------------------|
+ * | No provider bound for `CREDIT_VALIDATOR`    | `true` — work proceeds UNGATED                 |
+ * | Validator throws 402 `NO_CREDITS`           | `false` — job defers (marked `PendingCredits`) |
+ * | Validator throws anything else              | rethrown — never read as an empty balance      |
+ * | Credits disabled (`creditCost <= 0`)        | `true` — validator is a documented no-op       |
+ *
+ * The first row is the dangerous one: **an application that intends to enforce
+ * credits but forgets to bind this token runs entirely ungated, silently.**
+ * Failing open is deliberate — it preserves behaviour for consumers that never
+ * opted in — but it means the binding, not the package, is what enforces
+ * billing. Any consumer enforcing credits MUST register a provider, e.g. from a
+ * `@Global()` module so package-internal code can resolve it from its own
+ * injector:
+ *
+ * ```ts
+ * { provide: CREDIT_VALIDATOR, useExisting: CreditValidatorService }
+ * ```
+ *
+ * A global registration is required rather than merely convenient: a library
+ * module can never import an application feature module, so the binding has to
+ * be visible application-wide.
  */
 export const CREDIT_VALIDATOR = Symbol("CREDIT_VALIDATOR");
 

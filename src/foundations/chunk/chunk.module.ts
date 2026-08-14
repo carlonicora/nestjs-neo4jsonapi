@@ -5,7 +5,6 @@ import { createWorkerProvider } from "../../common/decorators/conditional-servic
 import { modelRegistry } from "../../common/registries/registry";
 import { LLMModule } from "../../core/llm/llm.module";
 import { AtomicFactModule } from "../atomicfact/atomicfact.module";
-import { CompanyModule } from "../company/company.module";
 import { KeyConceptModule } from "../keyconcept/keyconcept.module";
 import { S3Module } from "../s3/s3.module";
 import { TokenUsageModule } from "../tokenusage/tokenusage.module";
@@ -25,6 +24,14 @@ import { ChunkService } from "./services/chunk.service";
  * self-contained — every consuming app (api/corpus/neural-erp/phlow) loads
  * ChunkModule without having to register these queues in its own config, and
  * without declaring the rebuild routes itself (which previously duplicated).
+ *
+ * `CompanyModule` is deliberately NOT imported (same rule as
+ * `agents/drift/drift.module.ts`): it declares `CompanyController`, so
+ * importing it here mounts `companies/*` into every consumer of ChunkModule and
+ * crashes any app that replaces the company foundation with its own controller
+ * — `FastifyError: Method 'GET' already declared for route '/companies'`. The
+ * processors' credit gate therefore goes through the optional
+ * `CREDIT_VALIDATOR` seam instead; see `common/helpers/credit-gate.ts`.
  */
 @Module({
   controllers: [ChunkController],
@@ -38,7 +45,6 @@ import { ChunkService } from "./services/chunk.service";
   exports: [ChunkService, ChunkRepository],
   imports: [
     AtomicFactModule,
-    CompanyModule,
     GraphCreatorModule,
     KeyConceptModule,
     S3Module,

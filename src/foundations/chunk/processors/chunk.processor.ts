@@ -1,16 +1,18 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
+import { Inject, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { AiStatus, EntityAiStatus } from "../../../common/enums/ai.status";
+import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
 import { modelRegistry } from "../../../common/registries/registry";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { CHUNK_QUEUE_CONCURRENCY } from "../../../config/base.config";
 import { QueueId } from "../../../config/enums/queue.id";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
-import { CompanyService } from "../../company/services/company.service";
 import { ChunkService } from "../../chunk/services/chunk.service";
 import { ChunkRepository } from "../repositories/chunk.repository";
 
@@ -28,10 +30,20 @@ export class ChunkProcessor extends WorkerHost {
     private readonly tracer: TracingService,
     private readonly clsService: ClsService,
     private readonly chunkService: ChunkService,
-    private readonly companyService: CompanyService,
     private readonly chunkRepository: ChunkRepository,
     private readonly neo4j: Neo4jService,
     configService: ConfigService<BaseConfigInterface>,
+    /**
+     * Credit gating goes through the app-provided `CREDIT_VALIDATOR` seam
+     * rather than injecting `CompanyService`: `CompanyModule` declares
+     * `CompanyController`, so importing it here mounts `companies/*` into every
+     * consumer of `ChunkModule` and crashes any app that replaces the company
+     * foundation with its own controller. Unbound → ungated (see
+     * `hasAvailableCreditsVia`).
+     */
+    @Optional()
+    @Inject(CREDIT_VALIDATOR)
+    private readonly creditValidator?: CreditValidatorInterface,
   ) {
     super();
     this.chunkJobName = configService.get("jobNames", { infer: true })?.process?.chunk ?? "process_chunk";
@@ -63,7 +75,7 @@ export class ChunkProcessor extends WorkerHost {
 
       // Pre-flight credit gate (spec §2): defer, don't fail — the chunk stays
       // marked and approval re-processes it via its owning entity. Not a job failure.
-      if (!(await this.companyService.hasAvailableCredits({ companyId: job.data.companyId }))) {
+      if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))) {
         await this.chunkRepository.updateStatus({ id: job.data.chunkId, aiStatus: AiStatus.PendingCredits });
         // Roll the deferral up under the owning entity (spec §3.2) so the backlog
         // lists it even when the debounce gate passed but credits ran out mid-fan-out.
