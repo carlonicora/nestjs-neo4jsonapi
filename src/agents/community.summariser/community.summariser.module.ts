@@ -17,7 +17,12 @@ import { CommunitySummariserCron } from "./cron/community.summariser.cron";
  * uses the optional `CREDIT_VALIDATOR` seam — see `common/helpers/credit-gate.ts`.
  */
 @Module({
-  imports: [LLMModule, LoggingModule, CommunityModule, BullModule.registerQueue({ name: QueueId.COMMUNITY_SUMMARISER })],
+  imports: [
+    LLMModule,
+    LoggingModule,
+    CommunityModule,
+    BullModule.registerQueue({ name: QueueId.COMMUNITY_SUMMARISER }),
+  ],
   providers: [CommunitySummariserService, CommunitySummariserProcessor, createWorkerProvider(CommunitySummariserCron)],
   exports: [CommunitySummariserService],
 })
