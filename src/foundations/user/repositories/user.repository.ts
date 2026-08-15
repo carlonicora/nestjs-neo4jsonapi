@@ -309,8 +309,12 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     query.query += `
       {CURSOR}
 
+      // The company is what makes the platform-wide list readable: an
+      // administrator browsing every user needs to see which company each one
+      // belongs to. OPTIONAL, because a system administrator belongs to none.
+      OPTIONAL MATCH (${userMeta.nodeName})-[:BELONGS_TO]->(${userMeta.nodeName}_${companyMeta.nodeName}:${companyMeta.labelName})
       ${membershipRoleMatch({ userAlias: userMeta.nodeName, roleAlias: `${userMeta.nodeName}_role` })}
-      RETURN ${userMeta.nodeName}, ${userMeta.nodeName}_role
+      RETURN ${userMeta.nodeName}, ${userMeta.nodeName}_role, ${userMeta.nodeName}_${companyMeta.nodeName}
     `;
 
     return this.neo4j.readMany(query);
