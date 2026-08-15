@@ -88,7 +88,7 @@ export class StripePriceRepository implements OnModuleInit {
         MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName} {id: $productId})
         ${where}
         OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
+        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
         ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
       `;
     } else {
@@ -96,7 +96,7 @@ export class StripePriceRepository implements OnModuleInit {
         MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
         ${where}
         OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
+        RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
         ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
       `;
     }
@@ -121,7 +121,7 @@ export class StripePriceRepository implements OnModuleInit {
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -144,7 +144,7 @@ export class StripePriceRepository implements OnModuleInit {
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {stripePriceId: $stripePriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
     `;
 
     return this.neo4j.readOne(query);
@@ -165,7 +165,7 @@ export class StripePriceRepository implements OnModuleInit {
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {active: true, isTrial: true, priceType: 'recurring'})
       -[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
       LIMIT 1
     `;
 
@@ -292,7 +292,7 @@ export class StripePriceRepository implements OnModuleInit {
     }
 
     query.query += `
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -397,7 +397,7 @@ export class StripePriceRepository implements OnModuleInit {
     }
 
     query.query += `
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
@@ -463,7 +463,7 @@ export class StripePriceRepository implements OnModuleInit {
     query.query = `
       MATCH (${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {stripePriceId: $stripePriceId})-[:BELONGS_TO]->(${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       SET ${setParams.join(", ")}
-      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName}
+      RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
     `;
 
     return this.neo4j.writeOne(query);
