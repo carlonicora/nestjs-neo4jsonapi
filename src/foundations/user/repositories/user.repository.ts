@@ -535,6 +535,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     isActive?: boolean;
     phone?: string;
     preserveAvatar?: boolean;
+    /** The caller is editing their own user — see the company scoping note below. */
+    isSelf?: boolean;
   }): Promise<void> {
     const setClauses = [];
     // `name` is optional on the PUT DTO: an omitted name must leave the stored
@@ -568,13 +570,25 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       phone: params.phone ?? null,
     };
 
+    // `initQuery` emits its own company MATCH only when a company is in context;
+    // this method replaces the whole query, so it has to make the same call.
+    // A user can legitimately have no company (the seeded Administrator has
+    // none), and then `$companyId` is null — an unconditional
+    // `MATCH (company:Company {id: $companyId})` matches zero rows, so the SET
+    // never runs and the endpoint still answers 200 with the unchanged user.
+    // Dropping the match is only safe when the caller edits their OWN user: for
+    // anyone else's user this match is what confines a CompanyAdministrator to
+    // their own company. Roles are company-scoped, so the role block below stays
+    // gated on the company being matched.
+    const scopeToCompany = !!query.queryParams.companyId || !params.isSelf;
+
     query.query = `
-      MATCH (company:Company {id: $companyId})
+      ${scopeToCompany ? `MATCH (company:Company {id: $companyId})` : ``}
       MATCH (user:User {id: $userId})
       SET ${setClauses.join(", ")}
 
       ${
-        params.isAdmin && params.roles !== undefined
+        scopeToCompany && params.isAdmin && params.roles !== undefined
           ? `
             // Drop the roles this user no longer holds IN THIS COMPANY.
             // Platform memberships (no IN_COMPANY edge) are untouched here.

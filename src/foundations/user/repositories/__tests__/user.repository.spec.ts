@@ -259,4 +259,49 @@ describe("UserRepository", () => {
       expect(fulltext).toContain("n.`email`");
     });
   });
+
+  describe("putUser", () => {
+    const putParams = {
+      isAdmin: true,
+      userId: TEST_IDS.userId,
+      email: "User@Test.com",
+      name: "Updated Name",
+      roles: [],
+    };
+
+    function writtenQuery(): string {
+      return mockNeo4jService.writeOne.mock.calls[0][0].query;
+    }
+
+    it("keeps the company scoping when a company is in context", async () => {
+      mockNeo4jService.initQuery.mockReturnValue({ query: "", queryParams: { companyId: TEST_IDS.companyId } } as any);
+
+      await repository.putUser({ ...putParams, isSelf: true });
+
+      expect(writtenQuery()).toContain("MATCH (company:Company {id: $companyId})");
+    });
+
+    it("keeps the company scoping when editing someone else, even with no company in context", async () => {
+      // The company match is what confines a CompanyAdministrator to their own
+      // company — it must never be dropped for another user's record.
+      await repository.putUser({ ...putParams, isSelf: false });
+
+      expect(writtenQuery()).toContain("MATCH (company:Company {id: $companyId})");
+    });
+
+    it("drops the company match for a self-edit with no company, so the SET actually runs", async () => {
+      // A user can have no company (the seeded Administrator has none). With a
+      // null $companyId the company match resolves to zero rows, so the SET
+      // silently never ran while the endpoint still answered 200.
+      await repository.putUser({ ...putParams, isSelf: true });
+
+      const query = writtenQuery();
+      expect(query).not.toContain("MATCH (company:Company {id: $companyId})");
+      expect(query).toContain("MATCH (user:User {id: $userId})");
+      expect(query).toContain("user.name = $name");
+      // Roles are company-scoped: without a matched `company` the role block
+      // would reference an undefined variable.
+      expect(query).not.toContain("IN_COMPANY");
+    });
+  });
 });

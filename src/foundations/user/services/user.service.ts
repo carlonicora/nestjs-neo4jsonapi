@@ -205,6 +205,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
 
       await this.userRepository.putUser({
         isAdmin: params.isAdmin,
+        isSelf: params.isCurrentUser,
         userId: params.data.id,
         email: params.data.attributes.email,
         name: params.data.attributes.name,
