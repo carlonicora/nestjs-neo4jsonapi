@@ -336,6 +336,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         outputCostPer1MTokens: parseFloat(
           process.env.AUDIO_OUTPUT_COST_PER_1M_TOKENS || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
         ),
+        costPerMinute: parseFloat(process.env.AUDIO_COST_PER_MINUTE || "0"),
         googleCredentialsBase64:
           process.env.AUDIO_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
         directUrl: process.env.AUDIO_DIRECT_URL || undefined,

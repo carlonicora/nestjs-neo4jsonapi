@@ -8,7 +8,7 @@ import { TokenUsageAdminService } from "../services/tokenusage.admin.service";
 
 const GRANULARITIES = ["day", "week", "month"] as const;
 const STACK_BY = ["scope", "type", "company"] as const;
-const DIMENSIONS = ["company", "user", "operation"] as const;
+const DIMENSIONS = ["company", "user", "operation", "target"] as const;
 const SCOPES = ["customer", "platform"] as const;
 
 const DEFAULT_WINDOW_DAYS = 30;
@@ -77,6 +77,7 @@ export class TokenUsageAdminController {
     @Query("scope") scope?: string,
     @Query("companyId") companyId?: string,
     @Query("limit") limit?: string,
+    @Query("targetLabel") targetLabel?: string,
   ) {
     const range = this._range(from, to);
     const parsedLimit = limit === undefined ? 10 : Number(limit);
@@ -87,6 +88,10 @@ export class TokenUsageAdminController {
       await this.service.getBreakdown({
         ...range,
         dimension: this._oneOf(dimension, DIMENSIONS, "company"),
+        // Passed through raw on purpose: the allowlist is application-specific
+        // and injected into the repository, which is the single place that
+        // validates it. Do not add a second allowlist here.
+        targetLabel,
         scope: this._oneOf(scope, SCOPES, "customer"),
         companyId,
         limit: parsedLimit,

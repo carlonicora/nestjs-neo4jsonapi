@@ -1,6 +1,7 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { defineEntity } from "../../../common/helpers/define-entity";
 import { tokenUsageAdminTimelineMeta } from "./tokenusage-admin-timeline.meta";
+import { usageMetricFields, UsageMetrics } from "./usage-metric.fields";
 
 /**
  * One (bucket, series) cell of the usage-over-time chart. Rows are flat; the
@@ -14,13 +15,7 @@ import { tokenUsageAdminTimelineMeta } from "./tokenusage-admin-timeline.meta";
 export type TokenUsageAdminTimelineEntity = Entity & {
   bucket: string;
   series: string;
-  cost: number;
-  credits: number;
-  tokensIn: number;
-  tokensOut: number;
-  cached: number;
-  calls: number;
-};
+} & UsageMetrics;
 
 export const TokenUsageAdminTimelineDescriptor = defineEntity<TokenUsageAdminTimelineEntity>()({
   ...tokenUsageAdminTimelineMeta,
@@ -30,12 +25,7 @@ export const TokenUsageAdminTimelineDescriptor = defineEntity<TokenUsageAdminTim
   fields: {
     bucket: { type: "date", required: true },
     series: { type: "string", required: true },
-    cost: { type: "number", required: true },
-    credits: { type: "number", required: true },
-    tokensIn: { type: "number", required: true },
-    tokensOut: { type: "number", required: true },
-    cached: { type: "number", required: true },
-    calls: { type: "number", required: true },
+    ...usageMetricFields,
   },
 
   relationships: {},

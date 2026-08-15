@@ -1,6 +1,7 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { defineEntity } from "../../../common/helpers/define-entity";
 import { tokenUsageAdminBreakdownMeta } from "./tokenusage-admin-breakdown.meta";
+import { usageMetricFields, UsageMetrics } from "./usage-metric.fields";
 
 /**
  * One ranked row of a breakdown. The same shape serves all three dimensions —
@@ -15,16 +16,10 @@ import { tokenUsageAdminBreakdownMeta } from "./tokenusage-admin-breakdown.meta"
 export type TokenUsageAdminBreakdownEntity = Entity & {
   label: string;
   sublabel?: string;
-  cost: number;
-  credits: number;
-  tokensIn: number;
-  tokensOut: number;
-  cached: number;
-  calls: number;
   activeUsers?: number;
   monthlyCredits?: number;
   availableMonthlyCredits?: number;
-};
+} & UsageMetrics;
 
 export const TokenUsageAdminBreakdownDescriptor = defineEntity<TokenUsageAdminBreakdownEntity>()({
   ...tokenUsageAdminBreakdownMeta,
@@ -34,12 +29,7 @@ export const TokenUsageAdminBreakdownDescriptor = defineEntity<TokenUsageAdminBr
   fields: {
     label: { type: "string", required: true },
     sublabel: { type: "string" },
-    cost: { type: "number", required: true },
-    credits: { type: "number", required: true },
-    tokensIn: { type: "number", required: true },
-    tokensOut: { type: "number", required: true },
-    cached: { type: "number", required: true },
-    calls: { type: "number", required: true },
+    ...usageMetricFields,
     activeUsers: { type: "number" },
     monthlyCredits: { type: "number" },
     availableMonthlyCredits: { type: "number" },

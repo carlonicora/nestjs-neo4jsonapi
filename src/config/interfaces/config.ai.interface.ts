@@ -197,6 +197,21 @@ export interface ConfigAiInterface {
     apiVersion?: string;
     inputCostPer1MTokens: number;
     outputCostPer1MTokens: number;
+    /**
+     * Price of one minute of transcribed audio, in the same currency as the
+     * per-token rates. Set via AUDIO_COST_PER_MINUTE.
+     *
+     * This is what makes the `directUrl` engine billable. That endpoint reports
+     * no token counts, so a token-priced call costs nothing and - under the
+     * zero-token rule - recorded nothing at all: switching engines silently
+     * turned transcription into free work. With a rate here the cost is derived
+     * from the measured audio duration instead, so the choice of engine no
+     * longer decides whether the work is billed.
+     *
+     * Leave unset (or 0) only if you accept that the direct engine bills
+     * nothing; AudioLLMService warns loudly in that case.
+     */
+    costPerMinute?: number;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */
     googleCredentialsBase64?: string;
     /**

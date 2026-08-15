@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { TokenUsageDimension } from "../common/tokenusage.target-labels";
 import { TokenUsage, TokenUsageDescriptor } from "../entities/tokenusage";
 import { TokenUsageAdminBreakdownDescriptor } from "../entities/tokenusage-admin-breakdown";
 import { TokenUsageAdminSummaryDescriptor } from "../entities/tokenusage-admin-summary";
@@ -70,7 +71,8 @@ export class TokenUsageAdminService extends AbstractService<TokenUsage, typeof T
   async getBreakdown(params: {
     from: string;
     to: string;
-    dimension: "company" | "user" | "operation";
+    dimension: TokenUsageDimension;
+    targetLabel?: string;
     scope: "customer" | "platform";
     companyId?: string;
     limit: number;
@@ -79,6 +81,7 @@ export class TokenUsageAdminService extends AbstractService<TokenUsage, typeof T
       from: params.from,
       to: params.to,
       dimension: params.dimension,
+      targetLabel: params.targetLabel,
       scope: params.scope,
       companyId: params.companyId,
       limit: params.limit,

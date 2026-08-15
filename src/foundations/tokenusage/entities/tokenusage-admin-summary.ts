@@ -1,6 +1,7 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { defineEntity } from "../../../common/helpers/define-entity";
 import { tokenUsageAdminSummaryMeta } from "./tokenusage-admin-summary.meta";
+import { usageMetricFields, UsageMetrics } from "./usage-metric.fields";
 
 /**
  * One row of the admin summary: a cost centre observed over one time window.
@@ -16,13 +17,7 @@ import { tokenUsageAdminSummaryMeta } from "./tokenusage-admin-summary.meta";
 export type TokenUsageAdminSummaryEntity = Entity & {
   scope: string;
   window: string;
-  cost: number;
-  credits: number;
-  tokensIn: number;
-  tokensOut: number;
-  cached: number;
-  calls: number;
-};
+} & UsageMetrics;
 
 export const TokenUsageAdminSummaryDescriptor = defineEntity<TokenUsageAdminSummaryEntity>()({
   ...tokenUsageAdminSummaryMeta,
@@ -32,12 +27,7 @@ export const TokenUsageAdminSummaryDescriptor = defineEntity<TokenUsageAdminSumm
   fields: {
     scope: { type: "string", required: true },
     window: { type: "string", required: true },
-    cost: { type: "number", required: true },
-    credits: { type: "number", required: true },
-    tokensIn: { type: "number", required: true },
-    tokensOut: { type: "number", required: true },
-    cached: { type: "number", required: true },
-    calls: { type: "number", required: true },
+    ...usageMetricFields,
   },
 
   relationships: {},

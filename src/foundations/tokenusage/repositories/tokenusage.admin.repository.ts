@@ -11,12 +11,20 @@
 // The architecture gate raises a FILE-LEVEL manual-query-no-company-scope finding
 // on this shape; per-line ignores do not clear it, so this header note is the
 // documented resolution.
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { convertFieldValue } from "../../../common/helpers/define-entity";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import {
+  buildTargetGrouping,
+  normaliseTargetLabel,
+  ResolvedTokenUsageTarget,
+  TOKEN_USAGE_TARGET_LABELS,
+  TokenUsageDimension,
+  TokenUsageTargetLabel,
+} from "../common/tokenusage.target-labels";
 import { TokenUsageAdminBreakdownEntity } from "../entities/tokenusage-admin-breakdown";
 import { TokenUsageAdminSummaryEntity } from "../entities/tokenusage-admin-summary";
 import {
@@ -81,7 +89,12 @@ export class TokenUsageAdminRepository extends AbstractRepository<
 > {
   protected readonly descriptor = TokenUsageDescriptor;
 
-  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+  constructor(
+    neo4j: Neo4jService,
+    securityService: SecurityService,
+    clsService: ClsService,
+    @Optional() @Inject(TOKEN_USAGE_TARGET_LABELS) private readonly targetLabels: TokenUsageTargetLabel[] = [],
+  ) {
     super(neo4j, securityService, clsService);
   }
 
@@ -180,7 +193,8 @@ export class TokenUsageAdminRepository extends AbstractRepository<
   async findBreakdown(params: {
     from: string;
     to: string;
-    dimension: "company" | "user" | "operation";
+    dimension: TokenUsageDimension;
+    targetLabel?: string;
     scope: "customer" | "platform";
     companyId?: string;
     limit: number;
@@ -221,6 +235,21 @@ export class TokenUsageAdminRepository extends AbstractRepository<
       projection = `
              grp.id                          AS id,
              coalesce(grp.name, grp.email)   AS label,
+             head(collect(c.name))           AS sublabel,
+             null                            AS activeUsers,
+             null                            AS monthlyCredits,
+             null                            AS availableMonthlyCredits,`;
+    } else if (params.dimension === "target") {
+      // Label and relationship types come from the allowlist, not the request —
+      // see _resolveTarget and normaliseTargetLabel.
+      grouping = buildTargetGrouping({
+        target: this._resolveTarget(params.targetLabel),
+        nodeName: NODE,
+        carried: ["c"],
+      });
+      projection = `
+             grp.id                          AS id,
+             coalesce(grp.name, grp.title)   AS label,
              head(collect(c.name))           AS sublabel,
              null                            AS activeUsers,
              null                            AS monthlyCredits,
@@ -387,6 +416,25 @@ export class TokenUsageAdminRepository extends AbstractRepository<
     const unit = TRUNCATION_UNITS[granularity];
     if (!unit) throw new Error(`Unsupported timeline granularity: ${granularity}`);
     return unit;
+  }
+
+  /**
+   * Resolves the requested label against the host application's allowlist.
+   *
+   * Returns the ALLOWLIST'S OWN string, never the caller's — so even an exact
+   * match is echoed from trusted memory rather than from the request. An empty
+   * allowlist means the app did not opt in, and every target request is refused.
+   */
+  private _resolveTarget(requested: string | undefined): ResolvedTokenUsageTarget {
+    const available = this.targetLabels.map(normaliseTargetLabel);
+    const match = available.find((target) => target.label === requested);
+    if (!match)
+      throw new BadRequestException(
+        available.length === 0
+          ? "dimension=target is not enabled for this application"
+          : `targetLabel must be one of ${available.map((target) => target.label).join(", ")}`,
+      );
+    return match;
   }
 
   private _metrics(record: any): UsageMetrics {
