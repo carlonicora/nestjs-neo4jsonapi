@@ -1,6 +1,8 @@
 import { Global, Module } from "@nestjs/common";
 import { RedisModule } from "../redis/redis.module";
+import { AiConnectionModule } from "../../foundations/ai-connection/ai-connection.module";
 import { TokenUsageModule } from "../../foundations/tokenusage/tokenusage.module";
+import { AiConnectionResolverService } from "./services/ai-connection-resolver.service";
 import { AudioLLMService } from "./services/audio.llm.service";
 import { EmbedderService } from "./services/embedder.service";
 import { EmbedderTokenBucketService } from "./services/embedder-token-bucket.service";
@@ -14,6 +16,7 @@ import { VisionLLMService } from "./services/vision.llm.service";
 const LLM_SERVICES = [
   LLMService,
   ModelService,
+  AiConnectionResolverService,
   EmbedderService,
   EmbedderTokenBucketService,
   VisionLLMService,
@@ -41,7 +44,9 @@ const LLM_SERVICES = [
 @Module({
   // RedisModule provides RedisClientStorageService for EmbedderTokenBucketService's
   // distributed token bucket. RedisModule is NOT @Global, so it must be imported here.
-  imports: [TokenUsageModule, RedisModule],
+  // AiConnectionModule provides the repository + encryption service the
+  // AiConnectionResolverService reads its snapshot through.
+  imports: [AiConnectionModule, TokenUsageModule, RedisModule],
   providers: LLM_SERVICES,
   exports: LLM_SERVICES,
 })

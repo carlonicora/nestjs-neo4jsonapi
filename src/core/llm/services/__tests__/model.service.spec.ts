@@ -38,6 +38,36 @@ function makeService(aiConfig: any): ModelService {
   return new ModelService(clsService, configService);
 }
 
+/**
+ * Same harness plus the (optional) AI-connection resolver. Positional gap =
+ * the equally optional bucket / logger, which these tests do not need.
+ */
+function makeServiceWithResolver(aiConfig: any, resolver: any): ModelService {
+  const configService = { get: (_k: string) => aiConfig } as any;
+  const clsService = { get: () => undefined } as any;
+  return new ModelService(clsService, configService, undefined, undefined, resolver);
+}
+
+/** A resolver double: chains keyed by connection type. */
+function stubResolver(chains: Record<string, any[]>) {
+  return {
+    resolve: vi.fn((type: string) => chains[type] ?? []),
+    markFailure: vi.fn(),
+  };
+}
+
+/** A DB-sourced candidate, openrouter-shaped unless overridden. */
+const dbCandidate = (over: Partial<any> = {}): any => ({
+  source: "db",
+  connectionId: "conn-1",
+  connectionType: "ai",
+  provider: "openrouter",
+  apiKey: "db-key",
+  model: "db-model",
+  url: "https://primary.example.com/v1",
+  ...over,
+});
+
 const tier = (over: Partial<any> = {}) => ({
   provider: "openrouter",
   apiKey: "k",
@@ -476,5 +506,221 @@ describe("ModelService.getLLM client cache", () => {
     const svc = svcWith({ provider: "openrouter", region: undefined });
 
     expect(svc.getLLM()).toBe(svc.getLLM());
+  });
+});
+
+// === AI connections: candidate chains ====================================
+// Backward compatibility is the point of the @Optional() resolver: with no
+// resolver wired, every modality resolves to exactly ONE candidate built from
+// the `.env` config, and behaviour is byte-for-byte what it was.
+describe("ModelService candidates without a resolver", () => {
+  const svc = () =>
+    makeService({
+      ai: tier({ model: "normal" }),
+      aiLite: tier({ model: "lite" }),
+      aiLarge: tier({ model: "large" }),
+      vision: tier({ model: "vision-model", provider: "azure" }),
+      embedder: { provider: "openai", apiKey: "e", model: "embed", url: "", dimensions: 1536 },
+      transcriber: { provider: "openai", apiKey: "t", model: "whisper" },
+    });
+
+  it("returns exactly one env candidate per chat tier", () => {
+    const candidates = svc().getCandidates();
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].source).toBe("env");
+    expect(candidates[0].connectionId).toBe("env:ai");
+    expect(candidates[0].connectionType).toBe("ai");
+    expect(candidates[0].model).toBe("normal");
+  });
+
+  it("maps each weight onto its own connection type", () => {
+    expect(svc().getCandidates(ModelWeight.Lite)[0]).toMatchObject({ connectionId: "env:aiLite", model: "lite" });
+    expect(svc().getCandidates(ModelWeight.Large)[0]).toMatchObject({ connectionId: "env:aiLarge", model: "large" });
+  });
+
+  it("maps the non-chat modalities from their own config blocks", () => {
+    expect(svc().getCandidatesForType("vision")[0]).toMatchObject({
+      connectionId: "env:vision",
+      provider: "azure",
+      model: "vision-model",
+    });
+    expect(svc().getCandidatesForType("embedder")[0]).toMatchObject({ connectionId: "env:embedder", dimensions: 1536 });
+    expect(svc().getCandidatesForType("transcriber")[0]).toMatchObject({
+      connectionId: "env:transcriber",
+      model: "whisper",
+    });
+  });
+
+  it("survives a config that never declared the block being asked for", () => {
+    // Half the existing harnesses configure the chat tiers and nothing else.
+    const bare = makeService({ ai: tier(), aiLite: tier(), aiLarge: tier() });
+
+    expect(bare.getCandidatesForType("documentAi")[0]).toMatchObject({ connectionId: "env:documentAi", provider: "" });
+  });
+
+  it("keeps getLLM's client cache stable across calls", () => {
+    const service = svc();
+
+    expect(service.getLLM()).toBe(service.getLLM());
+  });
+
+  it("no-ops on notifyCandidateFailure", () => {
+    const service = svc();
+
+    expect(() => service.notifyCandidateFailure(service.getCandidates()[0])).not.toThrow();
+  });
+});
+
+describe("ModelService candidates with a resolver", () => {
+  const envConfig = () => ({
+    ai: tier({ model: "env-model", secret: "env-secret" }),
+    aiLite: tier({ model: "lite" }),
+    aiLarge: tier({ model: "large" }),
+  });
+
+  it("builds getLLM from the resolver's FIRST candidate by default", () => {
+    const resolver = stubResolver({
+      ai: [dbCandidate(), dbCandidate({ connectionId: "conn-2", model: "second-model" })],
+    });
+    const llm = makeServiceWithResolver(envConfig(), resolver).getLLM() as any;
+
+    expect(llm.model ?? llm.modelName).toBe("db-model");
+    expect(llm.clientConfig?.baseURL ?? llm.configuration?.baseURL).toBe("https://primary.example.com/v1");
+  });
+
+  it("builds from the NEXT candidate when candidateIndex advances", () => {
+    const resolver = stubResolver({
+      ai: [
+        dbCandidate(),
+        dbCandidate({ connectionId: "conn-2", model: "second-model", url: "https://backup.example.com/v1" }),
+      ],
+    });
+    const llm = makeServiceWithResolver(envConfig(), resolver).getLLM({ candidateIndex: 1 }) as any;
+
+    expect(llm.model ?? llm.modelName).toBe("second-model");
+    expect(llm.clientConfig?.baseURL ?? llm.configuration?.baseURL).toBe("https://backup.example.com/v1");
+  });
+
+  it("clamps an out-of-range candidateIndex to the last link instead of crashing", () => {
+    const resolver = stubResolver({
+      ai: [dbCandidate(), dbCandidate({ connectionId: "conn-2", model: "second-model" })],
+    });
+    const llm = makeServiceWithResolver(envConfig(), resolver).getLLM({ candidateIndex: 9 }) as any;
+
+    expect(llm.model ?? llm.modelName).toBe("second-model");
+  });
+
+  it("gives every connection its own cache entry, even when nothing else differs", () => {
+    // Two links of one chain can be indistinguishable on provider/model/url and
+    // still be different deployments with different credentials.
+    const resolver = stubResolver({ ai: [dbCandidate(), dbCandidate({ connectionId: "conn-2" })] });
+    const service = makeServiceWithResolver(envConfig(), resolver);
+
+    expect(service.getLLM({ candidateIndex: 0 })).toBe(service.getLLM({ candidateIndex: 0 }));
+    expect(service.getLLM({ candidateIndex: 1 })).not.toBe(service.getLLM({ candidateIndex: 0 }));
+  });
+
+  it("asks the resolver for the type matching the requested weight", () => {
+    const resolver = stubResolver({ aiLite: [dbCandidate({ connectionType: "aiLite", model: "db-lite" })] });
+    const llm = makeServiceWithResolver(envConfig(), resolver).getLLM({ modelWeight: ModelWeight.Lite }) as any;
+
+    expect(resolver.resolve).toHaveBeenCalledWith("aiLite");
+    expect(llm.model ?? llm.modelName).toBe("db-lite");
+  });
+
+  it("reflects the first candidate in getResolvedConfig while keeping env-only fields", () => {
+    const resolver = stubResolver({ ai: [dbCandidate({ provider: "azure", instance: "inst" })] });
+    const resolved = makeServiceWithResolver(envConfig(), resolver).getResolvedConfig();
+
+    expect(resolved.provider).toBe("azure");
+    expect(resolved.model).toBe("db-model");
+    // `secret` has no home on a candidate — it must survive the merge.
+    expect(resolved.secret).toBe("env-secret");
+  });
+
+  it("keeps supportsStrictStructuredOutput answering from the resolved candidate", () => {
+    const resolver = stubResolver({ ai: [dbCandidate({ provider: "vertex" })] });
+
+    expect(makeServiceWithResolver(envConfig(), resolver).supportsStrictStructuredOutput()).toBe(false);
+  });
+
+  it("forwards notifyCandidateFailure to the resolver's markFailure", () => {
+    const resolver = stubResolver({ ai: [dbCandidate()] });
+    const service = makeServiceWithResolver(envConfig(), resolver);
+
+    service.notifyCandidateFailure(service.getCandidates()[0]);
+
+    expect(resolver.markFailure).toHaveBeenCalledWith("conn-1");
+  });
+
+  it("falls back to the env candidate when the resolver returns an empty chain", () => {
+    const resolver = stubResolver({});
+    const candidates = makeServiceWithResolver(envConfig(), resolver).getCandidates();
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ source: "env", connectionId: "env:ai", model: "env-model" });
+  });
+
+  it("falls back to the env candidate when the resolver THROWS (degrade to .env, never to no AI)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const resolver = {
+      resolve: vi.fn(() => {
+        throw new Error("snapshot unavailable");
+      }),
+      markFailure: vi.fn(),
+    };
+
+    const candidates = makeServiceWithResolver(envConfig(), resolver).getCandidates();
+
+    expect(candidates[0]).toMatchObject({ source: "env", model: "env-model" });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("AI connection resolver failed"));
+    warn.mockRestore();
+  });
+
+  it("short-circuits MOCK_AI before consulting the resolver at all", () => {
+    const resolver = stubResolver({ ai: [dbCandidate()] });
+    const service = makeServiceWithResolver({ mock: true, ...envConfig() }, resolver);
+
+    expect(service.getLLM()).not.toBe(service.getLLM());
+    expect(resolver.resolve).not.toHaveBeenCalled();
+  });
+
+  it("resolves the embedder dimensions from the first candidate, falling back to config", () => {
+    const config = {
+      ...envConfig(),
+      embedder: { provider: "openai", apiKey: "e", model: "embed", url: "", dimensions: 1536 },
+    };
+    const withDimensions = stubResolver({
+      embedder: [dbCandidate({ connectionType: "embedder", provider: "openai", dimensions: 3072 })],
+    });
+    const withoutDimensions = stubResolver({
+      embedder: [dbCandidate({ connectionType: "embedder", provider: "openai" })],
+    });
+
+    expect(makeServiceWithResolver(config, withDimensions).getEmbedderDimensions()).toBe(3072);
+    expect(makeServiceWithResolver(config, withoutDimensions).getEmbedderDimensions()).toBe(1536);
+  });
+
+  it("builds the vision model from the vision chain", () => {
+    const resolver = stubResolver({
+      vision: [dbCandidate({ connectionType: "vision", model: "db-vision", url: "https://vision.example.com/v1" })],
+    });
+    const llm = makeServiceWithResolver({ ...envConfig(), vision: tier() }, resolver).getVisionLLM() as any;
+
+    expect(resolver.resolve).toHaveBeenCalledWith("vision");
+    expect(llm.model ?? llm.modelName).toBe("db-vision");
+  });
+
+  it("builds the transcriber from the transcriber chain", () => {
+    const resolver = stubResolver({
+      transcriber: [dbCandidate({ connectionType: "transcriber", provider: "openai", apiKey: "db-transcriber-key" })],
+    });
+    const config = { ...envConfig(), transcriber: { provider: "openai", apiKey: "env-key", model: "whisper" } };
+
+    const transcriber = makeServiceWithResolver(config, resolver).getTranscriber() as any;
+
+    expect(resolver.resolve).toHaveBeenCalledWith("transcriber");
+    expect(transcriber.apiKey).toBe("db-transcriber-key");
   });
 });

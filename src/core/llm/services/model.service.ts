@@ -15,7 +15,9 @@ import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfac
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { ModelWeight } from "../enums/model.weight";
 import { ReasoningEffort } from "../enums/reasoning.effort";
+import { AiConnectionType, ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { vertexLocationParams } from "../utils/vertex.utils";
+import { AiConnectionResolverService } from "./ai-connection-resolver.service";
 import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 import { RateLimitedEmbedder } from "./rate-limited-embedder";
@@ -151,9 +153,31 @@ interface LLMParameters {
  */
 const LLM_CACHE_MAX_ENTRIES = 100;
 
+/**
+ * Copies only the DEFINED entries of an object.
+ *
+ * Used when a resolved candidate is merged over an env config block: spreading
+ * the candidate wholesale would let its absent optionals (`region: undefined`,
+ * …) erase perfectly good env values, and would drop fields the candidate shape
+ * has no room for at all (`secret`).
+ */
+function definedFieldsOnly<T extends Record<string, unknown>>(source: T): Partial<T> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) if (value !== undefined) result[key] = value;
+  return result as Partial<T>;
+}
+
 @Injectable()
 export class ModelService implements OnModuleInit {
   private cachedEmbedder?: EmbeddingsInterface;
+
+  /**
+   * Connection id the {@link cachedEmbedder} was built from. The embedder is
+   * memoised for the lifetime of the process (it owns the shared rate-limit
+   * bucket), so without this a DB-side embedder change would stay invisible
+   * until a restart.
+   */
+  private cachedEmbedderConnectionId?: string;
 
   /**
    * Chat models built by {@link getLLM}, keyed on every parameter that is BAKED
@@ -185,6 +209,11 @@ export class ModelService implements OnModuleInit {
     // embedder — the rate-limit wrapper is purely additive.
     @Optional() private readonly bucket?: EmbedderTokenBucketService,
     @Optional() private readonly logger?: AppLoggingService,
+    // Optional for the same reason as `bucket`: every existing consumer and test
+    // harness constructs ModelService with (cls, config) only. When absent there
+    // is no DB-backed chain at all and every modality resolves to exactly one
+    // candidate built from the `.env` config — today's behaviour, byte for byte.
+    @Optional() private readonly aiConnectionResolver?: AiConnectionResolverService,
   ) {}
 
   /**
@@ -214,10 +243,13 @@ export class ModelService implements OnModuleInit {
   }
 
   /**
-   * Resolves the AI config block for a model weight.
+   * Resolves the `.env` AI config block for a model weight.
    * Undefined / Normal → `ai`; Lite → `aiLite`; Large → `aiLarge`.
+   *
+   * This is the FINAL fallback of every chat chain — {@link getResolvedConfig}
+   * layers the resolved (DB-first) candidate over it.
    */
-  getResolvedConfig(weight?: ModelWeight): ConfigAiInterface["ai"] {
+  private envTierConfig(weight?: ModelWeight): ConfigAiInterface["ai"] {
     switch (weight) {
       case ModelWeight.Lite:
         return this.aiConfig.aiLite;
@@ -226,6 +258,225 @@ export class ModelService implements OnModuleInit {
       default:
         return this.aiConfig.ai;
     }
+  }
+
+  /** Chat tier → AI connection type. Undefined / Normal → `ai`. */
+  private weightToType(weight?: ModelWeight): AiConnectionType {
+    switch (weight) {
+      case ModelWeight.Lite:
+        return "aiLite";
+      case ModelWeight.Large:
+        return "aiLarge";
+      default:
+        return "ai";
+    }
+  }
+
+  /**
+   * Ordered fallback candidates for a chat tier, healthiest first.
+   *
+   * Without a resolver (tests, minimal harnesses, an app that never registered
+   * the AI-connection feature) this is exactly one `.env` candidate — today's
+   * behaviour.
+   */
+  getCandidates(weight?: ModelWeight): ResolvedAiCandidate[] {
+    return this.getCandidatesForType(this.weightToType(weight));
+  }
+
+  /**
+   * Ordered fallback candidates for any AI connection type.
+   *
+   * Never throws: a resolver failure degrades to the `.env` candidate rather
+   * than to "no AI" (spec § 5), because this sits on the hot path of every
+   * single model construction.
+   */
+  getCandidatesForType(type: AiConnectionType): ResolvedAiCandidate[] {
+    if (this.aiConnectionResolver) {
+      try {
+        const candidates = this.aiConnectionResolver.resolve(type);
+        if (candidates.length > 0) return candidates;
+      } catch (error) {
+        const warning = `[ModelService] AI connection resolver failed for "${type}" — falling back to the .env connection: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        if (this.logger) this.logger.warn(warning, ModelService.name);
+        else console.warn(warning);
+      }
+    }
+    return [this.envCandidate(type)];
+  }
+
+  /** Reports a transient failure so the resolver cools that connection down. */
+  notifyCandidateFailure(candidate: ResolvedAiCandidate): void {
+    this.aiConnectionResolver?.markFailure(candidate.connectionId);
+  }
+
+  /**
+   * Picks one link out of a chain. Out-of-range indexes clamp to the last
+   * candidate, so a retry loop that outruns the chain simply keeps hammering
+   * the final (`.env`) link instead of crashing.
+   */
+  private pickCandidate(type: AiConnectionType, candidateIndex?: number): ResolvedAiCandidate {
+    const candidates = this.getCandidatesForType(type);
+    if (candidates.length === 0) return this.envCandidate(type);
+    const index = Math.min(Math.max(candidateIndex ?? 0, 0), candidates.length - 1);
+    return candidates[index];
+  }
+
+  /**
+   * The `.env` block of one connection type, normalised to a candidate.
+   *
+   * Used when no resolver is wired. A resolver appends its own env candidate as
+   * the last link of every chain, so this is the no-resolver twin of that entry
+   * and MUST stay field-for-field identical to it.
+   *
+   * Tolerates missing config blocks (a harness that only configures the chat
+   * tiers must not explode when something asks for the vision chain).
+   */
+  private envCandidate(type: AiConnectionType): ResolvedAiCandidate {
+    const cfg = this.aiConfig ?? ({} as ConfigAiInterface);
+    const identity = { source: "env" as const, connectionId: `env:${type}`, connectionType: type };
+
+    switch (type) {
+      case "vision": {
+        const vision = cfg.vision;
+        return {
+          ...identity,
+          provider: vision?.provider ?? "",
+          apiKey: vision?.apiKey ?? "",
+          model: vision?.model ?? "",
+          url: vision?.url ?? "",
+          region: vision?.region,
+          instance: vision?.instance,
+          apiVersion: vision?.apiVersion,
+          googleCredentialsBase64: vision?.googleCredentialsBase64,
+          reasoningEffort: vision?.reasoningEffort,
+          inputCostPer1MTokens: vision?.inputCostPer1MTokens,
+          outputCostPer1MTokens: vision?.outputCostPer1MTokens,
+        };
+      }
+
+      case "audio": {
+        const audio = cfg.audio;
+        return {
+          ...identity,
+          provider: audio?.provider ?? "",
+          apiKey: audio?.apiKey ?? "",
+          model: audio?.model ?? "",
+          url: audio?.url ?? "",
+          region: audio?.region,
+          instance: audio?.instance,
+          apiVersion: audio?.apiVersion,
+          googleCredentialsBase64: audio?.googleCredentialsBase64,
+          inputCostPer1MTokens: audio?.inputCostPer1MTokens,
+          outputCostPer1MTokens: audio?.outputCostPer1MTokens,
+          costPerMinute: audio?.costPerMinute,
+          directUrl: audio?.directUrl,
+          language: audio?.language,
+          directFormat: audio?.directFormat,
+          directProvider: audio?.directProvider,
+        };
+      }
+
+      case "embedder": {
+        const embedder = cfg.embedder;
+        return {
+          ...identity,
+          provider: embedder?.provider ?? "",
+          apiKey: embedder?.apiKey ?? "",
+          model: embedder?.model ?? "",
+          url: embedder?.url ?? "",
+          region: embedder?.region,
+          instance: embedder?.instance,
+          apiVersion: embedder?.apiVersion,
+          googleCredentialsBase64: embedder?.googleCredentialsBase64,
+          dimensions: embedder?.dimensions,
+          inputCostPer1MTokens: embedder?.inputCostPer1MTokens,
+        };
+      }
+
+      case "transcriber": {
+        const transcriber = cfg.transcriber;
+        return {
+          ...identity,
+          provider: transcriber?.provider ?? "",
+          apiKey: transcriber?.apiKey ?? "",
+          model: transcriber?.model ?? "",
+          url: transcriber?.url ?? "",
+          apiVersion: transcriber?.apiVersion,
+        };
+      }
+
+      case "documentAi": {
+        const documentAi = cfg.documentAi;
+        return {
+          ...identity,
+          provider: documentAi?.provider ?? "",
+          apiKey: documentAi?.apiKey ?? "",
+          model: documentAi?.model ?? "",
+          url: documentAi?.url ?? "",
+          apiVersion: documentAi?.apiVersion,
+          costPerPage: documentAi?.costPerPage,
+        };
+      }
+
+      default: {
+        const tier = type === "aiLite" ? cfg.aiLite : type === "aiLarge" ? cfg.aiLarge : cfg.ai;
+        return {
+          ...identity,
+          provider: tier?.provider ?? "",
+          apiKey: tier?.apiKey ?? "",
+          model: tier?.model ?? "",
+          url: tier?.url ?? "",
+          region: tier?.region,
+          instance: tier?.instance,
+          apiVersion: tier?.apiVersion,
+          googleCredentialsBase64: tier?.googleCredentialsBase64,
+          allowFallbacks: tier?.allowFallbacks,
+          reasoningEffort: tier?.reasoningEffort,
+          maxOutputTokens: tier?.maxOutputTokens,
+          inputCostPer1MTokens: tier?.inputCostPer1MTokens,
+          outputCostPer1MTokens: tier?.outputCostPer1MTokens,
+          cachedInputCostPer1MTokens: tier?.cachedInputCostPer1MTokens,
+        };
+      }
+    }
+  }
+
+  /**
+   * Resolves the effective AI config block for a model weight: the first
+   * healthy candidate of that chat tier, expressed in the `.env` block's shape.
+   *
+   * The signature is deliberately unchanged, so every existing caller
+   * (`LLMService` cost lookups, {@link supportsStrictStructuredOutput}, …)
+   * transparently reads the DB-first configuration. Only DEFINED candidate
+   * fields are layered over the env block, so fields the candidate shape does
+   * not carry (`secret`) survive.
+   */
+  getResolvedConfig(weight?: ModelWeight): ConfigAiInterface["ai"] {
+    const envBlock = this.envTierConfig(weight);
+    const candidate = this.pickCandidate(this.weightToType(weight));
+    if (candidate.source === "env") return envBlock;
+
+    return {
+      ...envBlock,
+      ...definedFieldsOnly({
+        provider: candidate.provider,
+        apiKey: candidate.apiKey,
+        model: candidate.model,
+        url: candidate.url,
+        region: candidate.region,
+        instance: candidate.instance,
+        apiVersion: candidate.apiVersion,
+        googleCredentialsBase64: candidate.googleCredentialsBase64,
+        allowFallbacks: candidate.allowFallbacks,
+        reasoningEffort: candidate.reasoningEffort,
+        maxOutputTokens: candidate.maxOutputTokens,
+        inputCostPer1MTokens: candidate.inputCostPer1MTokens,
+        outputCostPer1MTokens: candidate.outputCostPer1MTokens,
+        cachedInputCostPer1MTokens: candidate.cachedInputCostPer1MTokens,
+      }),
+    };
   }
 
   /**
@@ -270,6 +521,8 @@ export class ModelService implements OnModuleInit {
    *                             Lower = more deterministic, Higher = more creative
    * @param params.maxOutputTokens - Maximum output tokens (default from config)
    * @param params.modelWeight - Which AI tier to use (undefined → Normal)
+   * @param params.candidateIndex - Which link of the tier's fallback chain to
+   *                                build (default 0 = first healthy candidate)
    * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
    */
@@ -286,13 +539,19 @@ export class ModelService implements OnModuleInit {
     reasoningEffort?: ReasoningEffort;
     /** Per-attempt request budget in ms. Defaults to `ai.requestTimeoutMs`. */
     timeoutMs?: number;
+    /**
+     * Which link of this tier's fallback chain to build. 0 (default) is the
+     * first healthy candidate; a retry loop advances it on a transient failure.
+     * Out-of-range values clamp to the last candidate (the `.env` block).
+     */
+    candidateIndex?: number;
   }): BaseChatModel {
     if (this.aiConfig.mock) {
       return new FakeListChatModel({ responses: ["mock summary"] }) as unknown as BaseChatModel;
     }
 
     const temperature = params?.temperature ?? 0.2;
-    const cfg = this.getResolvedConfig(params?.modelWeight);
+    const cfg = this.pickCandidate(this.weightToType(params?.modelWeight), params?.candidateIndex);
     const maxOutputTokens = params?.maxOutputTokens ?? cfg.maxOutputTokens;
     // Precedence (Shared Contracts, plan 2026-07-31-llm-latency-and-structured-output):
     // an explicit per-call `reasoningEffort` wins; failing that, the equally
@@ -314,7 +573,11 @@ export class ModelService implements OnModuleInit {
     // pair — two different spellings of the same effort must hit the same entry.
     // `timeoutMs` and `frequencyPenalty` are part of the key because both are
     // baked into the constructed client, not passed per invocation.
+    // The connection id leads the key: two links of the same chain may agree on
+    // every other resolved parameter yet be different deployments (and carry
+    // different credentials), so each one caches its own client.
     const cacheKey = [
+      cfg.connectionId,
       cfg.provider,
       cfg.instance ?? cfg.url,
       cfg.model,
@@ -367,16 +630,18 @@ export class ModelService implements OnModuleInit {
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.1)
+   * @param params.candidateIndex - Which link of the vision fallback chain to
+   *                                build (default 0 = first healthy candidate)
    * @returns Configured BaseChatModel instance from LangChain
    * @throws {Error} If the configured LLM type is not supported
    */
-  getVisionLLM(params?: { temperature?: number }): BaseChatModel {
+  getVisionLLM(params?: { temperature?: number; candidateIndex?: number }): BaseChatModel {
     if (this.aiConfig.mock) {
       return new FakeListChatModel({ responses: ["mock summary"] }) as unknown as BaseChatModel;
     }
 
     const temperature = params?.temperature ?? 0.1;
-    const visionConfig = this.visionConfig;
+    const visionConfig = this.pickCandidate("vision", params?.candidateIndex);
 
     // Reasoning models (gpt-5 / o-series) accept `reasoning_effort` on the chat-completions
     // call. Lower effort = far fewer reasoning tokens = much faster. Passed via modelKwargs
@@ -389,7 +654,14 @@ export class ModelService implements OnModuleInit {
     const visionEffort = normaliseConfiguredReasoningEffort(visionConfig.reasoningEffort);
     const modelKwargs = isReasoningVisionModel && visionEffort ? { reasoning_effort: visionEffort } : undefined;
 
-    return this.buildChatModel(visionConfig, { temperature, credentialFileTag: "vision", modelKwargs });
+    return this.buildChatModel(visionConfig, {
+      temperature,
+      credentialFileTag: "vision",
+      modelKwargs,
+      // Absent on the `.env` vision block (it has no such field), so this stays
+      // undefined — and today's behaviour — until a DB connection sets it.
+      maxOutputTokens: visionConfig.maxOutputTokens,
+    });
   }
 
   /**
@@ -404,7 +676,7 @@ export class ModelService implements OnModuleInit {
    */
   getAudioLLM(params?: { temperature?: number }): BaseChatModel {
     const temperature = params?.temperature ?? 0.1;
-    return this.buildChatModel(this.audioConfig, { temperature, credentialFileTag: "audio" });
+    return this.buildChatModel(this.pickCandidate("audio"), { temperature, credentialFileTag: "audio" });
   }
 
   /**
@@ -627,53 +899,65 @@ export class ModelService implements OnModuleInit {
     }
 
     const rateLimit = this.aiConfig.embedder.rateLimit;
+    const candidate = this.pickCandidate("embedder");
     if (rateLimit && this.bucket && this.logger) {
-      if (this.cachedEmbedder) return this.cachedEmbedder;
-      const inner = this.buildInnerEmbedder() as Embeddings;
+      // Memoised per CONNECTION: an admin editing the embedder connection must
+      // take effect on the next call, not on the next process restart.
+      if (this.cachedEmbedder && this.cachedEmbedderConnectionId === candidate.connectionId) return this.cachedEmbedder;
+      const inner = this.buildInnerEmbedder(candidate) as Embeddings;
       this.cachedEmbedder = new RateLimitedEmbedder(inner, this.bucket, rateLimit, this.logger);
+      this.cachedEmbedderConnectionId = candidate.connectionId;
       return this.cachedEmbedder;
     }
 
-    return this.buildInnerEmbedder();
+    return this.buildInnerEmbedder(candidate);
   }
 
-  private buildInnerEmbedder(): EmbeddingsInterface {
+  /**
+   * Builds the raw provider embedder for one resolved candidate. `dimensions`
+   * falls back to the `.env` embedder block when the candidate does not carry
+   * one, so a DB connection that omits it keeps today's vector size.
+   */
+  private buildInnerEmbedder(candidate?: ResolvedAiCandidate): EmbeddingsInterface {
     let response: EmbeddingsInterface;
 
-    switch (this.aiConfig.embedder.provider) {
+    const embedderConfig = candidate ?? this.pickCandidate("embedder");
+    const dimensions = embedderConfig.dimensions ?? this.aiConfig.embedder?.dimensions;
+
+    switch (embedderConfig.provider) {
       case "local":
         throw new Error("Local embedder is not supported");
       case "openrouter":
         response = new OpenAIEmbeddings({
-          openAIApiKey: this.aiConfig.embedder.apiKey,
-          model: this.aiConfig.embedder.model,
+          openAIApiKey: embedderConfig.apiKey,
+          model: embedderConfig.model,
           configuration: {
-            baseURL: this.aiConfig.embedder.url,
+            baseURL: embedderConfig.url,
           },
         });
         break;
       case "requesty":
         response = new OpenAIEmbeddings({
-          openAIApiKey: this.aiConfig.embedder.apiKey,
-          model: this.aiConfig.embedder.model,
-          dimensions: this.aiConfig.embedder.dimensions,
+          openAIApiKey: embedderConfig.apiKey,
+          model: embedderConfig.model,
+          dimensions: dimensions,
           configuration: {
-            baseURL: this.aiConfig.embedder.url,
+            baseURL: embedderConfig.url,
           },
         });
         break;
       case "openai":
         response = new OpenAIEmbeddings({
-          openAIApiKey: this.aiConfig.embedder.apiKey,
-          model: this.aiConfig.embedder.model,
+          openAIApiKey: embedderConfig.apiKey,
+          model: embedderConfig.model,
         });
         break;
       case "azure":
         response = new AzureOpenAIEmbeddings({
-          azureOpenAIApiKey: this.aiConfig.embedder.apiKey,
-          azureOpenAIApiInstanceName: this.aiConfig.embedder.instance,
-          azureOpenAIApiDeploymentName: this.aiConfig.embedder.model,
-          azureOpenAIApiVersion: this.aiConfig.embedder.apiVersion,
+          azureOpenAIApiKey: embedderConfig.apiKey,
+          azureOpenAIApiInstanceName: embedderConfig.instance,
+          azureOpenAIApiDeploymentName: embedderConfig.model,
+          azureOpenAIApiVersion: embedderConfig.apiVersion,
           batchSize: 100,
         });
         break;
@@ -681,8 +965,6 @@ export class ModelService implements OnModuleInit {
         // Google Vertex AI Embeddings (uses embedder-specific credentials).
         // Match app-local behaviour: set GOOGLE_APPLICATION_CREDENTIALS and LEAVE it set
         // (the project id is resolved lazily at request time — do NOT restore/delete it).
-        const embedderConfig = this.aiConfig.embedder;
-
         if (embedderConfig.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(embedderConfig.googleCredentialsBase64, "base64").toString("utf-8");
           const credsPath = writeGcpCredentials(credentialsJson, "embedder");
@@ -694,7 +976,7 @@ export class ModelService implements OnModuleInit {
           location: embedderConfig.region,
           // EMBEDDER_REGION accepts a region or a multi-region, same as AI_REGION.
           ...vertexLocationParams(embedderConfig.region),
-          dimensions: embedderConfig.dimensions,
+          dimensions: dimensions,
         });
         break;
       }
@@ -704,7 +986,7 @@ export class ModelService implements OnModuleInit {
   }
 
   getEmbedderDimensions(): number {
-    return this.aiConfig.embedder.dimensions;
+    return this.pickCandidate("embedder").dimensions ?? this.aiConfig.embedder.dimensions;
   }
 
   /**
@@ -714,7 +996,7 @@ export class ModelService implements OnModuleInit {
    * by the `transcriber` config block (TRANSCRIBER_* env vars).
    */
   getTranscriber(): OpenAI | AzureOpenAI {
-    const transcriber = this.aiConfig.transcriber;
+    const transcriber = this.pickCandidate("transcriber");
     switch (transcriber.provider) {
       case "openai":
         return new OpenAI({ apiKey: transcriber.apiKey });
@@ -731,9 +1013,11 @@ export class ModelService implements OnModuleInit {
   }
 
   async transcribeAudio(params: { filePath: string; prompt: string; language?: string }): Promise<unknown> {
+    // Same candidate the client above was built from — reading the model from
+    // config while the client came from a DB connection would mix two chains.
     return await this.getTranscriber().audio.transcriptions.create({
       file: fs.createReadStream(params.filePath),
-      model: this.aiConfig.transcriber.model,
+      model: this.pickCandidate("transcriber").model,
       prompt: params.prompt,
       response_format: "json",
     });

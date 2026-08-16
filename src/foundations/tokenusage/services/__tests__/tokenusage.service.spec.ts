@@ -88,6 +88,7 @@ describe("TokenUsageService", () => {
       model: "text-embedding-ada-002",
       dimensions: 1536,
     },
+    connectionCooldownMinutes: 5,
   });
 
   /**
@@ -225,6 +226,128 @@ describe("TokenUsageService", () => {
       const cost = svc.computeCost({ tokens: { input: 100, output: 0, cached: 500 } });
       const allCached = svc.computeCost({ tokens: { input: 100, output: 0, cached: 100 } });
       expect(cost).toBeCloseTo(allCached, 12);
+    });
+  });
+
+  /**
+   * A call may be served by any link of a DB-backed AI-connection chain, and
+   * each link carries its own prices — so the tier's config block is no longer
+   * necessarily the right rate card. `rates` carries the SERVING connection's
+   * prices; absent (every `.env`-served call, i.e. every call today) the config
+   * block prices the record exactly as it always has.
+   */
+  describe("computeCost (per-connection rates)", () => {
+    it("prices the call from the serving connection's rates, not the tier config", async () => {
+      const { service: svc } = await buildServiceWithRates({ inputCostPer1MTokens: 10, outputCostPer1MTokens: 30 });
+
+      const cost = svc.computeCost({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        rates: { inputCostPer1MTokens: 1, outputCostPer1MTokens: 2 },
+      });
+
+      // The config block would have produced 40; the connection's rates give 3.
+      expect(cost).toBe(3);
+    });
+
+    it("leaves the config path untouched when no rates are supplied", async () => {
+      const { service: svc } = await buildServiceWithRates({ inputCostPer1MTokens: 10, outputCostPer1MTokens: 30 });
+
+      expect(svc.computeCost({ tokens: { input: 1_000_000, output: 1_000_000 } })).toBe(40);
+      // An undefined `rates` is the same call as omitting it.
+      expect(svc.computeCost({ tokens: { input: 1_000_000, output: 1_000_000 }, rates: undefined })).toBe(40);
+    });
+
+    it("falls back to the tier rate for a price the connection does not set", async () => {
+      const { service: svc } = await buildServiceWithRates({ inputCostPer1MTokens: 10, outputCostPer1MTokens: 30 });
+
+      const cost = svc.computeCost({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        rates: { outputCostPer1MTokens: 2 },
+      });
+
+      // input from config (10), output from the connection (2).
+      expect(cost).toBe(12);
+    });
+
+    it("bills cached tokens at the connection's own cached rate", async () => {
+      const { service: svc } = await buildServiceWithRates({ inputCostPer1MTokens: 10, outputCostPer1MTokens: 0 });
+
+      const cost = svc.computeCost({
+        tokens: { input: 1_000_000, output: 0, cached: 500_000 },
+        rates: { inputCostPer1MTokens: 10, cachedInputCostPer1MTokens: 1 },
+      });
+
+      // (500000 * 10 + 500000 * 1) / 1e6 = 5.5
+      expect(cost).toBeCloseTo(5.5, 10);
+    });
+
+    it("never mixes a connection's input price with the config's cache discount", async () => {
+      // Config gives cached tokens a 90% discount; the serving connection prices
+      // input higher and says nothing about caching — its cached tokens must
+      // cost ITS input rate, not the config's cheap cached rate.
+      const { service: svc } = await buildServiceWithRates({
+        inputCostPer1MTokens: 10,
+        outputCostPer1MTokens: 0,
+        cachedInputCostPer1MTokens: 1,
+      });
+
+      const cost = svc.computeCost({
+        tokens: { input: 1_000_000, output: 0, cached: 1_000_000 },
+        rates: { inputCostPer1MTokens: 20 },
+      });
+
+      expect(cost).toBe(20);
+    });
+
+    it("still uses the vision block as the fallback when useVisionCosts is set", async () => {
+      const { service: svc } = await buildServiceWithRates({});
+
+      const cost = svc.computeCost({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        useVisionCosts: true,
+        rates: { outputCostPer1MTokens: 1 },
+      });
+
+      // vision input 20 from config + output 1 from the connection.
+      expect(cost).toBe(21);
+    });
+  });
+
+  describe("recordTokenUsage (per-connection rates)", () => {
+    it("forwards the serving connection's rates to the persisted cost", async () => {
+      const { service: svc, repository } = await buildServiceWithRates({
+        inputCostPer1MTokens: 10,
+        outputCostPer1MTokens: 30,
+        credits: CREDITS_ENABLED,
+      });
+
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 1_000_000 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        rates: { inputCostPer1MTokens: 1, outputCostPer1MTokens: 2 },
+      });
+
+      // 3 € instead of the config block's 40 € → 750 credits at 0.004 €/credit.
+      const createCall = repository.create.mock.calls[0][0];
+      expect(createCall.cost).toBe(3);
+      expect(createCall.credits).toBe(750);
+    });
+
+    it("costOverride still wins over per-connection rates", async () => {
+      const { service: svc, repository } = await buildServiceWithRates({ inputCostPer1MTokens: 10 });
+
+      await svc.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 0 },
+        type: TokenUsageType.Embedding,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        rates: { inputCostPer1MTokens: 5 },
+        costOverride: 0.02,
+      });
+
+      expect(repository.create.mock.calls[0][0].cost).toBe(0.02);
     });
   });
 

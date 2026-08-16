@@ -6,6 +6,19 @@ import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfac
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { ModelService } from "../../llm/services/model.service";
+import { AiConnectionType, ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
+import { isTransientNetworkError } from "./llm.service";
+
+/**
+ * The failover surface `ModelService` gained with DB-backed AI connections,
+ * seen structurally and entirely optionally — see the identically-named type in
+ * `llm.service.ts` for why every method is optional (hand-written test doubles
+ * and older package builds must keep working, unchanged).
+ */
+interface CandidateAwareModelService {
+  getCandidatesForType?: (type: AiConnectionType) => ResolvedAiCandidate[] | undefined;
+  notifyCandidateFailure?: (candidate: ResolvedAiCandidate) => void;
+}
 
 /**
  * Opt-in cost attribution for an embedding call. Without both
@@ -45,6 +58,55 @@ export class EmbedderService {
     @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
   ) {}
 
+  /**
+   * Runs ONE embedding invocation, with a single failover retry on a transient
+   * provider failure (429/5xx/socket-level — classified by exactly the rule
+   * `LLMService` uses).
+   *
+   * ONE retry only, and only when there is somewhere to go: the failed
+   * connection is put into cooldown and the embedder is rebuilt, so
+   * `getEmbedder()` resolves the NEXT healthy link of the chain. A chain of one
+   * (no DB-backed embedder connection — just the `.env` block) has nowhere to
+   * fail over to, so the rejection propagates immediately, exactly as it does
+   * today. Everything beyond that single re-resolution belongs to the BullMQ
+   * job retry that owns these calls (spec § 2, "Other modalities").
+   */
+  private async withCandidateFailover<T>(
+    work: (embedder: ReturnType<ModelService["getEmbedder"]>) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await work(this.modelService.getEmbedder());
+    } catch (error) {
+      if (!isTransientNetworkError(error)) throw error;
+      const failed = this.failCurrentEmbedderCandidate();
+      if (!failed) throw error;
+      this.logger.warn(
+        `Embedder connection ${failed.connectionId} failed transiently — retrying once on the next candidate: ${String(error)}`,
+      );
+      return work(this.modelService.getEmbedder());
+    }
+  }
+
+  /**
+   * Puts the embedder connection currently in service into its cooldown window
+   * and returns it — or undefined when there is nothing to fail over to: no
+   * candidate-aware `ModelService`, a chain of one (`.env` only), or a registry
+   * that threw. Undefined means "behave exactly as before failover existed".
+   */
+  private failCurrentEmbedderCandidate(): ResolvedAiCandidate | undefined {
+    const resolver = this.modelService as unknown as CandidateAwareModelService;
+    if (typeof resolver.getCandidatesForType !== "function" || typeof resolver.notifyCandidateFailure !== "function")
+      return undefined;
+    try {
+      const candidates = resolver.getCandidatesForType("embedder") ?? [];
+      if (candidates.length < 2) return undefined;
+      resolver.notifyCandidateFailure(candidates[0]);
+      return candidates[0];
+    } catch {
+      return undefined;
+    }
+  }
+
   async vectoriseText(params: { text: string; attribution?: EmbedderAttribution }): Promise<any> {
     try {
       const result = await this.embedGuarded(params.text, params.attribution);
@@ -67,7 +129,9 @@ export class EmbedderService {
       // The texts that fit still travel as ONE provider batch, in input order —
       // batching is why vectoriseTextBatch exists (chunk.repository.ts:405).
       if (withinBudget.length > 0) {
-        const vectors = await this.modelService.getEmbedder().embedDocuments(withinBudget.map((index) => texts[index]));
+        const vectors = await this.withCandidateFailover((embedder) =>
+          embedder.embedDocuments(withinBudget.map((index) => texts[index])),
+        );
         withinBudget.forEach((index, position) => (result[index] = vectors[position]));
       }
       for (const index of oversized) {
@@ -91,7 +155,7 @@ export class EmbedderService {
    */
   private async embedGuarded(text: string, attribution?: EmbedderAttribution): Promise<number[]> {
     const slices = this.splitByTokenBudget(text);
-    if (slices.length === 1) return this.modelService.getEmbedder().embedQuery(text);
+    if (slices.length === 1) return this.withCandidateFailover((embedder) => embedder.embedQuery(text));
     this.warnOversizedInput(text, slices.length, attribution);
     return this.meanPool(await this.embedSlices(slices));
   }
@@ -103,7 +167,8 @@ export class EmbedderService {
    */
   private async embedSlices(slices: string[]): Promise<number[][]> {
     const vectors: number[][] = [];
-    for (const slice of slices) vectors.push(await this.modelService.getEmbedder().embedQuery(slice));
+    for (const slice of slices)
+      vectors.push(await this.withCandidateFailover((embedder) => embedder.embedQuery(slice)));
     return vectors;
   }
 

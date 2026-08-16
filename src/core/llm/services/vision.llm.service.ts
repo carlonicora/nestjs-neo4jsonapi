@@ -4,8 +4,20 @@ import { ConfigService } from "@nestjs/config";
 import { ZodType } from "zod";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { ModelService } from "../../llm/services/model.service";
+import { AiConnectionType, ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { convertZodToJsonSchema, sanitizeSchemaForGemini } from "../utils/schema.utils";
 import { StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
+
+/**
+ * The failover surface `ModelService` gained with DB-backed AI connections,
+ * seen structurally and entirely optionally — see the identically-named type in
+ * `llm.service.ts` for why every method is optional (hand-written test doubles
+ * and older package builds must keep working, unchanged).
+ */
+interface CandidateAwareModelService {
+  getCandidatesForType?: (type: AiConnectionType) => ResolvedAiCandidate[] | undefined;
+  notifyCandidateFailure?: (candidate: ResolvedAiCandidate) => void;
+}
 
 /**
  * Error thrown when vision model's content moderation blocks an image analysis request.
@@ -73,16 +85,47 @@ export class VisionLLMService {
   }
 
   /**
-   * Execute a function with exponential backoff retry on rate limit errors
+   * Puts the vision candidate that just rate-limited into its cooldown window,
+   * so the next resolution reaches for the next link of the chain instead.
+   *
+   * Best-effort in every direction — no candidate-aware `ModelService`, an empty
+   * chain, or a throwing registry all leave the retry exactly as it was.
+   * Failover bookkeeping must never turn a retryable 429 into a hard failure.
    */
-  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  private markCandidateFailure(attempt: number): void {
+    const resolver = this.modelService as unknown as CandidateAwareModelService;
+    if (typeof resolver.getCandidatesForType !== "function" || typeof resolver.notifyCandidateFailure !== "function")
+      return;
+    try {
+      const candidates = resolver.getCandidatesForType("vision") ?? [];
+      if (candidates.length === 0) return;
+      resolver.notifyCandidateFailure(candidates[Math.min(attempt, candidates.length - 1)]);
+    } catch {
+      /* the chain is an optimisation; a failure to record health never fails the call */
+    }
+  }
+
+  /**
+   * Execute a function with exponential backoff retry on rate limit errors.
+   *
+   * `fn` receives the ATTEMPT INDEX so it can rebuild its model against the
+   * n-th connection of the vision chain — that is what makes a 429 move to a
+   * different provider rather than knocking on the same closed door. With no
+   * DB-backed connections every index resolves the same `.env` connection, i.e.
+   * today's behaviour.
+   */
+  private async withRetry<T>(fn: (attempt: number) => Promise<T>): Promise<T> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
       try {
-        return await fn();
+        return await fn(attempt);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Marked even on the final attempt: the cooldown outlives this call, so
+        // the caller's next job retry starts on a healthier connection.
+        if (this.isRateLimitError(error)) this.markCandidateFailure(attempt);
 
         if (!this.isRateLimitError(error) || attempt === this.MAX_RETRIES - 1) {
           throw lastError;
@@ -159,11 +202,14 @@ export class VisionLLMService {
   private async callWithoutStructuredOutput<T>(
     params: VisionCallParams<T>,
     message: HumanMessage,
+    /** Which link of the vision chain to build from; 0 (the default) is the first healthy one. */
+    candidateIndex = 0,
   ): Promise<{ parsed: T; rawContent: string }> {
     const isGPT5 = this.isGPT5VisionModel();
     const effectiveTemperature = isGPT5 ? 1 : (params.temperature ?? 0.1);
     const baseModel = this.modelService.getVisionLLM({
       temperature: effectiveTemperature,
+      candidateIndex,
     });
 
     try {
@@ -205,6 +251,39 @@ export class VisionLLMService {
   }
 
   /**
+   * Builds the structured-output vision model for ONE attempt, from the
+   * `candidateIndex`-th link of the vision fallback chain.
+   *
+   * Extracted from {@link call} so each retry can rebuild against a different
+   * connection; the provider-shaped schema handling (Gemini sanitization,
+   * pre-converted JSON Schema for Azure/GPT-5, raw Zod elsewhere) is unchanged.
+   */
+  private buildStructuredVisionModel<T>(params: VisionCallParams<T>, candidateIndex: number) {
+    const isGPT5 = this.isGPT5VisionModel();
+    const effectiveTemperature = isGPT5 ? 1 : (params.temperature ?? 0.1);
+    const baseModel = this.modelService.getVisionLLM({
+      temperature: effectiveTemperature,
+      candidateIndex,
+    });
+
+    // Check if provider needs schema conversion/sanitization
+    const needsGeminiSanitization = this.isGeminiVisionModel();
+    const isAzure = this.isAzureVisionModel();
+
+    if (needsGeminiSanitization) {
+      const jsonSchema = convertZodToJsonSchema(params.outputSchema);
+      const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
+      return baseModel.withStructuredOutput(sanitizedSchema, { includeRaw: true });
+    }
+    if (isAzure || isGPT5) {
+      // Azure/GPT-5: use pre-converted JSON Schema to avoid Zod-to-OpenAI conversion issues
+      const jsonSchema = convertZodToJsonSchema(params.outputSchema);
+      return baseModel.withStructuredOutput(jsonSchema, { includeRaw: true });
+    }
+    return baseModel.withStructuredOutput(params.outputSchema, { includeRaw: true });
+  }
+
+  /**
    * Calls the LLM with an image for vision analysis using structured output.
    *
    * This method follows the same pattern as LLMService:
@@ -243,36 +322,11 @@ export class VisionLLMService {
     });
 
     try {
-      const isGPT5 = this.isGPT5VisionModel();
-      const effectiveTemperature = isGPT5 ? 1 : (params.temperature ?? 0.1);
-      const baseModel = this.modelService.getVisionLLM({
-        temperature: effectiveTemperature,
-      });
-
-      // Check if provider needs schema conversion/sanitization
-      const needsGeminiSanitization = this.isGeminiVisionModel();
-      const isAzure = this.isAzureVisionModel();
-
-      let structuredLlm;
-      if (needsGeminiSanitization) {
-        const jsonSchema = convertZodToJsonSchema(params.outputSchema);
-        const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
-        structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
-          includeRaw: true,
-        });
-      } else if (isAzure || isGPT5) {
-        // Azure/GPT-5: use pre-converted JSON Schema to avoid Zod-to-OpenAI conversion issues
-        const jsonSchema = convertZodToJsonSchema(params.outputSchema);
-        structuredLlm = baseModel.withStructuredOutput(jsonSchema, {
-          includeRaw: true,
-        });
-      } else {
-        structuredLlm = baseModel.withStructuredOutput(params.outputSchema, {
-          includeRaw: true,
-        });
-      }
-
-      const response = await this.withRetry(async () => {
+      // Built INSIDE the retry so a rate-limited attempt can be re-issued
+      // against the next connection in the chain: the model bakes in the
+      // provider, so reusing one instance would retry the same dead endpoint.
+      const response = await this.withRetry(async (attempt) => {
+        const structuredLlm = this.buildStructuredVisionModel(params, attempt);
         return (await this.withTimeout(
           structuredLlm.invoke([message]),
           this.CALL_TIMEOUT_MS,
@@ -324,7 +378,9 @@ export class VisionLLMService {
 
       if (isParsingError) {
         try {
-          const { parsed } = await this.withRetry(() => this.callWithoutStructuredOutput(params, message));
+          const { parsed } = await this.withRetry((attempt) =>
+            this.callWithoutStructuredOutput(params, message, attempt),
+          );
 
           return {
             ...(parsed as T),

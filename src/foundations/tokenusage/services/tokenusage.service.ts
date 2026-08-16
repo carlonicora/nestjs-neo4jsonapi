@@ -18,6 +18,22 @@ import { ModelWeight } from "../../../core/llm/enums/model.weight";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
 
 /**
+ * Per-call cost rates, in euros per 1M tokens, belonging to the AI connection
+ * that ACTUALLY served a call.
+ *
+ * Exists because a call may be served by any link of a DB-backed fallback chain
+ * (`AiConnection`), and each link carries its own prices — so the config block
+ * for the tier is no longer necessarily the right rate card. Supplied ONLY for
+ * candidates whose `source` is `"db"`; an `.env`-sourced candidate passes
+ * nothing and keeps the config-block path exactly as before.
+ */
+export interface TokenUsageRatesInterface {
+  inputCostPer1MTokens?: number;
+  outputCostPer1MTokens?: number;
+  cachedInputCostPer1MTokens?: number;
+}
+
+/**
  * TokenUsage service.
  *
  * Extends `AbstractService` so a consuming application can subclass it (see
@@ -73,13 +89,31 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
    * Computes the monetary cost of a call from the per-tier rates in config
    * (`inputCostPer1MTokens` / `outputCostPer1MTokens`). Single source of truth —
    * used both for persistence and for surfacing cost in ephemeral telemetry.
+   *
+   * `rates` overrides those config rates with the ones belonging to the AI
+   * connection that actually served the call (see
+   * {@link TokenUsageRatesInterface}). It is passed ONLY for DB-backed
+   * connections, so a caller that never configures any keeps the config-block
+   * path bit-for-bit. Each rate falls back to the config block individually, so
+   * a connection that prices only some fields still bills the rest at the tier
+   * rate — EXCEPT the cached rate, which falls back to the EFFECTIVE input rate
+   * rather than the config's cached rate: mixing one connection's input price
+   * with another's cache discount would price cached tokens above uncached ones.
    */
-  computeCost(params: { tokens: TokenUsageInterface; useVisionCosts?: boolean; modelWeight?: ModelWeight }): number {
+  computeCost(params: {
+    tokens: TokenUsageInterface;
+    useVisionCosts?: boolean;
+    modelWeight?: ModelWeight;
+    /** Rates of the connection that served the call; overrides the config block. */
+    rates?: TokenUsageRatesInterface;
+  }): number {
     const costConfig = params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
-    const inputRate = costConfig.inputCostPer1MTokens ?? 0;
-    const outputRate = costConfig.outputCostPer1MTokens ?? 0;
+    const inputRate = params.rates?.inputCostPer1MTokens ?? costConfig.inputCostPer1MTokens ?? 0;
+    const outputRate = params.rates?.outputCostPer1MTokens ?? costConfig.outputCostPer1MTokens ?? 0;
     // vision/audio configs have no cached rate → falls back to the full input rate (no discount).
-    const cachedRate = (costConfig as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens ?? inputRate;
+    const configCachedRate = (costConfig as { cachedInputCostPer1MTokens?: number }).cachedInputCostPer1MTokens;
+    const cachedRate =
+      params.rates?.cachedInputCostPer1MTokens ?? (params.rates ? inputRate : (configCachedRate ?? inputRate));
     const cached = Math.min(params.tokens.cached ?? 0, params.tokens.input);
     const uncachedInput = params.tokens.input - cached;
     const cost = uncachedInput * inputRate + cached * cachedRate + params.tokens.output * outputRate;
@@ -108,6 +142,8 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     applyMinimum?: boolean;
     /** Pre-computed cost in euros; when provided `computeCost` is skipped (embeddings: estimated tokens × the embedder rate). */
     costOverride?: number;
+    /** Rates of the AI connection that served the call; forwarded to `computeCost`. */
+    rates?: TokenUsageRatesInterface;
   }): Promise<void> {
     const cost =
       params.costOverride ??
@@ -115,6 +151,7 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
         tokens: params.tokens,
         useVisionCosts: params.useVisionCosts,
         modelWeight: params.modelWeight,
+        rates: params.rates,
       });
 
     const creditsConfig = this.configService.get<ConfigCreditsInterface>("credits");

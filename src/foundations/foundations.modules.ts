@@ -1,4 +1,5 @@
 import { DynamicModule, Module, Type } from "@nestjs/common";
+import { AiConnectionModule } from "./ai-connection/ai-connection.module";
 import { AssistantModule } from "./assistant/assistant.module";
 import { AtomicFactModule } from "./atomicfact/atomicfact.module";
 import { AuditModule } from "./audit/audit.module";
@@ -65,6 +66,7 @@ export interface FoundationsModuleConfig {
  * Queue registration is handled centrally by QueueModule (via baseConfig.chunkQueues).
  */
 const STATIC_FOUNDATION_MODULES = [
+  AiConnectionModule,
   AssistantModule,
   AtomicFactModule,
   AuditModule,

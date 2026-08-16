@@ -52,7 +52,18 @@ const AI_CONFIG = {
   requestWatchdogMs: 10_000,
 };
 
-function harness(opts: { invoke: () => Promise<any>; ai?: Record<string, unknown> }) {
+/**
+ * A ModelService double. `candidates` is OPTIONAL on purpose: omitting it
+ * models both a consumer with no DB-backed AI connections and every existing
+ * hand-written double, and must leave the retry behaving exactly as it did
+ * before failover existed.
+ */
+function harness(opts: {
+  invoke: () => Promise<any>;
+  ai?: Record<string, unknown>;
+  candidates?: any[];
+  tokenUsage?: { recordTokenUsage: ReturnType<typeof vi.fn> };
+}) {
   const model = {
     withStructuredOutput: vi.fn().mockReturnValue({ invoke: opts.invoke }),
     bindTools: vi.fn().mockReturnValue({ invoke: opts.invoke }),
@@ -61,6 +72,12 @@ function harness(opts: { invoke: () => Promise<any>; ai?: Record<string, unknown
     getResolvedConfig: () => ({ model: "m", provider: "openrouter" }),
     getLLM: vi.fn().mockReturnValue(model),
     supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
+    ...(opts.candidates
+      ? {
+          getCandidates: vi.fn().mockReturnValue(opts.candidates),
+          notifyCandidateFailure: vi.fn(),
+        }
+      : {}),
   } as any;
   const dumper = {
     startSession: () => ({
@@ -72,8 +89,20 @@ function harness(opts: { invoke: () => Promise<any>; ai?: Record<string, unknown
     }),
   } as any;
   const config = { get: vi.fn().mockReturnValue({ ...AI_CONFIG, ...(opts.ai ?? {}) }) } as any;
-  return { svc: new LLMService(modelService, config, dumper), modelService };
+  return { svc: new LLMService(modelService, config, dumper, opts.tokenUsage as any), modelService };
 }
+
+/** One link of a fallback chain, in the shape `ResolvedAiCandidate` declares. */
+const candidate = (id: string, source: "db" | "env", rates?: Record<string, number>) => ({
+  source,
+  connectionId: id,
+  connectionType: "ai",
+  provider: "openrouter",
+  apiKey: "k",
+  model: `model-${id}`,
+  url: "https://openrouter.ai/api/v1",
+  ...(rates ?? {}),
+});
 
 const OUTPUT = z.object({ ok: z.boolean() });
 const callParams = {
@@ -259,6 +288,181 @@ describe("LLMService request bounds", () => {
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(error.cause).toBe(refusal);
+  });
+
+  /**
+   * A 429 or 5xx used to be retried against the SAME connection, because there
+   * was only ever one. With DB-backed AI connections the retry walks an ordered
+   * chain instead — attempt n uses candidate n — and marks the connection that
+   * failed so the next resolution skips it for its cooldown window.
+   *
+   * The load-bearing property in every test below: with NO chain (no DB-backed
+   * connections, or a ModelService double that predates them) the behaviour is
+   * exactly the three-attempt, one-connection retry the tests above pin.
+   */
+  describe("connection failover", () => {
+    const RATE_LIMITED = () => Object.assign(new Error("429 Too Many Requests"), { status: 429 });
+
+    it("runs the number of attempts the caller budgets, numbering each one", async () => {
+      const { svc } = harness({ invoke: () => Promise.resolve({}) });
+      const attempts: number[] = [];
+      const failures: number[] = [];
+      const error = RATE_LIMITED();
+
+      const pending = (svc as any)
+        .runWithTransientRetry(
+          "failover",
+          40_000,
+          (_signal: AbortSignal, attempt: number) => {
+            attempts.push(attempt);
+            return Promise.reject(error);
+          },
+          { maxAttempts: 5, onTransientFailure: (attempt: number) => failures.push(attempt) },
+        )
+        .catch((e: unknown) => e);
+      // Four backoffs (5s + 15s + 15s + 15s), each jittered by up to +20%.
+      await vi.advanceTimersByTimeAsync(90_000);
+
+      expect(await pending).toBe(error);
+      expect(attempts).toEqual([0, 1, 2, 3, 4]);
+      // One per failure that was followed by another attempt — not the last one.
+      expect(failures).toEqual([0, 1, 2, 3]);
+    });
+
+    it("keeps today's three attempts when no options are passed", async () => {
+      const { svc } = harness({ invoke: () => Promise.resolve({}) });
+      const attempts: number[] = [];
+
+      const pending = (svc as any)
+        .runWithTransientRetry("legacy", 40_000, (_signal: AbortSignal, attempt: number) => {
+          attempts.push(attempt);
+          return Promise.reject(RATE_LIMITED());
+        })
+        .catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await pending;
+
+      expect(attempts).toEqual([0, 1, 2]);
+    });
+
+    it("passes no candidate index at all when the ModelService has no chain", async () => {
+      const { svc, modelService } = harness({ invoke: () => Promise.resolve({ parsed: { ok: true }, raw: {} }) });
+
+      await svc.call(callParams);
+
+      expect(modelService.getLLM.mock.calls[0][0]).not.toHaveProperty("candidateIndex");
+    });
+
+    it("moves to the next connection after a transient failure, and marks the failed one", async () => {
+      const invoke = vi
+        .fn()
+        .mockRejectedValueOnce(RATE_LIMITED())
+        .mockResolvedValueOnce({ parsed: { ok: true }, raw: {} });
+      const chain = [candidate("db-1", "db"), candidate("env:ai", "env")];
+      const { svc, modelService } = harness({ invoke: invoke as any, candidates: chain });
+
+      const pending = svc.call(callParams);
+      await vi.advanceTimersByTimeAsync(7_000);
+
+      expect((await pending).ok).toBe(true);
+      expect(modelService.getLLM.mock.calls.map((call: any[]) => call[0].candidateIndex)).toEqual([0, 1]);
+      expect(modelService.notifyCandidateFailure).toHaveBeenCalledTimes(1);
+      expect(modelService.notifyCandidateFailure).toHaveBeenCalledWith(chain[0]);
+    });
+
+    it("gives a chain longer than the default budget one attempt per connection, capped at six", async () => {
+      const invoke = vi.fn().mockRejectedValue(RATE_LIMITED());
+      const chain = Array.from({ length: 8 }, (_, index) => candidate(`db-${index}`, "db"));
+      const { svc, modelService } = harness({ invoke: invoke as any, candidates: chain });
+
+      const failure = svc.call(callParams).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await failure;
+
+      expect(invoke).toHaveBeenCalledTimes(6);
+      expect(modelService.getLLM.mock.calls.map((call: any[]) => call[0].candidateIndex)).toEqual([0, 1, 2, 3, 4, 5]);
+    });
+
+    it("keeps clamping to the last connection when the chain is shorter than the budget", async () => {
+      const invoke = vi.fn().mockRejectedValue(RATE_LIMITED());
+      const chain = [candidate("db-1", "db"), candidate("env:ai", "env")];
+      const { svc, modelService } = harness({ invoke: invoke as any, candidates: chain });
+
+      const failure = svc.call(callParams).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await failure;
+
+      // Three attempts (today's floor) across a two-link chain.
+      expect(modelService.getLLM.mock.calls.map((call: any[]) => call[0].candidateIndex)).toEqual([0, 1, 1]);
+    });
+
+    it("bills the call at the rates of the DB connection that served it", async () => {
+      const recordTokenUsage = vi.fn().mockResolvedValue(undefined);
+      const chain = [
+        candidate("db-1", "db", { inputCostPer1MTokens: 7, outputCostPer1MTokens: 9 }),
+        candidate("env:ai", "env"),
+      ];
+      const { svc } = harness({
+        invoke: () => Promise.resolve({ parsed: { ok: true }, raw: {} }),
+        candidates: chain,
+        tokenUsage: { recordTokenUsage },
+      });
+
+      await svc.call({ ...callParams, relationshipId: "r1", relationshipType: "Rel" });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({ rates: { inputCostPer1MTokens: 7, outputCostPer1MTokens: 9 } }),
+      );
+    });
+
+    it("sends NO rates when the .env connection served the call (today's cost path)", async () => {
+      const recordTokenUsage = vi.fn().mockResolvedValue(undefined);
+      const chain = [candidate("env:ai", "env", { inputCostPer1MTokens: 7 })];
+      const { svc } = harness({
+        invoke: () => Promise.resolve({ parsed: { ok: true }, raw: {} }),
+        candidates: chain,
+        tokenUsage: { recordTokenUsage },
+      });
+
+      await svc.call({ ...callParams, relationshipId: "r1", relationshipType: "Rel" });
+
+      expect(recordTokenUsage).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsage.mock.calls[0][0]).not.toHaveProperty("rates");
+    });
+
+    it("writes no usage record when a whole chain failed without serving anything", async () => {
+      const recordTokenUsage = vi.fn().mockResolvedValue(undefined);
+      const chain = [
+        candidate("db-1", "db", { inputCostPer1MTokens: 7 }),
+        candidate("db-2", "db", { inputCostPer1MTokens: 11 }),
+      ];
+      // Usage is reported before the final failure, so the record is written.
+      const invoke = vi.fn(async () => {
+        throw RATE_LIMITED();
+      });
+      const { svc } = harness({ invoke: invoke as any, candidates: chain, tokenUsage: { recordTokenUsage } });
+
+      const failure = svc.call({ ...callParams, relationshipId: "r1", relationshipType: "Rel" }).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await failure;
+
+      // Nothing was served, so the zero-token failure rule writes no record —
+      // but the chain still ended on its last link.
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it("still runs when the ModelService's chain resolution throws", async () => {
+      const { svc, modelService } = harness({ invoke: () => Promise.resolve({ parsed: { ok: true }, raw: {} }) });
+      modelService.getCandidates = vi.fn(() => {
+        throw new Error("resolver exploded");
+      });
+
+      const result = await svc.call(callParams);
+
+      // Degrades to the configured tier rather than failing the call.
+      expect(result.ok).toBe(true);
+      expect(modelService.getLLM.mock.calls[0][0]).not.toHaveProperty("candidateIndex");
+    });
   });
 
   it("bounds extractViaTool the same way", async () => {

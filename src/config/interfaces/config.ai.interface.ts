@@ -120,6 +120,11 @@ export interface ConfigAiInterface {
    */
   requestWatchdogMs: number;
   /**
+   * Minutes a failed AI connection is skipped before re-entering its fallback
+   * chain (AI_CONNECTION_COOLDOWN_MINUTES, default 5).
+   */
+  connectionCooldownMinutes: number;
+  /**
    * Mistral Document AI (OCR) on Azure AI Foundry — see DocumentAiService.
    * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION,COST_PER_PAGE}.
    */

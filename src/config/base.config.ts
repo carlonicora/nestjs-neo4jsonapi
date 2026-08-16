@@ -281,6 +281,10 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       requestTimeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS || "120000", 10),
       requestDeadlineAttempts: parseInt(process.env.AI_REQUEST_DEADLINE_ATTEMPTS || "3", 10),
       requestWatchdogMs: parseInt(process.env.AI_REQUEST_WATCHDOG_MS || "30000", 10),
+      // How long a DB-backed AI connection that failed transiently (429/5xx) is
+      // skipped before it re-enters its fallback chain. Fail-open: if every
+      // candidate is cooling, the full chain is used anyway.
+      connectionCooldownMinutes: parseInt(process.env.AI_CONNECTION_COOLDOWN_MINUTES || "5", 10),
       documentAi: {
         enabled: process.env.DOCUMENT_AI_ENABLED === "true",
         provider: process.env.DOCUMENT_AI_PROVIDER || "azure",

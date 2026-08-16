@@ -11,7 +11,11 @@ import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
-import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
+import {
+  TokenUsageRatesInterface,
+  TokenUsageService,
+} from "../../../foundations/tokenusage/services/tokenusage.service";
+import { ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { ModelWeight } from "../enums/model.weight";
 import { ReasoningEffort } from "../enums/reasoning.effort";
 import { LLMCacheService, buildCacheKey } from "./llm-cache.service";
@@ -108,6 +112,91 @@ export function isTimeoutError(error: unknown): boolean {
     name === "APIConnectionTimeoutError" ||
     /aborted due to timeout|timed? ?out|Request was aborted/i.test(message)
   );
+}
+
+/**
+ * True for a failure that means the request never reached a working provider,
+ * and is therefore worth another attempt: a DNS/socket-level error code, an
+ * HTTP 429 or 5xx, or the message text either of those arrives as.
+ *
+ * All three are checked because the same failure wears different clothes per
+ * transport: undici puts the code on `error.cause.code` behind a bare
+ * `TypeError: fetch failed`, the OpenAI SDK puts the status on the error and
+ * the code in the message, and LangChain re-wraps both in a plain `Error`.
+ *
+ * Deliberately NOT transient: a stall that burned its whole deadline
+ * ({@link LLMTimeoutError}), a refusal (402/403), a malformed request (400) or
+ * a parse failure. Those either already had their retry (`call()` re-issues a
+ * timed-out attempt once, escalating the OpenRouter pin) or will fail
+ * identically forever. The 429 vocabulary matches the one
+ * `VisionLLMService.isRateLimitError` retries on, so the two agree on what a
+ * rate limit looks like.
+ *
+ * Exported as a standalone function (with {@link LLMService} keeping a private
+ * method that delegates to it) so the other modality services — which have no
+ * `LLMService` dependency and must not grow one — classify a failure by exactly
+ * the same rule before failing a connection over to the next candidate.
+ */
+export function isTransientNetworkError(err: unknown): boolean {
+  if (err === undefined || err === null) return false;
+  const candidate = err as {
+    code?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+    cause?: unknown;
+  };
+  const cause = candidate.cause as { code?: unknown; status?: unknown } | undefined;
+
+  const codes = [candidate.code, cause?.code];
+  if (codes.some((code) => typeof code === "string" && TRANSIENT_ERROR_CODES.has(code))) return true;
+
+  const statuses = [candidate.status, candidate.statusCode, candidate.response?.status, cause?.status];
+  if (statuses.some((status) => typeof status === "number" && (status === 429 || (status >= 500 && status <= 599))))
+    return true;
+
+  const own = err instanceof Error ? err.message : String(err);
+  const causeMessage = cause instanceof Error ? cause.message : "";
+  const haystack = `${own} ${causeMessage}`.toLowerCase();
+
+  for (const code of TRANSIENT_ERROR_CODES) if (haystack.includes(code.toLowerCase())) return true;
+
+  return (
+    haystack.includes("socket hang up") ||
+    haystack.includes("fetch failed") ||
+    haystack.includes("network error") ||
+    haystack.includes("econnaborted") ||
+    // 429 / rate limiting — matched as a whole word so a token count never
+    // reads as a status code.
+    /\b429\b/.test(haystack) ||
+    haystack.includes("rate limit") ||
+    haystack.includes("resource exhausted") ||
+    haystack.includes("too many requests") ||
+    // 5xx. Only the codes providers actually emit, again whole-word: a blanket
+    // /5\d\d/ would retry "context length 512 exceeded" forever.
+    /\b(500|502|503|504|529)\b/.test(haystack) ||
+    haystack.includes("internal server error") ||
+    haystack.includes("bad gateway") ||
+    haystack.includes("service unavailable") ||
+    haystack.includes("gateway timeout") ||
+    haystack.includes("overloaded")
+  );
+}
+
+/**
+ * The failover surface `ModelService` gained with DB-backed AI connections,
+ * seen STRUCTURALLY and entirely optionally.
+ *
+ * Every method is optional on purpose: `LLMService` is constructed directly with
+ * hand-written `ModelService` doubles in several spec harnesses, and a consumer
+ * may hold an older build of the package. A double without these methods gets
+ * exactly the pre-failover behaviour — one candidate, today's three attempts —
+ * instead of a `TypeError` on the hot path, which is the same "degrade toward
+ * `.env`, never toward no AI" rule the resolver follows.
+ */
+interface CandidateAwareModelService {
+  getCandidates?: (weight?: ModelWeight) => ResolvedAiCandidate[] | undefined;
+  notifyCandidateFailure?: (candidate: ResolvedAiCandidate) => void;
 }
 
 /**
@@ -402,67 +491,79 @@ export class LLMService {
   }
 
   /**
-   * True for a failure that means the request never reached a working provider,
-   * and is therefore worth another attempt: a DNS/socket-level error code, an
-   * HTTP 429 or 5xx, or the message text either of those arrives as.
-   *
-   * All three are checked because the same failure wears different clothes per
-   * transport: undici puts the code on `error.cause.code` behind a bare
-   * `TypeError: fetch failed`, the OpenAI SDK puts the status on the error and
-   * the code in the message, and LangChain re-wraps both in a plain `Error`.
-   *
-   * Deliberately NOT transient: a stall that burned its whole deadline
-   * ({@link LLMTimeoutError}), a refusal (402/403), a malformed request (400) or
-   * a parse failure. Those either already had their retry (`call()` re-issues a
-   * timed-out attempt once, escalating the OpenRouter pin) or will fail
-   * identically forever. The 429 vocabulary matches the one
-   * `VisionLLMService.isRateLimitError` retries on, so the two agree on what a
-   * rate limit looks like.
+   * See the module-level {@link isTransientNetworkError} for the classification
+   * rule and why it lives outside the class. Kept as a method because it is part
+   * of this service's shape (spec harnesses stub and assert on it) — the
+   * unqualified call below resolves to the module function, not to itself.
    */
   private isTransientNetworkError(err: unknown): boolean {
-    if (err === undefined || err === null) return false;
-    const candidate = err as {
-      code?: unknown;
-      status?: unknown;
-      statusCode?: unknown;
-      response?: { status?: unknown };
-      cause?: unknown;
+    return isTransientNetworkError(err);
+  }
+
+  /**
+   * Ordered failover candidates for a chat tier, newest health state applied.
+   *
+   * EMPTY means "no candidate machinery available" (a `ModelService` double
+   * without `getCandidates`, or a resolution failure) — every caller then
+   * behaves exactly as it did before failover existed. A resolution failure is
+   * logged and swallowed rather than thrown: losing the chain must degrade to
+   * the configured tier, never break the call.
+   */
+  private resolveCandidates(modelWeight?: ModelWeight): ResolvedAiCandidate[] {
+    const resolver = this.modelService as unknown as CandidateAwareModelService;
+    if (typeof resolver.getCandidates !== "function") return [];
+    try {
+      return resolver.getCandidates(modelWeight) ?? [];
+    } catch (error) {
+      this.logger.warn(`AI candidate resolution failed — using the configured tier only: ${String(error)}`);
+      return [];
+    }
+  }
+
+  /**
+   * Puts the candidate that just failed transiently into its cooldown window, so
+   * the next resolution skips it. Best-effort in every direction: no candidate,
+   * no candidate-aware `ModelService`, or a throwing registry all leave the call
+   * itself untouched — bookkeeping must never turn a retryable failure into a
+   * hard one.
+   */
+  private markCandidateFailure(candidate: ResolvedAiCandidate | undefined): void {
+    if (!candidate) return;
+    const resolver = this.modelService as unknown as CandidateAwareModelService;
+    if (typeof resolver.notifyCandidateFailure !== "function") return;
+    try {
+      resolver.notifyCandidateFailure(candidate);
+    } catch (error) {
+      this.logger.warn(`Marking AI candidate ${candidate.connectionId} as failed did not succeed: ${String(error)}`);
+    }
+  }
+
+  /**
+   * The cost rates to bill this call at, or undefined to keep the config-block
+   * rates.
+   *
+   * ONLY a DB-backed connection supplies rates: an `.env` candidate is the very
+   * config block `computeCost` already reads, so passing its numbers back in
+   * would be a no-op at best and a rounding difference at worst. A DB connection
+   * that prices nothing also returns undefined, so it bills at the tier rate
+   * instead of silently costing zero.
+   */
+  private ratesForCandidate(candidate: ResolvedAiCandidate | undefined): TokenUsageRatesInterface | undefined {
+    if (!candidate || candidate.source !== "db") return undefined;
+    const { inputCostPer1MTokens, outputCostPer1MTokens, cachedInputCostPer1MTokens } = candidate;
+    if (
+      inputCostPer1MTokens === undefined &&
+      outputCostPer1MTokens === undefined &&
+      cachedInputCostPer1MTokens === undefined
+    )
+      return undefined;
+    // Only the prices the connection actually sets travel: an explicitly
+    // undefined key would still have to be reasoned about downstream.
+    return {
+      ...(inputCostPer1MTokens !== undefined ? { inputCostPer1MTokens } : {}),
+      ...(outputCostPer1MTokens !== undefined ? { outputCostPer1MTokens } : {}),
+      ...(cachedInputCostPer1MTokens !== undefined ? { cachedInputCostPer1MTokens } : {}),
     };
-    const cause = candidate.cause as { code?: unknown; status?: unknown } | undefined;
-
-    const codes = [candidate.code, cause?.code];
-    if (codes.some((code) => typeof code === "string" && TRANSIENT_ERROR_CODES.has(code))) return true;
-
-    const statuses = [candidate.status, candidate.statusCode, candidate.response?.status, cause?.status];
-    if (statuses.some((status) => typeof status === "number" && (status === 429 || (status >= 500 && status <= 599))))
-      return true;
-
-    const own = err instanceof Error ? err.message : String(err);
-    const causeMessage = cause instanceof Error ? cause.message : "";
-    const haystack = `${own} ${causeMessage}`.toLowerCase();
-
-    for (const code of TRANSIENT_ERROR_CODES) if (haystack.includes(code.toLowerCase())) return true;
-
-    return (
-      haystack.includes("socket hang up") ||
-      haystack.includes("fetch failed") ||
-      haystack.includes("network error") ||
-      haystack.includes("econnaborted") ||
-      // 429 / rate limiting — matched as a whole word so a token count never
-      // reads as a status code.
-      /\b429\b/.test(haystack) ||
-      haystack.includes("rate limit") ||
-      haystack.includes("resource exhausted") ||
-      haystack.includes("too many requests") ||
-      // 5xx. Only the codes providers actually emit, again whole-word: a blanket
-      // /5\d\d/ would retry "context length 512 exceeded" forever.
-      /\b(500|502|503|504|529)\b/.test(haystack) ||
-      haystack.includes("internal server error") ||
-      haystack.includes("bad gateway") ||
-      haystack.includes("service unavailable") ||
-      haystack.includes("gateway timeout") ||
-      haystack.includes("overloaded")
-    );
   }
 
   /**
@@ -470,11 +571,20 @@ export class LLMService {
    * ±20% jitter so a fleet of workers knocked out by the same DNS blip does not
    * come back in lockstep and knock it out again.
    */
-  private async waitBeforeTransientRetry(label: string, attempt: number, error: unknown): Promise<void> {
-    const base = TRANSIENT_RETRY_WAITS_MS[attempt];
+  private async waitBeforeTransientRetry(
+    label: string,
+    attempt: number,
+    error: unknown,
+    /** Total attempts this run budgets — only the log text uses it. Defaults to today's 3. */
+    maxAttempts: number = TRANSIENT_RETRY_WAITS_MS.length + 1,
+  ): Promise<void> {
+    // The wait index clamps to the LAST configured backoff: a failover chain can
+    // budget more attempts than there are configured waits, and every extra one
+    // waits the longest wait rather than reading past the end of the array.
+    const base = TRANSIENT_RETRY_WAITS_MS[Math.min(attempt, TRANSIENT_RETRY_WAITS_MS.length - 1)];
     const waitMs = Math.round(base * (0.8 + Math.random() * 0.4));
     this.logger.warn(
-      `[${label}] transient network failure on attempt ${attempt + 1}/${TRANSIENT_RETRY_WAITS_MS.length + 1} — ` +
+      `[${label}] transient network failure on attempt ${attempt + 1}/${maxAttempts} — ` +
         `retrying in ${Math.round(waitMs / 1000)}s: ${error instanceof Error ? error.message : String(error)}`,
     );
     await new Promise<void>((resolve) => {
@@ -486,29 +596,43 @@ export class LLMService {
   /**
    * Runs a provider call under {@link runBounded}, retrying it when — and only
    * when — it failed for a transient network reason
-   * ({@link isTransientNetworkError}). Two extra attempts, with the long
-   * jittered waits {@link TRANSIENT_RETRY_WAITS_MS} explains.
+   * ({@link isTransientNetworkError}). Two extra attempts by default, with the
+   * long jittered waits {@link TRANSIENT_RETRY_WAITS_MS} explains.
    *
    * Owns a FRESH AbortController per attempt: a controller that has already
    * aborted stays aborted forever, so re-using one would make every retry abort
    * before it sent a byte. `work` therefore receives the signal rather than
    * capturing one from the caller.
+   *
+   * `work` also receives the ATTEMPT INDEX, which is what turns this retry into
+   * a failover: `call()` uses it to pick the n-th connection of the chain, so
+   * attempt 2 of a 429 storm talks to a different provider instead of knocking
+   * on the same closed door. Callers that pass no `options` keep today's budget
+   * (three attempts, the two configured waits) exactly.
    */
   private async runWithTransientRetry<T>(
     label: string,
     attemptTimeoutMs: number,
-    work: (signal: AbortSignal) => Promise<T>,
+    work: (signal: AbortSignal, attempt: number) => Promise<T>,
+    options?: {
+      /** Total attempts. Default `TRANSIENT_RETRY_WAITS_MS.length + 1` (= 3, today's). */
+      maxAttempts?: number;
+      /** Invoked once per transient failure, before the backoff wait. */
+      onTransientFailure?: (attempt: number, error: unknown) => void;
+    },
   ): Promise<T> {
+    const maxAttempts = options?.maxAttempts ?? TRANSIENT_RETRY_WAITS_MS.length + 1;
     for (let attempt = 0; ; attempt++) {
       const controller = new AbortController();
       try {
-        return await this.runBounded(label, attemptTimeoutMs, controller, () => work(controller.signal));
+        return await this.runBounded(label, attemptTimeoutMs, controller, () => work(controller.signal, attempt));
       } catch (error) {
-        if (attempt >= TRANSIENT_RETRY_WAITS_MS.length || !this.isTransientNetworkError(error)) throw error;
+        if (attempt >= maxAttempts - 1 || !this.isTransientNetworkError(error)) throw error;
+        options?.onTransientFailure?.(attempt, error);
         // The attempt is over; release whatever socket it may still hold before
         // waiting out the backoff.
         controller.abort();
-        await this.waitBeforeTransientRetry(label, attempt, error);
+        await this.waitBeforeTransientRetry(label, attempt, error, maxAttempts);
       }
     }
   }
@@ -544,6 +668,13 @@ export class LLMService {
       modelWeight?: ModelWeight;
     },
     tokens: { input: number; output: number; cached?: number },
+    /**
+     * Rates of the AI connection that actually served the call — see
+     * {@link ratesForCandidate}. Omitted (the default, and always so for
+     * `.env`-served calls) the recorder prices the call from the config block,
+     * exactly as before.
+     */
+    rates?: TokenUsageRatesInterface,
   ): Promise<void> {
     // Attribution is opt-in: the caller decides which entity this usage is
     // recorded against. With no relationship, there is nothing to attribute to,
@@ -551,14 +682,21 @@ export class LLMService {
     if (!params.relationshipId || !params.relationshipType) return;
     const measured = tokens.input + tokens.output + (tokens.cached ?? 0) > 0;
     try {
-      await (this.tokenUsageRecorder ?? this.tokenUsageService).recordTokenUsage({
+      // Built as a variable rather than inline so `rates` reaches the package
+      // TokenUsageService without widening the published
+      // `TokenUsageRecorderInterface`: an application recorder that predates
+      // per-connection rates simply ignores the extra key and keeps pricing
+      // from its own config, which is the correct degradation.
+      const usage = {
         tokens,
         type: params.tokenUsageType ?? TokenUsageType.TextGeneration,
         relationshipId: params.relationshipId,
         relationshipType: params.relationshipType,
         modelWeight: params.modelWeight,
         ...(measured ? {} : { applyMinimum: false }),
-      });
+        ...(rates ? { rates } : {}),
+      };
+      await (this.tokenUsageRecorder ?? this.tokenUsageService).recordTokenUsage(usage);
     } catch (err) {
       this.logger.warn(`TokenUsage persistence failed — continuing: ${String(err)}`);
     }
@@ -589,9 +727,11 @@ export class LLMService {
       modelWeight?: ModelWeight;
     },
     tokens: { input: number; output: number; cached?: number },
+    /** See {@link persistUsage}: rates of the connection that served the call. */
+    rates?: TokenUsageRatesInterface,
   ): Promise<void> {
     if (tokens.input + tokens.output + (tokens.cached ?? 0) === 0) return;
-    await this.persistUsage(params, tokens);
+    await this.persistUsage(params, tokens, rates);
   }
 
   /**
@@ -917,22 +1057,49 @@ export class LLMService {
     // promise settles even if the provider never answers.
     const attemptTimeoutMs = this.attemptTimeoutMs(params.timeout);
     const label = `${(params.metadata?.nodeName as string) ?? "llm.call"}:${aiConfig.model}`;
+    // The ordered fallback chain for this tier. Empty when no candidate-aware
+    // ModelService is present; a single `.env` candidate when nothing is
+    // configured in the database — in both cases the retry below is byte-for-byte
+    // today's three attempts against one connection.
+    const candidates = this.resolveCandidates(modelWeight);
+    // Failover on 429/5xx walks the chain: at least today's 3 attempts, one per
+    // candidate when the chain is longer, capped at 6 (spec § 2).
+    const maxAttempts = Math.min(6, Math.max(TRANSIENT_RETRY_WAITS_MS.length + 1, candidates.length));
+    // The candidate the SUCCESSFUL attempt used — it, not the first link of the
+    // chain, is what the call is billed at.
+    let servingCandidate: ResolvedAiCandidate | undefined = candidates[0];
     try {
       // The abort signal now comes from the retry wrapper, which owns a fresh
       // controller per attempt — a reused one would abort every retry instantly.
-      const result = await this.runWithTransientRetry(label, attemptTimeoutMs, (signal) =>
-        this._invokeOriginal<T>(
-          params,
-          session,
-          (i, o, c) => {
-            totalInput += i;
-            totalOutput += o;
-            totalCached += c;
-          },
-          (kind) => parseFallbacks.push(kind),
-          (w) => warnings.push(w),
-          { attemptTimeoutMs, signal, label },
-        ),
+      const result = await this.runWithTransientRetry(
+        label,
+        attemptTimeoutMs,
+        (signal, attempt) => {
+          // Attempt n uses candidate n, clamped to the last one: a chain shorter
+          // than the attempt budget keeps retrying its final link, which is the
+          // `.env` block.
+          const candidateIndex = candidates.length > 0 ? Math.min(attempt, candidates.length - 1) : undefined;
+          if (candidateIndex !== undefined) servingCandidate = candidates[candidateIndex];
+          return this._invokeOriginal<T>(
+            params,
+            session,
+            (i, o, c) => {
+              totalInput += i;
+              totalOutput += o;
+              totalCached += c;
+            },
+            (kind) => parseFallbacks.push(kind),
+            (w) => warnings.push(w),
+            { attemptTimeoutMs, signal, label, candidateIndex },
+          );
+        },
+        {
+          maxAttempts,
+          // The candidate that just failed goes into cooldown, so the next
+          // resolution — this call's next attempt included — skips it.
+          onTransientFailure: (attempt) =>
+            this.markCandidateFailure(candidates[Math.min(attempt, candidates.length - 1)]),
+        },
       );
       session.close({
         finalStatus: "success",
@@ -948,6 +1115,7 @@ export class LLMService {
           modelWeight,
         },
         { input: totalInput, output: totalOutput, cached: totalCached },
+        this.ratesForCandidate(servingCandidate),
       );
       const finalResult = { ...result, modelWeight };
       // Write-through on a miss so the next identical cacheable call hits.
@@ -976,6 +1144,9 @@ export class LLMService {
           modelWeight,
         },
         { input: totalInput, output: totalOutput, cached: totalCached },
+        // Billed at the LAST candidate tried — the one whose failure ended the
+        // call and whose provider charged for whatever it served.
+        this.ratesForCandidate(servingCandidate),
       );
       console.error("[LLMService] Error calling LLM:", error);
       // The message text is load-bearing — callers match on "LLM service error:"
@@ -1001,7 +1172,10 @@ export class LLMService {
     // `label` is the SAME string the watchdog prints in `runBounded`, threaded
     // in so a reader can tie an iteration line to the `still pending` lines of
     // the very same call rather than guessing across two naming schemes.
-    bounds?: { attemptTimeoutMs?: number; signal?: AbortSignal; label?: string },
+    // `candidateIndex` selects which link of the tier's fallback chain builds the
+    // model for THIS attempt; absent (direct callers, tests, no candidate-aware
+    // ModelService) it resolves the first healthy candidate exactly as before.
+    bounds?: { attemptTimeoutMs?: number; signal?: AbortSignal; label?: string; candidateIndex?: number },
   ): Promise<T & { tokenUsage: { input: number; output: number; cached?: number } }> {
     const label = bounds?.label ?? "llm.call";
     // Optional: Validate input parameters against schema
@@ -1038,6 +1212,9 @@ export class LLMService {
       disableThinking: params.disableThinking,
       reasoningEffort: params.reasoningEffort,
       timeoutMs: bounds?.attemptTimeoutMs ?? params.timeout,
+      // Spread rather than always passed: without a chain the argument object
+      // stays exactly the one every existing caller already built.
+      ...(bounds?.candidateIndex !== undefined ? { candidateIndex: bounds.candidateIndex } : {}),
     });
 
     // Build config options for the invocation
