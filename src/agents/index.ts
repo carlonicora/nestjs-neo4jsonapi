@@ -37,7 +37,15 @@ export type {
 
 // Graph Creator
 export { GraphCreatorModule } from "./graph.creator/graph.creator.module";
-export { GraphCreatorService } from "./graph.creator/services/graph.creator.service";
+export {
+  GraphCreatorService,
+  // The extraction contract and the post-extraction gate. An app that supplies
+  // its own `prompts.graphCreator` needs the first to know what that prompt must
+  // instruct, and the second to measure what its output actually costs it.
+  graphCreatorOutputSchema,
+  buildGraphCreatorOutputSchema,
+  isValidKeyConcept,
+} from "./graph.creator/services/graph.creator.service";
 export { ChunkAnalysisInterface, ChunkDateInterface } from "./graph.creator/interfaces/chunk.analysis.interface";
 
 // Responder

@@ -186,58 +186,83 @@ For each unique key concept extracted, generate a brief description (1-2 sentenc
  */
 export const defaultGraphCreatorPrompt = prompt;
 
-const outputSchema = z.object({
-  atomicFacts: z
-    .array(
-      z.object({
-        keyConcepts: z
-          .array(z.string())
-          .describe(
-            `Only semantically meaningful entities: proper names (people, organizations), places, significant dates (with full date like "15/2/2023", NOT isolated times like "12.40"). Preserve exact characters. NO common nouns, NO isolated times without dates, NO administrative timestamps. Examples: "andrea ciampaglia", "tribunale di roma", "15/2/2023", "notifica", "presidente" - NOT "verbale", "12.40", "player", "thing"`,
-          ),
-        atomicFact: z
-          .string()
-          .describe(
-            `A single, indivisible fact containing ONLY ONE action/event/relationship. Each fact must have exactly ONE verb. If source text has multiple actions (e.g., "detects, grants and postpones"), split into separate atomic facts. NO compound sentences. Examples: "The president detects the ambiguity of the notification" (one action: detects). NOT: "The president detects the ambiguity and grants an extension" (two actions - must split).`,
-          ),
-      }),
-    )
-    .describe(`List of atomic facts and their key concepts`),
-  keyConceptsRelationships: z
-    .array(
-      z.object({
-        node_1: z.string().describe(`A specific named entity from the extracted key concepts`),
-        node_2: z.string().describe(`Another specific named entity from the extracted key concepts`),
-        edge: z
-          .string()
-          .describe(`Relationship between the two specific entities, node_1 and node_2 in one or two sentences.`),
-      }),
-    )
-    .describe(`List of all the key concepts in the atomic facts and their relationships to one another`),
-  keyConceptDescriptions: z
-    .array(
-      z.object({
-        keyConcept: z.string().describe(`The key concept value (lowercase, exact match from atomicFacts)`),
-        description: z
-          .string()
-          .describe(
-            `Brief 1-2 sentence description of what this entity is in the context of the document. Explains its role, type, or significance.`,
-          ),
-      }),
-    )
-    .describe(`Descriptions for each unique key concept extracted from the atomic facts`),
-  dates: z
-    .array(
-      z.object({
-        date: z.string().describe(`A date referenced in the text (verbatim from the source)`),
-        description: z.string().describe(`Brief description of the significance of this date in the context`),
-      }),
-    )
-    .optional()
-    .describe(
-      `Optional list of significant dates extracted from the text. Only populated when the configured prompt requests date extraction; otherwise omitted.`,
-    ),
-});
+/** The library's historical field descriptions, kept as the default. */
+export const defaultKeyConceptsDescription = `Only semantically meaningful entities: proper names (people, organizations), places, significant dates (with full date like "15/2/2023", NOT isolated times like "12.40"). Preserve exact characters. NO common nouns, NO isolated times without dates, NO administrative timestamps. Examples: "andrea ciampaglia", "tribunale di roma", "15/2/2023", "notifica", "presidente" - NOT "verbale", "12.40", "player", "thing"`;
+
+export const defaultAtomicFactDescription = `A single, indivisible fact containing ONLY ONE action/event/relationship. Each fact must have exactly ONE verb. If source text has multiple actions (e.g., "detects, grants and postpones"), split into separate atomic facts. NO compound sentences. Examples: "The president detects the ambiguity of the notification" (one action: detects). NOT: "The president detects the ambiguity and grants an extension" (two actions - must split).`;
+
+export const defaultKeyConceptDescriptionDescription = `Brief 1-2 sentence description of what this entity is in the context of the document. Explains its role, type, or significance.`;
+
+/**
+ * The extraction contract every Graph Creator prompt must satisfy.
+ *
+ * Three field descriptions are overridable through
+ * `ConfigPromptsInterface.graphCreatorSchemaDescriptions`; everything else is
+ * fixed. Called with no arguments the schema is identical to the historical
+ * hardcoded one, so existing consumers are unaffected.
+ *
+ * The three that open up are the three that say WHAT COUNTS as an entity, a
+ * fact and a description — the only places in the contract where the answer is
+ * domain-specific. An app extracting invented fiction and an app extracting
+ * legal filings disagree completely about them, and a description travels
+ * inline with the field it governs, which is where a model actually reads it.
+ */
+export const buildGraphCreatorOutputSchema = (descriptions?: {
+  keyConcepts?: string;
+  atomicFact?: string;
+  keyConceptDescription?: string;
+}) =>
+  z.object({
+    atomicFacts: z
+      .array(
+        z.object({
+          keyConcepts: z.array(z.string()).describe(descriptions?.keyConcepts ?? defaultKeyConceptsDescription),
+          atomicFact: z.string().describe(descriptions?.atomicFact ?? defaultAtomicFactDescription),
+        }),
+      )
+      .describe(`List of atomic facts and their key concepts`),
+    keyConceptsRelationships: z
+      .array(
+        z.object({
+          node_1: z.string().describe(`A specific named entity from the extracted key concepts`),
+          node_2: z.string().describe(`Another specific named entity from the extracted key concepts`),
+          edge: z
+            .string()
+            .describe(`Relationship between the two specific entities, node_1 and node_2 in one or two sentences.`),
+        }),
+      )
+      .describe(`List of all the key concepts in the atomic facts and their relationships to one another`),
+    keyConceptDescriptions: z
+      .array(
+        z.object({
+          keyConcept: z.string().describe(`The key concept value (lowercase, exact match from atomicFacts)`),
+          description: z
+            .string()
+            .describe(descriptions?.keyConceptDescription ?? defaultKeyConceptDescriptionDescription),
+        }),
+      )
+      .describe(`Descriptions for each unique key concept extracted from the atomic facts`),
+    dates: z
+      .array(
+        z.object({
+          date: z.string().describe(`A date referenced in the text (verbatim from the source)`),
+          description: z.string().describe(`Brief description of the significance of this date in the context`),
+        }),
+      )
+      .optional()
+      .describe(
+        `Optional list of significant dates extracted from the text. Only populated when the configured prompt requests date extraction; otherwise omitted.`,
+      ),
+  });
+
+/**
+ * The contract built with the library's own descriptions.
+ *
+ * Kept as a named export so a consumer evaluating one prompt or model against
+ * another issues the SAME schema the production call issues, rather than a
+ * hand-copied twin that silently drifts.
+ */
+export const graphCreatorOutputSchema = buildGraphCreatorOutputSchema();
 
 const inputSchema = z.object({
   content: z.string().describe("The content to analyse"),
@@ -326,10 +351,16 @@ function isGarbageText(text: string): string | false {
 /**
  * Check if a key concept is valid (not pure punctuation, has minimum length, meaningful characters)
  *
+ * Exported because this is the gate that decides what actually reaches the graph:
+ * a concept rejected here was tokens spent for nothing, so the rejection RATE is
+ * the honest measure of how well a given prompt/model pair is extracting. Any
+ * evaluation that scores raw model output rather than what survives this filter
+ * is scoring something the application never stores.
+ *
  * @param concept - The key concept to validate
  * @returns true if the concept is valid and should be kept
  */
-function isValidKeyConcept(concept: string): boolean {
+export function isValidKeyConcept(concept: string): boolean {
   if (!concept || typeof concept !== "string") {
     return false;
   }
@@ -372,6 +403,7 @@ function isValidKeyConcept(concept: string): boolean {
 @Injectable()
 export class GraphCreatorService {
   private readonly systemPrompt: string;
+  private readonly outputSchema: ReturnType<typeof buildGraphCreatorOutputSchema>;
 
   constructor(
     private readonly llmService: LLMService,
@@ -380,6 +412,9 @@ export class GraphCreatorService {
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.systemPrompt = prompts?.graphCreator ?? prompt;
+    // Built once, from the same config block as the prompt, so the schema an
+    // app sees can never disagree with the doctrine that app supplied.
+    this.outputSchema = buildGraphCreatorOutputSchema(prompts?.graphCreatorSchemaDescriptions);
   }
 
   async generateGraph(params: {
@@ -449,10 +484,10 @@ export class GraphCreatorService {
       contentPreview: sanitizedContent.substring(0, 200),
     });
 
-    const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
+    const llmResponse = await this.llmService.call<z.infer<typeof graphCreatorOutputSchema>>({
       inputSchema: inputSchema,
       inputParams: inputParams,
-      outputSchema: outputSchema,
+      outputSchema: this.outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
       tokenUsageType: TokenUsageType.GraphCreator,
