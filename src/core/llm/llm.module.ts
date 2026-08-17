@@ -8,6 +8,7 @@ import { EmbedderService } from "./services/embedder.service";
 import { EmbedderTokenBucketService } from "./services/embedder-token-bucket.service";
 import { LLMCacheService } from "./services/llm-cache.service";
 import { DocumentAiService } from "./services/document-ai.service";
+import { ImageLLMService } from "./services/image.llm.service";
 import { LLMCallDumper } from "./services/llm-call-dumper.service";
 import { LLMService } from "./services/llm.service";
 import { ModelService } from "./services/model.service";
@@ -20,6 +21,7 @@ const LLM_SERVICES = [
   EmbedderService,
   EmbedderTokenBucketService,
   VisionLLMService,
+  ImageLLMService,
   DocumentAiService,
   AudioLLMService,
   LLMCallDumper,
@@ -36,6 +38,7 @@ const LLM_SERVICES = [
  * - Multi-provider support (OpenAI, OpenRouter, etc.)
  * - Embeddings generation
  * - Vision/image analysis
+ * - Image generation (ImageLLMService, driven by the `ai.image` config block)
  * - Model selection and configuration
  * - Token usage tracking
  * - Optional per-call JSON dumps for debugging (gated by ASSISTANT_DUMP_LLM_CALLS)

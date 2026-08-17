@@ -179,6 +179,19 @@ export interface ConfigAiInterface {
     reasoningEffort?: string;
   };
   /**
+   * Image GENERATION (not analysis — that is `vision`). Drives ImageLLMService:
+   * an OpenRouter-style chat-completions call with modalities ["image","text"].
+   * Driven by IMAGE_* env vars, falling back to AI_* like vision/audio do.
+   */
+  image: {
+    provider: string;
+    apiKey: string;
+    model: string;
+    url: string;
+    inputCostPer1MTokens: number;
+    outputCostPer1MTokens: number;
+  };
+  /**
    * SDK-based audio transcription (OpenAI / Azure OpenAI `audio.transcriptions`).
    * Distinct from the `audio` block above (chat-LLM / OpenAI-style /audio/transcriptions
    * HTTP path used by AudioLLMService): this drives ModelService.getTranscriber() /

@@ -8,6 +8,7 @@ export * from "./services/audio.llm.service";
 export * from "./services/document-ai.service";
 export * from "./services/embedder.service";
 export * from "./services/embedder-token-bucket.service";
+export * from "./services/image.llm.service";
 export * from "./services/llm.service";
 export * from "./services/model.service";
 export * from "./services/rate-limited-embedder";

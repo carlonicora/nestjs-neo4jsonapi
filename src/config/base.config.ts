@@ -325,6 +325,18 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
           process.env.VISION_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
         reasoningEffort: process.env.VISION_REASONING_EFFORT || "",
       },
+      image: {
+        provider: process.env.IMAGE_PROVIDER || process.env.AI_PROVIDER || "",
+        apiKey: process.env.IMAGE_API_KEY || process.env.AI_API_KEY || "",
+        model: process.env.IMAGE_MODEL || "",
+        url: process.env.IMAGE_URL || process.env.AI_URL || "",
+        inputCostPer1MTokens: parseFloat(
+          process.env.IMAGE_INPUT_COST_PER_1M_TOKENS || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
+        ),
+        outputCostPer1MTokens: parseFloat(
+          process.env.IMAGE_OUTPUT_COST_PER_1M_TOKENS || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
+        ),
+      },
       audio: {
         provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",
         apiKey: process.env.AUDIO_API_KEY || process.env.AI_API_KEY || "",
