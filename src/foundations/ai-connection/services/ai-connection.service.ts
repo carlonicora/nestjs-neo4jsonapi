@@ -50,6 +50,8 @@ export class AiConnectionService extends AbstractService<AiConnection, typeof Ai
           return ai?.vision;
         case "audio":
           return ai?.audio;
+        case "image":
+          return ai?.image;
         case "embedder":
           return ai?.embedder;
         case "transcriber":

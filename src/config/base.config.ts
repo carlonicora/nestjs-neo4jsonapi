@@ -325,17 +325,20 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
           process.env.VISION_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
         reasoningEffort: process.env.VISION_REASONING_EFFORT || "",
       },
+      // Deliberately NO AI_* fallbacks (unlike vision/audio): image generation
+      // is its own modality with its own provider, key, endpoint and pricing —
+      // configure it via IMAGE_* or an admin AiConnection of type "image".
       image: {
-        provider: process.env.IMAGE_PROVIDER || process.env.AI_PROVIDER || "",
-        apiKey: process.env.IMAGE_API_KEY || process.env.AI_API_KEY || "",
+        provider: process.env.IMAGE_PROVIDER || "",
+        apiKey: process.env.IMAGE_API_KEY || "",
         model: process.env.IMAGE_MODEL || "",
-        url: process.env.IMAGE_URL || process.env.AI_URL || "",
-        inputCostPer1MTokens: parseFloat(
-          process.env.IMAGE_INPUT_COST_PER_1M_TOKENS || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
-        ),
-        outputCostPer1MTokens: parseFloat(
-          process.env.IMAGE_OUTPUT_COST_PER_1M_TOKENS || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
-        ),
+        url: process.env.IMAGE_URL || "",
+        region: process.env.IMAGE_REGION || "",
+        instance: process.env.IMAGE_INSTANCE || "",
+        apiVersion: process.env.IMAGE_API_VERSION || "",
+        googleCredentialsBase64: process.env.IMAGE_GOOGLE_CREDENTIALS_BASE64 || "",
+        inputCostPer1MTokens: parseFloat(process.env.IMAGE_INPUT_COST_PER_1M_TOKENS || "0"),
+        outputCostPer1MTokens: parseFloat(process.env.IMAGE_OUTPUT_COST_PER_1M_TOKENS || "0"),
       },
       audio: {
         provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",

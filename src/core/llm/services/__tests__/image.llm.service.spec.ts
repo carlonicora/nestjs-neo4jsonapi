@@ -1,22 +1,30 @@
 import { Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { ResolvedAiCandidate } from "../../interfaces/ai-candidate.interface";
 import { ImageLLMService } from "../image.llm.service";
+import { ModelService } from "../model.service";
 import { ContentModerationError } from "../vision.llm.service";
 
 describe("ImageLLMService", () => {
   let service: ImageLLMService;
-  let configService: { get: Mock };
+  let modelService: { getCandidatesForType: Mock; notifyCandidateFailure: Mock };
   let fetchMock: Mock;
 
-  const buildImageConfig = (overrides: Partial<Record<string, unknown>> = {}) => ({
+  /**
+   * One link of the "image" connection chain. Defaults to the env link; a test
+   * that needs a DB-configured connection overrides `source`/`connectionId`.
+   */
+  const makeCandidate = (overrides: Partial<ResolvedAiCandidate> = {}): ResolvedAiCandidate => ({
+    source: "env",
+    connectionId: "env:image",
+    connectionType: "image",
     provider: "openrouter",
     apiKey: "sk-image-test",
     model: "google/gemini-3.1-flash-lite-image",
     url: "https://openrouter.ai/api/v1",
-    inputCostPer1MTokens: 0.3,
-    outputCostPer1MTokens: 2.5,
+    inputCostPer1MTokens: 0.25,
+    outputCostPer1MTokens: 30,
     ...overrides,
   });
 
@@ -43,7 +51,7 @@ describe("ImageLLMService", () => {
     choices: [{ message: { images: [{ image_url: { url } }] } }],
   });
 
-  /** The canonical happy-path provider payload from the plan's case list. */
+  /** The canonical happy-path provider payload. */
   const imageResponse = (url = "data:image/png;base64,AAA") => ({
     ...imageChoices(url),
     usage: { prompt_tokens: 12, completion_tokens: 1290 },
@@ -52,7 +60,10 @@ describe("ImageLLMService", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    configService = { get: vi.fn().mockReturnValue({ image: buildImageConfig() }) };
+    modelService = {
+      getCandidatesForType: vi.fn().mockReturnValue([makeCandidate()]),
+      notifyCandidateFailure: vi.fn(),
+    };
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -60,7 +71,7 @@ describe("ImageLLMService", () => {
     vi.spyOn(Logger.prototype, "error").mockImplementation(() => undefined);
 
     const moduleRef: TestingModule = await Test.createTestingModule({
-      providers: [ImageLLMService, { provide: ConfigService, useValue: configService }],
+      providers: [ImageLLMService, { provide: ModelService, useValue: modelService }],
     }).compile();
 
     service = moduleRef.get(ImageLLMService);
@@ -69,6 +80,55 @@ describe("ImageLLMService", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe("connection resolution", () => {
+    it('resolves the chain for the "image" connection type — never the chat tiers', async () => {
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      await service.generate({ prompt: "p" });
+
+      expect(modelService.getCandidatesForType).toHaveBeenCalledWith("image");
+    });
+
+    it("serves from the FIRST link of the chain (a DB connection outranks env)", async () => {
+      const db = makeCandidate({
+        source: "db",
+        connectionId: "conn-1",
+        apiKey: "sk-db",
+        model: "db/model",
+        url: "https://db.example.com/v1",
+      });
+      modelService.getCandidatesForType.mockReturnValue([db, makeCandidate()]);
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      await service.generate({ prompt: "p" });
+
+      const [endpoint, init] = fetchMock.mock.calls[0];
+      expect(endpoint).toBe("https://db.example.com/v1/chat/completions");
+      expect(init.headers.Authorization).toBe("Bearer sk-db");
+      expect(JSON.parse(init.body).model).toBe("db/model");
+    });
+
+    it("skips unusable links (no model / no url) instead of calling them", async () => {
+      const bare = makeCandidate({ model: "", url: "" });
+      modelService.getCandidatesForType.mockReturnValue([bare, makeCandidate()]);
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      await service.generate({ prompt: "p" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+    });
+
+    it("fails fast, without calling any provider, when no link of the chain is usable", async () => {
+      modelService.getCandidatesForType.mockReturnValue([makeCandidate({ model: "", url: "" })]);
+
+      await expect(service.generate({ prompt: "p" })).rejects.toThrow(
+        /Image generation is not configured.*does not fall back to the AI_\*/s,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("request shape", () => {
@@ -95,6 +155,15 @@ describe("ImageLLMService", () => {
       });
     });
 
+    it("omits the Authorization header when the connection has no api key (custom endpoints)", async () => {
+      modelService.getCandidatesForType.mockReturnValue([makeCandidate({ apiKey: "" })]);
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      await service.generate({ prompt: "p" });
+
+      expect(fetchMock.mock.calls[0][1].headers).toEqual({ "Content-Type": "application/json" });
+    });
+
     it("carries the aspect ratio as image_config.aspect_ratio when one is passed", async () => {
       fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
 
@@ -115,22 +184,13 @@ describe("ImageLLMService", () => {
       expect(body).not.toHaveProperty("image_config");
     });
 
-    it("strips trailing slashes from the configured url before appending the path", async () => {
-      configService.get.mockReturnValue({ image: buildImageConfig({ url: "https://openrouter.ai/api/v1///" }) });
+    it("strips trailing slashes from the connection url before appending the path", async () => {
+      modelService.getCandidatesForType.mockReturnValue([makeCandidate({ url: "https://openrouter.ai/api/v1///" })]);
       fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
 
       await service.generate({ prompt: "p" });
 
       expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
-    });
-
-    it("fails fast, without calling the provider, when the image config is incomplete", async () => {
-      configService.get.mockReturnValue({ image: buildImageConfig({ model: "" }) });
-
-      await expect(service.generate({ prompt: "p" })).rejects.toThrow(
-        "Image generation is not configured: missing IMAGE_MODEL",
-      );
-      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
@@ -140,11 +200,9 @@ describe("ImageLLMService", () => {
 
       const result = await service.generate({ prompt: "p", aspectRatio: "1:1" });
 
-      expect(result).toEqual({
-        imageBase64: "data:image/png;base64,AAA",
-        mimeType: "image/png",
-        tokenUsage: { input: 12, output: 1290 },
-      });
+      expect(result.imageBase64).toBe("data:image/png;base64,AAA");
+      expect(result.mimeType).toBe("image/png");
+      expect(result.tokenUsage).toEqual({ input: 12, output: 1290 });
     });
 
     it("derives the mime type from the data URL rather than assuming png", async () => {
@@ -196,6 +254,27 @@ describe("ImageLLMService", () => {
       // the override with a string.
       expect((await service.generate({ prompt: "p" })).cost).toBeUndefined();
     });
+
+    it("reports the SERVING connection's rates for fallback pricing", async () => {
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      const result = await service.generate({ prompt: "p" });
+
+      expect(result.rates).toEqual({ inputCostPer1MTokens: 0.25, outputCostPer1MTokens: 30 });
+    });
+
+    it("leaves `rates` undefined when the serving connection declares no costs", async () => {
+      modelService.getCandidatesForType.mockReturnValue([
+        makeCandidate({ inputCostPer1MTokens: undefined, outputCostPer1MTokens: undefined }),
+      ]);
+      fetchMock.mockResolvedValueOnce(okResponse(imageResponse()));
+
+      const result = await service.generate({ prompt: "p" });
+
+      // Undefined (not zeros): the caller must be able to tell "no rates
+      // configured on this connection" apart from "rates of zero".
+      expect(result.rates).toBeUndefined();
+    });
   });
 
   describe("failure paths", () => {
@@ -230,17 +309,18 @@ describe("ImageLLMService", () => {
       await expect(service.generate({ prompt: "p" })).rejects.toThrow(ContentModerationError);
     });
 
-    it("rejects on a non-retryable HTTP 500 without exhausting the retry budget", async () => {
+    it("rejects on a non-retryable HTTP 500 without exhausting the retry budget or cooling anything down", async () => {
       fetchMock.mockResolvedValue(errorResponse(500, "upstream exploded"));
 
       await expect(service.generate({ prompt: "p" })).rejects.toThrow("HTTP 500 — upstream exploded");
 
       // A 500 is not a rate limit, so withRetry rethrows on the first attempt.
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(modelService.notifyCandidateFailure).not.toHaveBeenCalled();
     });
   });
 
-  describe("rate-limit retry", () => {
+  describe("rate-limit retry and failover", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
@@ -255,15 +335,37 @@ describe("ImageLLMService", () => {
       // the 120s call timeout.
       await vi.advanceTimersByTimeAsync(2_000);
 
-      await expect(pending).resolves.toEqual({
-        imageBase64: "data:image/png;base64,AAA",
-        mimeType: "image/png",
-        tokenUsage: { input: 12, output: 1290 },
-      });
+      const result = await pending;
+      expect(result.imageBase64).toBe("data:image/png;base64,AAA");
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    it("gives up after MAX_RETRIES consecutive rate limits", async () => {
+    it("cools the rate-limited connection down and fails over to the next link of the chain", async () => {
+      const first = makeCandidate({
+        source: "db",
+        connectionId: "conn-1",
+        apiKey: "sk-db",
+        model: "db/model",
+        url: "https://db.example.com/v1",
+      });
+      const second = makeCandidate();
+      modelService.getCandidatesForType.mockReturnValue([first, second]);
+      fetchMock
+        .mockResolvedValueOnce(errorResponse(429, "rate limited"))
+        .mockResolvedValueOnce(okResponse(imageResponse()));
+
+      const pending = service.generate({ prompt: "p" });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await pending;
+
+      expect(modelService.notifyCandidateFailure).toHaveBeenCalledWith(first);
+      // Attempt 0 hit the DB connection, attempt 1 the env link.
+      expect(fetchMock.mock.calls[0][0]).toBe("https://db.example.com/v1/chat/completions");
+      expect(fetchMock.mock.calls[1][0]).toBe("https://openrouter.ai/api/v1/chat/completions");
+      expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer sk-image-test");
+    });
+
+    it("gives up after MAX_RETRIES consecutive rate limits, cooling the connection down each time", async () => {
       fetchMock.mockResolvedValue(errorResponse(429, "rate limited"));
 
       const pending = service.generate({ prompt: "p" });
@@ -274,6 +376,9 @@ describe("ImageLLMService", () => {
       await settled;
 
       expect(fetchMock).toHaveBeenCalledTimes(5);
+      // Marked on every attempt INCLUDING the last: the cooldown outlives the
+      // call so the next request starts on a healthier connection.
+      expect(modelService.notifyCandidateFailure).toHaveBeenCalledTimes(5);
     });
   });
 });

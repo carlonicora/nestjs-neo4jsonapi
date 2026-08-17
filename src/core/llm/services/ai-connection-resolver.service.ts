@@ -319,6 +319,8 @@ export class AiConnectionResolverService implements OnModuleInit {
         return (ai.vision ?? {}) as EnvBlock;
       case "audio":
         return (ai.audio ?? {}) as EnvBlock;
+      case "image":
+        return (ai.image ?? {}) as EnvBlock;
       case "embedder":
         return (ai.embedder ?? {}) as EnvBlock;
       case "transcriber":

@@ -181,13 +181,27 @@ export interface ConfigAiInterface {
   /**
    * Image GENERATION (not analysis — that is `vision`). Drives ImageLLMService:
    * an OpenRouter-style chat-completions call with modalities ["image","text"].
-   * Driven by IMAGE_* env vars, falling back to AI_* like vision/audio do.
+   * Driven exclusively by IMAGE_* env vars — deliberately NO AI_* fallback:
+   * image generation defines its own provider, key, endpoint and pricing.
+   * This block is the final (env) link of the "image" AiConnection chain, so
+   * admins can also configure it from the database like every other type.
    */
   image: {
     provider: string;
     apiKey: string;
     model: string;
     url: string;
+    /**
+     * Provider-surface parity with the other AI_* blocks (vision/audio), so a
+     * future provider switch is a configuration change, not a config-schema
+     * change. The current engine (OpenAI-compatible chat-completions with
+     * image modalities) does not read them yet.
+     */
+    region?: string;
+    instance?: string;
+    apiVersion?: string;
+    /** Base64-encoded GCP service account JSON for Google Vertex AI */
+    googleCredentialsBase64?: string;
     inputCostPer1MTokens: number;
     outputCostPer1MTokens: number;
   };

@@ -209,6 +209,41 @@ const TRANSCRIBER_PROVIDERS: AiProviderDescriptor[] = [
 ];
 
 /**
+ * Image GENERATION rates: input prompt tokens and output image tokens. No cached
+ * rate — image endpoints have no prompt-cache discount to describe. Note the
+ * output rate prices generated-IMAGE tokens, which providers bill far above text
+ * tokens (used only as fallback when the provider reports no `usage.cost`).
+ */
+const IMAGE_COST_FIELDS: AiProviderFieldDescriptor[] = [
+  { field: "inputCostPer1MTokens", kind: "number" },
+  { field: "outputCostPer1MTokens", kind: "number" },
+];
+
+/**
+ * Image GENERATION providers, mirroring what `ImageLLMService` can call: an
+ * OpenRouter-style chat-completions endpoint with `modalities: ["image","text"]`.
+ * `custom` covers any OpenAI-compatible endpoint that supports image output.
+ */
+const IMAGE_PROVIDERS: AiProviderDescriptor[] = [
+  {
+    provider: "openrouter",
+    fields: [
+      { field: "model", kind: "text", required: true },
+      { field: "apiKey", kind: "secret", required: true },
+      { field: "url", kind: "text", default: "https://openrouter.ai/api/v1" },
+    ],
+  },
+  {
+    provider: "custom",
+    fields: [
+      { field: "model", kind: "text", required: true },
+      { field: "url", kind: "text", required: true },
+      { field: "apiKey", kind: "secret" },
+    ],
+  },
+];
+
+/**
  * Mistral Document AI (OCR). One generic row: the endpoint is fully described by
  * url + apiVersion, so there is nothing provider-specific to branch on.
  */
@@ -244,6 +279,7 @@ export const AI_PROVIDER_REGISTRY: Record<AiConnectionType, AiProviderDescriptor
     { field: "directFormat", kind: "select", options: ["multipart", "json"] },
     { field: "directProvider", kind: "text" },
   ]),
+  image: withExtras(IMAGE_PROVIDERS, IMAGE_COST_FIELDS),
   embedder: withExtras(EMBEDDER_PROVIDERS, EMBEDDER_COST_FIELDS),
   transcriber: TRANSCRIBER_PROVIDERS,
   documentAi: DOCUMENT_AI_PROVIDERS,

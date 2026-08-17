@@ -378,6 +378,23 @@ export class ModelService implements OnModuleInit {
         };
       }
 
+      case "image": {
+        const image = cfg.image;
+        return {
+          ...identity,
+          provider: image?.provider ?? "",
+          apiKey: image?.apiKey ?? "",
+          model: image?.model ?? "",
+          url: image?.url ?? "",
+          region: image?.region,
+          instance: image?.instance,
+          apiVersion: image?.apiVersion,
+          googleCredentialsBase64: image?.googleCredentialsBase64,
+          inputCostPer1MTokens: image?.inputCostPer1MTokens,
+          outputCostPer1MTokens: image?.outputCostPer1MTokens,
+        };
+      }
+
       case "embedder": {
         const embedder = cfg.embedder;
         return {

@@ -4,6 +4,7 @@ export const AI_CONNECTION_TYPES = [
   "aiLarge",
   "vision",
   "audio",
+  "image",
   "embedder",
   "transcriber",
   "documentAi",

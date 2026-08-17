@@ -1,15 +1,17 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageRatesInterface } from "../../../foundations/tokenusage/services/tokenusage.service";
+import { AiConnectionType, ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
+import { ModelService } from "./model.service";
 import { ContentModerationError } from "./vision.llm.service";
+
+const IMAGE_CONNECTION_TYPE: AiConnectionType = "image";
 
 /**
  * Result of one image GENERATION call.
  *
  * `imageBase64` is the FULL data URL (`data:image/png;base64,…`) exactly as the
- * provider returned it, so a caller can drop it straight into an `<img src>` or
- * decode it for upload without having to re-assemble the prefix.
+ * provider returned it, so a caller can render it directly or decode it for
+ * upload without having to re-assemble the prefix.
  */
 export interface ImageGenerationResult {
   /** Full data URL, e.g. "data:image/png;base64,…" */
@@ -25,6 +27,14 @@ export interface ImageGenerationResult {
    * Undefined when the provider does not report a cost.
    */
   cost?: number;
+  /**
+   * Per-1M-token rates of the CONNECTION THAT SERVED THE CALL — a DB-configured
+   * AiConnection of type "image", or the IMAGE_* env block as the final link of
+   * the chain. Fallback pricing only (used when `cost` is absent). Undefined
+   * when the serving connection declares no rates, so the caller can tell
+   * "no rates configured" apart from "rates of zero".
+   */
+  rates?: TokenUsageRatesInterface;
 }
 
 /** Parameters for an image generation call. */
@@ -62,9 +72,13 @@ interface ImageChatCompletionResponse {
  * `choices[0].message.images[0].image_url.url`. This mirrors the direct HTTP
  * path `AudioLLMService` already uses for transcription.
  *
- * There is no candidate/failover chain here (unlike vision): image generation
- * is driven by a single dedicated `ai.image` config block, so a rate-limited
- * attempt is simply retried with exponential backoff against the same endpoint.
+ * Configuration resolves through the "image" AI-connection chain
+ * (`ModelService.getCandidatesForType`): database-configured `AiConnection`
+ * nodes first (per-company, then global, administered from the AI-connections
+ * page), with the IMAGE_* env block as the final link. There is deliberately
+ * NO fallback onto the AI_* chat configuration — image generation defines its
+ * own provider, key, endpoint and pricing. A rate-limited attempt cools the
+ * failing connection down and retries against the next link of the chain.
  */
 @Injectable()
 export class ImageLLMService {
@@ -74,7 +88,7 @@ export class ImageLLMService {
   private readonly INITIAL_DELAY_MS = 1000;
   private readonly CALL_TIMEOUT_MS = 120000; // 120 second timeout for image generation calls
 
-  constructor(private readonly config: ConfigService<BaseConfigInterface>) {}
+  constructor(private readonly modelService: ModelService) {}
 
   /**
    * Checks if an error is a rate limit (429) error
@@ -112,17 +126,25 @@ export class ImageLLMService {
   /**
    * Execute a function with exponential backoff retry on rate limit errors.
    *
-   * No candidate-failover bookkeeping (see the class doc): image generation has
-   * a single configured endpoint, so every attempt targets the same connection.
+   * `fn` receives the ATTEMPT INDEX so each retry can address the next link of
+   * the image connection chain (mirrors `VisionLLMService.withRetry`); a chain
+   * of one simply re-targets the same connection. `onRateLimited` fires before
+   * every backoff — including the final attempt — so the failing connection's
+   * cooldown outlives this call.
    */
-  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  private async withRetry<T>(
+    fn: (attempt: number) => Promise<T>,
+    onRateLimited: (attempt: number) => void,
+  ): Promise<T> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
       try {
-        return await fn();
+        return await fn(attempt);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (this.isRateLimitError(error)) onRateLimited(attempt);
 
         if (!this.isRateLimitError(error) || attempt === this.MAX_RETRIES - 1) {
           throw lastError;
@@ -140,16 +162,55 @@ export class ImageLLMService {
     throw lastError ?? new Error("Max retries exceeded");
   }
 
-  /**
-   * Per-1M-token rates for the image connection, so the caller can price the
-   * generation through the standard TokenUsage path.
-   */
-  getRates(): TokenUsageRatesInterface {
-    const image = this.config.get<ConfigAiInterface>("ai").image;
+  /** The serving connection's rates, or undefined when it declares none. */
+  private ratesOf(candidate: ResolvedAiCandidate): TokenUsageRatesInterface | undefined {
+    if (candidate.inputCostPer1MTokens === undefined && candidate.outputCostPer1MTokens === undefined) {
+      return undefined;
+    }
     return {
-      inputCostPer1MTokens: image.inputCostPer1MTokens,
-      outputCostPer1MTokens: image.outputCostPer1MTokens,
+      inputCostPer1MTokens: candidate.inputCostPer1MTokens,
+      outputCostPer1MTokens: candidate.outputCostPer1MTokens,
     };
+  }
+
+  /** One provider round-trip against one connection of the chain. */
+  private async callCandidate(
+    candidate: ResolvedAiCandidate,
+    params: ImageGenerationParams,
+  ): Promise<ImageChatCompletionResponse> {
+    const endpoint = `${candidate.url.replace(/\/+$/, "")}/chat/completions`;
+
+    // OpenRouter-documented image-output body: `modalities` opts the response
+    // into image parts, `image_config` carries provider-specific generation
+    // options (aspect_ratio among them) and is omitted entirely when unset.
+    const body = {
+      model: candidate.model,
+      modalities: ["image", "text"],
+      messages: [{ role: "user", content: params.prompt }],
+      ...(params.aspectRatio ? { image_config: { aspect_ratio: params.aspectRatio } } : {}),
+    };
+
+    const response = await this.withTimeout(
+      fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // A `custom` connection may point at an unauthenticated endpoint.
+          ...(candidate.apiKey ? { Authorization: `Bearer ${candidate.apiKey}` } : {}),
+        },
+        body: JSON.stringify(body),
+      }),
+      this.CALL_TIMEOUT_MS,
+      "Image LLM call",
+    );
+
+    if (!response.ok) {
+      const bodyText = (await response.text().catch(() => "")).slice(0, 500);
+      this.logger.error(`image-generation: UPSTREAM ERROR — status=${response.status} body=${bodyText}`);
+      throw new Error(`HTTP ${response.status} — ${bodyText}`);
+    }
+
+    return (await response.json().catch(() => ({}))) as ImageChatCompletionResponse;
   }
 
   /**
@@ -159,56 +220,44 @@ export class ImageLLMService {
    * @param params.aspectRatio - Optional aspect ratio (e.g. "16:9"), sent as
    *   `image_config.aspect_ratio`. Omitted from the body when unset so the
    *   provider default applies.
-   * @returns The image as a data URL, its MIME type, and token usage.
-   * @throws {Error} If the image config is incomplete, the endpoint fails, or
-   *   no image comes back.
+   * @returns The image as a data URL, its MIME type, token usage, the
+   *   provider-reported cost when available, and the serving connection's rates.
+   * @throws {Error} If no image connection is configured, the endpoint fails,
+   *   or no image comes back.
    * @throws {ContentModerationError} If the provider refused on safety grounds.
    */
   async generate(params: ImageGenerationParams): Promise<ImageGenerationResult> {
-    const image = this.config.get<ConfigAiInterface>("ai").image;
+    // DB-configured connections first (company chain, then global), the
+    // IMAGE_* env block last. A candidate without a model or url cannot serve
+    // an image call and is skipped — with an empty IMAGE_* block that is
+    // exactly the bare env placeholder the resolver always appends.
+    const candidates = this.modelService
+      .getCandidatesForType(IMAGE_CONNECTION_TYPE)
+      .filter((candidate) => candidate.model && candidate.url);
 
-    const missing: string[] = [];
-    if (!image?.model) missing.push("IMAGE_MODEL");
-    if (!image?.apiKey) missing.push("IMAGE_API_KEY (or AI_API_KEY)");
-    if (!image?.url) missing.push("IMAGE_URL (or AI_URL)");
-    if (missing.length > 0) {
-      throw new Error(`Image generation is not configured: missing ${missing.join(", ")}`);
+    if (candidates.length === 0) {
+      throw new Error(
+        'Image generation is not configured: define an AI connection of type "image" in Administration, ' +
+          "or set IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_URL and IMAGE_API_KEY. " +
+          "Image generation deliberately does not fall back to the AI_* chat configuration.",
+      );
     }
 
-    const endpoint = `${image.url.replace(/\/+$/, "")}/chat/completions`;
+    // Out-of-range attempts clamp to the last link, mirroring
+    // ModelService.pickCandidate: a retry loop that outruns the chain keeps
+    // addressing the final connection instead of crashing.
+    const candidateAt = (attempt: number) => candidates[Math.min(attempt, candidates.length - 1)];
 
-    // OpenRouter-documented image-output body: `modalities` opts the response
-    // into image parts, `image_config` carries provider-specific generation
-    // options (aspect_ratio among them) and is omitted entirely when unset.
-    const body = {
-      model: image.model,
-      modalities: ["image", "text"],
-      messages: [{ role: "user", content: params.prompt }],
-      ...(params.aspectRatio ? { image_config: { aspect_ratio: params.aspectRatio } } : {}),
-    };
-
-    const json = await this.withRetry(async () => {
-      const response = await this.withTimeout(
-        fetch(endpoint, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${image.apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        }),
-        this.CALL_TIMEOUT_MS,
-        "Image LLM call",
-      );
-
-      if (!response.ok) {
-        const bodyText = (await response.text().catch(() => "")).slice(0, 500);
-        this.logger.error(`image-generation: UPSTREAM ERROR — status=${response.status} body=${bodyText}`);
-        throw new Error(`HTTP ${response.status} — ${bodyText}`);
-      }
-
-      return (await response.json().catch(() => ({}))) as ImageChatCompletionResponse;
-    });
+    let serving: ResolvedAiCandidate = candidateAt(0);
+    const json = await this.withRetry(
+      (attempt) => {
+        serving = candidateAt(attempt);
+        return this.callCandidate(serving, params);
+      },
+      // Cooldown the rate-limited connection so the NEXT attempt (and the next
+      // request) resolves past it. Best-effort by contract: notify never throws.
+      (attempt) => this.modelService.notifyCandidateFailure(candidateAt(attempt)),
+    );
 
     const url = json.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
@@ -249,6 +298,7 @@ export class ImageLLMService {
       // Guarded to a finite number so a malformed value degrades to token-based
       // pricing instead of poisoning the caller's cost override.
       cost: typeof json.usage?.cost === "number" && Number.isFinite(json.usage.cost) ? json.usage.cost : undefined,
+      rates: this.ratesOf(serving),
     };
   }
 }
