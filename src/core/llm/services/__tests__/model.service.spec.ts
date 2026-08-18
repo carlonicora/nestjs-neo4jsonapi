@@ -29,7 +29,13 @@ vi.mock("@langchain/google-vertexai", () => ({
   },
 }));
 
-import { ModelService, validateAiUrl, writeGcpCredentials } from "../model.service";
+import {
+  ModelService,
+  supportsGeminiThinkingLevel,
+  toGeminiThinkingLevel,
+  validateAiUrl,
+  writeGcpCredentials,
+} from "../model.service";
 import { ModelWeight } from "../../enums/model.weight";
 
 function makeService(aiConfig: any): ModelService {
@@ -332,6 +338,67 @@ describe("ModelService vertex credentials env contract", () => {
     const llm = vertexSvc("europe-west4").getLLM() as any;
     expect(llm.opts.location).toBe("europe-west4");
     expect(llm.opts.endpoint).toBeUndefined();
+  });
+});
+
+/**
+ * Reasoning effort has to reach Vertex as `thinkingLevel`.
+ *
+ * `llmConfig.modelKwargs` — where `reasoning_effort` is resolved for the
+ * OpenAI-compatible clients — never reaches the vertex branch, which returns its
+ * own client. A configured `AI_REASONING_EFFORT` was therefore dropped in
+ * silence: a cost-test run pinned at `low` was really measured at the model's
+ * default, and nothing in any log said so.
+ */
+describe("ModelService vertex thinking level", () => {
+  const vertexWith = (over: any) =>
+    makeService({ ai: tier({ provider: "vertex", region: "eu", ...over }), aiLite: tier(), aiLarge: tier() });
+
+  it("sends thinkingLevel for a Gemini 3 model with a configured effort", () => {
+    const llm = vertexWith({ model: "gemini-3.1-flash-lite", reasoningEffort: "low" }).getLLM() as any;
+    expect(llm.opts.thinkingLevel).toBe("LOW");
+  });
+
+  it("maps none to MINIMAL — Gemini 3 has no zero thinking level", () => {
+    const llm = vertexWith({ model: "gemini-3.1-flash-lite", reasoningEffort: "none" }).getLLM() as any;
+    expect(llm.opts.thinkingLevel).toBe("MINIMAL");
+  });
+
+  it("NEVER sends thinkingLevel to a pre-Gemini-3 model, even with an effort configured", () => {
+    // Sending it to gemini-2.5-* is a hard ERROR, not a no-op. This is the guard
+    // that keeps the existing 2.5 tier working when an effort is set.
+    const llm = vertexWith({ model: "gemini-2.5-flash-lite", reasoningEffort: "low" }).getLLM() as any;
+    expect(llm.opts.thinkingLevel).toBeUndefined();
+  });
+
+  it("sends nothing when no effort is configured, so the request is byte-identical to before", () => {
+    const llm = vertexWith({ model: "gemini-3.1-flash-lite" }).getLLM() as any;
+    expect(llm.opts.thinkingLevel).toBeUndefined();
+  });
+
+  it("never passes reasoningEffort to the Vertex client — that maps to a token BUDGET, which Gemini 3 rejects alongside a level", () => {
+    const llm = vertexWith({ model: "gemini-3.1-flash-lite", reasoningEffort: "high" }).getLLM() as any;
+    expect(llm.opts.thinkingLevel).toBe("HIGH");
+    expect(llm.opts.reasoningEffort).toBeUndefined();
+    expect(llm.opts.maxReasoningTokens).toBeUndefined();
+    expect(llm.opts.thinkingBudget).toBeUndefined();
+  });
+
+  it("detects the Gemini major version rather than the literal string gemini-3", () => {
+    for (const model of ["gemini-3-pro", "gemini-3.1-flash-lite", "gemini-4-flash", "google/gemini-3.1-flash-lite"]) {
+      expect(supportsGeminiThinkingLevel(model)).toBe(true);
+    }
+    for (const model of ["gemini-2.5-flash-lite", "gemini-1.5-pro", "gpt-5-nano", "", undefined]) {
+      expect(supportsGeminiThinkingLevel(model)).toBe(false);
+    }
+  });
+
+  it("maps every effort onto Gemini's vocabulary", () => {
+    expect(toGeminiThinkingLevel("none")).toBe("MINIMAL");
+    expect(toGeminiThinkingLevel("minimal")).toBe("MINIMAL");
+    expect(toGeminiThinkingLevel("low")).toBe("LOW");
+    expect(toGeminiThinkingLevel("medium")).toBe("MEDIUM");
+    expect(toGeminiThinkingLevel("high")).toBe("HIGH");
   });
 });
 

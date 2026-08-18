@@ -129,6 +129,54 @@ export function normaliseConfiguredReasoningEffort(value: unknown): ReasoningEff
   return undefined;
 }
 
+/** Gemini's own thinking-level vocabulary (`GoogleThinkingLevel` in @langchain/google-common). */
+export type GeminiThinkingLevel = "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+
+/**
+ * Is `model` a Gemini 3-or-later model, i.e. one that understands `thinkingLevel`?
+ *
+ * Gemini introduced `thinking_level` with the 3.x family, and sending it to an
+ * EARLIER model is a hard error rather than a no-op — so this gate is what keeps
+ * a `gemini-2.5-*` tier working unchanged when a reasoning effort is configured.
+ *
+ * Matched on the major version rather than the literal string "gemini-3" so 3.1,
+ * 3.5 and a future 4.x are all covered without another edit. The name is searched
+ * anywhere in the string because providers qualify it differently
+ * ("gemini-3.1-flash-lite", "google/gemini-3.1-flash-lite").
+ */
+export function supportsGeminiThinkingLevel(model?: string): boolean {
+  const match = /gemini-(\d+)/i.exec(model ?? "");
+  return match ? Number(match[1]) >= 3 : false;
+}
+
+/**
+ * Maps this project's reasoning-effort vocabulary onto Gemini's thinking levels.
+ *
+ * `none` becomes `MINIMAL` because Gemini 3 has no zero: MINIMAL is documented as
+ * "as close as possible to a zero budget for thinking, but still requires thought
+ * signatures". Reporting the nearest honest equivalent beats refusing to send
+ * anything and silently inheriting the model default.
+ *
+ * NOTE this deliberately does NOT go through `reasoningEffort` on the Vertex
+ * client: @langchain/google-common maps THAT to `maxReasoningTokens`, a token
+ * BUDGET, and Gemini 3 rejects a request carrying both a thinking budget and a
+ * thinking level. The level is the parameter we want; the budget is a different
+ * knob wearing a similar name.
+ */
+export function toGeminiThinkingLevel(effort: ReasoningEffort): GeminiThinkingLevel {
+  switch (effort) {
+    case "none":
+    case "minimal":
+      return "MINIMAL";
+    case "low":
+      return "LOW";
+    case "medium":
+      return "MEDIUM";
+    case "high":
+      return "HIGH";
+  }
+}
+
 interface LLMParameters {
   apiKey: string;
   temperature: number;
@@ -823,6 +871,24 @@ export class ModelService implements OnModuleInit {
           const credsPath = writeGcpCredentials(credentialsJson, opts.credentialFileTag);
           process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
         }
+        // Reasoning effort on Vertex.
+        //
+        // `llmConfig.modelKwargs` (where `reasoning_effort` was resolved above)
+        // reaches only the OpenAI-compatible clients — this branch returns its own
+        // client and never sees it, so a configured `AI_REASONING_EFFORT` used to
+        // be dropped here without a word. That is the same defect the comment on
+        // `modelKwargs` records for the azure branch, and it is why a cost-test run
+        // pinned at `low` was actually measured at the model's default.
+        //
+        // Two conditions, both required, so this is strictly ADDITIVE — a tier that
+        // configures no effort, or runs a pre-3 Gemini, builds exactly the request
+        // it built before:
+        //   1. an effort is explicitly configured or passed, and
+        //   2. the model understands `thinkingLevel` (Gemini 3+). Sending it to an
+        //      earlier model is an ERROR, not a no-op, so `gemini-2.5-*` tiers must
+        //      never receive it.
+        const thinkingLevel =
+          effort && supportsGeminiThinkingLevel(cfg.model) ? toGeminiThinkingLevel(effort) : undefined;
         return new ChatVertexAI({
           model: cfg.model,
           temperature,
@@ -832,6 +898,7 @@ export class ModelService implements OnModuleInit {
           // first and third correctly — see vertexLocationParams.
           ...vertexLocationParams(cfg.region),
           ...(maxOutputTokens ? { maxOutputTokens } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
         });
       }
 
