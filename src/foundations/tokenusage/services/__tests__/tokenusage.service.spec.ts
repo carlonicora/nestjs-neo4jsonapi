@@ -938,4 +938,88 @@ describe("TokenUsageService", () => {
       });
     });
   });
+
+  /**
+   * Every record names the model that produced it.
+   *
+   * Without this a usage row is unauditable — nothing in the database says what
+   * generated the cost — and comparing two models is impossible, because the
+   * ledger cannot separate the tier under test from the `_LARGE` / vision /
+   * embedder spend running alongside it unchanged.
+   *
+   * The model is resolved from the SAME config tier that priced the call, so
+   * these tests assert the model and the cost together: a record billed at the
+   * vision rate but labelled with the base model would be worse than an
+   * unlabelled one, because it reads as evidence.
+   */
+  describe("recordTokenUsage (model attribution)", () => {
+    const record = async (params: Record<string, unknown>) => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+      await service.recordTokenUsage({
+        tokens: { input: 1_000_000, output: 0 },
+        type: TokenUsageType.TextGeneration,
+        relationshipId: "entity-id",
+        relationshipType: "Document",
+        ...params,
+      } as Parameters<TokenUsageService["recordTokenUsage"]>[0]);
+      return tokenUsageRepository.create.mock.calls[0][0];
+    };
+
+    it("records the BASE tier by default, at the base rate", async () => {
+      const created = await record({});
+      expect(created.model).toBe("gpt-4");
+      expect(created.provider).toBe("openai");
+      expect(created.cost).toBeCloseTo(10, 12); // 1M input tokens @ 10 per 1M
+    });
+
+    it("records the LARGE tier when the call was weighted large", async () => {
+      const created = await record({ modelWeight: ModelWeight.Large });
+      expect(created.model).toBe("gpt-4-turbo");
+      // Priced at the large rate (50/1M), proving model and cost came from one tier.
+      expect(created.cost).toBeCloseTo(50, 12);
+    });
+
+    it("records the LITE tier when the call was weighted lite", async () => {
+      const created = await record({ modelWeight: ModelWeight.Lite });
+      expect(created.model).toBe("gpt-4o-mini");
+      expect(created.cost).toBeCloseTo(1, 12);
+    });
+
+    it("records the VISION tier when the call was priced with vision costs", async () => {
+      const created = await record({ useVisionCosts: true });
+      expect(created.model).toBe("gpt-4-vision");
+      expect(created.cost).toBeCloseTo(20, 12);
+    });
+
+    it("lets an explicit model/provider win — the embedder and audio paths price with costOverride, so their tier cannot be inferred", async () => {
+      const created = await record({
+        costOverride: 0.5,
+        model: "text-embedding-3-large",
+        provider: "azure",
+      });
+      expect(created.model).toBe("text-embedding-3-large");
+      expect(created.provider).toBe("azure");
+      // Without the explicit value this record would have claimed the base model
+      // "gpt-4" for a call the base model never made.
+      expect(created.cost).toBe(0.5);
+    });
+
+    /**
+     * A DB-backed AI connection supplies its own `rates`, and its model is NOT
+     * the config tier's. `configForCall` resolves the CONFIG BLOCK only, so such
+     * a caller must name its model explicitly — otherwise the record is priced by
+     * the connection but labelled with the tier, which is precisely the
+     * cost-says-one-thing/model-says-another failure this field exists to prevent.
+     */
+    it("labels a connection-served call with the connection's model, not the tier's", async () => {
+      const created = await record({
+        rates: { inputCostPer1MTokens: 1, outputCostPer1MTokens: 2 },
+        model: "claude-sonnet-5",
+        provider: "anthropic",
+      });
+      expect(created.model).toBe("claude-sonnet-5");
+      expect(created.provider).toBe("anthropic");
+      expect(created.cost).toBeCloseTo(1, 12); // 1M input @ the CONNECTION's rate
+    });
+  });
 });

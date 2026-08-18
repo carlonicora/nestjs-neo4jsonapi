@@ -276,6 +276,10 @@ export class AudioLLMService {
         relationshipType: params.relationshipType,
         costOverride: cost,
         applyMinimum: false,
+        // Priced with costOverride at the AUDIO rate (or per minute), so the
+        // recorder cannot infer the tier — name it explicitly.
+        model: audio?.model,
+        provider: audio?.provider,
       });
     } catch (err) {
       this.logger.warn(`Transcription usage persistence failed — continuing: ${String(err)}`);

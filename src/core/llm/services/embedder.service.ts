@@ -293,6 +293,11 @@ export class EmbedderService {
         relationshipType: attribution.relationshipType,
         applyMinimum: false,
         costOverride: (tokens * rate) / 1_000_000,
+        // Priced with costOverride at the EMBEDDER rate, so the recorder cannot
+        // infer the tier — name it, or the record would credit the base LLM with
+        // a call it never made.
+        model: embedderConfig?.model,
+        provider: embedderConfig?.provider,
       });
     } catch (err) {
       this.logger.warn(`Embedding usage persistence failed — continuing: ${String(err)}`);

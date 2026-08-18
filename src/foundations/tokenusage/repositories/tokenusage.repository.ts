@@ -105,6 +105,8 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
     cachedInputTokens?: number;
     cost?: number;
     credits?: number;
+    model?: string;
+    provider?: string;
     relationshipId: string;
     relationshipType: string;
   }): Promise<void> {
@@ -120,6 +122,13 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
       relationshipId: params.relationshipId,
       cost: params.cost ?? 0,
       credits: params.credits ?? 0,
+      // null rather than "": Neo4j omits a null property from the created node,
+      // so a record whose model could not be resolved has NO `model` key at all.
+      // That keeps "unknown" distinguishable from "recorded as empty" — the same
+      // distinction the cost-test comparison relies on to decide whether it can
+      // isolate base-tier spend or must fall back to a whole-run delta.
+      model: params.model ?? null,
+      provider: params.provider ?? null,
     };
 
     // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
@@ -132,6 +141,8 @@ export class TokenUsageRepository extends AbstractRepository<TokenUsage, typeof 
         cachedInputTokens: $cachedInputTokens,
         cost: $cost,
         credits: $credits,
+        model: $model,
+        provider: $provider,
         createdAt: datetime(),
         updatedAt: datetime()
       })

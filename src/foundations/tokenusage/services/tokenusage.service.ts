@@ -100,6 +100,23 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
    * rather than the config's cached rate: mixing one connection's input price
    * with another's cache discount would price cached tokens above uncached ones.
    */
+  /**
+   * The CONFIG tier whose rates price a call — and, when no DB-backed connection
+   * supplied its own, the tier that served it.
+   *
+   * Extracted so `computeCost` and the recorded `model`/`provider` read the same
+   * tier: a record billed at the vision rate but labelled with the base model
+   * would be worse than an unlabelled one, because it reads as evidence.
+   *
+   * NOTE: this resolves the CONFIG BLOCK only. When a DB-backed AI connection
+   * serves the call it also carries its own `rates`, and its model is NOT this
+   * tier's model — such callers must pass `model`/`provider` explicitly, exactly
+   * as the `costOverride` callers do.
+   */
+  protected configForCall(params: { useVisionCosts?: boolean; modelWeight?: ModelWeight }) {
+    return params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
+  }
+
   computeCost(params: {
     tokens: TokenUsageInterface;
     useVisionCosts?: boolean;
@@ -107,7 +124,7 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     /** Rates of the connection that served the call; overrides the config block. */
     rates?: TokenUsageRatesInterface;
   }): number {
-    const costConfig = params.useVisionCosts ? this.aiConfig.vision : this.configForWeight(params.modelWeight);
+    const costConfig = this.configForCall(params);
     const inputRate = params.rates?.inputCostPer1MTokens ?? costConfig.inputCostPer1MTokens ?? 0;
     const outputRate = params.rates?.outputCostPer1MTokens ?? costConfig.outputCostPer1MTokens ?? 0;
     // vision/audio configs have no cached rate → falls back to the full input rate (no discount).
@@ -144,6 +161,17 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     costOverride?: number;
     /** Rates of the AI connection that served the call; forwarded to `computeCost`. */
     rates?: TokenUsageRatesInterface;
+    /**
+     * The model that served the call. MUST be supplied by callers whose model is
+     * not the config tier's: those pricing with `costOverride` (embeddings,
+     * transcription), and those served by a DB-backed AI connection (which also
+     * pass `rates`). Without it the record would name the config-block model for
+     * a call that model never made. Everyone else omits it and gets the tier that
+     * priced the call.
+     */
+    model?: string;
+    /** Provider that served the call. Same rule as `model`. */
+    provider?: string;
   }): Promise<void> {
     const cost =
       params.costOverride ??
@@ -153,6 +181,12 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
         modelWeight: params.modelWeight,
         rates: params.rates,
       });
+
+    // Which model to record. An explicit value always wins; otherwise it comes
+    // from the tier that priced the call, so the two can never drift apart.
+    const tier = this.configForCall({ useVisionCosts: params.useVisionCosts, modelWeight: params.modelWeight });
+    const model = params.model ?? tier?.model ?? undefined;
+    const provider = params.provider ?? tier?.provider ?? undefined;
 
     const creditsConfig = this.configService.get<ConfigCreditsInterface>("credits");
     let credits = 0;
@@ -169,6 +203,8 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
       cachedInputTokens: params.tokens.cached ?? 0,
       cost: cost,
       credits: credits,
+      model: model,
+      provider: provider,
       relationshipId: params.relationshipId,
       relationshipType: params.relationshipType,
     });

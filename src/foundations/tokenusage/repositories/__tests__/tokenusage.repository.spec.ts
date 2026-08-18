@@ -38,18 +38,24 @@ const createMockClsService = () => ({
 });
 
 describe("TokenUsageDescriptor", () => {
-  it("serialises exactly the six token-usage attributes", () => {
+  it("serialises exactly the eight token-usage attributes", () => {
     const serialised = Object.entries(TokenUsageDescriptor.fields)
       .filter(([, def]: [string, any]) => !def.excludeFromJsonApi && !def.meta)
       .map(([name]) => name)
       .sort();
 
+    // `model` and `provider` record WHICH model served the call. They are on the
+    // JSON:API surface deliberately: a usage record that cannot say what produced
+    // it is unauditable, and comparing the cost of two models is impossible
+    // without it (every record would have to be attributed by timestamp guesswork).
     expect(serialised).toEqual([
       "cachedInputTokens",
       "cost",
       "credits",
       "inputTokens",
+      "model",
       "outputTokens",
+      "provider",
       "tokenUsageType",
     ]);
   });

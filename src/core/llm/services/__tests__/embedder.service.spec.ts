@@ -84,6 +84,7 @@ function makeService(params: {
   const modelService = { getEmbedder: () => embedder } as any;
   const aiConfig = {
     embedder: {
+      provider: "azure",
       model: params.model ?? "text-embedding-3-large",
       inputCostPer1MTokens: params.inputCostPer1MTokens,
       rateLimit: params.charsPerToken === undefined ? undefined : { charsPerToken: params.charsPerToken },
@@ -146,6 +147,12 @@ describe("EmbedderService usage recording", () => {
       relationshipType: "Document",
       applyMinimum: false,
       costOverride: (FOX_TIKTOKEN_TOKENS * rate) / 1_000_000,
+      // Because the cost is overridden with the EMBEDDER rate, the recorder
+      // cannot infer the tier from useVisionCosts/modelWeight — it would fall
+      // back to the base LLM and attribute an embedding call to a model that
+      // never ran. The embedder must name itself.
+      model: "text-embedding-3-large",
+      provider: "azure",
     });
   });
 

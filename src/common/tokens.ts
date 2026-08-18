@@ -83,6 +83,15 @@ export interface TokenUsageRecorderInterface {
     applyMinimum?: boolean;
     /** Pre-computed cost in euros; when provided `computeCost` is skipped (embeddings: estimated tokens × the embedder rate). */
     costOverride?: number;
+    /**
+     * The model that served the call. Callers pricing with `costOverride`
+     * (embeddings, transcription) MUST supply it — their tier is not derivable
+     * from `useVisionCosts`/`modelWeight`. Everyone else omits it and the
+     * recorder resolves the tier that priced the call.
+     */
+    model?: string;
+    /** Provider that served the call. Same rule as `model`. */
+    provider?: string;
   }): Promise<void>;
 }
 

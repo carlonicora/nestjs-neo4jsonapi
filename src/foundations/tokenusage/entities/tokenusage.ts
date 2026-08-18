@@ -18,6 +18,8 @@ export type TokenUsage = Entity & {
   cost?: number;
   credits?: number;
   tokenUsageType: string;
+  model?: string;
+  provider?: string;
 
   company: Company;
 };
@@ -86,6 +88,16 @@ export const TokenUsageDescriptor = defineEntity<TokenUsage>()({
       required: true,
       description:
         'Which internal AI operation triggered this usage (e.g. "summariser", "graph_creator", "ethicist"). See the application\'s TokenUsageType enum for the full list of values.',
+    },
+    model: {
+      type: "string",
+      description:
+        'The model that actually served this call (e.g. "gemini-2.5-flash-lite", "gpt-5-nano"). Resolved from the same tier that priced the call, so it can never disagree with `cost`. Absent on records written before this field existed.',
+    },
+    provider: {
+      type: "string",
+      description:
+        'The provider that served this call (e.g. "vertex", "azure"). Recorded alongside `model` because a model name is only unique within a provider.',
     },
   },
 
