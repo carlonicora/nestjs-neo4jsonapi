@@ -1,6 +1,19 @@
-import { Body, Controller, Logger, Param, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Inject,
+  Logger,
+  NotFoundException,
+  Optional,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AssistantActionDescriptor } from "../../../foundations/assistant-action/entities/assistant-action";
 import { AssistantMessageDescriptor } from "../../../foundations/assistant-message/entities/assistant-message";
@@ -30,6 +43,13 @@ export class OperatorController {
   constructor(
     private readonly assistants: AssistantService,
     private readonly jsonApi: JsonApiService,
+    /**
+     * Same seam `AssistantController` uses. The operator engine runs the LLM on
+     * its own routes, so it needs its own gate — the assistant module's gate
+     * covers only the other engine and the frontend picks between them by
+     * `assistant.engine`.
+     */
+    @Optional() @Inject(CREDIT_VALIDATOR) private readonly creditValidator?: CreditValidatorInterface,
   ) {}
 
   /**
@@ -42,6 +62,13 @@ export class OperatorController {
    */
   @Post(operatorMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+      throw new NotFoundException();
+    }
+
+    if (this.creditValidator && req.user?.companyId)
+      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}`,
@@ -91,6 +118,13 @@ export class OperatorController {
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+      throw new NotFoundException();
+    }
+
+    if (this.creditValidator && req.user?.companyId)
+      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+
     const { content, howToMode, limitToHowToId } = body.data.attributes;
     this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);
     const { userMessage, assistantMessage, toolCalls, action } = await this.assistants.appendMessageOperator({

@@ -21,6 +21,8 @@ import { VersionService } from "../../../core/version/services/version.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { QueueId } from "../../../config/enums/queue.id";
 import { Company } from "../entities/company";
+import { EventEmitter2 } from "@nestjs/event-emitter";
+import { COMPANY_AI_DISABLED_EVENT } from "../events/company.events";
 
 describe("CompanyService", () => {
   let service: CompanyService;
@@ -33,6 +35,7 @@ describe("CompanyService", () => {
   let mockModuleRef: vi.Mocked<ModuleRef>;
   let mockWebSocketService: vi.Mocked<WebSocketService>;
   let mockConfigService: vi.Mocked<ConfigService>;
+  let mockEventEmitter: vi.Mocked<EventEmitter2>;
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_COMPANY: Company = {
@@ -63,6 +66,7 @@ describe("CompanyService", () => {
       findSingle: vi.fn(),
       delete: vi.fn(),
       useCredits: vi.fn(),
+      updateTokens: vi.fn(),
     } as any;
 
     mockJsonApiService = {
@@ -93,6 +97,10 @@ describe("CompanyService", () => {
       get: vi.fn().mockReturnValue({ creditCost: 0.01, minCreditsPerRecord: 0.1 }),
     } as any;
 
+    mockEventEmitter = {
+      emit: vi.fn(),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CompanyService,
@@ -105,6 +113,7 @@ describe("CompanyService", () => {
         { provide: ModuleRef, useValue: mockModuleRef },
         { provide: WebSocketService, useValue: mockWebSocketService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
@@ -174,6 +183,143 @@ describe("CompanyService", () => {
       await expect(service.validateCompanyCredits({ companyId: MOCK_COMPANY_ID })).rejects.toThrow(
         new HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED),
       );
+    });
+  });
+
+  describe("isAiEnabled", () => {
+    it("returns true when the company has no aiEnabled property (legacy row)", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID });
+
+      await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
+    });
+
+    it("returns true when aiEnabled is true", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+
+      await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
+    });
+
+    it("returns false ONLY when aiEnabled is explicitly false", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+
+      await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(false);
+    });
+
+    it("returns true (does NOT throw) when the company row is absent", async () => {
+      // Neo4jService.readOne returns null for zero rows. Without the optional
+      // chain this is a TypeError, and callers that wrap the lookup in a
+      // try/catch (finalize-recording.processor) swallow it and silently
+      // behave as AI-off — a company on a normal AI plan losing AI with no
+      // zero-token plan anywhere in the picture.
+      mockRepository.findByCompanyId.mockResolvedValue(null as any);
+
+      await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
+    });
+
+    it("is independent of credit balances", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({
+        id: MOCK_COMPANY_ID,
+        aiEnabled: true,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 0,
+      });
+
+      await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
+    });
+  });
+
+  describe("updateTokensAndAiFlag", () => {
+    it("writes the balances and the flag through the repository", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+
+      await service.updateTokensAndAiFlag({
+        companyId: MOCK_COMPANY_ID,
+        monthlyCredits: 0,
+        availableMonthlyCredits: 0,
+        aiEnabled: false,
+      });
+
+      expect(mockRepository.updateTokens).toHaveBeenCalledWith({
+        companyId: MOCK_COMPANY_ID,
+        monthlyCredits: 0,
+        availableMonthlyCredits: 0,
+        aiEnabled: false,
+      });
+    });
+
+    it("emits COMPANY_AI_DISABLED_EVENT when aiEnabled goes true -> false", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(COMPANY_AI_DISABLED_EVENT, {
+        companyId: MOCK_COMPANY_ID,
+      });
+    });
+
+    it("does NOT emit when the company was already AI-free", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalledWith(COMPANY_AI_DISABLED_EVENT, expect.anything());
+    });
+
+    it("does NOT emit when AI is being enabled", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalledWith(COMPANY_AI_DISABLED_EVENT, expect.anything());
+    });
+
+    // The flag rides the current-user payload, which is fetched once per
+    // session and cookie-backed. Without this broadcast a live session keeps
+    // the stale capability until the user logs out and back in — a page reload
+    // is not enough.
+    it("broadcasts company:subscription_updated when AI is switched OFF", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
+
+      expect(mockWebSocketService.sendMessageToCompany).toHaveBeenCalledWith(
+        MOCK_COMPANY_ID,
+        "company:subscription_updated",
+        { type: "company:subscription_updated", companyId: MOCK_COMPANY_ID },
+      );
+    });
+
+    // The direction that was actually broken: upgrading back to an AI plan left
+    // the GM staring at an AI-free product.
+    it("broadcasts company:subscription_updated when AI is switched ON", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
+
+      expect(mockWebSocketService.sendMessageToCompany).toHaveBeenCalledWith(
+        MOCK_COMPANY_ID,
+        "company:subscription_updated",
+        { type: "company:subscription_updated", companyId: MOCK_COMPANY_ID },
+      );
+    });
+
+    it("does NOT broadcast when the flag is unchanged (every renewal)", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
+
+      expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
+    });
+
+    it("still completes the write when the broadcast throws", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockWebSocketService.sendMessageToCompany.mockRejectedValueOnce(new Error("socket gone"));
+
+      await expect(
+        service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false, monthlyCredits: 0 }),
+      ).resolves.not.toThrow();
+
+      expect(mockRepository.updateTokens).toHaveBeenCalled();
     });
   });
 

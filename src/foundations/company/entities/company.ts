@@ -17,6 +17,17 @@ export type Company = Entity & {
   monthlyCredits: number;
   availableMonthlyCredits: number;
   availableExtraCredits: number;
+
+  /**
+   * Whether the company's plan carries AI at all.
+   *
+   * Optional because `defineEntity`'s auto-generated mapper applies no
+   * conversion to booleans, so a row written before this field existed maps to
+   * `undefined`. Every read point coalesces to `true` — only an explicit
+   * `StripePrice.token === 0` sets this false.
+   */
+  aiEnabled?: boolean;
+
   configurations?: string;
   configuration?: any;
 
@@ -80,6 +91,7 @@ export const CompanyDescriptor = defineEntity<Company>()({
     monthlyCredits: { type: "number" },
     availableMonthlyCredits: { type: "number" },
     availableExtraCredits: { type: "number" },
+    aiEnabled: { type: "boolean" },
     configurations: { type: "string" },
     configuration: { type: "string" },
     subscriptionEndedAt: { type: "datetime" },

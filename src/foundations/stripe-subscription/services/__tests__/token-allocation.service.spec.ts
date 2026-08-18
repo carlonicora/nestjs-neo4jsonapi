@@ -10,6 +10,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { TokenAllocationService } from "../token-allocation.service";
 import { StripeSubscriptionRepository } from "../../repositories/stripe-subscription.repository";
 import { CompanyRepository } from "../../../company/repositories/company.repository";
+import { CompanyService } from "../../../company/services/company.service";
 import { StripePriceRepository } from "../../../stripe-price/repositories/stripe-price.repository";
 import { AppLoggingService } from "../../../../core/logging";
 
@@ -17,6 +18,7 @@ describe("TokenAllocationService", () => {
   let service: TokenAllocationService;
   let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
   let companyRepository: vi.Mocked<CompanyRepository>;
+  let companyService: vi.Mocked<CompanyService>;
   let stripePriceRepository: vi.Mocked<StripePriceRepository>;
   let logger: vi.Mocked<AppLoggingService>;
 
@@ -91,6 +93,10 @@ describe("TokenAllocationService", () => {
       markSubscriptionStatus: vi.fn(),
     };
 
+    const mockCompanyService = {
+      updateTokensAndAiFlag: vi.fn(),
+    };
+
     const mockStripePriceRepository = {
       findById: vi.fn(),
     };
@@ -107,6 +113,7 @@ describe("TokenAllocationService", () => {
         TokenAllocationService,
         { provide: StripeSubscriptionRepository, useValue: mockSubscriptionRepository },
         { provide: CompanyRepository, useValue: mockCompanyRepository },
+        { provide: CompanyService, useValue: mockCompanyService },
         { provide: StripePriceRepository, useValue: mockStripePriceRepository },
         { provide: AppLoggingService, useValue: mockLogger },
       ],
@@ -115,6 +122,7 @@ describe("TokenAllocationService", () => {
     service = module.get<TokenAllocationService>(TokenAllocationService);
     subscriptionRepository = module.get(StripeSubscriptionRepository);
     companyRepository = module.get(CompanyRepository);
+    companyService = module.get(CompanyService);
     stripePriceRepository = module.get(StripePriceRepository);
     logger = module.get(AppLoggingService);
   });
@@ -127,7 +135,7 @@ describe("TokenAllocationService", () => {
     it("should allocate full tokens on successful payment", async () => {
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION);
       companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       const result = await service.allocateTokensOnPayment({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
@@ -138,11 +146,42 @@ describe("TokenAllocationService", () => {
       expect(result.previousTokens).toBe(2500);
       expect(result.companyId).toBe(MOCK_COMPANY_ID);
 
-      expect(companyRepository.updateTokens).toHaveBeenCalledWith({
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith({
         companyId: MOCK_COMPANY_ID,
         monthlyCredits: MOCK_TOKENS,
         availableMonthlyCredits: MOCK_TOKENS,
+        aiEnabled: true,
       });
+    });
+
+    it("sets aiEnabled false when the plan carries zero tokens", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+        ...MOCK_SUBSCRIPTION,
+        stripePrice: { ...MOCK_PRICE_WITH_TOKENS, token: 0 },
+      });
+      companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
+
+      await service.allocateTokensOnPayment({ stripeSubscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith(
+        expect.objectContaining({ aiEnabled: false, monthlyCredits: 0 }),
+      );
+    });
+
+    it("sets aiEnabled true when the plan carries tokens", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+        ...MOCK_SUBSCRIPTION,
+        stripePrice: { ...MOCK_PRICE_WITH_TOKENS, token: 5000 },
+      });
+      companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
+
+      await service.allocateTokensOnPayment({ stripeSubscriptionId: MOCK_SUBSCRIPTION_ID });
+
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith(
+        expect.objectContaining({ aiEnabled: true, monthlyCredits: 5000 }),
+      );
     });
 
     it("should skip allocation when price has no tokens", async () => {
@@ -158,7 +197,7 @@ describe("TokenAllocationService", () => {
 
       expect(result.success).toBe(true);
       expect(result.reason).toBe("No tokens configured for this plan");
-      expect(companyRepository.updateTokens).not.toHaveBeenCalled();
+      expect(companyService.updateTokensAndAiFlag).not.toHaveBeenCalled();
     });
 
     it("should return failure when subscription not found", async () => {
@@ -193,7 +232,7 @@ describe("TokenAllocationService", () => {
       };
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION);
       companyRepository.findByStripeCustomerId.mockResolvedValue(companyWithBigInt);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       const result = await service.allocateTokensOnPayment({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
@@ -215,7 +254,7 @@ describe("TokenAllocationService", () => {
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(midCycleSubscription);
       stripePriceRepository.findById.mockResolvedValue(MOCK_PRICE_WITH_TOKENS);
       companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       const result = await service.allocateProratedTokensOnPlanChange({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
@@ -238,7 +277,7 @@ describe("TokenAllocationService", () => {
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(endOfCycleSubscription);
       stripePriceRepository.findById.mockResolvedValue(MOCK_PRICE_WITH_TOKENS);
       companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       const result = await service.allocateProratedTokensOnPlanChange({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
@@ -259,7 +298,7 @@ describe("TokenAllocationService", () => {
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(startOfCycleSubscription);
       stripePriceRepository.findById.mockResolvedValue(MOCK_PRICE_WITH_TOKENS);
       companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       const result = await service.allocateProratedTokensOnPlanChange({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
@@ -282,7 +321,7 @@ describe("TokenAllocationService", () => {
 
       expect(result.success).toBe(true);
       expect(result.reason).toBe("No tokens configured for new plan");
-      expect(companyRepository.updateTokens).not.toHaveBeenCalled();
+      expect(companyService.updateTokensAndAiFlag).not.toHaveBeenCalled();
     });
 
     it("should return failure when subscription not found", async () => {
@@ -320,16 +359,17 @@ describe("TokenAllocationService", () => {
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(midCycleSubscription);
       stripePriceRepository.findById.mockResolvedValue(MOCK_PRICE_WITH_TOKENS);
       companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY);
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
 
       await service.allocateProratedTokensOnPlanChange({
         stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
         newPriceId: MOCK_PRICE_ID,
       });
 
-      expect(companyRepository.updateTokens).toHaveBeenCalledWith(
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith(
         expect.objectContaining({
           monthlyCredits: MOCK_TOKENS, // Full plan value
+          aiEnabled: true,
         }),
       );
     });

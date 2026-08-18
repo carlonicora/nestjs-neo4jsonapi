@@ -467,12 +467,14 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
    * @param params.monthlyCredits - Optional new monthly credit allocation
    * @param params.availableMonthlyCredits - Optional new available monthly credits
    * @param params.availableExtraCredits - Optional new available extra credits
+   * @param params.aiEnabled - Optional new AI availability flag for the plan
    */
   async updateTokens(params: {
     companyId: string;
     monthlyCredits?: number;
     availableMonthlyCredits?: number;
     availableExtraCredits?: number;
+    aiEnabled?: boolean;
   }): Promise<void> {
     const setParams: string[] = [];
     setParams.push("company.updatedAt = datetime()");
@@ -486,6 +488,9 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     if (params.availableExtraCredits !== undefined) {
       setParams.push("company.availableExtraCredits = $availableExtraCredits");
     }
+    if (params.aiEnabled !== undefined) {
+      setParams.push("company.aiEnabled = $aiEnabled");
+    }
 
     const query = this.neo4j.initQuery();
 
@@ -494,6 +499,7 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       monthlyCredits: params.monthlyCredits,
       availableMonthlyCredits: params.availableMonthlyCredits,
       availableExtraCredits: params.availableExtraCredits,
+      aiEnabled: params.aiEnabled,
     };
 
     query.query = `

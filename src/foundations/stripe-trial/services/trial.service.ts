@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CompanyRepository } from "../../company/repositories/company.repository";
+import { CompanyService } from "../../company/services/company.service";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeCustomerAdminService } from "../../stripe-customer/services/stripe-customer-admin.service";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
@@ -32,6 +33,7 @@ export class TrialService {
   constructor(
     private readonly moduleRef: ModuleRef,
     private readonly companyRepository: CompanyRepository,
+    private readonly companyService: CompanyService,
     private readonly logger: AppLoggingService,
   ) {}
 
@@ -110,15 +112,17 @@ export class TrialService {
       // trialEnd: Math.floor(Date.now() / 1000) + 3 * 60,
     });
 
-    // 4. Allocate trial tokens from price configuration
+    // 4. Allocate trial tokens from price configuration.
+    // The flag is written unconditionally: a trial price with token 0 is an
+    // AI-free trial, and gating this behind `trialTokens > 0` would silently
+    // leave such a company with AI enabled.
     const trialTokens = trialPrice.token ?? 0;
-    if (trialTokens > 0) {
-      await this.companyRepository.updateTokens({
-        companyId: params.companyId,
-        monthlyCredits: trialTokens,
-        availableMonthlyCredits: trialTokens,
-      });
-    }
+    await this.companyService.updateTokensAndAiFlag({
+      companyId: params.companyId,
+      monthlyCredits: trialTokens,
+      availableMonthlyCredits: trialTokens,
+      aiEnabled: trialTokens > 0,
+    });
 
     // 5. Mark subscription as active (during trial)
     await this.companyRepository.markSubscriptionStatus({

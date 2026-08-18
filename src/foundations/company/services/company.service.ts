@@ -2,7 +2,7 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
-import { OnEvent } from "@nestjs/event-emitter";
+import { EventEmitter2, OnEvent } from "@nestjs/event-emitter";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../../tokenusage/events/tokenusage.events";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
@@ -21,6 +21,7 @@ import { CompanyRepository } from "../../company/repositories/company.repository
 import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.put.dto";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
+import { COMPANY_AI_DISABLED_EVENT, CompanyAiDisabledPayload } from "../events/company.events";
 
 /**
  * Company service.
@@ -48,6 +49,18 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     @Optional()
     @Inject(COMPANY_DELETION_HANDLER)
     private readonly deletionHandler?: CompanyDeletionHandler,
+    // APPENDED and optional on purpose. This class is documented as
+    // subclassable by consuming applications, and a subclass passes its
+    // dependencies to `super()` positionally — so inserting a required
+    // parameter anywhere before the end silently breaks every such subclass on
+    // upgrade. Added last and `@Optional()`, existing `super()` argument lists
+    // keep working untouched, which keeps this a backward-compatible change.
+    //
+    // `EventEmitterModule` is global in any app that registers it, so DI
+    // supplies this in practice; the optional marker exists so an app that has
+    // not registered it fails soft (no events) rather than failing to boot.
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
   ) {
     super(builder, companyRepository, cls, CompanyDescriptor.model);
   }
@@ -88,6 +101,84 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       (!!company.availableMonthlyCredits && company.availableMonthlyCredits > 0) ||
       (!!company.availableExtraCredits && company.availableExtraCredits > 0)
     );
+  }
+
+  /**
+   * Whether this company's plan carries AI.
+   *
+   * Deliberately independent of credit balances: a company with AI but an
+   * exhausted balance returns `true` here and is handled by the existing
+   * defer-and-backlog flow. Defaults to `true` so local dev, unconfigured
+   * billing, and rows written before this field existed keep AI.
+   *
+   * `company?.` is load-bearing: `Neo4jService.readOne` returns `null` for zero
+   * rows, so a missing company would throw a TypeError rather than default.
+   * Callers that wrap this in a try/catch would then swallow the throw and
+   * behave as AI-off — a company on a perfectly normal AI plan silently losing
+   * AI, which is the exact failure the `?? true` default exists to prevent.
+   */
+  async isAiEnabled(params: { companyId: string }): Promise<boolean> {
+    const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
+    return company?.aiEnabled ?? true;
+  }
+
+  /**
+   * Writes token balances and, when `aiEnabled` transitions true → false,
+   * emits COMPANY_AI_DISABLED_EVENT so the application can clear anything it
+   * had deferred awaiting credits. Reads the previous value first because the
+   * event must fire exactly once per transition, not on every renewal of an
+   * already-AI-free plan.
+   *
+   * On ANY change to `aiEnabled` — both directions — it also broadcasts
+   * `company:subscription_updated`, which is what makes a live browser session
+   * notice. Consumers read the flag off the company carried by the current-user
+   * payload, which is fetched once per session and cookie-backed, so without
+   * this a GM who upgrades keeps seeing an AI-free product (and one who
+   * downgrades keeps seeing AI controls that now 404) until they log out and
+   * back in — a page reload is not enough.
+   *
+   * Reuses `company:subscription_updated` rather than adding an event type:
+   * the frontend already handles it by refetching the whole user, which is
+   * exactly what a capability change requires. It fires only on plan changes,
+   * so the refetch is rare.
+   */
+  async updateTokensAndAiFlag(params: {
+    companyId: string;
+    monthlyCredits?: number;
+    availableMonthlyCredits?: number;
+    aiEnabled: boolean;
+  }): Promise<void> {
+    const previous = await this.isAiEnabled({ companyId: params.companyId });
+
+    await this.companyRepository.updateTokens({
+      companyId: params.companyId,
+      monthlyCredits: params.monthlyCredits,
+      availableMonthlyCredits: params.availableMonthlyCredits,
+      aiEnabled: params.aiEnabled,
+    });
+
+    if (previous && !params.aiEnabled) {
+      this.eventEmitter?.emit(COMPANY_AI_DISABLED_EVENT, {
+        companyId: params.companyId,
+      } satisfies CompanyAiDisabledPayload);
+    }
+
+    // Best-effort: a failed broadcast must never fail the allocation that just
+    // succeeded. The worst case degrades to the old behaviour — the user sees
+    // the change after logging out and back in.
+    if (previous !== params.aiEnabled) {
+      try {
+        await this.webSocketService.sendMessageToCompany(params.companyId, "company:subscription_updated", {
+          type: "company:subscription_updated",
+          companyId: params.companyId,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to broadcast company:subscription_updated for ${params.companyId}: ${(error as Error).message}`,
+          (error as Error).stack,
+        );
+      }
+    }
   }
 
   async useCredits(params: { credits: number }) {

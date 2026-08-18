@@ -3,7 +3,7 @@ import { Inject, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
-import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
+import { hasAvailableCreditsVia, isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { EmbedderService } from "../../../core";
@@ -54,6 +54,13 @@ export class ChunkEmbeddingProcessor extends WorkerHost {
       this.clsService.set("companyId", job.data.companyId);
       this.clsService.set("userId", job.data.userId);
       this.clsService.set("isAutomatedJob", true);
+
+      // No AI on this plan: drop silently. Deliberately BEFORE the credit
+      // check so nothing is ever marked pending or deferred — an AI-free
+      // company must accumulate no backlog.
+      if (!(await isAiEnabledVia(this.creditValidator, { companyId: job.data.companyId }))) {
+        return { processed: 0 };
+      }
 
       if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))) {
         return { processed: 0 }; // admin re-embed is maintenance; skip cleanly, no marker

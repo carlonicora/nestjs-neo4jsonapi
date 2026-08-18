@@ -477,6 +477,25 @@ describe("CompanyRepository", () => {
 
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();
     });
+
+    it("writes aiEnabled when provided", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue();
+
+      await repository.updateTokens({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
+
+      const query = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(query.query).toContain("company.aiEnabled = $aiEnabled");
+      expect(query.queryParams.aiEnabled).toBe(false);
+    });
+
+    it("omits aiEnabled from the SET clause when not provided", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue();
+
+      await repository.updateTokens({ companyId: MOCK_COMPANY_ID, monthlyCredits: 100 });
+
+      const query = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(query.query).not.toContain("company.aiEnabled");
+    });
   });
 
   describe("find", () => {

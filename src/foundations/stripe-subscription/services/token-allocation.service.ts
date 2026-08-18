@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { AppLoggingService } from "../../../core/logging";
 import { Company } from "../../company/entities/company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
+import { CompanyService } from "../../company/services/company.service";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";
 
@@ -18,6 +19,7 @@ export class TokenAllocationService {
   constructor(
     private readonly subscriptionRepository: StripeSubscriptionRepository,
     private readonly companyRepository: CompanyRepository,
+    private readonly companyService: CompanyService,
     private readonly stripePriceRepository: StripePriceRepository,
     private readonly logger: AppLoggingService,
   ) {}
@@ -68,10 +70,11 @@ export class TokenAllocationService {
     });
 
     // 5. Reset monthly tokens to full amount
-    await this.companyRepository.updateTokens({
+    await this.companyService.updateTokensAndAiFlag({
       companyId: company.id,
       monthlyCredits: price.token,
       availableMonthlyCredits: price.token,
+      aiEnabled: (price.token ?? 0) > 0,
     });
 
     this.logger.log(
@@ -145,10 +148,11 @@ export class TokenAllocationService {
     const previousTokens = Number(company.availableMonthlyCredits ?? 0);
 
     // 6. Reset to prorated amount
-    await this.companyRepository.updateTokens({
+    await this.companyService.updateTokensAndAiFlag({
       companyId: company.id,
       monthlyCredits: newPrice.token,
       availableMonthlyCredits: proratedTokens,
+      aiEnabled: (newPrice.token ?? 0) > 0,
     });
 
     this.logger.log(

@@ -2,7 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Inject, Optional } from "@nestjs/common";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
-import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
+import { hasAvailableCreditsVia, isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
@@ -53,6 +53,11 @@ export class CommunitySummariserProcessor extends WorkerHost {
 
     await this.cls.run(async () => {
       this.cls.set("companyId", companyId);
+
+      // No AI on this plan: drop silently. Deliberately BEFORE the credit
+      // check so nothing is ever marked pending or deferred — an AI-free
+      // company must accumulate no backlog.
+      if (!(await isAiEnabledVia(this.creditValidator, { companyId }))) return;
 
       if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId }))) {
         // Leave isStale set; flag pendingCredits so the 10-minute cron stops

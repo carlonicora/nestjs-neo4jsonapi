@@ -235,4 +235,73 @@ describe("OperatorController", () => {
       await expect(ctl.append("missing", postBody({ content: "next" }), req)).rejects.toThrow("Not Found");
     });
   });
+
+  describe("AI gate (CREDIT_VALIDATOR seam)", () => {
+    // The operator engine owns its own routes. The frontend picks between the
+    // two engines by `assistant.engine`, so gating only `assistant.controller`
+    // left every operator thread running an unmetered LLM turn.
+    const makeGatedController = (validator: any) => new OperatorController(assistants, jsonApi, validator);
+
+    const aiFree = () => ({
+      validateCredits: vi.fn(),
+      isAiEnabled: vi.fn(async () => false),
+    });
+    const aiEnabled = () => ({
+      validateCredits: vi.fn(),
+      isAiEnabled: vi.fn(async () => true),
+    });
+
+    it("POST /operator throws 404 and never runs the turn when the plan carries no AI", async () => {
+      const validator = aiFree();
+      const gated = makeGatedController(validator);
+
+      await expect(gated.create(postBody({ content: "hello" }), req)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(assistants.createWithFirstMessageOperator).not.toHaveBeenCalled();
+      // 404, never 402 — a payment-required answer tells an AI-free GM that AI
+      // exists. The credit check must not even be reached.
+      expect(validator.validateCredits).not.toHaveBeenCalled();
+    });
+
+    it("POST /operator/:id/assistant-messages throws 404 and never runs the turn when the plan carries no AI", async () => {
+      const validator = aiFree();
+      const gated = makeGatedController(validator);
+
+      await expect(gated.append("asst-1", postBody({ content: "next" }), req)).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(assistants.appendMessageOperator).not.toHaveBeenCalled();
+      expect(validator.validateCredits).not.toHaveBeenCalled();
+    });
+
+    it("runs the turn and validates credits when the plan has AI", async () => {
+      const validator = aiEnabled();
+      const gated = makeGatedController(validator);
+
+      await gated.create(postBody({ content: "hello" }), req);
+
+      expect(validator.isAiEnabled).toHaveBeenCalledWith({ companyId: "c-1" });
+      expect(validator.validateCredits).toHaveBeenCalledWith({ companyId: "c-1" });
+      expect(assistants.createWithFirstMessageOperator).toHaveBeenCalled();
+    });
+
+    it("propagates the 402 from validateCredits when the company has AI but no balance", async () => {
+      // The credit path is unchanged: AI plan + empty balance still 402s.
+      const validator = aiEnabled();
+      validator.validateCredits.mockRejectedValueOnce(Object.assign(new Error("NO_CREDITS"), { status: 402 }));
+      const gated = makeGatedController(validator);
+
+      await expect(gated.append("asst-1", postBody({ content: "next" }), req)).rejects.toThrow("NO_CREDITS");
+      expect(assistants.appendMessageOperator).not.toHaveBeenCalled();
+    });
+
+    it("stays ungated when no validator is bound", async () => {
+      const ungated = makeGatedController(undefined);
+
+      await ungated.create(postBody({ content: "hello" }), req);
+
+      expect(assistants.createWithFirstMessageOperator).toHaveBeenCalled();
+    });
+  });
 });

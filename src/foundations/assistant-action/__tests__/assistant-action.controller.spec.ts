@@ -180,4 +180,63 @@ describe("AssistantActionController", () => {
       );
     });
   });
+
+  describe("AI gate (CREDIT_VALIDATOR seam)", () => {
+    // approve/deny RESUME a frozen operator run — i.e. they run the LLM. Same
+    // seam and same 404 as AssistantController.
+    const makeGatedController = (validator: any) =>
+      new AssistantActionController(assistantActions, assistants, jsonApi, auditService, cacheService, validator);
+
+    const makeAuthedRequest = (actionId = "act-1") =>
+      ({ params: { actionId }, user: { userId: "u-1", companyId: "c-1" } }) as any;
+
+    it("approve throws 404 and never resumes the run when the plan carries no AI", async () => {
+      const validator = { validateCredits: vi.fn(), isAiEnabled: vi.fn(async () => false) };
+      const gated = makeGatedController(validator);
+      const send = vi.fn();
+
+      await expect(gated.approve(makeAuthedRequest(), { send } as any, "act-1")).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(assistants.resolveAction).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      // 404, never 402.
+      expect(validator.validateCredits).not.toHaveBeenCalled();
+    });
+
+    it("deny throws 404 and never resumes the run when the plan carries no AI", async () => {
+      const validator = { validateCredits: vi.fn(), isAiEnabled: vi.fn(async () => false) };
+      const gated = makeGatedController(validator);
+      const send = vi.fn();
+
+      await expect(gated.deny(makeAuthedRequest(), { send } as any, "act-1")).rejects.toMatchObject({
+        status: 404,
+      });
+      expect(assistants.resolveAction).not.toHaveBeenCalled();
+      expect(validator.validateCredits).not.toHaveBeenCalled();
+    });
+
+    it("resolves the action and validates credits when the plan has AI", async () => {
+      const validator = { validateCredits: vi.fn(), isAiEnabled: vi.fn(async () => true) };
+      const gated = makeGatedController(validator);
+      const send = vi.fn();
+
+      await gated.approve(makeAuthedRequest(), { send } as any, "act-1");
+
+      expect(validator.isAiEnabled).toHaveBeenCalledWith({ companyId: "c-1" });
+      expect(validator.validateCredits).toHaveBeenCalledWith({ companyId: "c-1" });
+      expect(assistants.resolveAction).toHaveBeenCalledWith({ actionId: "act-1", approved: true });
+    });
+
+    it("defers when the request carries no companyId (auth problem, not a capability problem)", async () => {
+      const validator = { validateCredits: vi.fn(), isAiEnabled: vi.fn(async () => false) };
+      const gated = makeGatedController(validator);
+      const send = vi.fn();
+
+      await gated.approve(makeRequest(), { send } as any, "act-1");
+
+      expect(validator.isAiEnabled).not.toHaveBeenCalled();
+      expect(assistants.resolveAction).toHaveBeenCalled();
+    });
+  });
 });

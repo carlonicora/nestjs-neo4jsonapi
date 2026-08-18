@@ -112,6 +112,18 @@ export interface TokenUsageRecorderInterface {
  * | Validator throws anything else              | rethrown — never read as an empty balance      |
  * | Credits disabled (`creditCost <= 0`)        | `true` — validator is a documented no-op       |
  *
+ * The same processors also consult the OPTIONAL `isAiEnabled` method below
+ * through `isAiEnabledVia` (`common/helpers/credit-gate.ts`), a separate
+ * boolean check for a DIFFERENT question — not "is there balance?" but "does
+ * this plan carry AI at all?". It fails OPEN on every uncertain case:
+ *
+ * | Situation                                   | Result                        |
+ * |---------------------------------------------|--------------------------------|
+ * | No provider bound for `CREDIT_VALIDATOR`    | `true` — AI treated as enabled |
+ * | Validator does not implement `isAiEnabled`  | `true` — AI treated as enabled |
+ * | `isAiEnabled` throws                        | `true` — AI treated as enabled |
+ * | `isAiEnabled` resolves                      | its answer, as-is              |
+ *
  * The first row is the dangerous one: **an application that intends to enforce
  * credits but forgets to bind this token runs entirely ungated, silently.**
  * Failing open is deliberate — it preserves behaviour for consumers that never
@@ -135,4 +147,14 @@ export const CREDIT_VALIDATOR = Symbol("CREDIT_VALIDATOR");
  */
 export interface CreditValidatorInterface {
   validateCredits(params: { companyId: string }): Promise<void>;
+
+  /**
+   * Whether the company's plan carries AI at all. OPTIONAL so existing
+   * implementations keep compiling; an implementation that omits it is treated
+   * as "AI enabled", matching this seam's documented unbound behaviour.
+   *
+   * Distinct from validateCredits: a company can have AI and no balance (defer
+   * the work) or no AI at all (drop the work).
+   */
+  isAiEnabled?(params: { companyId: string }): Promise<boolean>;
 }

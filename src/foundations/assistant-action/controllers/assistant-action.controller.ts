@@ -1,8 +1,11 @@
-import { Controller, Get, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, NotFoundException, Optional, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply, FastifyRequest } from "fastify";
 import { Audit, CacheInvalidate } from "../../../common/decorators";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
+import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AuditService } from "../../audit/services/audit.service";
@@ -23,6 +26,11 @@ export class AssistantActionController {
     private readonly jsonApi: JsonApiService,
     private readonly auditService: AuditService,
     private readonly cacheService: CacheService,
+    /**
+     * Approving or denying a pending action RESUMES a frozen operator run —
+     * i.e. it runs the LLM. Same seam and same 404 as `AssistantController`.
+     */
+    @Optional() @Inject(CREDIT_VALIDATOR) private readonly creditValidator?: CreditValidatorInterface,
   ) {}
 
   // GET /assistant-actions/:actionId
@@ -39,7 +47,8 @@ export class AssistantActionController {
    */
   @Post(`${assistantActionMeta.endpoint}/:actionId/approve`)
   @CacheInvalidate(assistantActionMeta, "actionId")
-  async approve(@Req() request: FastifyRequest, @Res() reply: FastifyReply, @Param("actionId") actionId: string) {
+  async approve(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Param("actionId") actionId: string) {
+    await this.gate(request);
     return this.resolve(reply, actionId, true);
   }
 
@@ -50,8 +59,25 @@ export class AssistantActionController {
    */
   @Post(`${assistantActionMeta.endpoint}/:actionId/deny`)
   @CacheInvalidate(assistantActionMeta, "actionId")
-  async deny(@Req() request: FastifyRequest, @Res() reply: FastifyReply, @Param("actionId") actionId: string) {
+  async deny(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Param("actionId") actionId: string) {
+    await this.gate(request);
     return this.resolve(reply, actionId, false);
+  }
+
+  /**
+   * 404 when the caller's plan carries no AI, then the ordinary credit check.
+   *
+   * Order matters and mirrors `AssistantController`: an AI-free company must
+   * never receive a 402, because "pay and you can have this" tells them AI
+   * exists. Resuming the run is an unmetered LLM turn without both checks.
+   */
+  private async gate(request: AuthenticatedRequest): Promise<void> {
+    const companyId = request.user?.companyId;
+    if (!companyId) return;
+
+    if (!(await isAiEnabledVia(this.creditValidator, { companyId }))) throw new NotFoundException();
+
+    if (this.creditValidator) await this.creditValidator.validateCredits({ companyId });
   }
 
   private async resolve(reply: FastifyReply, actionId: string, approved: boolean) {

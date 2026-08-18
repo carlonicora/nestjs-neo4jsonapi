@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ModuleRef } from "@nestjs/core";
 import { TrialService } from "../trial.service";
 import { CompanyRepository } from "../../../company/repositories/company.repository";
+import { CompanyService } from "../../../company/services/company.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { StripeCustomerAdminService } from "../../../stripe-customer/services/stripe-customer-admin.service";
 import { StripeSubscriptionAdminService } from "../../../stripe-subscription/services/stripe-subscription-admin.service";
@@ -55,6 +56,10 @@ const createMockCompanyRepository = () => ({
   markSubscriptionStatus: vi.fn(),
 });
 
+const createMockCompanyService = () => ({
+  updateTokensAndAiFlag: vi.fn(),
+});
+
 const createMockLoggingService = () => ({
   log: vi.fn(),
   warn: vi.fn(),
@@ -100,6 +105,7 @@ const createMockStripeCustomerRepository = () => ({
 describe("TrialService", () => {
   let service: TrialService;
   let companyRepository: ReturnType<typeof createMockCompanyRepository>;
+  let companyService: ReturnType<typeof createMockCompanyService>;
   let logger: ReturnType<typeof createMockLoggingService>;
   let stripeCustomerAdminService: ReturnType<typeof createMockStripeCustomerAdminService>;
   let stripeSubscriptionAdminService: ReturnType<typeof createMockStripeSubscriptionAdminService>;
@@ -109,6 +115,7 @@ describe("TrialService", () => {
 
   beforeEach(async () => {
     companyRepository = createMockCompanyRepository();
+    companyService = createMockCompanyService();
     logger = createMockLoggingService();
     stripeCustomerAdminService = createMockStripeCustomerAdminService();
     stripeSubscriptionAdminService = createMockStripeSubscriptionAdminService();
@@ -131,6 +138,7 @@ describe("TrialService", () => {
         TrialService,
         { provide: ModuleRef, useValue: moduleRef },
         { provide: CompanyRepository, useValue: companyRepository },
+        { provide: CompanyService, useValue: companyService },
         { provide: AppLoggingService, useValue: logger },
       ],
     }).compile();
@@ -154,7 +162,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial(trialParams);
@@ -168,10 +176,11 @@ describe("TrialService", () => {
         priceId: MOCK_TRIAL_PRICE.id,
         trialPeriodDays: 14,
       });
-      expect(companyRepository.updateTokens).toHaveBeenCalledWith({
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith({
         companyId: trialParams.companyId,
         monthlyCredits: MOCK_TRIAL_PRICE.token,
         availableMonthlyCredits: MOCK_TRIAL_PRICE.token,
+        aiEnabled: true,
       });
       expect(companyRepository.markSubscriptionStatus).toHaveBeenCalledWith({
         companyId: trialParams.companyId,
@@ -218,35 +227,39 @@ describe("TrialService", () => {
       expect(stripeSubscriptionAdminService.createSubscription).not.toHaveBeenCalled();
     });
 
-    it("should skip token allocation when trial price has no tokens", async () => {
+    it("writes aiEnabled false when trial price has no tokens (undefined)", async () => {
       companyRepository.findByCompanyId.mockResolvedValue(MOCK_COMPANY);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE_NO_TOKENS);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial(trialParams);
 
-      expect(companyRepository.updateTokens).not.toHaveBeenCalled();
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith(
+        expect.objectContaining({ aiEnabled: false, monthlyCredits: 0 }),
+      );
       expect(companyRepository.markSubscriptionStatus).toHaveBeenCalledWith({
         companyId: trialParams.companyId,
         isActiveSubscription: true,
       });
     });
 
-    it("should skip token allocation when trial price has zero tokens", async () => {
+    it("writes aiEnabled false for a zero-token trial price", async () => {
       const priceWithZeroTokens = { ...MOCK_TRIAL_PRICE, token: 0 };
       companyRepository.findByCompanyId.mockResolvedValue(MOCK_COMPANY);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
       stripePriceRepository.findTrialPrice.mockResolvedValue(priceWithZeroTokens);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial(trialParams);
 
-      expect(companyRepository.updateTokens).not.toHaveBeenCalled();
+      expect(companyService.updateTokensAndAiFlag).toHaveBeenCalledWith(expect.objectContaining({ aiEnabled: false }));
     });
 
     it("should continue with trial when company has no subscription", async () => {
@@ -256,7 +269,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial(trialParams);
@@ -271,7 +284,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial(trialParams);
@@ -288,7 +301,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial({
@@ -311,7 +324,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial({
@@ -329,7 +342,7 @@ describe("TrialService", () => {
       stripePriceRepository.findTrialPrice.mockResolvedValue(priceWith5000Tokens);
       stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
       stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
-      companyRepository.updateTokens.mockResolvedValue(undefined);
+      companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
       companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
 
       await service.startTrial({

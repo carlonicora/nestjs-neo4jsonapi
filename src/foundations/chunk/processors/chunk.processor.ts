@@ -4,7 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { AiStatus, EntityAiStatus } from "../../../common/enums/ai.status";
-import { hasAvailableCreditsVia } from "../../../common/helpers/credit-gate";
+import { hasAvailableCreditsVia, isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { modelRegistry } from "../../../common/registries/registry";
 import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { CHUNK_QUEUE_CONCURRENCY } from "../../../config/base.config";
@@ -72,6 +72,11 @@ export class ChunkProcessor extends WorkerHost {
     await this.clsService.run(async () => {
       this.clsService.set("companyId", job.data.companyId);
       this.clsService.set("userId", job.data.userId);
+
+      // No AI on this plan: drop silently. Deliberately BEFORE the credit
+      // check so nothing is ever marked pending or deferred — an AI-free
+      // company must accumulate no backlog.
+      if (!(await isAiEnabledVia(this.creditValidator, { companyId: job.data.companyId }))) return;
 
       // Pre-flight credit gate (spec §2): defer, don't fail — the chunk stays
       // marked and approval re-processes it via its owning entity. Not a job failure.

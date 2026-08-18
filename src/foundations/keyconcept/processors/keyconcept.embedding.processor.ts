@@ -1,7 +1,10 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
+import { Inject, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
+import { hasAvailableCreditsVia, isAiEnabledVia } from "../../../common/helpers/credit-gate";
+import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { EmbedderService } from "../../../core";
 import { KeyConceptRepository } from "../repositories/keyconcept.repository";
@@ -17,6 +20,10 @@ export class KeyConceptEmbeddingProcessor extends WorkerHost {
     private readonly keyConceptRepository: KeyConceptRepository,
     private readonly embedderService: EmbedderService,
     configService: ConfigService<BaseConfigInterface>,
+    /** See ChunkProcessor: seam, not CompanyService — CompanyModule would mount `companies/*` here. */
+    @Optional()
+    @Inject(CREDIT_VALIDATOR)
+    private readonly creditValidator?: CreditValidatorInterface,
   ) {
     super();
     this.rebuildKeyConceptsJobName =
@@ -47,6 +54,17 @@ export class KeyConceptEmbeddingProcessor extends WorkerHost {
       this.clsService.set("companyId", job.data.companyId);
       this.clsService.set("userId", job.data.userId);
       this.clsService.set("isAutomatedJob", true);
+
+      // No AI on this plan: drop silently. Deliberately BEFORE the credit
+      // check so nothing is ever marked pending or deferred — an AI-free
+      // company must accumulate no backlog. Mirrors ChunkEmbeddingProcessor.
+      if (!(await isAiEnabledVia(this.creditValidator, { companyId: job.data.companyId }))) {
+        return { processed: 0 };
+      }
+
+      if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))) {
+        return { processed: 0 }; // admin re-embed is maintenance; skip cleanly, no marker
+      }
 
       // 1. Recreate vector index with new dimensions
       await this.keyConceptRepository.recreateVectorIndex();

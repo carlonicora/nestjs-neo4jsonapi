@@ -8,6 +8,7 @@ export { CompanyDTO, CompanyDataDTO, CompanyDataListDTO } from "./dtos/company.d
 export { CompanyPostDTO, CompanyPostDataDTO, CompanyPostAttributesDTO } from "./dtos/company.post.dto";
 export { CompanyPutDTO, CompanyPutDataDTO } from "./dtos/company.put.dto";
 export { CompanyConfigurationsPutDTO } from "./dtos/company.configurations.put.dto";
+export { COMPANY_AI_DISABLED_EVENT, CompanyAiDisabledPayload } from "./events/company.events";
 export {
   CompanyDeletionHandler,
   COMPANY_DELETION_HANDLER,

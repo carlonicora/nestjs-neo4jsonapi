@@ -40,3 +40,23 @@ export async function hasAvailableCreditsVia(
     throw error;
   }
 }
+
+/**
+ * Boolean AI-capability check for background jobs.
+ *
+ * Fails OPEN in every uncertain case — unbound validator, unimplemented
+ * method, or a thrown error — because wrongly reporting "no AI" would silently
+ * drop work for a paying customer, which is unrecoverable. Wrongly reporting
+ * "AI enabled" only means the credit gate downstream handles it.
+ */
+export async function isAiEnabledVia(
+  validator: CreditValidatorInterface | undefined,
+  params: { companyId: string },
+): Promise<boolean> {
+  if (!validator?.isAiEnabled) return true;
+  try {
+    return await validator.isAiEnabled({ companyId: params.companyId });
+  } catch {
+    return true;
+  }
+}

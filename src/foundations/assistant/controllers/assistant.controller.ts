@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Inject,
   Logger,
+  NotFoundException,
   Optional,
   Param,
   Patch,
@@ -20,6 +21,7 @@ import {
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
+import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { modelRegistry } from "../../../common/registries/registry";
 import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
@@ -102,6 +104,10 @@ export class AssistantController {
    */
   @Post(assistantMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+      throw new NotFoundException();
+    }
+
     if (this.creditValidator && req.user?.companyId)
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
@@ -155,6 +161,10 @@ export class AssistantController {
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+      throw new NotFoundException();
+    }
+
     if (this.creditValidator && req.user?.companyId)
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
