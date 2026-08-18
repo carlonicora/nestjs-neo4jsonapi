@@ -49,6 +49,28 @@ const MAX_REPAIRS = 6;
 
 const UNSUPPORTED_CODES = new Set(["unsupported_parameter", "unsupported_value"]);
 
+/**
+ * Rejections a provider reports in PROSE rather than through `error.code`.
+ *
+ * Azure answers a gpt-5.6-luna request carrying both function tools and
+ * `reasoning_effort` with `param: "reasoning_effort"` but `code: null`, so the
+ * code-driven path above never fires and the request fails forever. Observed
+ * verbatim on 2026-08-17:
+ *
+ *   { message: "Function tools with reasoning_effort are not supported for this
+ *               model in /v1/chat/completions. Please use /v1/responses instead.",
+ *     type: "invalid_request_error", param: "reasoning_effort", code: null }
+ *
+ * The refusal is CONDITIONAL — the parameter is fine on its own and only clashes
+ * with `tools` — so each pattern names the parameter whose presence triggers it.
+ * Matching stays narrow on purpose: "not supported" is a capability statement,
+ * whereas "must be between 0 and 2" is a validation error that dropping the
+ * parameter would silently paper over.
+ */
+const PROSE_REJECTIONS: ReadonlyArray<{ pattern: RegExp; requiresParam: string }> = [
+  { pattern: /\btools?\b[^.]*\bnot supported\b/i, requiresParam: "tools" },
+];
+
 /** What the provider refused, and how widely that refusal generalises. */
 interface Verdict {
   /** Rename target when the parameter has a documented successor, else null (drop). */
@@ -60,6 +82,15 @@ interface Verdict {
    * value.
    */
   values?: Set<string>;
+  /**
+   * Set only for a CONDITIONAL rejection: the verdict applies solely to a request
+   * that also carries this parameter. Without it, one tool-using call teaching the
+   * deployment "drop reasoning_effort" would also strip thinking from every
+   * tool-less call — and `modelKey` is provider|instance|model, so a base tier and
+   * a `_LARGE` tier running the same deployment share one entry. That is exactly
+   * how a deliberate `AI_REASONING_EFFORT_LARGE=high` would silently stop working.
+   */
+  requiresParam?: string;
 }
 
 /** Canonical key for a parameter value, so `"none"` and `0.2` compare reliably. */
@@ -93,6 +124,10 @@ function applyLearned(bodyStr: string, modelKey: string): string {
       // A value-scoped verdict must not touch a request carrying a value the
       // deployment has never refused — that value may well be accepted.
       if (verdict.values && !verdict.values.has(valueKey(value))) continue;
+      // A conditional verdict must not touch a request that does not reproduce the
+      // clash — dropping `reasoning_effort` from a tool-less call would remove
+      // thinking the caller deliberately asked for.
+      if (verdict.requiresParam && !(verdict.requiresParam in body)) continue;
       delete body[param];
       if (verdict.successor) body[verdict.successor] = value;
       changed = true;
@@ -109,13 +144,22 @@ function applyLearned(bodyStr: string, modelKey: string): string {
 function rememberVerdict(modelKey: string, param: string, verdict: Verdict): void {
   const verdicts = learned.get(modelKey) ?? new Map<string, Verdict>();
   const existing = verdicts.get(param);
-  if (existing && !verdict.values) {
-    // Parameter-level wins outright.
+  // BROADEST verdict wins. An unconditional parameter-level rejection (no `values`,
+  // no `requiresParam`) covers every request; a value-scoped or conditional one
+  // covers a subset. Replacing the broad one with a narrow one would re-send a
+  // parameter already known to be refused outright.
+  const unconditional = (v: Verdict): boolean => !v.values && !v.requiresParam;
+  if (!existing) {
     verdicts.set(param, verdict);
-  } else if (existing?.values && verdict.values) {
+  } else if (unconditional(verdict)) {
+    verdicts.set(param, verdict);
+  } else if (unconditional(existing)) {
+    // Keep the broader verdict.
+  } else if (existing.values && verdict.values) {
     for (const value of verdict.values) existing.values.add(value);
-  } else if (!existing) {
-    verdicts.set(param, verdict);
+  } else if (existing.requiresParam && verdict.requiresParam && existing.requiresParam !== verdict.requiresParam) {
+    // Two different conditions both refuse it → the parameter is refused broadly.
+    verdicts.set(param, { successor: verdict.successor });
   }
   // existing is parameter-level and the new verdict is value-level → already covered.
   learned.set(modelKey, verdicts);
@@ -130,14 +174,33 @@ function readVerdict(
 ): { param: string; verdict: Verdict; rejectedValue: unknown } | undefined {
   let param: unknown;
   let code: unknown;
+  let message: unknown;
   try {
     const error = JSON.parse(responseText)?.error;
     param = error?.param;
     code = error?.code;
+    message = error?.message;
   } catch {
     return undefined;
   }
-  if (typeof param !== "string" || !param || typeof code !== "string" || !UNSUPPORTED_CODES.has(code)) return undefined;
+  if (typeof param !== "string" || !param) return undefined;
+
+  // Prose fallback for providers that name the parameter but send no code. Only a
+  // capability statement qualifies, and only when the request carries the
+  // parameter the message blames the clash on.
+  const coded = typeof code === "string" && UNSUPPORTED_CODES.has(code);
+  let requiresParam: string | undefined;
+  if (!coded) {
+    if (typeof message !== "string") return undefined;
+    const prose = PROSE_REJECTIONS.find((r) => r.pattern.test(message));
+    if (!prose) return undefined;
+    try {
+      if (!(prose.requiresParam in JSON.parse(bodyStr))) return undefined;
+    } catch {
+      return undefined;
+    }
+    requiresParam = prose.requiresParam;
+  }
 
   let rejectedValue: unknown;
   try {
@@ -154,7 +217,12 @@ function readVerdict(
   return {
     param,
     rejectedValue,
-    verdict: code === "unsupported_value" ? { successor, values: new Set([valueKey(rejectedValue)]) } : { successor },
+    verdict:
+      code === "unsupported_value"
+        ? { successor, values: new Set([valueKey(rejectedValue)]) }
+        : requiresParam
+          ? { successor, requiresParam }
+          : { successor },
   };
 }
 

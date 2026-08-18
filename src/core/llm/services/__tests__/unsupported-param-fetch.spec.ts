@@ -11,6 +11,25 @@ const rejection = (param: string, code = "unsupported_parameter") =>
 
 const ok = () => new Response(JSON.stringify({ choices: [{ message: { content: "hi" } }] }), { status: 200 });
 
+/**
+ * The 400 Azure returns for gpt-5.6-luna when a request carries BOTH function
+ * tools and `reasoning_effort` — captured verbatim on 2026-08-17. Note
+ * `code: null`: the code-driven path cannot see this one.
+ */
+const toolsPlusEffortRejection = () =>
+  new Response(
+    JSON.stringify({
+      error: {
+        message:
+          "Function tools with reasoning_effort are not supported for this model in /v1/chat/completions. Please use /v1/responses instead.",
+        type: "invalid_request_error",
+        param: "reasoning_effort",
+        code: null,
+      },
+    }),
+    { status: 400, headers: { "content-type": "application/json" } },
+  );
+
 /** Builds a fake fetch that replays `responses` in order and records every body it saw. */
 function fakeFetch(responses: Response[]) {
   const bodies: any[] = [];
@@ -243,5 +262,80 @@ describe("unsupportedParamFetch", () => {
     const inner = vi.fn(async () => ok());
     await unsupportedParamFetch("azure|a|m", inner as unknown as typeof fetch)("u", { body: undefined } as any);
     expect(inner).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Providers that name the rejected parameter but send NO code.
+   *
+   * gpt-5.6-luna on Azure refuses `reasoning_effort` when the request also carries
+   * function tools, with `code: null`. The repair loop could not see it, so every
+   * tool-using call failed permanently: a full cost-test run lost legal research
+   * three times over (94 such 400s, 0 citations) while every tool-less feature
+   * succeeded, because retrieval is the only node that binds tools.
+   */
+  describe("prose rejections (param named, code null)", () => {
+    it("drops reasoning_effort and retries when tools are present", async () => {
+      const inner = fakeFetch([toolsPlusEffortRejection(), ok()]);
+      const res = await unsupportedParamFetch("azure|a|luna", inner.fn)("u", {
+        body: JSON.stringify({ reasoning_effort: "low", tools: [{ type: "function" }], messages: [] }),
+      } as any);
+
+      expect(res.status).toBe(200);
+      expect(inner.bodies[1].reasoning_effort).toBeUndefined();
+      expect(inner.bodies[1].tools).toBeDefined(); // the TOOLS are the point of the call
+    });
+
+    it("remembers the verdict, so later tool calls never re-pay the failed round-trip", async () => {
+      const first = fakeFetch([toolsPlusEffortRejection(), ok()]);
+      await unsupportedParamFetch("azure|a|luna", first.fn)("u", {
+        body: JSON.stringify({ reasoning_effort: "low", tools: [{ type: "function" }] }),
+      } as any);
+
+      const second = fakeFetch([ok()]);
+      await unsupportedParamFetch("azure|a|luna", second.fn)("u", {
+        body: JSON.stringify({ reasoning_effort: "high", tools: [{ type: "function" }] }),
+      } as any);
+      expect(second.calls).toHaveBeenCalledTimes(1);
+      expect(second.bodies[0].reasoning_effort).toBeUndefined();
+    });
+
+    /**
+     * The conditional half. `modelKey` is provider|instance|model, so a base tier
+     * and a `_LARGE` tier pointed at one deployment share a verdict entry. Learning
+     * this refusal unconditionally would strip thinking from tool-less calls too —
+     * silently undoing a deliberate AI_REASONING_EFFORT_LARGE=high.
+     */
+    it("leaves reasoning_effort ALONE on a tool-less call to the same deployment", async () => {
+      const first = fakeFetch([toolsPlusEffortRejection(), ok()]);
+      await unsupportedParamFetch("azure|a|luna", first.fn)("u", {
+        body: JSON.stringify({ reasoning_effort: "low", tools: [{ type: "function" }] }),
+      } as any);
+
+      const second = fakeFetch([ok()]);
+      await unsupportedParamFetch("azure|a|luna", second.fn)("u", {
+        body: JSON.stringify({ reasoning_effort: "high", messages: [] }),
+      } as any);
+      expect(second.bodies[0].reasoning_effort).toBe("high");
+    });
+
+    it("ignores a validation error that merely names a parameter", async () => {
+      // "must be between" is a bad VALUE, not an unsupported capability. Dropping
+      // the parameter would hide a real misconfiguration.
+      const payload = JSON.stringify({
+        error: {
+          message: "temperature must be between 0 and 2.",
+          type: "invalid_request_error",
+          param: "temperature",
+          code: null,
+        },
+      });
+      const inner = fakeFetch([new Response(payload, { status: 400 }), ok()]);
+      const res = await unsupportedParamFetch("azure|a|m", inner.fn)("u", {
+        body: JSON.stringify({ temperature: 5 }),
+      } as any);
+
+      expect(res.status).toBe(400);
+      expect(inner.calls).toHaveBeenCalledTimes(1);
+    });
   });
 });
