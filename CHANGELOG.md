@@ -1,3 +1,13 @@
+## [2.14.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.1...v2.14.2) (2026-08-18)
+
+### 🐛 Bug Fixes
+
+* **audio:** bill transcription from the usage the STT engine reports ([a82cbef](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a82cbefea707ebf4d60d9730fe00624c6d55c897))
+
+### 🛠 Build System
+
+* **release:** pin the changelog preset to the writer-8 line ([409c800](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/409c8000fc20f1c6dff7f72b9d8d075c0d05d949))
+
 ## [2.14.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.0...v2.14.1) (2026-08-18)
 
 ## [2.14.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.13.0...v2.14.0) (2026-08-18)
