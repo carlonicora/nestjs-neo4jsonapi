@@ -49,10 +49,92 @@ export interface AudioCallParams {
 
 export interface TranscriptionResult {
   text: string;
-  /** {0, 0} when audio.directUrl is set — /audio/transcriptions returns no tokens. */
+  /**
+   * Tokens the engine reported. {0, 0} when it reports none — which is common on
+   * the direct `/audio/transcriptions` path, where a duration-priced model
+   * (whisper-large-v3-turbo) charges by the second and reports no tokens at all.
+   */
   tokenUsage: { input: number; output: number };
   /** Duration of the audio actually sent (from ffmpeg's Duration line). */
   audioSeconds: number;
+  /**
+   * The price the PROVIDER invoiced for this request, when it reports one
+   * (OpenRouter's `/audio/transcriptions` returns `usage.cost`). Absent
+   * otherwise. A measured figure rather than an estimate, so `persistUsage`
+   * bills it in preference to both the token and the duration clock.
+   *
+   * NEVER ASSUME IT IS THERE. Reporting a cost is an OpenRouter courtesy, not
+   * part of the OpenAI-style contract this path speaks: an endpoint on Azure,
+   * Vertex, OpenAI itself or a self-hosted Whisper reports tokens or a duration
+   * at best, and often nothing at all. Every such call falls through to the
+   * manual clocks in {@link AudioLLMService.persistUsage}, which is why those
+   * clocks remain load-bearing rather than legacy.
+   *
+   * CURRENCY IS THE PROVIDER'S. OpenRouter reports USD; `credits.creditCost`
+   * is nominally euro-denominated. The gap is the same one the configured
+   * `*CostPer1MTokens` rates already carry (they are copied off provider
+   * pricing pages in USD too), so nothing is converted here — a deployment
+   * that needs euro-exact accounting must price its credits accordingly.
+   */
+  providerCost?: number;
+  /**
+   * Audio duration the PROVIDER measured and billed, when it reports one
+   * (OpenAI-style endpoints return `usage: {type: "duration", seconds}`).
+   * Preferred over the locally measured `audioSeconds` by the duration clock,
+   * because it is the number the invoice was calculated from. Absent when the
+   * endpoint reports no usage at all.
+   */
+  providerSeconds?: number;
+}
+
+/**
+ * `usage` block returned by OpenAI-style `/audio/transcriptions` endpoints.
+ * Every field is optional because the shape varies by vendor: OpenRouter
+ * returns `{seconds, total_tokens, input_tokens, output_tokens, cost}`, while
+ * OpenAI returns a discriminated `{type: "tokens", ...}` / `{type: "duration",
+ * seconds}` with no cost at all. Read defensively — see {@link parseDirectUsage}.
+ */
+interface DirectUsagePayload {
+  seconds?: unknown;
+  input_tokens?: unknown;
+  output_tokens?: unknown;
+  cost?: unknown;
+}
+
+/**
+ * Narrows one field of an untrusted `usage` block to a usable number.
+ *
+ * Anything that is not a finite, non-negative number — a string, null, NaN, a
+ * field the vendor renamed — becomes `undefined` and the caller falls back to
+ * the next pricing clock. Billing must degrade to an estimate when the wire
+ * shape changes upstream, never to a `NaN` cost silently written to every
+ * usage row.
+ */
+function usageNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Extracts whatever a direct endpoint chose to report. Each field is
+ * independent on purpose: providers report wildly different subsets (OpenRouter
+ * all four, OpenAI/Azure a duration OR token counts, a self-hosted Whisper
+ * nothing), and a caller that demanded the full block would throw away the one
+ * number a given provider did give it.
+ */
+function parseDirectUsage(usage: unknown): {
+  tokens: { input: number; output: number };
+  providerCost?: number;
+  providerSeconds?: number;
+} {
+  const block = (typeof usage === "object" && usage !== null ? usage : {}) as DirectUsagePayload;
+  return {
+    tokens: {
+      input: usageNumber(block.input_tokens) ?? 0,
+      output: usageNumber(block.output_tokens) ?? 0,
+    },
+    providerCost: usageNumber(block.cost),
+    providerSeconds: usageNumber(block.seconds),
+  };
 }
 
 /**
@@ -146,8 +228,15 @@ export class AudioLLMService {
       const result = audio.directUrl
         ? await this.callDirect(params, audio, transcode)
         : await this.callChat(params, audio, transcode);
-      this.warnIfDirectPathUnbilled(audio, result.tokenUsage);
-      await this.persistUsage(params, result.tokenUsage, transcode.durationSeconds);
+      this.warnIfDirectPathUnbilled(audio, result.tokenUsage, result.providerCost);
+      // Duration for the fallback clock: the provider's own measurement when it
+      // gave one (that is the number it billed), else ffmpeg's.
+      await this.persistUsage(
+        params,
+        result.tokenUsage,
+        result.providerSeconds ?? transcode.durationSeconds,
+        result.providerCost,
+      );
       return result;
     } catch (error) {
       // A failed transcription is not a free call in principle, but neither
@@ -176,18 +265,30 @@ export class AudioLLMService {
   /**
    * Makes an unbillable engine LOUD instead of silent.
    *
-   * The direct `/audio/transcriptions` engine (AUDIO_DIRECT_URL) reports no
-   * token counts at all, and the zero-token rule in {@link persistUsage} then
-   * writes no usage record — so switching an application to that engine
-   * silently turns transcription back into completely unbilled work. There is
-   * no per-minute rate to fall back on (`audioSeconds` is available on the
-   * result, but no price for it is configured anywhere), and inventing a token
-   * count would be a lie, so the honest fix is a warning that names the
-   * consequence. Emitted once per process — never in the hot per-utterance
-   * path beyond a boolean check.
+   * Some direct `/audio/transcriptions` engines report no usage of their own —
+   * no tokens, no cost. The zero-token rule in {@link persistUsage} then writes
+   * no usage record, so pointing an application at such an engine silently
+   * turns transcription into completely unbilled work. Inventing a token count
+   * would be a lie, so the honest fix is a warning that names the consequence
+   * and the one setting that fixes it.
+   *
+   * NOT every direct engine is in that position: OpenRouter returns a full
+   * `usage` block (tokens AND its own `cost`), which {@link parseDirectUsage}
+   * now reads, so those calls bill exactly and must not be warned about. The
+   * warning fires only when the engine reported NOTHING billable and no
+   * per-minute rate is configured either.
+   *
+   * Emitted once per process — never in the hot per-utterance path beyond a
+   * boolean check.
    */
-  private warnIfDirectPathUnbilled(audio: ConfigAiInterface["audio"], tokens: { input: number; output: number }): void {
+  private warnIfDirectPathUnbilled(
+    audio: ConfigAiInterface["audio"],
+    tokens: { input: number; output: number },
+    providerCost?: number,
+  ): void {
     if (!audio.directUrl) return;
+    // The engine priced the call itself — nothing to warn about.
+    if ((providerCost ?? 0) > 0) return;
     if (tokens.input + tokens.output > 0) return;
     // A per-minute rate is exactly the fallback this warning used to ask for:
     // with one configured the duration clock bills the call, so there is
@@ -197,10 +298,10 @@ export class AudioLLMService {
     this.directPathUnbilledWarned = true;
     this.logger.warn(
       `audio-billing: TRANSCRIPTION USAGE IS NOT BEING BILLED — the direct STT endpoint ` +
-        `(AUDIO_DIRECT_URL=${audio.directUrl}, model=${audio.model}) returns no token counts, and no ` +
-        `AUDIO_COST_PER_MINUTE is configured, so every transcription records zero usage and deducts no ` +
-        `credits. Set AUDIO_COST_PER_MINUTE to bill this engine by measured audio duration, or unset ` +
-        `AUDIO_DIRECT_URL to use the chat engine, which reports real tokens. Logged once per process.`,
+        `(AUDIO_DIRECT_URL=${audio.directUrl}, model=${audio.model}) reported neither token counts nor a ` +
+        `usage.cost, and no AUDIO_COST_PER_MINUTE is configured, so every transcription records zero usage ` +
+        `and deducts no credits. Set AUDIO_COST_PER_MINUTE to bill this engine by measured audio duration, ` +
+        `or unset AUDIO_DIRECT_URL to use the chat engine, which reports real tokens. Logged once per process.`,
     );
   }
 
@@ -211,22 +312,30 @@ export class AudioLLMService {
    * `computeCost()`, which only knows the text tiers (`configForWeight` never
    * looks at `ai.audio`), hence `costOverride`.
    *
-   * TWO PRICING CLOCKS, in priority order:
+   * THREE PRICING CLOCKS, in priority order:
    *
-   * 1. TOKENS, when the engine reports any. The chat path (AUDIO_DIRECT_URL
-   *    unset) counts the audio itself as input tokens, so this is the truer
-   *    measure and always wins.
-   * 2. DURATION, when it reports none and `ai.audio.costPerMinute` is set. The
-   *    direct `/audio/transcriptions` engine never reports tokens by design, so
-   *    without this second clock it recorded NOTHING and switching engines
-   *    silently turned transcription into unbilled work.
+   * 0. PROVIDER COST, when the engine invoices the call itself. OpenRouter's
+   *    `/audio/transcriptions` returns `usage.cost` — what it actually charged,
+   *    not what we estimate it charged — so it outranks both estimates below.
+   *    It is also the ONLY correct clock for a duration-priced model such as
+   *    whisper-large-v3-turbo, which reports a real cost alongside ZERO tokens:
+   *    the token clock prices that call at nothing and the zero-token rule then
+   *    drops the record entirely, which is exactly how a full session of 665
+   *    utterances once billed nobody.
+   * 1. TOKENS, when the engine reports counts but no cost. The chat path
+   *    (AUDIO_DIRECT_URL unset) counts the audio itself as input tokens, so
+   *    this is the truer measure wherever a provider cost is unavailable.
+   * 2. DURATION, when the engine reports neither and `ai.audio.costPerMinute`
+   *    is set. A pure estimate, and the last line of defence: without it an
+   *    engine that reports nothing records NOTHING, silently turning
+   *    transcription into unbilled work.
    *
-   * They are never combined — billing one call by both clocks would charge it
-   * twice. A call that reports neither tokens nor a priced duration still
+   * They are never combined — billing one call by two clocks would charge it
+   * twice. A call that reports no cost, no tokens and no priced duration still
    * records nothing, because `recordTokenUsage` floors every row at
-   * `minCreditsPerRecord` and a 0/0 row with no duration would invent a charge
-   * for work nobody can measure. That case is what
-   * {@link warnIfDirectPathUnbilled} shouts about.
+   * `minCreditsPerRecord` and such a row would invent a charge for work nobody
+   * can measure. That case is what {@link warnIfDirectPathUnbilled} shouts
+   * about.
    *
    * FLOOR-EXEMPT (`applyMinimum: false`), same rationale as EmbedderService:
    * transcription is per-utterance, not per-request. A session averages a few
@@ -247,6 +356,7 @@ export class AudioLLMService {
     params: { tokenUsageType?: string; relationshipId?: string; relationshipType?: string },
     tokens: { input: number; output: number },
     audioSeconds?: number,
+    providerCost?: number,
   ): Promise<void> {
     if (!params.relationshipId || !params.relationshipType) return;
 
@@ -255,18 +365,36 @@ export class AudioLLMService {
 
     const audio = this.config.get<ConfigAiInterface>("ai")?.audio;
     const costPerMinute = audio?.costPerMinute ?? 0;
+    const hasProviderCost = (providerCost ?? 0) > 0;
     const hasTokens = tokens.input + tokens.output > 0;
     const billableSeconds = audioSeconds ?? 0;
 
-    // Duration pricing is the fallback, not the default: when the engine reports
-    // tokens they are the truer measure, and double-charging a call by both
-    // clocks would inflate every chat-path transcription.
-    if (!hasTokens && (costPerMinute <= 0 || billableSeconds <= 0)) return;
+    // Nothing measurable to bill by: no invoice from the provider, no tokens,
+    // no priced duration. Recording here would invent a charge (see the floor
+    // note above), so the honest outcome is no row — and a loud warning from
+    // warnIfDirectPathUnbilled.
+    if (!hasProviderCost && !hasTokens && (costPerMinute <= 0 || billableSeconds <= 0)) return;
 
-    const cost = hasTokens
-      ? (tokens.input * (audio?.inputCostPer1MTokens ?? 0) + tokens.output * (audio?.outputCostPer1MTokens ?? 0)) /
-        1_000_000
-      : (billableSeconds / 60) * costPerMinute;
+    // Strictly ordered, never combined. The provider's own figure is measured
+    // rather than estimated, so it wins outright; tokens beat duration for the
+    // same reason one rung down.
+    const cost = hasProviderCost
+      ? (providerCost as number)
+      : hasTokens
+        ? (tokens.input * (audio?.inputCostPer1MTokens ?? 0) + tokens.output * (audio?.outputCostPer1MTokens ?? 0)) /
+          1_000_000
+        : (billableSeconds / 60) * costPerMinute;
+
+    // Which clock priced this row. Three clocks can produce three different
+    // numbers for the same audio (a provider invoice, our token rates, our
+    // per-minute rate), and nothing on the TokenUsage node records which one
+    // ran — so without this line a disputed bill cannot be traced back to the
+    // basis it was calculated on.
+    this.logger.log(
+      `audio-billing: clock=${hasProviderCost ? "provider-cost" : hasTokens ? "tokens" : "duration"} ` +
+        `cost=${cost} tokensIn=${tokens.input} tokensOut=${tokens.output} seconds=${billableSeconds} ` +
+        `model=${audio?.model} provider=${audio?.provider}`,
+    );
 
     try {
       await recorder.recordTokenUsage({
@@ -494,12 +622,33 @@ export class AudioLLMService {
         throw new Error(`HTTP ${response.status} — ${bodyText.slice(0, 500)}`);
       }
 
-      const json = (await response.json().catch(() => ({}))) as { text?: unknown };
+      const json = (await response.json().catch(() => ({}))) as { text?: unknown; usage?: unknown };
       const text = typeof json.text === "string" ? json.text : "";
 
-      session.recordResponse({ content: text, tokenUsage: { input: 0, output: 0 } });
-      session.close({ finalStatus: "success", totalTokens: { input: 0, output: 0 } });
-      return { text, tokenUsage: { input: 0, output: 0 }, audioSeconds: transcode.durationSeconds };
+      // The usage block is the engine's own accounting: OpenRouter reports
+      // `{seconds, input_tokens, output_tokens, cost}`, cost being what it
+      // actually charged. Reading it is what makes this path billable at all —
+      // it used to be discarded and hardcoded to {0,0}, and the zero-token rule
+      // in persistUsage then wrote no usage record, so entire sessions
+      // transcribed for free. Endpoints that report nothing still yield
+      // {0,0}/undefined and fall through to the per-minute clock.
+      const { tokens, providerCost, providerSeconds } = parseDirectUsage(json.usage);
+
+      this.logger.log(
+        `audio-direct: usage tokensIn=${tokens.input} tokensOut=${tokens.output} ` +
+          `providerCost=${providerCost ?? "(not reported)"} providerSeconds=${providerSeconds ?? "(not reported)"} ` +
+          `generationId=${response.headers?.get?.("x-generation-id") ?? "(none)"}`,
+      );
+
+      session.recordResponse({ content: text, tokenUsage: tokens });
+      session.close({ finalStatus: "success", totalTokens: tokens });
+      return {
+        text,
+        tokenUsage: tokens,
+        audioSeconds: transcode.durationSeconds,
+        ...(providerCost !== undefined ? { providerCost } : {}),
+        ...(providerSeconds !== undefined ? { providerSeconds } : {}),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;

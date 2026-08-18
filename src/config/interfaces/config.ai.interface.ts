@@ -240,15 +240,22 @@ export interface ConfigAiInterface {
      * Price of one minute of transcribed audio, in the same currency as the
      * per-token rates. Set via AUDIO_COST_PER_MINUTE.
      *
-     * This is what makes the `directUrl` engine billable. That endpoint reports
-     * no token counts, so a token-priced call costs nothing and - under the
-     * zero-token rule - recorded nothing at all: switching engines silently
-     * turned transcription into free work. With a rate here the cost is derived
-     * from the measured audio duration instead, so the choice of engine no
-     * longer decides whether the work is billed.
+     * LAST of the three pricing clocks in `AudioLLMService.persistUsage`, and a
+     * pure estimate: it applies only when the engine reports neither a
+     * `usage.cost` of its own nor any token counts. Endpoints that DO report
+     * usage (OpenRouter's `/audio/transcriptions` returns
+     * `{seconds, input_tokens, output_tokens, cost}`) are billed on their own
+     * figures and ignore this rate entirely.
      *
-     * Leave unset (or 0) only if you accept that the direct engine bills
-     * nothing; AudioLLMService warns loudly in that case.
+     * Still worth setting on any `directUrl` deployment. A self-hosted Whisper
+     * or an endpoint that drops its usage block reports nothing billable, and
+     * under the zero-token rule that records NO usage row at all - which is how
+     * transcription silently became free work. With a rate here the cost falls
+     * back to measured audio duration, so the choice of engine never decides
+     * whether the work is billed.
+     *
+     * Leave unset (or 0) only if you accept that an engine reporting no usage
+     * bills nothing; AudioLLMService warns loudly in that case.
      */
     costPerMinute?: number;
     /** Base64-encoded GCP service account JSON for Google Vertex AI */

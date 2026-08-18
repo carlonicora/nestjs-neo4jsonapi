@@ -747,5 +747,250 @@ describe("AudioLLMService", () => {
 
       expect(result.text).toBe("transcribed");
     });
+
+    // ── Provider-reported usage (OpenRouter /audio/transcriptions) ──────────
+    //
+    // The endpoint returns `usage: { seconds, input_tokens, output_tokens, cost }`
+    // — `cost` being the provider's own invoiced price for the request. It is a
+    // measured figure, not an estimate, so it outranks both the token clock and
+    // the per-minute clock. This whole block is a regression suite for a bug that
+    // billed a full session (665 utterances) at exactly zero: `callDirect` threw
+    // the usage block away and hardcoded {0,0}, and the zero-token rule then
+    // wrote no usage row at all.
+    describe("provider-reported usage", () => {
+      const directConfig = (overrides: Partial<Record<string, unknown>> = {}) =>
+        buildAudioConfig({
+          directUrl: "https://openrouter.ai/api/v1/audio/transcriptions",
+          directFormat: "json",
+          apiKey: "or-key",
+          model: "openai/whisper-large-v3-turbo",
+          ...overrides,
+        });
+
+      const stubDirect = (body: unknown) => {
+        const fetchMock = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(body),
+          text: () => Promise.resolve(JSON.stringify(body)),
+        } as unknown as Response);
+        vi.stubGlobal("fetch", fetchMock);
+        return fetchMock;
+      };
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it("returns the tokens and cost the endpoint reports instead of hardcoded zeros", async () => {
+        configService.get.mockReturnValue({ audio: directConfig() });
+        stubDirect({
+          text: "spoken words",
+          usage: { seconds: 9.2, total_tokens: 113, input_tokens: 83, output_tokens: 30, cost: 0.000508 },
+        });
+        const billed = await buildServiceWithRecorder();
+
+        const result = await billed.call({ audioPath: "/tmp/x.wav", prompt: "p" });
+
+        expect(result.text).toBe("spoken words");
+        expect(result.tokenUsage).toEqual({ input: 83, output: 30 });
+        expect(result.providerCost).toBeCloseTo(0.000508, 10);
+      });
+
+      it("bills a duration-priced model from usage.cost even though it reports zero tokens", async () => {
+        // whisper-large-v3-turbo is priced per audio second, so OpenRouter
+        // returns a real `cost` alongside zero token counts. Billing off tokens
+        // alone records nothing — the exact shape of the original bug.
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0 }) });
+        stubDirect({ text: "spoken words", usage: { seconds: 30, input_tokens: 0, output_tokens: 0, cost: 0.0001 } });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        expect(recordTokenUsage).toHaveBeenCalledTimes(1);
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo(0.0001, 12);
+        expect(recorded.tokens).toEqual({ input: 0, output: 0 });
+        expect(recorded.applyMinimum).toBe(false);
+      });
+
+      it("prefers the provider's own cost over the per-minute clock", async () => {
+        // 12.5s at 0.6/min would be 0.125 — an estimate the provider just
+        // superseded with the figure it actually charged.
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0.6 }) });
+        stubDirect({ text: "ok", usage: { seconds: 12.5, input_tokens: 0, output_tokens: 0, cost: 0.002 } });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo(0.002, 12);
+      });
+
+      it("prefers the provider's own cost over the configured token rates", async () => {
+        // 1M in @ 0.1 + 1M out @ 0.4 would be 0.5 by the token clock.
+        configService.get.mockReturnValue({
+          audio: directConfig({ inputCostPer1MTokens: 0.1, outputCostPer1MTokens: 0.4 }),
+        });
+        stubDirect({
+          text: "ok",
+          usage: { seconds: 5, input_tokens: 1_000_000, output_tokens: 1_000_000, cost: 0.007 },
+        });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo(0.007, 12);
+        // The real token counts still land on the row — only the PRICE comes
+        // from the provider.
+        expect(recorded.tokens).toEqual({ input: 1_000_000, output: 1_000_000 });
+      });
+
+      it("does not warn about unbilled transcription when the engine reports its own cost", async () => {
+        const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+        configService.get.mockReturnValue({ audio: directConfig() });
+        stubDirect({ text: "ok", usage: { seconds: 5, input_tokens: 0, output_tokens: 0, cost: 0.0001 } });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        expect(warnSpy.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("audio-billing"))).toHaveLength(0);
+        warnSpy.mockRestore();
+      });
+
+      it("records the tokens an endpoint reports without a cost, priced by the configured rates", async () => {
+        // OpenAI's own /audio/transcriptions reports `usage: {type: "tokens", ...}`
+        // with no `cost`, so the token clock is still the right one there.
+        configService.get.mockReturnValue({
+          audio: directConfig({ directFormat: undefined, inputCostPer1MTokens: 0.1, outputCostPer1MTokens: 0.4 }),
+        });
+        stubDirect({ text: "ok", usage: { type: "tokens", input_tokens: 1_000_000, output_tokens: 1_000_000 } });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo(0.5, 10);
+      });
+
+      it("ignores a malformed usage block and falls back to the per-minute clock", async () => {
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0.6 }) });
+        // Strings, not numbers — a shape change upstream must not poison billing.
+        stubDirect({ text: "ok", usage: { input_tokens: "83", output_tokens: null, cost: "0.000508" } });
+        const billed = await buildServiceWithRecorder();
+
+        const result = await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        expect(result.tokenUsage).toEqual({ input: 0, output: 0 });
+        expect(result.providerCost).toBeUndefined();
+        // Falls all the way back to duration: 12.5s at 0.6/min.
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo((12.5 / 60) * 0.6, 10);
+      });
+
+      // A different upstream provider may serve any given request (OpenRouter
+      // routes whisper-large-v3-turbo between DeepInfra and Groq, and nothing in
+      // the response says which), and it may report far less than OpenRouter's
+      // full block. The manual clocks must take whatever IS reported.
+      it("prices the duration fallback from the provider's own seconds when it reports no cost", async () => {
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0.6 }) });
+        // OpenAI's shape: a duration, no cost, no tokens. Its seconds (30) is
+        // what the provider billed; our transcode measured 12.5.
+        stubDirect({ text: "ok", usage: { type: "duration", seconds: 30 } });
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        expect(recorded.costOverride).toBeCloseTo((30 / 60) * 0.6, 10);
+      });
+
+      it("falls back to the locally measured duration when the provider reports no seconds either", async () => {
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0.6 }) });
+        stubDirect({ text: "ok" }); // no usage block at all
+        const billed = await buildServiceWithRecorder();
+
+        await billed.call({
+          audioPath: "/tmp/x.wav",
+          prompt: "p",
+          relationshipId: "session-1",
+          relationshipType: "Session",
+        });
+
+        const [recorded] = recordTokenUsage.mock.calls[0];
+        // ffmpeg's 12.5s, since the provider offered nothing to bill from.
+        expect(recorded.costOverride).toBeCloseTo((12.5 / 60) * 0.6, 10);
+      });
+
+      it("keeps audioSeconds as the locally measured duration regardless of what the provider reports", async () => {
+        configService.get.mockReturnValue({ audio: directConfig() });
+        stubDirect({ text: "ok", usage: { seconds: 30, cost: 0.001 } });
+        const billed = await buildServiceWithRecorder();
+
+        const result = await billed.call({ audioPath: "/tmp/x.wav", prompt: "p" });
+
+        // The published contract is "duration of the audio actually sent".
+        expect(result.audioSeconds).toBe(12.5);
+        expect(result.providerSeconds).toBe(30);
+      });
+
+      it("does not bill a failed call for the cost of a request that never returned", async () => {
+        configService.get.mockReturnValue({ audio: directConfig({ costPerMinute: 0.6 }) });
+        const fetchMock = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          text: () => Promise.resolve("upstream exploded"),
+        } as unknown as Response);
+        vi.stubGlobal("fetch", fetchMock);
+        const billed = await buildServiceWithRecorder();
+
+        await expect(
+          billed.call({
+            audioPath: "/tmp/x.wav",
+            prompt: "p",
+            relationshipId: "session-1",
+            relationshipType: "Session",
+          }),
+        ).rejects.toThrow("Audio LLM service error");
+
+        expect(recordTokenUsage).not.toHaveBeenCalled();
+      });
+    });
   });
 });
