@@ -2,7 +2,7 @@ import { Embeddings, EmbeddingsInterface } from "@langchain/core/embeddings";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { FakeListChatModel } from "@langchain/core/utils/testing";
 import { ChatVertexAI, VertexAIEmbeddings } from "@langchain/google-vertexai";
-import { AzureChatOpenAI, AzureOpenAIEmbeddings, ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { AzureOpenAIEmbeddings, ChatOpenAI, ChatOpenAIResponses, OpenAIEmbeddings } from "@langchain/openai";
 import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
@@ -570,7 +570,8 @@ export class ModelService implements OnModuleInit {
    * - `openrouter`: OpenRouter cloud service
    * - `requesty`: Requesty proxy service
    * - `vertex`: Google Vertex AI (Gemini models)
-   * - `azure`: Azure OpenAI Service
+   * - `azure`: Azure OpenAI Service — chat branch speaks the Responses API on
+   *   the GA v1 surface ({instance}.openai.azure.com/openai/v1), not chat-completions
    * - any other provider name: generic OpenAI-compatible endpoint (requires `url`)
    *
    * Each model weight resolves its own full config block (provider, apiKey,
@@ -691,7 +692,8 @@ export class ModelService implements OnModuleInit {
    * - `openrouter`: OpenRouter cloud service
    * - `requesty`: Requesty service
    * - `vertex`: Google Vertex AI (Gemini models)
-   * - `azure`: Azure OpenAI Service
+   * - `azure`: Azure OpenAI Service — chat branch speaks the Responses API on
+   *   the GA v1 surface ({instance}.openai.azure.com/openai/v1), not chat-completions
    *
    * @param params - Optional parameters
    * @param params.temperature - Temperature for text generation (0-2, default: 0.1)
@@ -710,8 +712,12 @@ export class ModelService implements OnModuleInit {
 
     // Reasoning models (gpt-5 / o-series) accept `reasoning_effort` on the chat-completions
     // call. Lower effort = far fewer reasoning tokens = much faster. Passed via modelKwargs
-    // (raw param) because the LangChain `reasoning` object is rejected by Azure chat-completions
-    // deployments. Ignored for non-reasoning models.
+    // (raw param) — this is what reaches the OpenAI-compatible chat-completions providers
+    // (openrouter, requesty, ollama, llamacpp, the generic branch). Azure no longer takes this
+    // path: `buildChatModel`'s `case "azure"` now speaks the Responses API and lifts a
+    // configured effort out of modelKwargs into `reasoning.effort` itself — a leaked
+    // `modelKwargs.reasoning_effort` there would be an unknown Responses parameter, not a
+    // rejected one. Ignored for non-reasoning models.
     const visionModelLower = (visionConfig.model || "").toLowerCase();
     const isReasoningVisionModel = visionModelLower.includes("gpt-5") || /(^|\/)o\d/.test(visionModelLower);
     // Config-sourced, so validated exactly like the chat tiers' effort — the vision
@@ -759,6 +765,13 @@ export class ModelService implements OnModuleInit {
       region?: string;
       allowFallbacks?: boolean;
       instance?: string;
+      /**
+       * IGNORED by the `case "azure"` branch below — it speaks the GA v1
+       * Responses surface, which is IMPLICITLY versioned, so no `api-version`
+       * is ever sent. Still used by azure embeddings and the transcriber
+       * (`ModelService.getTranscriber` / `buildInnerEmbedder`), which stay on
+       * their own SDK clients and are unaffected by the Responses move.
+       */
       apiVersion?: string;
       googleCredentialsBase64?: string;
     },
@@ -903,27 +916,59 @@ export class ModelService implements OnModuleInit {
       }
 
       case "azure": {
-        const azureParameters: any = {
-          azureOpenAIApiKey: cfg.apiKey,
-          azureOpenAIApiInstanceName: cfg.instance,
-          azureOpenAIApiDeploymentName: cfg.model,
-          azureOpenAIApiVersion: cfg.apiVersion,
-          // The deployment name builds the URL — it never reaches the parameter
-          // mapping. Without `model` LangChain falls back to its "gpt-3.5-turbo"
-          // default and picks the request shape from THAT, sending `max_tokens`
-          // to a gpt-5 deployment (400 — "Use 'max_completion_tokens' instead").
-          // Azure ignores the body's `model`, so this is purely a client-side
-          // signal about which model the deployment actually serves.
+        // Azure's GA v1 surface: {instance}.openai.azure.com/openai/v1 with
+        // implicit versioning (cfg.apiVersion is deliberately unused) and the
+        // deployment name in the body's `model`. The branch speaks the
+        // RESPONSES API, not chat-completions: gpt-5.6-luna rejects function
+        // tools combined with reasoning_effort on /chat/completions ("Please
+        // use /v1/responses instead", probed 2026-08-17), and new-model
+        // capabilities land on Responses first. Design + live probes:
+        // docs/superpowers/specs/2026-08-18-azure-responses-api-design.md.
+        //
+        // The v1 baseURL below is BUILT from cfg.instance — the old
+        // AzureChatOpenAI construction threw on a missing instance (it needs
+        // `azureOpenAIApiInstanceName`); this branch must not regress to a
+        // silent `https://undefined.openai.azure.com/...` ENOTFOUND.
+        if (!cfg.instance) {
+          throw new Error(
+            "Azure provider requires AI_INSTANCE (or the tier's instance): the v1 baseURL is built from it",
+          );
+        }
+        //
+        // The resolved effort travels as `reasoning: { effort }` — the
+        // Responses spelling — and must NOT stay in modelKwargs, because
+        // ChatOpenAIResponses spreads modelKwargs into the request body
+        // verbatim and `reasoning_effort` is not a Responses parameter.
+        // Destructuring also lifts out the vision tier's config-sourced
+        // effort, which arrives via opts.modelKwargs rather than
+        // opts.reasoningEffort.
+        const { reasoning_effort: azureEffort, ...azureModelKwargs } = (llmConfig.modelKwargs ?? {}) as Record<
+          string,
+          unknown
+        >;
+        return new ChatOpenAIResponses({
+          apiKey: cfg.apiKey,
           model: cfg.model,
           temperature,
           ...(timeoutMs ? { timeout: timeoutMs } : {}),
           ...(maxOutputTokens ? { maxTokens: maxOutputTokens } : {}),
-          ...(llmConfig.modelKwargs ? { modelKwargs: llmConfig.modelKwargs } : {}),
-          // ONLY `fetch` — a `baseURL` here would override the Azure endpoint
-          // that azureOpenAIApiInstanceName/DeploymentName build.
-          configuration: { fetch: unsupportedParamFetch(modelKey) },
-        };
-        return new AzureChatOpenAI(azureParameters);
+          // `none` vs `minimal` is generation-split (luna: none, nano:
+          // minimal) — sent as-is; a mismatch is repaired by the
+          // VALUE_SUCCESSORS substitution in unsupportedParamFetch.
+          ...(azureEffort ? { reasoning: { effort: azureEffort as OpenAI.Reasoning["effort"] } } : {}),
+          ...(Object.keys(azureModelKwargs).length > 0 ? { modelKwargs: azureModelKwargs } : {}),
+          // Responses is server-stateful by default (30-day retention).
+          // zdrEnabled sends store:false and keeps reasoning items
+          // client-side — deliberate posture for legal-domain traffic.
+          zdrEnabled: true,
+          // Parity with the generic branch below: 1 hard attempt + 2 soft
+          // retries through LangChain's AsyncCaller.
+          maxRetries: 2,
+          configuration: {
+            baseURL: `https://${cfg.instance}.openai.azure.com/openai/v1`,
+            fetch: unsupportedParamFetch(modelKey),
+          },
+        });
       }
 
       default:

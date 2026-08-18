@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetLearnedUnsupportedParams, unsupportedParamFetch } from "../unsupported-param-fetch";
 
@@ -337,5 +337,299 @@ describe("unsupportedParamFetch", () => {
       expect(res.status).toBe(400);
       expect(inner.calls).toHaveBeenCalledTimes(1);
     });
+  });
+
+  /**
+   * The UNCONDITIONAL half of the prose fallback. Observed live on 2026-08-18
+   * against gpt-5.6-luna on the Responses API (`/openai/v1/responses`): a plain
+   * capability rejection, `code: null`, no clashing parameter — the deployment
+   * simply does not accept `temperature` at all. Fatal in production because the
+   * app always sends a default `temperature: 0.2`.
+   */
+  describe("unconditional prose rejections (Responses API, no clash parameter)", () => {
+    it("drops an uncoded 'Unsupported parameter' rejection and retries", async () => {
+      const payload = JSON.stringify({
+        error: {
+          message: "Unsupported parameter: 'temperature' is not supported with this model.",
+          type: "invalid_request_error",
+          param: "temperature",
+          code: null,
+        },
+      });
+      const first = fakeFetch([new Response(payload, { status: 400 }), ok()]);
+      const res = await unsupportedParamFetch("azure|a|luna", first.fn)("u", {
+        body: JSON.stringify({ temperature: 0.2, model: "gpt-5.6-luna" }),
+      } as any);
+
+      expect(res.status).toBe(200);
+      expect(first.bodies[1]).toEqual({ model: "gpt-5.6-luna" });
+
+      // A second wrapper — ModelService builds a fresh one per call — is
+      // pre-repaired before the round-trip: the verdict was remembered.
+      const second = fakeFetch([ok()]);
+      const res2 = await unsupportedParamFetch("azure|a|luna", second.fn)("u", {
+        body: JSON.stringify({ temperature: 0.2, model: "gpt-5.6-luna" }),
+      } as any);
+
+      expect(res2.status).toBe(200);
+      expect(second.calls).toHaveBeenCalledTimes(1);
+      expect(second.bodies[0]).toEqual({ model: "gpt-5.6-luna" });
+    });
+
+    it("still ignores a validation error, even though it names the same parameter", async () => {
+      // "must be between" is a bad VALUE, not an unsupported capability — the
+      // unconditional pattern is anchored to "Unsupported parameter:" and must
+      // not also swallow this.
+      const payload = JSON.stringify({
+        error: {
+          message: "temperature must be between 0 and 2.",
+          type: "invalid_request_error",
+          param: "temperature",
+          code: null,
+        },
+      });
+      const inner = fakeFetch([new Response(payload, { status: 400 })]);
+      const res = await unsupportedParamFetch("azure|a|luna", inner.fn)("u", {
+        body: JSON.stringify({ temperature: 5 }),
+      } as any);
+
+      expect(res.status).toBe(400);
+      expect(inner.calls).toHaveBeenCalledTimes(1);
+    });
+
+    it("renames max_tokens through the uncoded prose path instead of dropping it", async () => {
+      const payload = JSON.stringify({
+        error: {
+          message: "Unsupported parameter: 'max_tokens' is not supported with this model.",
+          type: "invalid_request_error",
+          param: "max_tokens",
+          code: null,
+        },
+      });
+      const inner = fakeFetch([new Response(payload, { status: 400 }), ok()]);
+      await unsupportedParamFetch("azure|a|luna", inner.fn)("u", {
+        body: JSON.stringify({ max_tokens: 28000, model: "gpt-5.6-luna" }),
+      } as any);
+
+      expect(inner.bodies[1]).toEqual({ max_completion_tokens: 28000, model: "gpt-5.6-luna" });
+    });
+  });
+
+  describe("nested-parameter rejections (reasoning.effort)", () => {
+    beforeEach(() => resetLearnedUnsupportedParams());
+
+    const rejection = (param: string, message: string) =>
+      new Response(
+        JSON.stringify({ error: { message, type: "invalid_request_error", param, code: "unsupported_value" } }),
+        { status: 400 },
+      );
+
+    const ok = () => new Response(JSON.stringify({ id: "resp_1" }), { status: 200 });
+
+    it("substitutes 'none' with 'minimal' when the provider rejects it, instead of dropping", async () => {
+      const bodies: any[] = [];
+      const inner = vi.fn(async (_input: any, init: any) => {
+        bodies.push(JSON.parse(init.body));
+        return bodies.length === 1
+          ? rejection("reasoning.effort", "Unsupported value: 'none' is not supported with the 'gpt-5-nano' model.")
+          : ok();
+      });
+      const fetch = unsupportedParamFetch("azure|inst|gpt-5-nano", inner as any);
+
+      const res = await fetch("https://x/openai/v1/responses", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5-nano", input: "ok", reasoning: { effort: "none" } }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(bodies[1].reasoning).toEqual({ effort: "minimal" });
+    });
+
+    it("remembers the substitution — the next request is repaired BEFORE the round-trip", async () => {
+      const bodies: any[] = [];
+      let first = true;
+      const inner = vi.fn(async (_input: any, init: any) => {
+        bodies.push(JSON.parse(init.body));
+        if (first) {
+          first = false;
+          return rejection("reasoning.effort", "Unsupported value: 'none' is not supported.");
+        }
+        return ok();
+      });
+      const fetch = unsupportedParamFetch("azure|inst|gpt-5-nano", inner as any);
+      const body = JSON.stringify({ model: "gpt-5-nano", input: "ok", reasoning: { effort: "none" } });
+
+      await fetch("https://x", { method: "POST", body });
+      await fetch("https://x", { method: "POST", body });
+
+      // call 1 (rejected) + call 1 retry + call 2 (pre-repaired) = 3 round-trips, not 4
+      expect(bodies).toHaveLength(3);
+      expect(bodies[2].reasoning).toEqual({ effort: "minimal" });
+    });
+
+    it("drops the nested parameter when the successor value is ALSO rejected", async () => {
+      const bodies: any[] = [];
+      const inner = vi.fn(async (_input: any, init: any) => {
+        const b = JSON.parse(init.body);
+        bodies.push(b);
+        if (b.reasoning?.effort)
+          return rejection("reasoning.effort", `Unsupported value: '${b.reasoning.effort}' is not supported.`);
+        return ok();
+      });
+      const fetch = unsupportedParamFetch("azure|inst|weird-model", inner as any);
+
+      const res = await fetch("https://x", {
+        method: "POST",
+        body: JSON.stringify({ model: "weird-model", input: "ok", reasoning: { effort: "none" } }),
+      });
+
+      expect(res.status).toBe(200);
+      // none rejected → minimal sent → minimal rejected → whole reasoning key dropped
+      expect(bodies.at(-1)!.reasoning).toBeUndefined();
+    });
+
+    it("substitutes 'minimal' with 'none' — the mapping is symmetric (luna rejects minimal)", async () => {
+      const bodies: any[] = [];
+      const inner = vi.fn(async (_input: any, init: any) => {
+        bodies.push(JSON.parse(init.body));
+        return bodies.length === 1
+          ? rejection(
+              "reasoning.effort",
+              "Unsupported value: 'minimal' is not supported with the 'gpt-5.6-luna' model.",
+            )
+          : ok();
+      });
+      const fetch = unsupportedParamFetch("azure|inst|gpt-5.6-luna", inner as any);
+
+      await fetch("https://x", {
+        method: "POST",
+        body: JSON.stringify({ model: "gpt-5.6-luna", input: "ok", reasoning: { effort: "minimal" } }),
+      });
+
+      expect(bodies[1].reasoning).toEqual({ effort: "none" });
+    });
+
+    it("leaves a value-scoped nested verdict alone when the request carries an accepted value", async () => {
+      const bodies: any[] = [];
+      let first = true;
+      const inner = vi.fn(async (_input: any, init: any) => {
+        bodies.push(JSON.parse(init.body));
+        if (first) {
+          first = false;
+          return rejection("reasoning.effort", "Unsupported value: 'none' is not supported.");
+        }
+        return ok();
+      });
+      const fetch = unsupportedParamFetch("azure|inst|gpt-5-nano", inner as any);
+
+      await fetch("https://x", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", input: "ok", reasoning: { effort: "none" } }),
+      });
+      await fetch("https://x", {
+        method: "POST",
+        body: JSON.stringify({ model: "m", input: "ok", reasoning: { effort: "low" } }),
+      });
+
+      // "low" was never rejected — it must go out untouched.
+      expect(bodies.at(-1)!.reasoning).toEqual({ effort: "low" });
+    });
+  });
+});
+
+/**
+ * `error.param` in a 400 response is attacker-influenced input — the provider
+ * chose the string, and the middleware trusted it blindly. A naive `key in
+ * node` walk follows the PROTOTYPE chain (`"constructor" in {}` is true), so a
+ * crafted `param: "constructor.prototype.toString"` could land `deletePath` on
+ * the REAL, shared `Object.prototype` — process-wide corruption from a single
+ * remote 400. These tests prove the path helpers refuse to traverse there.
+ */
+describe("path safety — no prototype-chain traversal", () => {
+  afterEach(() => resetLearnedUnsupportedParams());
+
+  it("refuses to repair a __proto__ path — no round-trip, Object.prototype.toString intact", async () => {
+    const before = Object.prototype.toString;
+    const inner = fakeFetch([rejection("__proto__.toString")]);
+
+    const res = await unsupportedParamFetch("azure|a|m", inner.fn)("u", {
+      body: JSON.stringify({ temperature: 0.2 }),
+    } as any);
+
+    expect(res.status).toBe(400);
+    expect(inner.calls).toHaveBeenCalledTimes(1);
+    expect(Object.prototype.toString).toBe(before);
+  });
+
+  it("refuses to repair a constructor.prototype path — no round-trip, Object.prototype.hasOwnProperty intact", async () => {
+    const before = Object.prototype.hasOwnProperty;
+    const inner = fakeFetch([rejection("constructor.prototype.x")]);
+
+    const res = await unsupportedParamFetch("azure|a|m", inner.fn)("u", {
+      body: JSON.stringify({ temperature: 0.2 }),
+    } as any);
+
+    expect(res.status).toBe(400);
+    expect(inner.calls).toHaveBeenCalledTimes(1);
+    expect(Object.prototype.hasOwnProperty).toBe(before);
+  });
+});
+
+/**
+ * A dotted path segment can name an ARRAY index ("messages.0.content") — the
+ * path helpers must not follow it. Before this fix a coded rejection naming an
+ * array index bailed for a different reason (the flat `in` check failed), so
+ * this behaviour was never actually exercised; now that `hasPath` traverses
+ * dotted paths on purpose, arrays must be excluded explicitly.
+ */
+describe("path safety — no traversal into arrays", () => {
+  afterEach(() => resetLearnedUnsupportedParams());
+
+  it("does not traverse into an array — messages.0.content is refused, not retried", async () => {
+    const inner = fakeFetch([rejection("messages.0.content")]);
+
+    const res = await unsupportedParamFetch("azure|a|m", inner.fn)("u", {
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    } as any);
+
+    expect(res.status).toBe(400);
+    expect(inner.calls).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * `tools` / `stream` / `messages` / `input` / `response_format` must never be
+ * silently DROPPED — a gateway rejecting `tools` this way would otherwise turn
+ * a loud 400 into a silent capability downgrade (the caller believes function
+ * calling is available and it simply never fires again for the process). A
+ * RENAME or a viable VALUE substitution is still allowed; only an outright
+ * drop is refused.
+ */
+describe("NEVER_DROP — load-bearing parameters refuse to be silently dropped", () => {
+  afterEach(() => resetLearnedUnsupportedParams());
+
+  it("does not drop tools on a coded unsupported_parameter rejection — the 400 surfaces instead", async () => {
+    const inner = fakeFetch([rejection("tools", "unsupported_parameter")]);
+
+    const res = await unsupportedParamFetch("azure|a|m", inner.fn)("u", {
+      body: JSON.stringify({ tools: [{ type: "function" }], model: "m" }),
+    } as any);
+
+    expect(res.status).toBe(400);
+    expect(inner.calls).toHaveBeenCalledTimes(1);
+  });
+
+  it("still drops reasoning_effort (not in NEVER_DROP) on the tools-clash prose path, leaving tools alone", async () => {
+    // Regression guard: the NEVER_DROP guard must not touch the EXISTING
+    // conditional behaviour — the rejected param there is "reasoning_effort",
+    // not "tools", so it stays droppable and `tools` itself is never touched.
+    const inner = fakeFetch([toolsPlusEffortRejection(), ok()]);
+    const res = await unsupportedParamFetch("azure|a|luna", inner.fn)("u", {
+      body: JSON.stringify({ reasoning_effort: "low", tools: [{ type: "function" }], messages: [] }),
+    } as any);
+
+    expect(res.status).toBe(200);
+    expect(inner.bodies[1].reasoning_effort).toBeUndefined();
+    expect(inner.bodies[1].tools).toBeDefined();
   });
 });

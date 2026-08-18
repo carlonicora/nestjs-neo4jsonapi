@@ -25,6 +25,13 @@ export interface ResolvedAiCandidate {
   url: string;
   region?: string;
   instance?: string;
+  /**
+   * IGNORED by the azure chat branch (`ModelService.buildChatModel`'s `case
+   * "azure"`) — that branch speaks the GA v1 Responses surface, which is
+   * IMPLICITLY versioned, so no `api-version` is ever sent. Still read by
+   * azure EMBEDDINGS (`AzureOpenAIEmbeddings`) and the TRANSCRIBER
+   * (`AzureOpenAI` SDK client), which are unaffected by the Responses move.
+   */
   apiVersion?: string;
   googleCredentialsBase64?: string;
   allowFallbacks?: boolean;

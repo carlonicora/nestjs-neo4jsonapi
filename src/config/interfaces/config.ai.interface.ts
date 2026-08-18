@@ -52,6 +52,13 @@ export interface AiTierConfig {
   region?: string;
   secret?: string;
   instance?: string;
+  /**
+   * IGNORED by the azure chat branch (`ModelService.buildChatModel`'s `case
+   * "azure"`) — that branch speaks the GA v1 Responses surface, which is
+   * IMPLICITLY versioned, so no `api-version` is ever sent. Still read by
+   * azure EMBEDDINGS (`AzureOpenAIEmbeddings`) and the TRANSCRIBER
+   * (`AzureOpenAI` SDK client), which are unaffected by the Responses move.
+   */
   apiVersion?: string;
   inputCostPer1MTokens: number;
   outputCostPer1MTokens: number;

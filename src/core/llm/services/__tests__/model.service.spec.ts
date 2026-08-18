@@ -37,6 +37,7 @@ import {
   writeGcpCredentials,
 } from "../model.service";
 import { ModelWeight } from "../../enums/model.weight";
+import { ChatOpenAIResponses } from "@langchain/openai";
 
 function makeService(aiConfig: any): ModelService {
   const configService = { get: (_k: string) => aiConfig } as any;
@@ -471,8 +472,11 @@ describe("ModelService reasoning effort reaches EVERY provider branch", () => {
   // returns early. `reasoningEffort` was therefore silently dropped on Azure — the one
   // provider this project runs — while every test here passed, because they all built
   // an `openrouter` tier. Assert each branch explicitly.
+  //
+  // The azure branch is asserted separately, below, because it now speaks the
+  // Responses API (`reasoning.effort`, not `modelKwargs.reasoning_effort`) — see
+  // "ModelService azure branch speaks the Responses API".
   const providers = [
-    { provider: "azure", instance: "inst", apiVersion: "2024-12-01-preview" },
     { provider: "openrouter", url: "https://openrouter.ai/api/v1" },
     { provider: "ollama", url: "http://localhost:11434/v1" },
     { provider: "llamacpp", url: "http://localhost:8033/v1" },
@@ -492,6 +496,87 @@ describe("ModelService reasoning effort reaches EVERY provider branch", () => {
       expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
     });
   }
+});
+
+describe("ModelService azure branch speaks the Responses API", () => {
+  // Azure rejects tools + reasoning_effort on chat/completions for gpt-5.6-luna
+  // ("Please use /v1/responses instead"), so the whole branch was moved to the
+  // GA v1 Responses surface — see docs/superpowers/specs/2026-08-18-azure-responses-api-design.md.
+  const azureTier = (over: any = {}) =>
+    tier({ provider: "azure", instance: "inst", apiVersion: "2024-12-01-preview", model: "gpt-5.6-luna", ...over });
+  const svcWith = (over: any = {}) => makeService({ ai: azureTier(over), aiLite: tier(), aiLarge: tier() });
+
+  it("builds a ChatOpenAIResponses against the v1 surface derived from the instance", () => {
+    const llm = svcWith().getLLM() as any;
+
+    expect(llm).toBeInstanceOf(ChatOpenAIResponses);
+    expect(llm.clientConfig.baseURL).toBe("https://inst.openai.azure.com/openai/v1");
+  });
+
+  it("never puts the api-version on the client — the v1 surface has none", () => {
+    const llm = svcWith().getLLM() as any;
+    expect(llm.azureOpenAIApiVersion).toBeUndefined();
+    expect(llm.clientConfig.baseURL).not.toContain("api-version");
+  });
+
+  it("throws when azure has no instance configured — the v1 baseURL is built from it", () => {
+    // The old AzureChatOpenAI construction threw on a missing instance
+    // (azureOpenAIApiInstanceName); this branch must not regress to a silent
+    // `https://undefined.openai.azure.com/...` ENOTFOUND.
+    const svc = svcWith({ instance: undefined });
+    expect(() => svc.getLLM()).toThrow(
+      "Azure provider requires AI_INSTANCE (or the tier's instance): the v1 baseURL is built from it",
+    );
+  });
+
+  it("carries a per-call effort as reasoning.effort, NOT modelKwargs.reasoning_effort", () => {
+    const llm = svcWith().getLLM({ reasoningEffort: "low" }) as any;
+
+    expect(llm.reasoning).toEqual({ effort: "low" });
+    // ChatOpenAIResponses spreads modelKwargs into the request body verbatim —
+    // a leaked reasoning_effort would be an unknown Responses parameter.
+    expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
+  });
+
+  it("spells disableThinking as reasoning.effort none", () => {
+    const llm = svcWith().getLLM({ disableThinking: true }) as any;
+    expect(llm.reasoning).toEqual({ effort: "none" });
+  });
+
+  it("sends no reasoning object when no effort is asked for", () => {
+    const llm = svcWith().getLLM() as any;
+    expect(llm.reasoning).toBeUndefined();
+  });
+
+  it("opts out of server-side response storage (zdrEnabled → store:false)", () => {
+    // Responses is stateful by default with 30-day retention — wrong for
+    // legal-domain traffic. zdrEnabled makes LangChain send store:false.
+    const llm = svcWith().getLLM() as any;
+    expect(llm.zdrEnabled).toBe(true);
+  });
+
+  it("hands the vision tier's config-sourced effort to reasoning.effort", () => {
+    // getVisionLLM resolves its effort into opts.modelKwargs.reasoning_effort
+    // (model.service.ts:713-721) — the azure branch must lift it out, or the
+    // vision effort regresses silently.
+    const svc = makeService({
+      ai: tier(),
+      aiLite: tier(),
+      aiLarge: tier(),
+      vision: tier({ provider: "azure", instance: "inst", model: "gpt-5-nano", reasoningEffort: "low" }),
+    });
+    const llm = svc.getVisionLLM() as any;
+
+    expect(llm).toBeInstanceOf(ChatOpenAIResponses);
+    expect(llm.reasoning).toEqual({ effort: "low" });
+    expect(llm.modelKwargs?.reasoning_effort).toBeUndefined();
+  });
+
+  it("still keys the client cache on the resolved effort", () => {
+    const svc = svcWith();
+    expect(svc.getLLM({ reasoningEffort: "low" })).not.toBe(svc.getLLM({ reasoningEffort: "high" }));
+    expect(svc.getLLM({ reasoningEffort: "low" })).toBe(svc.getLLM({ reasoningEffort: "low" }));
+  });
 });
 
 describe("ModelService.supportsStrictStructuredOutput", () => {
