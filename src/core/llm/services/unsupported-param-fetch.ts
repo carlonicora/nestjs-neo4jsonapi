@@ -136,7 +136,8 @@ const splitPath = (param: string): string[] => param.split(".");
  */
 const DANGEROUS_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 
-const isDangerousPath = (param: string): boolean => splitPath(param).some((segment) => DANGEROUS_PATH_SEGMENTS.has(segment));
+const isDangerousPath = (param: string): boolean =>
+  splitPath(param).some((segment) => DANGEROUS_PATH_SEGMENTS.has(segment));
 
 /** A plain JSON object node — excludes arrays (and null), so the path
  *  helpers never index into a list. */
