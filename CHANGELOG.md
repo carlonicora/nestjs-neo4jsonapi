@@ -1,3 +1,9 @@
+## [2.14.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.2...v2.14.3) (2026-08-19)
+
+### 📦 Code Refactoring
+
+* **config:** route every env read through base.config ([63b322b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/63b322be1f7b06a8ae96bf289d66de693010f1f1))
+
 ## [2.14.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.1...v2.14.2) (2026-08-18)
 
 ### 🐛 Bug Fixes
