@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "crypto";
 import { Redis } from "ioredis";
+import { baseConfig } from "../../../config/base.config";
 import { BaseConfigInterface, ConfigRedisInterface } from "../../../config/interfaces";
 import { ModelWeight } from "../enums/model.weight";
 
@@ -27,7 +28,7 @@ export function buildCacheKey(params: {
   systemPrompts: string[];
   prompt: string;
 }): string {
-  const version = process.env.CACHE_VERSION ?? "v1";
+  const version = baseConfig.cache.version;
   const raw = `${version}|${params.modelWeight}|${params.temperature ?? ""}|${params.systemPrompts.join("|")}|${params.prompt}`;
   const digest = createHash("sha256").update(raw).digest("hex");
   return `llm:${digest}`;

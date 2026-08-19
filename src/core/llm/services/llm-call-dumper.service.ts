@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { baseConfig } from "../../../config/base.config";
 import { LLMCallMetadata } from "../interfaces/llm-call-metadata.interface";
 import { WebSocketService } from "../../websocket/services/websocket.service";
 
@@ -309,7 +310,7 @@ class RealDumpSession implements DumpSession {
    * means no redaction.
    */
   private shouldRedact(): boolean {
-    return process.env.ASSISTANT_DUMP_LLM_REDACT === "true";
+    return baseConfig.ai.dump.redact;
   }
 
   /**
@@ -318,13 +319,7 @@ class RealDumpSession implements DumpSession {
    * left untouched even if it would otherwise be redacted.
    */
   private get keepFields(): Set<string> {
-    const raw = process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS ?? "";
-    return new Set(
-      raw
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0),
-    );
+    return new Set(baseConfig.ai.dump.keepFields);
   }
 
   private static readonly POLICY_PROMPT_RE = /consent|ethical|moral|legal/i;
@@ -406,12 +401,8 @@ export class LLMCallDumper {
     @Optional() private readonly cls?: ClsService,
     @Optional() private readonly webSocket?: WebSocketService,
   ) {
-    this.enabled = process.env.ASSISTANT_DUMP_LLM_CALLS === "1";
-    // Default to `<cwd>/.llm-dumps`. When the API runs via
-    // `pnpm --filter neural-erp-api dev`, cwd is `apps/api/`, so this lands at
-    // `apps/api/.llm-dumps/` (which is gitignored). For any other cwd, set
-    // ASSISTANT_DUMP_LLM_CALLS_DIR to an absolute path.
-    this.outputDir = process.env.ASSISTANT_DUMP_LLM_CALLS_DIR ?? `${process.cwd()}/.llm-dumps`;
+    this.enabled = baseConfig.ai.dump.enabled;
+    this.outputDir = baseConfig.ai.dump.dir;
   }
 
   startSession(params: DumpSessionStartParams): DumpSession {

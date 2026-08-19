@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Redis } from "ioredis";
+import { baseConfig } from "../../../config/base.config";
 import { BaseConfigInterface, ConfigRedisInterface } from "../../../config/interfaces";
 
 export interface NotificationMessage {
@@ -75,7 +76,7 @@ export class RedisMessagingService implements OnModuleInit, OnModuleDestroy {
     const fullNotification: NotificationMessage = {
       ...notification,
       timestamp: new Date(),
-      source: process.env.APP_MODE === "worker" ? "worker" : "api",
+      source: baseConfig.environment.appMode,
     };
 
     await this.publisher.publish(this.channel, JSON.stringify(fullNotification));

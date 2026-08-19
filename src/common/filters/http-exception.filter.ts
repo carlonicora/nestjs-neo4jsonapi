@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Optional } from "@nestjs/common";
 import { FastifyReply, FastifyRequest } from "fastify";
+import { baseConfig } from "../../config/base.config";
 import { AppLoggingService } from "../../core/logging/services/logging.service";
 
 /**
@@ -7,7 +8,7 @@ import { AppLoggingService } from "../../core/logging/services/logging.service";
  * Stack traces should be hidden from clients and sanitized in logs in production.
  */
 function isProduction(): boolean {
-  return process.env.NODE_ENV === "production";
+  return baseConfig.environment.nodeEnv === "production";
 }
 
 /**

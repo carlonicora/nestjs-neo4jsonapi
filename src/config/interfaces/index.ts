@@ -24,6 +24,7 @@ export * from "./config.job.names.interface";
 export * from "./config.jwt.interface";
 export * from "./config.logging.interface";
 export * from "./config.mcp.interface";
+export * from "./config.model.manager.interface";
 export * from "./config.neo4j.interface";
 export * from "./config.oauth.interface";
 export * from "./config.operator.interface";

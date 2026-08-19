@@ -11,6 +11,7 @@ import * as os from "os";
 import * as path from "path";
 import { ClsService } from "nestjs-cls";
 import OpenAI, { AzureOpenAI } from "openai";
+import { baseConfig } from "../../../config/base.config";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { ModelWeight } from "../enums/model.weight";
@@ -90,12 +91,8 @@ export function validateAiUrl(url: string, provider: string): void {
   if (parsed.protocol !== "https:" && !isLocalhost && !isDotLocal) {
     throw new Error(`AI_URL must be HTTPS (or localhost) — refusing to send API key over ${parsed.protocol}`);
   }
-  const allowlistRaw = process.env.AI_URL_ALLOWLIST;
-  if (allowlistRaw) {
-    const allowlist = allowlistRaw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  const allowlist = baseConfig.ai.urlAllowlist;
+  if (allowlist) {
     const ok = allowlist.some((host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`));
     if (!ok) throw new Error(`AI_URL hostname "${parsed.hostname}" not in allowlist`);
   }
@@ -269,11 +266,12 @@ export class ModelService implements OnModuleInit {
    * call) for every model/embedder/structured call — invaluable for local dev and
    * tests, catastrophic in production (it would write fake AI data into the graph).
    * This refuses to start when MOCK_AI is on AND the environment is production.
-   * Reads `process.env.ENV` directly on purpose: a fail-closed safety gate must not
-   * depend on config wiring being correct.
+   * Reads the module-level `baseConfig` rather than the injected ConfigService on
+   * purpose: a fail-closed safety gate must not depend on DI wiring being correct,
+   * and `baseConfig` is a plain constant resolved at import time.
    */
   onModuleInit(): void {
-    if (this.aiConfig.mock && process.env.ENV === "production") {
+    if (this.aiConfig.mock && baseConfig.api.env === "production") {
       throw new Error("MOCK_AI must never run in production — refusing to start.");
     }
   }
@@ -882,6 +880,9 @@ export class ModelService implements OnModuleInit {
         if (cfg.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(cfg.googleCredentialsBase64, "base64").toString("utf-8");
           const credsPath = writeGcpCredentials(credentialsJson, opts.credentialFileTag);
+          // WRITE, not a config read: the Google auth library discovers the
+          // service-account file through this process variable, so exporting it
+          // is the only way to hand it the credentials we just materialised.
           process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
         }
         // Reasoning effort on Vertex.
@@ -1097,6 +1098,9 @@ export class ModelService implements OnModuleInit {
         if (embedderConfig.googleCredentialsBase64) {
           const credentialsJson = Buffer.from(embedderConfig.googleCredentialsBase64, "base64").toString("utf-8");
           const credsPath = writeGcpCredentials(credentialsJson, "embedder");
+          // WRITE, not a config read: the Google auth library discovers the
+          // service-account file through this process variable, so exporting it
+          // is the only way to hand it the credentials we just materialised.
           process.env.GOOGLE_APPLICATION_CREDENTIALS = credsPath;
         }
 

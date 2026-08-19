@@ -6,7 +6,7 @@ export class VersionService {
   private readonly apiConfig = baseConfig.api;
 
   getVersion(): string {
-    return process.env.npm_package_version || "1.0.0";
+    return this.apiConfig.version;
   }
 
   getApiUrl(): string {

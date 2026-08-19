@@ -12,6 +12,22 @@ import { SearchCommunitiesTool } from "../search-communities.tool";
 import { OperatorTestActionTool } from "../operator-test-action.tool";
 import { OperatorToolRegistry } from "../operator.tool.registry";
 
+// `baseConfig` is a module-level constant captured when the config module is
+// first imported, so a test that mutates `process.env` afterwards would never
+// be seen by the code under test. Re-derive it from the REAL builder on every
+// access, so these cases keep exercising the env -> config mapping they were
+// written for without weakening the assertions.
+vi.mock("../../../../config/base.config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../config/base.config")>();
+  return {
+    ...actual,
+    get baseConfig() {
+      return actual.createBaseConfig();
+    },
+  };
+});
+
+
 // Real capture wrapper, dependencies unused by capture().
 const factory = new ToolFactory({} as any, {} as any);
 

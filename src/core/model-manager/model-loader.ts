@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { Logger } from "@nestjs/common";
+import { baseConfig } from "../../config/base.config";
 import { ModelsConfig, ConfigValidationResult, OnnxModelConfig, TransformersModelConfig } from "./model-manager.config";
 
 const logger = new Logger("ModelLoader");
@@ -17,15 +18,7 @@ export class ModelLoader {
   private configPath: string;
 
   constructor(configPath?: string) {
-    this.configPath = configPath || this.getDefaultConfigPath();
-  }
-
-  private getDefaultConfigPath(): string {
-    const fromEnv = process.env.MODEL_CONFIG_PATH;
-    if (fromEnv) {
-      return fromEnv;
-    }
-    return path.join(process.cwd(), "config", "models.config.yaml");
+    this.configPath = configPath || baseConfig.modelManager.configPath;
   }
 
   load(): ModelsConfig {

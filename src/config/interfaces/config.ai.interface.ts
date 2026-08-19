@@ -132,6 +132,36 @@ export interface ConfigAiInterface {
    */
   connectionCooldownMinutes: number;
   /**
+   * Host suffixes an AI_URL is allowed to point at, parsed from the
+   * comma-separated AI_URL_ALLOWLIST.
+   *
+   * `undefined` means the var was unset/empty and NO allowlist check runs — it
+   * is NOT the same as an empty array, which means "the var was set but listed
+   * no usable host" and therefore rejects every URL. `validateAiUrl` relies on
+   * that distinction, so keep the field optional.
+   */
+  urlAllowlist?: string[];
+  /**
+   * Developer LLM call dumping — see LLMCallDumper. Driven by
+   * ASSISTANT_DUMP_LLM_{CALLS,CALLS_DIR,REDACT,KEEP_FIELDS}.
+   */
+  dump: {
+    /** ASSISTANT_DUMP_LLM_CALLS === "1" (default false). Any other value is off. */
+    enabled: boolean;
+    /** Output directory, from ASSISTANT_DUMP_LLM_CALLS_DIR (default `<cwd>/.llm-dumps`). */
+    dir: string;
+    /**
+     * Opt-in prompt redaction, ASSISTANT_DUMP_LLM_REDACT === "true"
+     * (default false so local development keeps seeing full prompts).
+     */
+    redact: boolean;
+    /**
+     * Dot-paths left untouched by redaction, parsed from the comma-separated
+     * ASSISTANT_DUMP_LLM_KEEP_FIELDS (default empty).
+     */
+    keepFields: string[];
+  };
+  /**
    * Mistral Document AI (OCR) on Azure AI Foundry — see DocumentAiService.
    * Driven by DOCUMENT_AI_{ENABLED,PROVIDER,API_KEY,MODEL,URL,API_VERSION,COST_PER_PAGE}.
    */

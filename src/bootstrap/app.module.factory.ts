@@ -153,7 +153,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
 
           // Discord bot (only in worker mode when token is configured)
           // IMPORTANT: Must be AFTER appModules so Necord can discover decorated handlers
-          ...(modeConfig.enableCronJobs && process.env.DISCORD_TOKEN
+          ...(modeConfig.enableCronJobs && baseConfig.discord.token
             ? [
                 NecordModule.forRootAsync({
                   imports: [ConfigModule],

@@ -3,6 +3,22 @@ import { ArgumentsHost, HttpException, HttpStatus } from "@nestjs/common";
 import { HttpExceptionFilter } from "../http-exception.filter";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 
+// `baseConfig` is a module-level constant captured when the config module is
+// first imported, so a test that mutates `process.env` afterwards would never
+// be seen by the code under test. Re-derive it from the REAL builder on every
+// access, so these cases keep exercising the env -> config mapping they were
+// written for without weakening the assertions.
+vi.mock("../../../config/base.config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../config/base.config")>();
+  return {
+    ...actual,
+    get baseConfig() {
+      return actual.createBaseConfig();
+    },
+  };
+});
+
+
 describe("HttpExceptionFilter", () => {
   let filter: HttpExceptionFilter;
   let mockLogger: vi.Mocked<Partial<AppLoggingService>>;

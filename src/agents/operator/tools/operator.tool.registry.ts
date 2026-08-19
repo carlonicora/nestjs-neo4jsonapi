@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { baseConfig } from "../../../config/base.config";
 import { DescribeEntityTool } from "../../graph/tools/describe-entity.tool";
 import { ReadEntityTool } from "../../graph/tools/read-entity.tool";
 import { ResolveEntityTool } from "../../graph/tools/resolve-entity.tool";
@@ -72,7 +73,7 @@ export class OperatorToolRegistry {
     // contributed spread so the duplicate-name guard below covers them too.
     definitions.push(...(this.entityWriteTools?.buildDefinitions(ctx, recorder) ?? []));
 
-    if (process.env.NODE_ENV !== "production") {
+    if (baseConfig.environment.nodeEnv !== "production") {
       definitions.push(this.operatorTestActionTool.buildDefinition(recorder));
     }
 

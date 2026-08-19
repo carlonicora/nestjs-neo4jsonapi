@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as path from "path";
 import { createBaseConfig } from "../base.config";
 
 describe("createBaseConfig — AI tiers", () => {
@@ -242,5 +243,203 @@ describe("createBaseConfig — chunker", () => {
     expect(c.strategy).toBe("semantic");
     expect(c.ocrLanguage).toBe("ita");
     expect(c.targetChars).toBe(3000);
+  });
+});
+
+/**
+ * Coverage for the variables that moved into this file when the direct
+ * `process.env` reads were removed from the services that used to own them.
+ * The services now only surface what config resolved, so the env mapping and
+ * its defaults are asserted here.
+ */
+describe("createBaseConfig — env reads centralised from services", () => {
+  const KEYS = [
+    "npm_package_version",
+    "APP_MODE",
+    "NODE_ENV",
+    "CACHE_VERSION",
+    "LOG_LEVEL",
+    "CONSOLE_ENABLED",
+    "DEBUG_LOGGING_ENABLED",
+    "DEBUG_LOG_PATH",
+    "AI_URL_ALLOWLIST",
+    "ASSISTANT_DUMP_LLM_CALLS",
+    "ASSISTANT_DUMP_LLM_CALLS_DIR",
+    "ASSISTANT_DUMP_LLM_REDACT",
+    "ASSISTANT_DUMP_LLM_KEEP_FIELDS",
+    "MODEL_CONFIG_PATH",
+    "MODELS_CACHE_DIR",
+    "MODEL_BASE_URL",
+    "MODEL_VERIFY_HASH",
+    "MODEL_STRICT_HASH",
+    "MODEL_AUTO_UPDATE",
+    "ONNX_INTRA_OP_NUM_THREADS",
+    "ONNX_INTER_OP_NUM_THREADS",
+  ];
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  describe("api.version", () => {
+    it("reads npm_package_version", () => {
+      process.env.npm_package_version = "2.5.10";
+      expect(createBaseConfig().api.version).toBe("2.5.10");
+    });
+
+    it("falls back to 1.0.0 when unset or empty", () => {
+      expect(createBaseConfig().api.version).toBe("1.0.0");
+      process.env.npm_package_version = "";
+      expect(createBaseConfig().api.version).toBe("1.0.0");
+    });
+
+    it("passes a semantic-version string through untouched", () => {
+      process.env.npm_package_version = "1.2.3-alpha.1";
+      expect(createBaseConfig().api.version).toBe("1.2.3-alpha.1");
+    });
+  });
+
+  describe("environment", () => {
+    it("defaults appMode to api and only 'worker' flips it", () => {
+      expect(createBaseConfig().environment.appMode).toBe("api");
+      process.env.APP_MODE = "anything-else";
+      expect(createBaseConfig().environment.appMode).toBe("api");
+      process.env.APP_MODE = "worker";
+      expect(createBaseConfig().environment.appMode).toBe("worker");
+    });
+
+    it("exposes NODE_ENV as an empty string when unset", () => {
+      expect(createBaseConfig().environment.nodeEnv).toBe("");
+      process.env.NODE_ENV = "production";
+      expect(createBaseConfig().environment.nodeEnv).toBe("production");
+    });
+  });
+
+  describe("cache.version", () => {
+    it("defaults to v1 and reads CACHE_VERSION", () => {
+      expect(createBaseConfig().cache.version).toBe("v1");
+      process.env.CACHE_VERSION = "v2";
+      expect(createBaseConfig().cache.version).toBe("v2");
+    });
+  });
+
+  describe("logging", () => {
+    it("leaves level empty when unset so each transport applies its own default", () => {
+      expect(createBaseConfig().logging.level).toBe("");
+      process.env.LOG_LEVEL = "warn";
+      expect(createBaseConfig().logging.level).toBe("warn");
+    });
+
+    it("keeps console output off unless CONSOLE_ENABLED is exactly 'true'", () => {
+      expect(createBaseConfig().logging.consoleEnabled).toBe(false);
+      process.env.CONSOLE_ENABLED = "1";
+      expect(createBaseConfig().logging.consoleEnabled).toBe(false);
+      process.env.CONSOLE_ENABLED = "true";
+      expect(createBaseConfig().logging.consoleEnabled).toBe(true);
+    });
+
+    it("reads the debug round-logger switches", () => {
+      const off = createBaseConfig().logging.debug;
+      expect(off.enabled).toBe(false);
+      expect(off.basePath).toBe("./logs");
+
+      process.env.DEBUG_LOGGING_ENABLED = "true";
+      process.env.DEBUG_LOG_PATH = "./test-logs";
+      const on = createBaseConfig().logging.debug;
+      expect(on.enabled).toBe(true);
+      expect(on.basePath).toBe("./test-logs");
+    });
+  });
+
+  describe("ai.urlAllowlist", () => {
+    it("is undefined when unset, so no allowlist check runs", () => {
+      expect(createBaseConfig().ai.urlAllowlist).toBeUndefined();
+      process.env.AI_URL_ALLOWLIST = "";
+      expect(createBaseConfig().ai.urlAllowlist).toBeUndefined();
+    });
+
+    it("splits, trims and drops empty entries", () => {
+      process.env.AI_URL_ALLOWLIST = " api.example.com , openrouter.ai ,, ";
+      expect(createBaseConfig().ai.urlAllowlist).toEqual(["api.example.com", "openrouter.ai"]);
+    });
+
+    it("keeps an empty ARRAY distinct from undefined when the value lists no host", () => {
+      // A set-but-unusable value must reject every URL rather than silently
+      // disabling the check.
+      process.env.AI_URL_ALLOWLIST = ",";
+      expect(createBaseConfig().ai.urlAllowlist).toEqual([]);
+    });
+  });
+
+  describe("ai.dump", () => {
+    it("is off unless ASSISTANT_DUMP_LLM_CALLS is exactly '1'", () => {
+      expect(createBaseConfig().ai.dump.enabled).toBe(false);
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "true";
+      expect(createBaseConfig().ai.dump.enabled).toBe(false);
+      process.env.ASSISTANT_DUMP_LLM_CALLS = "1";
+      expect(createBaseConfig().ai.dump.enabled).toBe(true);
+    });
+
+    it("defaults the output dir to <cwd>/.llm-dumps", () => {
+      expect(createBaseConfig().ai.dump.dir).toBe(`${process.cwd()}/.llm-dumps`);
+      process.env.ASSISTANT_DUMP_LLM_CALLS_DIR = "/tmp/dumps";
+      expect(createBaseConfig().ai.dump.dir).toBe("/tmp/dumps");
+    });
+
+    it("defaults redaction off and parses the keep-list", () => {
+      const off = createBaseConfig().ai.dump;
+      expect(off.redact).toBe(false);
+      expect(off.keepFields).toEqual([]);
+
+      process.env.ASSISTANT_DUMP_LLM_REDACT = "true";
+      process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS = "metadata.gameId, metadata.roundId ,";
+      const on = createBaseConfig().ai.dump;
+      expect(on.redact).toBe(true);
+      expect(on.keepFields).toEqual(["metadata.gameId", "metadata.roundId"]);
+    });
+  });
+
+  describe("modelManager", () => {
+    it("defaults every path, host and switch", () => {
+      const m = createBaseConfig().modelManager;
+      expect(m.configPath).toBe(path.join(process.cwd(), "config", "models.config.yaml"));
+      expect(m.cacheDir).toBe(path.join(process.cwd(), ".cache", "models"));
+      expect(m.baseUrl).toBe("https://huggingface.co");
+      expect(m.verifyHash).toBe(true);
+      expect(m.strictHash).toBe(true);
+      expect(m.autoUpdate).toBe(true);
+      expect(m.onnx).toEqual({ intraOpNumThreads: 2, interOpNumThreads: 1 });
+    });
+
+    it("reads every override, and only the literal 'false' disables a switch", () => {
+      process.env.MODEL_CONFIG_PATH = "/etc/models.yaml";
+      process.env.MODELS_CACHE_DIR = "/var/cache/models";
+      process.env.MODEL_BASE_URL = "https://mirror.example.com";
+      process.env.MODEL_VERIFY_HASH = "false";
+      process.env.MODEL_STRICT_HASH = "0";
+      process.env.MODEL_AUTO_UPDATE = "false";
+      process.env.ONNX_INTRA_OP_NUM_THREADS = "8";
+      process.env.ONNX_INTER_OP_NUM_THREADS = "4";
+
+      const m = createBaseConfig().modelManager;
+      expect(m.configPath).toBe("/etc/models.yaml");
+      expect(m.cacheDir).toBe("/var/cache/models");
+      expect(m.baseUrl).toBe("https://mirror.example.com");
+      expect(m.verifyHash).toBe(false);
+      // "0" is not "false", so the switch stays on — the documented semantics.
+      expect(m.strictHash).toBe(true);
+      expect(m.autoUpdate).toBe(false);
+      expect(m.onnx).toEqual({ intraOpNumThreads: 8, interOpNumThreads: 4 });
+    });
   });
 });

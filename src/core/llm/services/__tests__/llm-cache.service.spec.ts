@@ -2,6 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelWeight } from "../../enums/model.weight";
 import { LLMCacheService, buildCacheKey } from "../llm-cache.service";
 
+// `baseConfig` is a module-level constant captured when the config module is
+// first imported, so a test that mutates `process.env` afterwards would never
+// be seen by the code under test. Re-derive it from the REAL builder on every
+// access, so these cases keep exercising the env -> config mapping they were
+// written for without weakening the assertions.
+vi.mock("../../../../config/base.config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../config/base.config")>();
+  return {
+    ...actual,
+    get baseConfig() {
+      return actual.createBaseConfig();
+    },
+  };
+});
+
+
 /**
  * The cache talks to Redis through an ioredis-shaped client. We mock only the
  * two methods the service uses (`get` and `set`) so the suite never touches a

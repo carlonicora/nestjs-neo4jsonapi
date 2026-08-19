@@ -25,6 +25,22 @@ import { CompanyRepository } from "../../company/repositories/company.repository
 import { UserRepository } from "../../user/repositories/user.repository";
 import { QueueId } from "../../../config/enums/queue.id";
 
+// `baseConfig` is a module-level constant captured when the config module is
+// first imported, so a test that mutates `process.env` afterwards would never
+// be seen by the code under test. Re-derive it from the REAL builder on every
+// access, so these cases keep exercising the env -> config mapping they were
+// written for without weakening the assertions.
+vi.mock("../../../config/base.config", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../config/base.config")>();
+  return {
+    ...actual,
+    get baseConfig() {
+      return actual.createBaseConfig();
+    },
+  };
+});
+
+
 describe("ReferralService", () => {
   let service: ReferralService;
   let mockConfig: Required<ReferralModuleConfig>;

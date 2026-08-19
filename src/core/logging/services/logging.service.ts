@@ -35,8 +35,8 @@ export class AppLoggingService implements LoggingServiceInterface, LoggerService
         return;
       }
 
-      const baseLevel = process.env.LOG_LEVEL || "info";
-      const consoleEnabled = process.env.CONSOLE_ENABLED === "true";
+      const baseLevel = loggingConfig.level || "info";
+      const consoleEnabled = loggingConfig.consoleEnabled;
 
       const targets: any[] = [
         {
@@ -85,8 +85,8 @@ export class AppLoggingService implements LoggingServiceInterface, LoggerService
   }
 
   private initializeFileLogger(jobName?: string) {
-    const baseLevel = (process.env.LOG_LEVEL || "trace") as pino.Level;
-    const consoleEnabled = process.env.CONSOLE_ENABLED === "true";
+    const baseLevel = (this.loggingConfig.level || "trace") as pino.Level;
+    const consoleEnabled = this.loggingConfig.consoleEnabled;
 
     // Only output to console if explicitly enabled
     const streamLevel = consoleEnabled ? baseLevel : ("silent" as pino.Level);

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "crypto";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 
+import { baseConfig } from "../../../config/base.config";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { QueueId } from "../../../config/enums/queue.id";
@@ -56,10 +57,13 @@ export class ReferralService implements ReferralCompletionHandler {
   }
 
   /**
-   * Build the referral URL using APP_URL environment variable.
+   * Build the referral URL from the configured app URL (APP_URL).
+   *
+   * `app.url` is normalised with a trailing slash by the config layer, so it is
+   * stripped here to avoid a doubled separator before `/register`.
    */
   private buildReferralUrl(referralCode: string): string {
-    const base = (process.env.APP_URL || "").replace(/\/$/, "");
+    const base = baseConfig.app.url.replace(/\/$/, "");
     return `${base}/register?ref=${referralCode}`;
   }
 

@@ -1,3 +1,5 @@
+import * as path from "path";
+
 import { BaseConfigInterface } from "./interfaces/base.config.interface";
 import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
@@ -63,6 +65,24 @@ const buildAiTier = (suffix: string): AiTierConfig => {
     allowFallbacks,
     googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),
   };
+};
+
+/**
+ * Parses AI_URL_ALLOWLIST into the host-suffix list `validateAiUrl` enforces.
+ *
+ * Returns `undefined` — not `[]` — when the var is unset or empty, because the
+ * two mean opposite things downstream: `undefined` skips the allowlist check
+ * entirely, while an empty array is a list that matches no host and therefore
+ * rejects every URL. Collapsing them would silently disable the check for a
+ * misconfigured value such as `AI_URL_ALLOWLIST=","`.
+ */
+const buildAiUrlAllowlist = (): string[] | undefined => {
+  const raw = process.env.AI_URL_ALLOWLIST;
+  if (!raw) return undefined;
+  return raw
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
 };
 
 /**
@@ -173,6 +193,11 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
   const config = {
     environment: {
       type: environmentType,
+      // APP_MODE, not the `environmentType` option: the pre-built `baseConfig`
+      // export is created with no options and therefore always reports
+      // `type: "api"`, even inside the worker process.
+      appMode: (process.env.APP_MODE === "worker" ? "worker" : "api") as "worker" | "api",
+      nodeEnv: process.env.NODE_ENV || "",
     },
     api: {
       url: process.env.API_URL
@@ -182,6 +207,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         : "http://localhost:3000/",
       port: parseInt(process.env.API_PORT || "3000"),
       env: process.env.ENV || "development",
+      version: process.env.npm_package_version || "1.0.0",
     },
     app: {
       url: process.env.APP_URL
@@ -207,6 +233,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       enabled: process.env.CACHE_ENABLED !== "false",
       defaultTtl: parseInt(process.env.CACHE_DEFAULT_TTL || "600"),
       skipPatterns: (process.env.CACHE_SKIP_PATTERNS || "/access,/auth,/notifications,/websocket,/version").split(","),
+      version: process.env.CACHE_VERSION ?? "v1",
     },
     cors: {
       origins: process.env.CORS_ORIGINS
@@ -244,6 +271,14 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       defaultLocale: process.env.EMAIL_DEFAULT_LOCALE || "en",
     },
     logging: {
+      // Left raw on purpose — the Loki transport falls back to "info" and the
+      // file transport to "trace", so the default belongs at the call site.
+      level: process.env.LOG_LEVEL || "",
+      consoleEnabled: process.env.CONSOLE_ENABLED === "true",
+      debug: {
+        enabled: process.env.DEBUG_LOGGING_ENABLED === "true",
+        basePath: process.env.DEBUG_LOG_PATH || "./logs",
+      },
       loki: {
         enabled: process.env.LOKI_ENABLED === "true",
         host: process.env.LOKI_HOST || "http://localhost:3100",
@@ -285,6 +320,21 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       // skipped before it re-enters its fallback chain. Fail-open: if every
       // candidate is cooling, the full chain is used anyway.
       connectionCooldownMinutes: parseInt(process.env.AI_CONNECTION_COOLDOWN_MINUTES || "5", 10),
+      urlAllowlist: buildAiUrlAllowlist(),
+      dump: {
+        // Only the literal "1" enables dumping — any other value is off.
+        enabled: process.env.ASSISTANT_DUMP_LLM_CALLS === "1",
+        // `<cwd>/.llm-dumps`. When the API runs via `pnpm --filter <app>-api dev`,
+        // cwd is `apps/api/`, so this lands at `apps/api/.llm-dumps/` (gitignored).
+        // For any other cwd, set ASSISTANT_DUMP_LLM_CALLS_DIR to an absolute path.
+        dir: process.env.ASSISTANT_DUMP_LLM_CALLS_DIR ?? `${process.cwd()}/.llm-dumps`,
+        // Redaction is opt-in so local development keeps seeing full prompts.
+        redact: process.env.ASSISTANT_DUMP_LLM_REDACT === "true",
+        keepFields: (process.env.ASSISTANT_DUMP_LLM_KEEP_FIELDS ?? "")
+          .split(",")
+          .map((field) => field.trim())
+          .filter((field) => field.length > 0),
+      },
       documentAi: {
         enabled: process.env.DOCUMENT_AI_ENABLED === "true",
         provider: process.env.DOCUMENT_AI_PROVIDER || "azure",
@@ -436,6 +486,20 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
+    },
+    modelManager: {
+      configPath: process.env.MODEL_CONFIG_PATH || path.join(process.cwd(), "config", "models.config.yaml"),
+      cacheDir: process.env.MODELS_CACHE_DIR || path.join(process.cwd(), ".cache", "models"),
+      // HuggingFace host only; each model's repo comes from its `modelId` so the
+      // shared lib serves multiple apps (the download URL is built per-model).
+      baseUrl: process.env.MODEL_BASE_URL || "https://huggingface.co",
+      verifyHash: process.env.MODEL_VERIFY_HASH !== "false",
+      strictHash: process.env.MODEL_STRICT_HASH !== "false",
+      autoUpdate: process.env.MODEL_AUTO_UPDATE !== "false",
+      onnx: {
+        intraOpNumThreads: parseInt(process.env.ONNX_INTRA_OP_NUM_THREADS || "2"),
+        interOpNumThreads: parseInt(process.env.ONNX_INTER_OP_NUM_THREADS || "1"),
+      },
     },
     auth: {
       allowRegistration: process.env.ALLOW_REGISTRATION !== "false",

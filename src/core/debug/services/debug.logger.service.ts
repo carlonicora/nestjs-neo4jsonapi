@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import * as fs from "fs";
 import * as path from "path";
 
+import { baseConfig } from "../../../config/base.config";
+
 interface RoundLogContext {
   roundId: string;
   roundPosition: number;
@@ -73,8 +75,9 @@ export class DebugLoggerService {
   private currentTurn: TurnLogEntry | null = null;
 
   constructor() {
-    this.enabled = process.env.DEBUG_LOGGING_ENABLED === "true";
-    this.logBasePath = process.env.DEBUG_LOG_PATH || "./logs";
+    const debugConfig = baseConfig.logging.debug;
+    this.enabled = debugConfig.enabled;
+    this.logBasePath = debugConfig.basePath;
   }
 
   /**

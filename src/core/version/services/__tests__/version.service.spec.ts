@@ -6,6 +6,7 @@ vi.mock("../../../../config/base.config", () => ({
   baseConfig: {
     api: {
       url: "https://test-api.example.com",
+      version: "2.5.10",
     },
   },
 }));
@@ -34,36 +35,11 @@ describe("VersionService", () => {
   });
 
   describe("getVersion", () => {
-    it("should return npm_package_version when environment variable is set", () => {
-      process.env.npm_package_version = "2.5.10";
-
-      const result = service.getVersion();
-
-      expect(result).toBe("2.5.10");
-    });
-
-    it("should return default version 1.0.0 when npm_package_version is not set", () => {
-      delete process.env.npm_package_version;
-
-      const result = service.getVersion();
-
-      expect(result).toBe("1.0.0");
-    });
-
-    it("should return default version when npm_package_version is empty string", () => {
-      process.env.npm_package_version = "";
-
-      const result = service.getVersion();
-
-      expect(result).toBe("1.0.0");
-    });
-
-    it("should handle semantic versioning format", () => {
-      process.env.npm_package_version = "1.2.3-alpha.1";
-
-      const result = service.getVersion();
-
-      expect(result).toBe("1.2.3-alpha.1");
+    // The npm_package_version -> api.version mapping (and its "1.0.0" fallback)
+    // now belongs to the config layer and is covered in base.config.spec.ts.
+    // Here the service is only responsible for surfacing what config resolved.
+    it("should return the version resolved by the config layer", () => {
+      expect(service.getVersion()).toBe("2.5.10");
     });
   });
 

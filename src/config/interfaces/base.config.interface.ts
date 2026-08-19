@@ -18,6 +18,7 @@ import { ConfigJobNamesInterface } from "./config.job.names.interface";
 import { ConfigJwtInterface } from "./config.jwt.interface";
 import { ConfigLoggingInterface } from "./config.logging.interface";
 import { ConfigMcpInterface } from "./config.mcp.interface";
+import { ConfigModelManagerInterface } from "./config.model.manager.interface";
 import { ConfigNeo4jInterface } from "./config.neo4j.interface";
 import { ConfigOAuthInterface } from "./config.oauth.interface";
 import { ConfigOperatorInterface } from "./config.operator.interface";
@@ -64,6 +65,7 @@ export interface BaseConfigInterface {
   google: ConfigGoogleInterface;
   oauth: ConfigOAuthInterface;
   mcp: ConfigMcpInterface;
+  modelManager: ConfigModelManagerInterface;
   twoFactor?: ConfigTwoFactorInterface;
   embeddingContext?: ConfigEmbeddingContextInterface;
 }

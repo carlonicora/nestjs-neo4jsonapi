@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as ort from "onnxruntime-node";
+import { baseConfig } from "../../config/base.config";
 import { getModelLoader } from "./model-loader";
 import type {
   ModelsConfig,
@@ -50,13 +51,12 @@ export class ModelManagerService implements OnApplicationBootstrap {
 
   constructor(@Optional() @Inject(APP_MODE_TOKEN) private readonly appModeConfig?: AppModeConfig) {
     this.config = getModelLoader().getConfig();
-    this.cacheDir = process.env.MODELS_CACHE_DIR || path.join(process.cwd(), ".cache", "models");
-    // HuggingFace host only; each model's repo comes from its `modelId` so the
-    // shared lib serves multiple apps (the download URL is built per-model below).
-    this.baseUrl = process.env.MODEL_BASE_URL || "https://huggingface.co";
-    this.verifyHash = process.env.MODEL_VERIFY_HASH !== "false";
-    this.strictHash = process.env.MODEL_STRICT_HASH !== "false";
-    this.autoUpdate = process.env.MODEL_AUTO_UPDATE !== "false";
+    const modelManagerConfig = baseConfig.modelManager;
+    this.cacheDir = modelManagerConfig.cacheDir;
+    this.baseUrl = modelManagerConfig.baseUrl;
+    this.verifyHash = modelManagerConfig.verifyHash;
+    this.strictHash = modelManagerConfig.strictHash;
+    this.autoUpdate = modelManagerConfig.autoUpdate;
 
     // Initialize readiness promise
     this.readyPromise = new Promise<void>((resolve) => {
@@ -231,8 +231,8 @@ export class ModelManagerService implements OnApplicationBootstrap {
     const sessionOptions: ort.InferenceSession.SessionOptions = {
       executionProviders: ["cpu"],
       graphOptimizationLevel: "all",
-      intraOpNumThreads: parseInt(process.env.ONNX_INTRA_OP_NUM_THREADS || "2"),
-      interOpNumThreads: parseInt(process.env.ONNX_INTER_OP_NUM_THREADS || "1"),
+      intraOpNumThreads: baseConfig.modelManager.onnx.intraOpNumThreads,
+      interOpNumThreads: baseConfig.modelManager.onnx.interOpNumThreads,
       enableCpuMemArena: true,
       enableMemPattern: true,
     };
