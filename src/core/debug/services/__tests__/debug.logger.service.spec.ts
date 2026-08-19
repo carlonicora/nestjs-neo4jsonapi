@@ -31,7 +31,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 describe("DebugLoggerService", () => {
   let service: DebugLoggerService;
 

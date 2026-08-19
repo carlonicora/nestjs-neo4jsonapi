@@ -18,7 +18,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 async function waitForFile(dir: string, timeoutMs: number): Promise<string | null> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {

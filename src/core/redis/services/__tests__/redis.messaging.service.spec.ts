@@ -15,7 +15,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 // Create mock Redis instances
 const mockPublisher = {
   publish: vi.fn(),

@@ -18,7 +18,6 @@ vi.mock("../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 describe("HttpExceptionFilter", () => {
   let filter: HttpExceptionFilter;
   let mockLogger: vi.Mocked<Partial<AppLoggingService>>;

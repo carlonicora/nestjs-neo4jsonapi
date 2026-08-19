@@ -17,7 +17,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 /**
  * The cache talks to Redis through an ioredis-shaped client. We mock only the
  * two methods the service uses (`get` and `set`) so the suite never touches a

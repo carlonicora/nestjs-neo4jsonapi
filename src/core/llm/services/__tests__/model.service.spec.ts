@@ -54,7 +54,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 function makeService(aiConfig: any): ModelService {
   const configService = { get: (_k: string) => aiConfig } as any;
   const clsService = { get: () => undefined } as any;

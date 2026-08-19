@@ -40,7 +40,6 @@ vi.mock("../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 describe("ReferralService", () => {
   let service: ReferralService;
   let mockConfig: Required<ReferralModuleConfig>;

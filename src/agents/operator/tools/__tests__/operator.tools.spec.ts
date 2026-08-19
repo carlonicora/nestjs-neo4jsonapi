@@ -27,7 +27,6 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
   };
 });
 
-
 // Real capture wrapper, dependencies unused by capture().
 const factory = new ToolFactory({} as any, {} as any);
 
