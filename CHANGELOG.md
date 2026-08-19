@@ -1,3 +1,9 @@
+## [2.14.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.3...v2.14.4) (2026-08-19)
+
+### 📦 Code Refactoring
+
+* **tests:** remove unnecessary blank lines in spec files ([bbfcd02](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/bbfcd026c5cf847bd3f1057c5acbef77911463d6))
+
 ## [2.14.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.2...v2.14.3) (2026-08-19)
 
 ### 📦 Code Refactoring
