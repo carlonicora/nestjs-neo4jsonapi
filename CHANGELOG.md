@@ -1,3 +1,9 @@
+## [2.14.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.4...v2.14.5) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **agents:** confine AI retrieval to the run's scope root ([7100c62](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7100c628810fada99e98007ff5828d308acd9b35))
+
 ## [2.14.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.3...v2.14.4) (2026-08-19)
 
 ### 📦 Code Refactoring
