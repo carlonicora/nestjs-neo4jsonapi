@@ -1018,9 +1018,7 @@ describe("LLMService", () => {
       });
       await result;
 
-      expect(createOpenAICompatible).toHaveBeenCalledWith(
-        expect.objectContaining({ supportsStructuredOutputs: true }),
-      );
+      expect(createOpenAICompatible).toHaveBeenCalledWith(expect.objectContaining({ supportsStructuredOutputs: true }));
       // All-required schema → strict is satisfiable, so demand constrained decoding.
       expect(streamObjectMock).toHaveBeenCalledWith(
         expect.objectContaining({ providerOptions: { openrouter: { strictJsonSchema: true } } }),
