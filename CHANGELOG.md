@@ -1,3 +1,9 @@
+## [2.14.7](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.6...v2.14.7) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **llm:** send the output schema on streamCall instead of bare json_object ([8f6d3cd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8f6d3cd2b1d041711ca5db16b31358dd7550b282))
+
 ## [2.14.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.5...v2.14.6) (2026-08-20)
 
 ### 🐛 Bug Fixes
