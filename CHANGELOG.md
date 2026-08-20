@@ -1,3 +1,9 @@
+## [2.14.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.5...v2.14.6) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **community-detector:** skip scope roots with no key concepts ([3a23f80](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3a23f80f7fa811527d58f6520d29c3c2b711488b))
+
 ## [2.14.5](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.4...v2.14.5) (2026-08-20)
 
 ### 🐛 Bug Fixes
