@@ -71,6 +71,22 @@ export class CommunityDetectorService {
 
       let total = 0;
       for (const partition of partitions.length ? partitions : [undefined]) {
+        // GDS refuses a projection whose node query matches nothing
+        // ("Node-Query returned no nodes"), and an empty partition is the NORM
+        // once detection runs per scope root — most roots hold no ingested
+        // content at all. Checked here rather than caught downstream so an
+        // empty partition is a skip, not a failed company.
+        if (partition) {
+          const partitionKeyConcepts = await this.countKeyConceptsForCompany(partition);
+          if (partitionKeyConcepts === 0) {
+            this.logger.debug(
+              `No KeyConcepts under ${partition.type}:${partition.id} — skipping its partition`,
+              "CommunityDetectorService",
+            );
+            continue;
+          }
+        }
+
         const detected: DetectedCommunity[] = [];
 
         for (let levelIndex = 0; levelIndex < this.louvainResolutions.length; levelIndex++) {
@@ -103,10 +119,15 @@ export class CommunityDetectorService {
   /**
    * Count KeyConcepts for the current company
    */
-  private async countKeyConceptsForCompany(): Promise<number> {
+  private async countKeyConceptsForCompany(scopeRoot?: AgentScope): Promise<number> {
     const query = this.neo4j.initQuery();
+    const predicate = scopeRoot ? this.scopePredicates?.build({ alias: "data", scope: scopeRoot }) : undefined;
+    if (scopeRoot && !predicate) return 0;
+
+    query.queryParams = { ...query.queryParams, ...(predicate?.params ?? {}) };
     query.query += `
-      MATCH (company)<-[:BELONGS_TO]-()-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(kc:KeyConcept)
+      MATCH (company)<-[:BELONGS_TO]-(data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(kc:KeyConcept)
+      ${predicate ? `WHERE ${predicate.cypher}` : ""}
       RETURN count(DISTINCT kc) AS count
     `;
 
