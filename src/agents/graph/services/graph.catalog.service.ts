@@ -380,6 +380,19 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     return out;
   }
 
+  /**
+   * EVERY catalogued entity, unfiltered by module access.
+   *
+   * Deliberately not `getAccessibleTypes`: this feeds the SCOPE predicate, and
+   * scope and permission are different questions. A type the caller cannot
+   * reach is already excluded by the permission layer; leaving it out of the
+   * scope predicate as well would silently narrow retrieval for reasons that
+   * have nothing to do with which campaign the run is in.
+   */
+  getAllEntities(): CatalogEntity[] {
+    return Array.from(this.entities.values());
+  }
+
   hasType(type: string): boolean {
     return this.entities.has(type);
   }

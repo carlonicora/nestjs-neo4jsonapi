@@ -3,6 +3,7 @@ import { ClsService } from "nestjs-cls";
 import { buildEmbedderAttribution } from "../../../agents/common/usage-attribution";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { unwrapNeo4jIntegers } from "../../../common/helpers/unwrap-neo4j-integer";
+import { AgentScopeFilterService } from "../../../common/repositories/agent-scope.filter";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
 import { EmbedderAttribution, EmbedderService } from "../../../core";
@@ -31,6 +32,7 @@ export class ChunkRepository implements OnModuleInit {
     private readonly clsService: ClsService,
     private readonly securityService: SecurityService,
     @Inject(AI_SOURCE_QUERY) private readonly aiSourceQuery: AiSourceQueryProvider,
+    private readonly agentScope: AgentScopeFilterService,
   ) {}
 
   async onModuleInit() {
@@ -125,10 +127,15 @@ export class ChunkRepository implements OnModuleInit {
       securityService: this.securityService,
       returnsData: true,
     });
+    // Both the vector and the lexical branch below are filtered to this id-set,
+    // so confining it to the run's scope root confines the whole hybrid search.
+    const scopeFilter = this.agentScope.build({ alias: "data", dataLimits: params.dataLimits });
+
     const scopeQuery = this.neo4j.initQuery();
-    scopeQuery.queryParams = { ...scopeQuery.queryParams, ...scope.params };
+    scopeQuery.queryParams = { ...scopeQuery.queryParams, ...scope.params, ...scopeFilter.params };
     scopeQuery.query += `
         ${scope.cypher}
+        ${scopeFilter.cypher}
         MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
         RETURN COLLECT(DISTINCT chunk.id) AS chunkIds
       `;
@@ -238,16 +245,27 @@ export class ChunkRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async findChunkById(params: { chunkId: string }): Promise<Chunk> {
+  /**
+   * `dataLimits` is optional so existing callers keep working, but the
+   * contextualiser MUST pass it: the ids reaching this method come from an LLM
+   * choosing among the chunks it was shown. That is a soft constraint — the
+   * model can echo an id it saw in an earlier hop, or hallucinate one outright
+   * — so the scope root is re-checked here rather than trusted from upstream.
+   */
+  async findChunkById(params: { chunkId: string; dataLimits?: DataLimits }): Promise<Chunk> {
     const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
+
+    const scopePredicate = this.agentScope.predicate({ alias: "data", dataLimits: params.dataLimits });
 
     query.queryParams = {
       ...query.queryParams,
       chunkId: params.chunkId,
+      ...(scopePredicate?.params ?? {}),
     };
 
     query.query += `
       MATCH (chunk:Chunk {id: $chunkId})
+      ${scopePredicate ? `WHERE EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE ${scopePredicate.cypher} }` : ""}
       RETURN chunk
     `;
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "./graph.catalog.service";
+import { buildScopePattern } from "./scope.pattern";
 import { UserContext } from "../tools/tool.factory";
 
 /**
@@ -79,12 +80,6 @@ export class ScopeGuard {
 
   /** `(alias)-[:REL]->(:Label)…-[:REL]->(:Root { id: $scopeId })` */
   private buildPattern(scope: NonNullable<CatalogEntity["scope"]>, alias: string): string {
-    let pattern = `(${alias})`;
-    scope.path.forEach((hop, index) => {
-      const isLast = index === scope.path.length - 1;
-      const node = isLast ? `(:${hop.targetLabel} { id: $scopeId })` : `(:${hop.targetLabel})`;
-      pattern += hop.cypherDirection === "out" ? `-[:${hop.cypherLabel}]->${node}` : `<-[:${hop.cypherLabel}]-${node}`;
-    });
-    return pattern;
+    return buildScopePattern({ scope, alias, paramName: "scopeId" });
   }
 }

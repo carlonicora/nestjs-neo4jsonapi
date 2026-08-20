@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { AgentScopeFilterService } from "../../../common/repositories/agent-scope.filter";
 import { EmbedderService, ModelService } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
@@ -13,6 +14,7 @@ export class CommunityRepository implements OnModuleInit {
     private readonly embedderService: EmbedderService,
     private readonly modelService: ModelService,
     private readonly securityService: SecurityService,
+    private readonly agentScope: AgentScopeFilterService,
   ) {}
 
   async onModuleInit() {
@@ -38,11 +40,19 @@ export class CommunityRepository implements OnModuleInit {
    * Create a new community node with BELONGS_TO company relationship
    * Uses companyId from CLS (current request context)
    */
+  /**
+   * `scopeRoot` ties the community to the scope root its members were detected
+   * within. Communities are built per scope root precisely so a scoped run can
+   * be answered from communities that contain nothing from a sibling root;
+   * without the edge, `findByVector` has no way to tell them apart and the
+   * whole partition is decorative.
+   */
   async createCommunity(params: {
     name: string;
     level: number;
     memberCount: number;
     rating?: number;
+    scopeRoot?: { id: string; label: string };
   }): Promise<Community> {
     const query = this.neo4j.initQuery({ serialiser: CommunityModel });
     const id = randomUUID();
@@ -54,6 +64,7 @@ export class CommunityRepository implements OnModuleInit {
       level: params.level,
       memberCount: params.memberCount,
       rating: params.rating ?? 0,
+      scopeRootId: params.scopeRoot?.id ?? null,
     };
 
     // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
@@ -70,6 +81,13 @@ export class CommunityRepository implements OnModuleInit {
         updatedAt: datetime()
       })
       ${query.queryParams.companyId ? `CREATE (community)-[:BELONGS_TO]->(company)` : ``}
+      ${
+        params.scopeRoot
+          ? `WITH community
+      MATCH (scopeRoot:${params.scopeRoot.label} { id: $scopeRootId })
+      CREATE (community)-[:SCOPED_TO]->(scopeRoot)`
+          : ``
+      }
       RETURN community
     `;
 
@@ -286,18 +304,31 @@ export class CommunityRepository implements OnModuleInit {
    * Find communities by vector similarity search
    * Filters by company from CLS context
    */
+  /**
+   * FAIL CLOSED on scope. A community summarises many members at once, so a
+   * single unscoped hit hands the answer content from every scope root it drew
+   * on. In a scoped run only communities detected within that exact root are
+   * eligible; a community with no `SCOPED_TO` edge predates the partition and
+   * is therefore assumed to mix roots.
+   */
   async findByVector(params: { embedding: number[]; topK: number; level?: number }): Promise<Community[]> {
     const query = this.neo4j.initQuery({ serialiser: CommunityModel });
+    const scope = this.agentScope.current();
+
     query.queryParams = {
       ...query.queryParams,
       embedding: params.embedding,
       topK: params.topK,
       level: params.level,
+      ...(scope ? { agentScopeId: scope.id } : {}),
     };
 
     let whereClause = "WHERE community.embedding IS NOT NULL AND community.isStale = false";
     if (params.level !== undefined) {
       whereClause += " AND community.level = $level";
+    }
+    if (scope) {
+      whereClause += ` AND EXISTS { MATCH (community)-[:SCOPED_TO]->(:${scope.label} { id: $agentScopeId }) }`;
     }
 
     query.query += `
@@ -487,7 +518,18 @@ export class CommunityRepository implements OnModuleInit {
    * Find communities that contain KeyConcepts related to a given KeyConcept
    * Returns affinity scores based on relationship count and weight
    */
-  async findCommunitiesByRelatedKeyConcepts(keyConceptId: string): Promise<
+  /**
+   * `scopeRoot` keeps incremental assignment inside its partition.
+   *
+   * KeyConcept nodes are globally de-duplicated by value, so a concept two
+   * scope roots happen to share relates to members of BOTH their communities.
+   * Without this filter the incremental path quietly re-mixes what detection
+   * partitioned, and the mixing compounds on every ingest.
+   */
+  async findCommunitiesByRelatedKeyConcepts(
+    keyConceptId: string,
+    scopeRoot?: { id: string; label: string },
+  ): Promise<
     {
       communityId: string;
       memberCount: number;
@@ -496,12 +538,13 @@ export class CommunityRepository implements OnModuleInit {
     }[]
   > {
     const query = this.neo4j.initQuery();
-    query.queryParams = { ...query.queryParams, keyConceptId };
+    query.queryParams = { ...query.queryParams, keyConceptId, scopeRootId: scopeRoot?.id ?? null };
     query.query += `
       MATCH (kc:KeyConcept {id: $keyConceptId})
       MATCH (kc)<-[:RELATES_TO]-(rel:KeyConceptRelationship)-[:RELATES_TO]->(relatedKc:KeyConcept)
       MATCH (community:Community)-[:HAS_MEMBER]->(relatedKc)
       MATCH (community)-[:BELONGS_TO]->(company)
+      ${scopeRoot ? `WHERE EXISTS { MATCH (community)-[:SCOPED_TO]->(:${scopeRoot.label} { id: $scopeRootId }) }` : ""}
       WITH community, rel, relatedKc
       RETURN community.id AS communityId,
              community.memberCount AS memberCount,

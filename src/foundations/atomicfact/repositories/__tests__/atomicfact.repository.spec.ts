@@ -6,6 +6,7 @@ import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { AtomicFact } from "../../entities/atomic.fact.entity";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
 
 // Test IDs
 const TEST_IDS = {
@@ -35,8 +36,15 @@ const createMockClsService = () => ({
   set: vi.fn(),
 });
 
+const createMockAgentScopeFilter = () => ({
+  current: vi.fn(() => undefined as any),
+  build: vi.fn(() => ({ cypher: "", params: {}, applied: false })),
+  predicate: vi.fn(() => null as any),
+});
+
 describe("AtomicFactRepository", () => {
   let repository: AtomicFactRepository;
+  let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let securityService: ReturnType<typeof createMockSecurityService>;
   let clsService: ReturnType<typeof createMockClsService>;
@@ -59,6 +67,7 @@ describe("AtomicFactRepository", () => {
   };
 
   beforeEach(async () => {
+    agentScopeFilter = createMockAgentScopeFilter();
     neo4jService = createMockNeo4jService();
     securityService = createMockSecurityService();
     clsService = createMockClsService();
@@ -72,6 +81,7 @@ describe("AtomicFactRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AgentScopeFilterService, useValue: agentScopeFilter },
         AtomicFactRepository,
         { provide: Neo4jService, useValue: neo4jService },
         { provide: SecurityService, useValue: securityService },
@@ -500,6 +510,48 @@ describe("AtomicFactRepository", () => {
       });
 
       expect(clsService.get).toHaveBeenCalledWith("userId");
+    });
+  });
+
+  // A KeyConcept node is globally de-duplicated by value, so a concept two
+  // scope roots happen to share fans out to the atomic facts of BOTH unless
+  // `data` is confined first.
+  describe("scope isolation", () => {
+    it("confines findAtomicFactsByKeyConcepts to the run's scope root", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      agentScopeFilter.build.mockReturnValue({
+        cypher: "WHERE (data:Child)",
+        params: { agentScopeId: "root-1" },
+        applied: true,
+      } as any);
+
+      await repository.findAtomicFactsByKeyConcepts({
+        keyConcepts: ["a"],
+        skipChunkIds: [],
+        skipAtomicFactIds: [],
+        dataLimits: {},
+      });
+
+      expect(agentScopeFilter.build).toHaveBeenCalledWith({ alias: "data", dataLimits: {} });
+      expect(mockQuery.query).toContain("WHERE (data:Child)");
+      expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
+    });
+
+    it("leaves an unscoped run unfiltered", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAtomicFactsByKeyConcepts({
+        keyConcepts: ["a"],
+        skipChunkIds: [],
+        skipAtomicFactIds: [],
+        dataLimits: {},
+      });
+
+      expect((mockQuery.queryParams as any).agentScopeId).toBeUndefined();
     });
   });
 });

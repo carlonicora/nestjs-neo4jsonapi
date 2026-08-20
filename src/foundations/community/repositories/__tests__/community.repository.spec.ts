@@ -6,6 +6,7 @@ import { SecurityService } from "../../../../core/security/services/security.ser
 import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
 import { Community } from "../../entities/community.entity";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
 
 // Test IDs
 const TEST_IDS = {
@@ -44,8 +45,15 @@ const createMockSecurityService = () => ({
   isCurrentUserCompanyAdmin: vi.fn().mockReturnValue(true),
 });
 
+const createMockAgentScopeFilter = () => ({
+  current: vi.fn(() => undefined as any),
+  build: vi.fn(() => ({ cypher: "", params: {}, applied: false })),
+  predicate: vi.fn(() => null as any),
+});
+
 describe("CommunityRepository", () => {
   let repository: CommunityRepository;
+  let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let modelService: ReturnType<typeof createMockModelService>;
   let embedderService: ReturnType<typeof createMockEmbedderService>;
@@ -84,6 +92,7 @@ describe("CommunityRepository", () => {
   } as Community;
 
   beforeEach(async () => {
+    agentScopeFilter = createMockAgentScopeFilter();
     neo4jService = createMockNeo4jService();
     modelService = createMockModelService();
     embedderService = createMockEmbedderService();
@@ -91,6 +100,7 @@ describe("CommunityRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AgentScopeFilterService, useValue: agentScopeFilter },
         CommunityRepository,
         { provide: Neo4jService, useValue: neo4jService },
         { provide: ModelService, useValue: modelService },
@@ -835,6 +845,90 @@ describe("CommunityRepository", () => {
       });
 
       expect(mockQuery.queryParams.summary).toBe(longSummary);
+    });
+  });
+
+  // A community summarises many members at once, so a single unscoped hit hands
+  // the answer content from every scope root it drew on. Communities are
+  // therefore detected per scope root and retrieved per scope root.
+  describe("scope isolation", () => {
+    const SCOPE = { id: "root-1", type: "roots", label: "Root" };
+
+    it("ties a community to the scope root it was detected under", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue({} as any);
+
+      await repository.createCommunity({
+        name: "C",
+        level: 0,
+        memberCount: 3,
+        scopeRoot: { id: "root-1", label: "Root" },
+      });
+
+      expect(mockQuery.query).toContain("MATCH (scopeRoot:Root { id: $scopeRootId })");
+      expect(mockQuery.query).toContain("CREATE (community)-[:SCOPED_TO]->(scopeRoot)");
+      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
+    });
+
+    it("creates no scope edge when detection ran company-wide", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue({} as any);
+
+      await repository.createCommunity({ name: "C", level: 0, memberCount: 3 });
+
+      expect(mockQuery.query).not.toContain("SCOPED_TO");
+    });
+
+    it("restricts vector search to communities detected under the run's root", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      agentScopeFilter.current.mockReturnValue(SCOPE as any);
+
+      await repository.findByVector({ embedding: [0.1], topK: 5 });
+
+      expect(mockQuery.query).toContain("EXISTS { MATCH (community)-[:SCOPED_TO]->(:Root { id: $agentScopeId }) }");
+      expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
+    });
+
+    // A community with no SCOPED_TO edge predates the partition, so it is
+    // assumed to mix roots and excluded from a scoped run.
+    it("excludes unpartitioned communities from a scoped run", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      agentScopeFilter.current.mockReturnValue(SCOPE as any);
+
+      await repository.findByVector({ embedding: [0.1], topK: 5 });
+
+      expect(mockQuery.query).toContain("EXISTS { MATCH (community)-[:SCOPED_TO]->");
+      expect(mockQuery.query).not.toContain("OR NOT EXISTS");
+    });
+
+    it("leaves vector search unrestricted for an unscoped run", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findByVector({ embedding: [0.1], topK: 5 });
+
+      expect(mockQuery.query).not.toContain("SCOPED_TO");
+      expect((mockQuery.queryParams as any).agentScopeId).toBeUndefined();
+    });
+
+    it("keeps incremental assignment inside the content's own partition", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.findCommunitiesByRelatedKeyConcepts("kc-1", { id: "root-1", label: "Root" });
+
+      expect(mockQuery.query).toContain(
+        "WHERE EXISTS { MATCH (community)-[:SCOPED_TO]->(:Root { id: $scopeRootId }) }",
+      );
+      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
     });
   });
 });

@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { AgentScopeFilterService } from "../../../common/repositories/agent-scope.filter";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
@@ -14,6 +15,7 @@ export class AtomicFactRepository implements OnModuleInit {
     private readonly securityService: SecurityService,
     private readonly clsService: ClsService,
     @Inject(AI_SOURCE_QUERY) private readonly aiSourceQuery: AiSourceQueryProvider,
+    private readonly agentScope: AgentScopeFilterService,
   ) {}
 
   async onModuleInit() {
@@ -35,15 +37,23 @@ export class AtomicFactRepository implements OnModuleInit {
       securityService: this.securityService,
       returnsData: true,
     });
+    // The gate that matters most on this query: KeyConcept nodes are globally
+    // de-duplicated by value, so a concept that two scope roots happen to share
+    // fans out to the atomic facts of BOTH unless `data` is confined to the
+    // run's scope root first.
+    const scopeFilter = this.agentScope.build({ alias: "data", dataLimits: params.dataLimits });
+
     query.queryParams = {
       ...query.queryParams,
       keyConcepts: params.keyConcepts,
       skipChunkIds: params.skipChunkIds,
       skipAtomicFactIds: params.skipAtomicFactIds,
       ...scope.params,
+      ...scopeFilter.params,
     };
     query.query += `
       ${scope.cypher}
+      ${scopeFilter.cypher}
       MATCH (keyconcept:KeyConcept)<-[:HAS_KEY_CONCEPT]-(atomicfact:AtomicFact)<-[:HAS_ATOMIC_FACT]-(atomicfact_chunk:Chunk)<-[:HAS_CHUNK]-(data)
       WHERE keyconcept.value IN $keyConcepts
       ${params.skipChunkIds.length > 0 ? `AND NOT atomicfact_chunk.id IN $skipChunkIds` : ""}

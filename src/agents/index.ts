@@ -70,6 +70,9 @@ export {
   GRAPH_SEMANTIC_MIN_SCORE,
 } from "./graph/services/graph.search.service";
 export { GraphDescriptorRegistry } from "./graph/services/descriptor.source";
+export { ScopeGuard } from "./graph/services/scope.guard";
+export { ScopePredicateService } from "./graph/services/scope.predicate.service";
+export { buildScopePattern } from "./graph/services/scope.pattern";
 export { UserModulesRepository } from "./graph/repositories/user-modules.repository";
 // The graph tool builders, for app-side agents that bind the catalog tools to
 // their own LLM calls (each .build(ctx, recorder) returns a DynamicStructuredTool).

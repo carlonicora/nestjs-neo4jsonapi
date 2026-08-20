@@ -8,6 +8,7 @@ import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
 import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { KeyConcept } from "../../entities/key.concept.entity";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
 
 // Test IDs
 const TEST_IDS = {
@@ -51,8 +52,15 @@ const createMockClsService = () => ({
   set: vi.fn(),
 });
 
+const createMockAgentScopeFilter = () => ({
+  current: vi.fn(() => undefined as any),
+  build: vi.fn(() => ({ cypher: "", params: {}, applied: false })),
+  predicate: vi.fn(() => null as any),
+});
+
 describe("KeyConceptRepository", () => {
   let repository: KeyConceptRepository;
+  let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let modelService: ReturnType<typeof createMockModelService>;
   let embedderService: ReturnType<typeof createMockEmbedderService>;
@@ -74,6 +82,7 @@ describe("KeyConceptRepository", () => {
   } as KeyConcept;
 
   beforeEach(async () => {
+    agentScopeFilter = createMockAgentScopeFilter();
     neo4jService = createMockNeo4jService();
     modelService = createMockModelService();
     embedderService = createMockEmbedderService();
@@ -89,6 +98,7 @@ describe("KeyConceptRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AgentScopeFilterService, useValue: agentScopeFilter },
         KeyConceptRepository,
         { provide: Neo4jService, useValue: neo4jService },
         { provide: ModelService, useValue: modelService },

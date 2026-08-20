@@ -12,6 +12,7 @@ import { EntityFactory } from "../../../../core/neo4j/factories/entity.factory";
 import { TokenResolverService } from "../../../../core/neo4j/services/token-resolver.service";
 import { Chunk, ChunkDescriptor } from "../../entities/chunk.entity";
 import { AiStatus } from "../../../../common/enums/ai.status";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
 
 // Test IDs
 const TEST_IDS = {
@@ -55,8 +56,15 @@ const createMockClsService = () => ({
   set: vi.fn(),
 });
 
+const createMockAgentScopeFilter = () => ({
+  current: vi.fn(() => undefined as any),
+  build: vi.fn(() => ({ cypher: "", params: {}, applied: false })),
+  predicate: vi.fn(() => null as any),
+});
+
 describe("ChunkRepository", () => {
   let repository: ChunkRepository;
+  let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
   let modelService: ReturnType<typeof createMockModelService>;
   let embedderService: ReturnType<typeof createMockEmbedderService>;
@@ -81,6 +89,7 @@ describe("ChunkRepository", () => {
   };
 
   beforeEach(async () => {
+    agentScopeFilter = createMockAgentScopeFilter();
     neo4jService = createMockNeo4jService();
     modelService = createMockModelService();
     embedderService = createMockEmbedderService();
@@ -102,6 +111,7 @@ describe("ChunkRepository", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AgentScopeFilterService, useValue: agentScopeFilter },
         ChunkRepository,
         { provide: Neo4jService, useValue: neo4jService },
         { provide: ModelService, useValue: modelService },
@@ -1023,6 +1033,64 @@ describe("ChunkRepository", () => {
         relationshipId: "npc-1",
         relationshipType: "Npc",
       });
+    });
+  });
+
+  // Both the vector and the lexical branch of hybrid retrieval are filtered to
+  // the id-set built by the scope query, so confining that query confines the
+  // whole search.
+  describe("scope isolation", () => {
+    const makeRecord = (key: string, value: unknown) => ({
+      get: (k: string) => (k === key ? value : undefined),
+    });
+
+    it("confines the hybrid id-set to the run's scope root", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.read
+        .mockResolvedValueOnce({ records: [makeRecord("chunkIds", ["c1"])] })
+        .mockResolvedValueOnce({ records: [] })
+        .mockResolvedValueOnce({ records: [] });
+      neo4jService.readMany.mockResolvedValue([]);
+      agentScopeFilter.build.mockReturnValue({
+        cypher: "WHERE (data:Child)",
+        params: { agentScopeId: "root-1" },
+        applied: true,
+      } as any);
+
+      await repository.findPotentialChunks({ question: "q", dataLimits: {} });
+
+      expect(agentScopeFilter.build).toHaveBeenCalledWith({ alias: "data", dataLimits: {} });
+      const scopeQuery = neo4jService.read.mock.calls[0][0] as string;
+      expect(scopeQuery).toContain("WHERE (data:Child)");
+      expect((neo4jService.read.mock.calls[0][1] as any).agentScopeId).toBe("root-1");
+    });
+
+    // The ids reaching findChunkById come from an LLM choosing among the chunks
+    // it was shown — a soft constraint, so the root is re-checked here.
+    it("re-checks the scope root on a chunk fetched by id", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_CHUNK);
+      agentScopeFilter.predicate.mockReturnValue({
+        cypher: "(data:Child)",
+        params: { agentScopeId: "root-1" },
+      } as any);
+
+      await repository.findChunkById({ chunkId: "c1", dataLimits: {} });
+
+      expect(mockQuery.query).toContain("EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE (data:Child) }");
+      expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
+    });
+
+    it("does not gate a by-id fetch in an unscoped run", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_CHUNK);
+
+      await repository.findChunkById({ chunkId: "c1" });
+
+      expect(mockQuery.query).not.toContain("EXISTS");
+      expect(mockQuery.query).toContain("MATCH (chunk:Chunk {id: $chunkId})");
     });
   });
 });

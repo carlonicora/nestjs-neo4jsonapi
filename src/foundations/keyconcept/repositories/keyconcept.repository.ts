@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { AgentScopeFilterService } from "../../../common/repositories/agent-scope.filter";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../../../common/repositories/ai-source-query.provider";
 import { DataLimits } from "../../../common/types/data.limits";
 import { EmbedderAttribution, EmbedderService, ModelService } from "../../../core";
@@ -19,6 +20,7 @@ export class KeyConceptRepository implements OnModuleInit {
     private readonly securityService: SecurityService,
     private readonly clsService: ClsService,
     @Inject(AI_SOURCE_QUERY) private readonly aiSourceQuery: AiSourceQueryProvider,
+    private readonly agentScope: AgentScopeFilterService,
   ) {}
 
   async onModuleInit() {
@@ -93,10 +95,24 @@ export class KeyConceptRepository implements OnModuleInit {
     // (the app's `howToId` maps to these via declaration-merge semantics).
     const isCompanyIndependent = !!params.dataLimits.howToMode || !!params.dataLimits.limitToHowToId;
 
+    // Scope gate. This query never touches `aiSourceQuery`, so it needs its own:
+    // a KeyConcept node is GLOBALLY de-duplicated by value, which means the
+    // bridging relationship is the only thing that says which content the
+    // neighbour actually came from. Anchored through `OCCURS_IN` to a chunk
+    // owned by in-scope content.
+    const scopePredicate = this.agentScope.predicate({ alias: "scopedData", dataLimits: params.dataLimits });
+    const scopeGate = scopePredicate
+      ? `AND EXISTS {
+        MATCH (keyConceptRelationship)-[:OCCURS_IN]->(:Chunk)<-[:HAS_CHUNK]-(scopedData)
+        WHERE ${scopePredicate.cypher}
+      }`
+      : "";
+
     query.queryParams = {
       ...query.queryParams,
       keyConcepts: params.keyConcepts,
       isCompanyIndependent,
+      ...(scopePredicate?.params ?? {}),
     };
 
     query.query += `
@@ -106,6 +122,7 @@ export class KeyConceptRepository implements OnModuleInit {
       AND NOT EXISTS {
         MATCH (startingKeyConcept)<-[:HAS_KEY_CONCEPT]-()<-[:HAS_ATOMIC_FACT]-()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept)
       }
+      ${scopeGate}
       // Company scoping: the neighbour is reachable only if the relationship that
       // bridges to it belongs to the caller's company or is global (no company).
       // The previous gate accepted a relationship owned by ANY company and relied on
@@ -148,14 +165,21 @@ export class KeyConceptRepository implements OnModuleInit {
       returnsData: true,
     });
 
+    // Confines `data` to the run's scope root before a single concept is
+    // gathered. Without it the topic set below spans the whole COMPANY, so
+    // every scope root seeds retrieval for every other one.
+    const scopeFilter = this.agentScope.build({ alias: "data", dataLimits: params.dataLimits });
+
     query.queryParams = {
       ...query.queryParams,
       queryEmbedding,
       ...scope.params,
+      ...scopeFilter.params,
     };
 
     query.query += `
       ${scope.cypher}
+      ${scopeFilter.cypher}
       MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
       WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
 

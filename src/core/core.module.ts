@@ -5,6 +5,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { EntityServiceRegistry } from "../common/registries/entity.service.registry";
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../common/repositories/ai-source-query.provider";
+import { AgentScopeFilterService } from "../common/repositories/agent-scope.filter";
 import { DefaultAiSourceQueryProvider } from "../common/repositories/default.ai-source-query.provider";
 import { BaseConfigInterface, ConfigJwtInterface } from "../config/interfaces";
 
@@ -165,13 +166,16 @@ export class CoreModule {
     const providers: Provider[] = [
       EntityServiceRegistry,
       { provide: AI_SOURCE_QUERY, useClass: options?.aiSourceQuery ?? DefaultAiSourceQueryProvider },
+      // Applied on TOP of whatever AI_SOURCE_QUERY returns, so an app that
+      // overrides its source query cannot drop scope enforcement with it.
+      AgentScopeFilterService,
     ];
 
     return {
       module: CoreModule,
       imports: getCoreModules(options?.queueIds ?? [], options?.securityService, options?.migrator ?? true),
       providers,
-      exports: [...getCoreModuleExports(), EntityServiceRegistry, AI_SOURCE_QUERY],
+      exports: [...getCoreModuleExports(), EntityServiceRegistry, AI_SOURCE_QUERY, AgentScopeFilterService],
       global: true,
     };
   }

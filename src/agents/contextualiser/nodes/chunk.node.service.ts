@@ -127,6 +127,7 @@ export class ChunkNodeService {
       const chunkId = chunkIdsToProcess.shift();
       const chunk = await this.chunkRepository.findChunkById({
         chunkId: chunkId,
+        dataLimits: params.state.limits,
       });
       if (chunk) chunks.push(chunk);
     }

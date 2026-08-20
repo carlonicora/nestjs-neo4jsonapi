@@ -19,6 +19,7 @@ import {
   AssistantSeedContextProvider,
 } from "../../../common/interfaces/seed.context.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { AGENT_SCOPE_CLS_KEY, AgentScope } from "../../../common/types/agent.scope";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigOperatorInterface } from "../../../config/interfaces/config.operator.interface";
 import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
@@ -743,7 +744,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     };
 
     const bound = params.boundContent;
-    if (!bound?.type || !bound?.id) return ctx;
+    if (!bound?.type || !bound?.id) return this.publishScope(ctx);
 
     const scope = this.graphCatalog.getEntityDetail(bound.type, params.userModuleIds)?.scope;
     if (scope && scope.path.length === 0 && scope.rootType === bound.type) {
@@ -757,6 +758,26 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         `buildTurnContext: bound type "${bound.type}" is not a catalogued scope root — the turn runs unscoped.`,
       );
     }
+    return this.publishScope(ctx);
+  }
+
+  /**
+   * Publishes the turn's scope to CLS, where RETRIEVAL reads it.
+   *
+   * This is the choke point on purpose: every entry point that starts a turn —
+   * ask, append, regenerate, operator run, operator resume — builds its context
+   * here, so a new one cannot be added that forgets to declare its scope. The
+   * key is written on EVERY turn, `undefined` included: leaving a previous
+   * turn's value in place would scope this turn to the wrong root, which is
+   * worse than not scoping it at all.
+   */
+  private publishScope(ctx: UserContext): UserContext {
+    this.clsService.set(
+      AGENT_SCOPE_CLS_KEY,
+      ctx.scopeId && ctx.scopeType
+        ? ({ id: ctx.scopeId, type: ctx.scopeType, label: ctx.scopeLabel ?? "" } satisfies AgentScope)
+        : undefined,
+    );
     return ctx;
   }
 
