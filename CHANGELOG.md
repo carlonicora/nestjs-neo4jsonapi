@@ -1,3 +1,9 @@
+## [2.14.8](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.7...v2.14.8) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **llm:** simplify expectation for createOpenAICompatible call ([afb16d8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/afb16d8cd1a87f54ac81db7aeba0071a123cd1d6))
+
 ## [2.14.7](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.6...v2.14.7) (2026-08-20)
 
 ### 🐛 Bug Fixes
