@@ -1890,10 +1890,31 @@ export class LLMService {
       );
     }
 
+    // `strict: true` is the only mode that GUARANTEES the payload matches the
+    // schema, but it demands every property be required with
+    // `additionalProperties: false`. Schemas carrying `.optional()` fields or
+    // open records cannot satisfy that and the provider rejects the request
+    // outright, so mirror `call`'s decision and ask for strict only when the
+    // schema already qualifies. Non-strict still ships the schema — as guidance
+    // rather than constrained decoding.
+    const strictJsonSchema = isStrictStructuredOutputCompatible(convertZodToDraftJsonSchema(params.outputSchema));
+
+    const providerOptionsKey = aiConfig.provider || "narr8";
     const provider = createOpenAICompatible({
-      name: aiConfig.provider || "narr8",
+      name: providerOptionsKey,
       apiKey: aiConfig.apiKey,
       baseURL: aiConfig.url,
+      // Send the output schema as `response_format.json_schema`. WITHOUT this
+      // the SDK silently degrades every structured request to
+      // `{ type: "json_object" }` and DROPS the schema: the model is told to
+      // emit "some JSON" with no shape at all, and OpenAI/Azure reject the call
+      // outright — "Response input messages must contain the word 'json' in
+      // some form to use 'text.format' of type 'json_object'" — unless the
+      // prompt happens to contain that word. Gemini tolerated the degraded
+      // form; gpt-5.x does not. The non-streaming `call` path has always sent
+      // json_schema (LangChain's `withStructuredOutput`), so every provider
+      // reachable from here already supports it.
+      supportsStructuredOutputs: true,
       // Pin OpenRouter routing on the streaming path too (the LangChain path
       // pins via modelKwargs; this SDK builds its own model). Without it the
       // stream is unpinned and can be moderated by a misrouted provider.
@@ -1931,6 +1952,7 @@ export class LLMService {
           schema: params.outputSchema as any,
           system,
           prompt: finalInstructions,
+          providerOptions: { [providerOptionsKey]: { strictJsonSchema } },
           temperature: params.temperature,
           maxOutputTokens: params.maxTokens,
           maxRetries: 2,

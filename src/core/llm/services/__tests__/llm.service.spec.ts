@@ -10,6 +10,7 @@ import { LLMCallDumper } from "../llm-call-dumper.service";
 import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
 import { TOKEN_USAGE_RECORDER } from "../../../../common/tokens";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 // Mock LangChain modules
 vi.mock("@langchain/core/messages", () => {
@@ -995,6 +996,57 @@ describe("LLMService", () => {
       ).rejects.toThrow();
 
       expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+
+    // Regression: without `supportsStructuredOutputs` the openai-compatible SDK
+    // degrades `responseFormat: {type:"json", schema}` to a bare
+    // `{type:"json_object"}` and DROPS the schema. OpenAI/Azure then 400 the
+    // request ("input messages must contain the word 'json'…") — observed live
+    // on openai/gpt-5.x, tolerated by gemini.
+    it("streamCall() asks the provider for schema-carrying structured output", async () => {
+      streamObjectMock.mockReturnValue({
+        object: Promise.resolve({ response: "ok" }),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
+        finishReason: Promise.resolve("stop"),
+        partialObjectStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamCall({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["sys"],
+      });
+      await result;
+
+      expect(createOpenAICompatible).toHaveBeenCalledWith(
+        expect.objectContaining({ supportsStructuredOutputs: true }),
+      );
+      // All-required schema → strict is satisfiable, so demand constrained decoding.
+      expect(streamObjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ providerOptions: { openrouter: { strictJsonSchema: true } } }),
+      );
+    });
+
+    it("streamCall() drops strict mode for a schema strict mode cannot express", async () => {
+      streamObjectMock.mockReturnValue({
+        object: Promise.resolve({ response: "ok" }),
+        usage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
+        finishReason: Promise.resolve("stop"),
+        partialObjectStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamCall({
+        inputParams: { message: "Hello" },
+        // `.optional()` keeps the field out of `required`, which strict mode
+        // forbids — sending strict:true here would 400 the whole request.
+        outputSchema: z.object({ response: z.string(), note: z.string().optional() }),
+        systemPrompts: ["sys"],
+      });
+      await result;
+
+      expect(streamObjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ providerOptions: { openrouter: { strictJsonSchema: false } } }),
+      );
     });
 
     it("streamCall() records the usage that settled even though the object rejected", async () => {
