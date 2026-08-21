@@ -11,6 +11,7 @@ export * from "./services/cypher.service";
 export { TokenResolverService, type DynamicTokenResult } from "./services/token-resolver.service";
 export { EntityFactory } from "./factories/entity.factory";
 export { orderBy } from "./queries/order.by";
+export { buildFulltextTerm, escapeLuceneTerm } from "./helpers/build-fulltext-term";
 export { updateRelationshipQuery } from "./queries/update.relationship";
 
 // Abstracts

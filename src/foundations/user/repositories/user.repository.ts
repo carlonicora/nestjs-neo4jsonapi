@@ -20,6 +20,7 @@ import { roleMeta } from "../../role/entities/role.meta";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
+import { buildFulltextTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
 
 /**
  * User repository.
@@ -287,7 +288,7 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
 
     query.queryParams = {
       ...query.queryParams,
-      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
+      term: buildFulltextTerm(params.term),
     };
 
     if (params.term && this.descriptor.fulltextIndexName) {
