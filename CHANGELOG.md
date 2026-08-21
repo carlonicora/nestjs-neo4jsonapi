@@ -1,3 +1,9 @@
+## [2.14.9](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.8...v2.14.9) (2026-08-21)
+
+### 🐛 Bug Fixes
+
+* **neo4j:** stop raw search terms reaching Lucene's query parser ([7fb603b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7fb603b534af7f87ceb114e1d226f879651bf925))
+
 ## [2.14.8](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.7...v2.14.8) (2026-08-20)
 
 ### 🐛 Bug Fixes
