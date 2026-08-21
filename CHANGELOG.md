@@ -1,3 +1,9 @@
+## [2.14.10](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.9...v2.14.10) (2026-08-21)
+
+### 🐛 Bug Fixes
+
+* **auth:** await the three 204 handlers that reported success on failure ([e34cbd0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e34cbd0f418394cf6790c3ed241e9abbfb27446f))
+
 ## [2.14.9](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.8...v2.14.9) (2026-08-21)
 
 ### 🐛 Bug Fixes
