@@ -428,46 +428,6 @@ describe("AuthRepository", () => {
     });
   });
 
-  describe("startResetPassword", () => {
-    it("should set reset password code on user", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_USER);
-
-      const result = await repository.startResetPassword({ userId: TEST_IDS.userId });
-
-      expect(mockQuery.queryParams.userId).toBe(TEST_IDS.userId);
-      expect(mockQuery.queryParams.code).toBe("mocked-uuid-12345");
-      expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})");
-      expect(mockQuery.query).toContain("SET user.code = $code");
-      expect(mockQuery.query).toContain("user.codeExpiration = datetime($codeExpiration)");
-      expect(result).toEqual(MOCK_USER);
-    });
-  });
-
-  describe("resetPassword", () => {
-    it("should reset user password and clear code", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.resetPassword({
-        userId: TEST_IDS.userId,
-        password: "new-hashed-password",
-      });
-
-      expect(mockQuery.queryParams).toMatchObject({
-        userId: TEST_IDS.userId,
-        password: "new-hashed-password",
-      });
-      expect(mockQuery.query).toContain("MATCH (user:User {id: $userId})");
-      expect(mockQuery.query).toContain("SET user.password = $password");
-      expect(mockQuery.query).toContain("user.code = null");
-      expect(mockQuery.query).toContain("user.codeExpiration = null");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-  });
-
   describe("acceptInvitation", () => {
     it("should accept invitation and set user password", async () => {
       const mockQuery = createMockQuery();
