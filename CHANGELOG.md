@@ -1,3 +1,27 @@
+## [2.14.10](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.9...v2.14.10) (2026-08-21)
+
+### 🐛 Bug Fixes
+
+* **auth:** await the three 204 handlers that reported success on failure ([e34cbd0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e34cbd0f418394cf6790c3ed241e9abbfb27446f))
+
+## [2.14.9](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.8...v2.14.9) (2026-08-21)
+
+### 🐛 Bug Fixes
+
+* **neo4j:** stop raw search terms reaching Lucene's query parser ([7fb603b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7fb603b534af7f87ceb114e1d226f879651bf925))
+
+## [2.14.8](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.7...v2.14.8) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **llm:** simplify expectation for createOpenAICompatible call ([afb16d8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/afb16d8cd1a87f54ac81db7aeba0071a123cd1d6))
+
+## [2.14.7](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.6...v2.14.7) (2026-08-20)
+
+### 🐛 Bug Fixes
+
+* **llm:** send the output schema on streamCall instead of bare json_object ([8f6d3cd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8f6d3cd2b1d041711ca5db16b31358dd7550b282))
+
 ## [2.14.6](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.5...v2.14.6) (2026-08-20)
 
 ### 🐛 Bug Fixes

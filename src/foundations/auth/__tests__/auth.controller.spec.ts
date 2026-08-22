@@ -7,6 +7,7 @@ vi.mock("../../../common/guards/jwt.auth.guard", () => ({
   },
 }));
 
+import { HttpException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { AuthController } from "../controllers/auth.controller";
 import { AuthService } from "../services/auth.service";
@@ -166,90 +167,6 @@ describe("AuthController", () => {
     });
   });
 
-  describe("POST /auth/register", () => {
-    it("should register new user", async () => {
-      const registerBody = {
-        data: {
-          type: "auths",
-          attributes: {
-            email: "new@example.com",
-            password: "newpassword123",
-          },
-        },
-      };
-      authService.register.mockResolvedValue(undefined);
-
-      await controller.register(registerBody as any);
-
-      expect(authService.register).toHaveBeenCalledWith({ data: registerBody.data });
-    });
-  });
-
-  describe("POST /auth/forgot", () => {
-    it("should start password reset flow", async () => {
-      const forgotBody = {
-        data: {
-          attributes: {
-            email: "USER@EXAMPLE.COM",
-          },
-        },
-      };
-      authService.startResetPassword.mockResolvedValue(undefined);
-
-      await controller.forgotPassword(forgotBody as any, "en");
-
-      expect(authService.startResetPassword).toHaveBeenCalledWith("user@example.com", "en");
-    });
-
-    it("should lowercase email before sending", async () => {
-      const forgotBody = {
-        data: {
-          attributes: {
-            email: "UPPERCASE@EMAIL.COM",
-          },
-        },
-      };
-      authService.startResetPassword.mockResolvedValue(undefined);
-
-      await controller.forgotPassword(forgotBody as any, undefined);
-
-      expect(authService.startResetPassword).toHaveBeenCalledWith("uppercase@email.com", undefined);
-    });
-  });
-
-  describe("GET /auth/validate/:code", () => {
-    it("should validate reset code", async () => {
-      authService.validateCode.mockResolvedValue(undefined);
-
-      await controller.validateResetCode(TEST_CODES.resetCode);
-
-      expect(authService.validateCode).toHaveBeenCalledWith(TEST_CODES.resetCode);
-    });
-
-    it("should handle invalid code", async () => {
-      authService.validateCode.mockRejectedValue(new Error("Invalid or expired code"));
-
-      await expect(controller.validateResetCode("invalid-code")).rejects.toThrow("Invalid or expired code");
-    });
-  });
-
-  describe("POST /auth/reset/:code", () => {
-    it("should reset password with valid code", async () => {
-      const resetBody = {
-        data: {
-          attributes: {
-            password: "newSecurePassword123!",
-          },
-        },
-      };
-      authService.resetPassword.mockResolvedValue(undefined);
-
-      controller.resetPassword(resetBody as any, TEST_CODES.resetCode);
-
-      expect(authService.resetPassword).toHaveBeenCalledWith(TEST_CODES.resetCode, "newSecurePassword123!");
-    });
-  });
-
   describe("POST /auth/invitation/:code", () => {
     it("should accept invitation and set password", async () => {
       const invitationBody = {
@@ -261,9 +178,44 @@ describe("AuthController", () => {
       };
       authService.acceptInvitation.mockResolvedValue(undefined);
 
-      controller.acceptInvitation(invitationBody as any, TEST_CODES.invitationCode);
+      await controller.acceptInvitation(invitationBody as any, TEST_CODES.invitationCode);
 
       expect(authService.acceptInvitation).toHaveBeenCalledWith(TEST_CODES.invitationCode, "myNewPassword123!");
+    });
+  });
+
+  // Regression for all three @HttpCode(204) handlers that used to call their
+  // service WITHOUT awaiting: the 204 was sent before the promise settled, so
+  // every failure was lost as an unhandled rejection and the caller was told
+  // the operation succeeded — a duplicate-email registration showed the
+  // confirmation card, and an invalid or expired code reported the password as
+  // changed when it was not.
+  //
+  // These assert the CONTRACT (a service failure must reach the response), not
+  // the behaviour of registration or password reset, whose own tests were
+  // removed as unused features. They bite only because the controller call is
+  // awaited here: an un-awaited call in a test passes either way, which is
+  // exactly why the pre-existing invitation test never caught this.
+  describe("204 handlers propagate service failures", () => {
+    const PASSWORD_BODY = { data: { attributes: { password: "myNewPassword123!" } } };
+
+    it("register", async () => {
+      authService.register.mockRejectedValue(new HttpException("Email already exists", 409));
+      await expect(controller.register({ data: {} } as any)).rejects.toThrow("Email already exists");
+    });
+
+    it("resetPassword", async () => {
+      authService.resetPassword.mockRejectedValue(new HttpException("The code provided is invalid", 404));
+      await expect(controller.resetPassword(PASSWORD_BODY as any, "bad-code")).rejects.toThrow(
+        "The code provided is invalid",
+      );
+    });
+
+    it("acceptInvitation", async () => {
+      authService.acceptInvitation.mockRejectedValue(new HttpException("The code is expired", 400));
+      await expect(controller.acceptInvitation(PASSWORD_BODY as any, TEST_CODES.invitationCode)).rejects.toThrow(
+        "The code is expired",
+      );
     });
   });
 

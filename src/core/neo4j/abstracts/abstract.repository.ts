@@ -5,6 +5,7 @@ import { modelRegistry } from "../../../common/registries/registry";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
 import { buildFilterClauses } from "../helpers/build-filter-clauses";
+import { buildFulltextTerm } from "../helpers/build-fulltext-term";
 import { buildOrderByClause } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
@@ -396,7 +397,7 @@ export abstract class AbstractRepository<
 
     query.queryParams = {
       ...query.queryParams,
-      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
+      term: buildFulltextTerm(params.term),
       ...this.getPolyLabelParams(),
     };
 
@@ -542,7 +543,7 @@ export abstract class AbstractRepository<
     query.queryParams = {
       ...query.queryParams,
       relatedIds,
-      term: params.term ? `*${params.term.toLowerCase()}*` : undefined,
+      term: buildFulltextTerm(params.term),
       ...this.getPolyLabelParams(),
     };
 

@@ -60,7 +60,12 @@ export class AuthController {
   @Post("register")
   @HttpCode(HttpStatus.NO_CONTENT)
   async register(@Body() body: AuthPostRegisterDTO) {
-    this.service.register({ data: body.data });
+    // MUST be awaited — see acceptInvitation below for the full rationale.
+    // Unawaited, the 204 is sent before the promise settles, so the duplicate
+    // email 409 that UserService.expectNotExists raises never reaches the
+    // response: the caller always sees the confirmation card, registered or
+    // not, and the error is lost as an unhandled rejection.
+    await this.service.register({ data: body.data });
   }
 
   @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
@@ -80,13 +85,21 @@ export class AuthController {
   @Post("reset/:code")
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetPassword(@Body() body: AuthPostResetPasswordDTO, @Param("code") code: string) {
-    this.service.resetPassword(code, body.data.attributes.password);
+    // MUST be awaited — see acceptInvitation below. Unawaited, an invalid or
+    // expired code still returns 204 and the user is told their password was
+    // changed when it was not.
+    await this.service.resetPassword(code, body.data.attributes.password);
   }
 
   @Post("invitation/:code")
   @HttpCode(HttpStatus.NO_CONTENT)
   async acceptInvitation(@Body() body: AuthPostResetPasswordDTO, @Param("code") code: string) {
-    this.service.acceptInvitation(code, body.data.attributes.password);
+    // MUST be awaited. Without it the 204 is sent before the promise settles,
+    // so every failure the service raises — invalid code, expired code — is
+    // lost as an unhandled rejection and the invitee is told their password was
+    // set when it was not. The handler is declared `async` and the response
+    // code is fixed by @HttpCode, so awaiting changes nothing on success.
+    await this.service.acceptInvitation(code, body.data.attributes.password);
   }
 
   @Post("activate/:code")

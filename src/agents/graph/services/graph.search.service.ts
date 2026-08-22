@@ -6,6 +6,7 @@ import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphIndexManager } from "./graph.index.manager";
 import { GraphCatalogService } from "./graph.catalog.service";
 import { ScopeGuard } from "./scope.guard";
+import { escapeLuceneTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
 
 export const GRAPH_EXACT_MAX_RESULTS = 10;
 export const GRAPH_FUZZY_MAX_RESULTS = 10;
@@ -13,8 +14,6 @@ export const GRAPH_SEMANTIC_MAX_RESULTS = 5;
 export const GRAPH_RESOLVE_MAX_RESULTS = 10;
 export const GRAPH_SEMANTIC_MIN_SCORE = 0.6;
 const GRAPH_VECTOR_OVERFETCH = 50;
-
-const LUCENE_RESERVED_RE = /[+\-&|!(){}[\]^"~*?:\\/]/g;
 
 export type MatchMode = "exact" | "fuzzy" | "semantic" | "none";
 
@@ -274,7 +273,7 @@ export class GraphSearchService {
     if (existing.size > 0 && !existing.has(indexName)) {
       return { matchMode: mode === "substring" ? "exact" : "fuzzy", items: [] };
     }
-    const escaped = params.text.replace(LUCENE_RESERVED_RE, "\\$&").toLowerCase();
+    const escaped = escapeLuceneTerm(params.text).toLowerCase();
     const term = mode === "substring" ? `*${escaped}*` : `${escaped}~`;
     const max = mode === "substring" ? GRAPH_EXACT_MAX_RESULTS : GRAPH_FUZZY_MAX_RESULTS;
 
