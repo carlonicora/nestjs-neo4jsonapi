@@ -413,12 +413,10 @@ export class TokenUsageAdminRepository extends AbstractRepository<
    * no companyId otherwise), which is exactly the dual-role shape the platform
    * admin fixture — and real deployments — have.
    */
-  private _adminQuery(params: {
-    from: string;
-    to: string;
-    companyId?: string;
-    granularity?: string | null;
-  }): { query: string; queryParams: Record<string, unknown> } {
+  private _adminQuery(params: { from: string; to: string; companyId?: string; granularity?: string | null }): {
+    query: string;
+    queryParams: Record<string, unknown>;
+  } {
     return {
       query: "",
       queryParams: {
