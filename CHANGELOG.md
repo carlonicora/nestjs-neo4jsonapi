@@ -2,6 +2,12 @@
 
 ### 🚀 Features
 
+* **contextualiser:** scope-first retrieval rework — source-text notebook, call budget, shed-widening trim ([0614bab](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0614babf9512c1bd86ab58bf6322b396f19b9fdc))
+
+## [2.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.11...v2.15.0) (2026-08-22)
+
+### 🚀 Features
+
 * **contextualiser:** `notebook[].content` now carries source text rather than an AI-written paraphrase — same type, deliberately different content
 * **contextualiser:** retrieval selection reworked — results are ordered by relevance, key concepts are reranked by index, and `NOTEBOOK_BUDGET_CHARS` is the single bound on what reaches the answer
 * **agents:** token-ledger accounting corrected — a node now returns a delta rather than accumulated state
