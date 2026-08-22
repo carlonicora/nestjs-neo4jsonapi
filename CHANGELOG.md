@@ -1,3 +1,18 @@
+## [3.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.3...v3.0.0) (2026-08-22)
+
+### ⚠ BREAKING CHANGES
+
+* **graph:** the graph node system prompt no longer carries ERP doctrine
+(role line, cents claim, call-economy hint, Account/Person worked example).
+An ERP consumer must supply prompts.graphNodeDomain to reproduce previous
+behaviour; without a domain layer the prompt is generic but complete.
+
+Claude-Session: https://claude.ai/code/session_01HuKUg5od6NViS83dYFt76F
+
+### 🚀 Features
+
+* **graph:** split graph node system prompt into domain-free kernel plus app domain slots ([4f2ec63](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4f2ec631c2c8dc8da8ee15ca3c756510ed4df6bd))
+
 ## [2.15.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.2...v2.15.3) (2026-08-22)
 
 ### 🐛 Bug Fixes
