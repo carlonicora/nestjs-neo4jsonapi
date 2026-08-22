@@ -8,6 +8,11 @@
 // entityFactory.createGraphList expects nodes. Same shape and same rationale as
 // apps/api/src/features/administration/platform-kpi/repositories/platform-kpi.read.repository.ts.
 //
+// For the same reason it also does NOT call Neo4jService.initQuery() — that
+// helper prepends its own CLS-scoped company MATCH, which is the same scoping
+// through a less obvious door. Every query here seeds itself from _adminQuery()
+// instead; see that method for the outage it caused (ADM-53..57).
+//
 // The architecture gate raises a FILE-LEVEL manual-query-no-company-scope finding
 // on this shape; per-line ignores do not clear it, so this header note is the
 // documented resolution.
@@ -121,18 +126,16 @@ export class TokenUsageAdminRepository extends AbstractRepository<
     stackBy: "scope" | "type" | "company";
     companyId?: string;
   }): Promise<TokenUsageAdminTimelineEntity[]> {
-    const query = this.neo4j.initQuery();
-    query.queryParams = {
-      ...query.queryParams,
+    const query = this._adminQuery({
       from: params.from,
       to: params.to,
-      companyId: params.companyId ?? null,
+      companyId: params.companyId,
       // Cypher accepts a parameter for date.truncate's unit (verified against
       // DozerDB 5.26), so the granularity is bound rather than interpolated —
       // the "always parameterised, never interpolated" guardrail applies here
       // even though _truncationUnit() already whitelists the value.
       granularity: params.granularity === "day" ? null : this._truncationUnit(params.granularity),
-    };
+    });
 
     const bucket =
       params.granularity === "day" ? `date(${NODE}.createdAt)` : `date.truncate($granularity, ${NODE}.createdAt)`;
@@ -144,7 +147,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
           ? `coalesce(c.name, 'platform')`
           : `CASE WHEN c IS NULL THEN 'platform' ELSE 'customer' END`;
 
-    query.query += `
+    query.query = `
       MATCH (${NODE}:${tokenUsageMeta.labelName})
       WHERE ${NODE}.createdAt >= datetime($from) AND ${NODE}.createdAt <= datetime($to)
       OPTIONAL MATCH (${NODE})-[:BELONGS_TO]->(c:Company)
@@ -199,13 +202,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
     companyId?: string;
     limit: number;
   }): Promise<TokenUsageAdminBreakdownEntity[]> {
-    const query = this.neo4j.initQuery();
-    query.queryParams = {
-      ...query.queryParams,
-      from: params.from,
-      to: params.to,
-      companyId: params.companyId ?? null,
-    };
+    const query = this._adminQuery({ from: params.from, to: params.to, companyId: params.companyId });
 
     const companyMatch =
       params.scope === "customer"
@@ -265,7 +262,7 @@ export class TokenUsageAdminRepository extends AbstractRepository<
              null                            AS availableMonthlyCredits,`;
     }
 
-    query.query += `
+    query.query = `
       MATCH (${NODE}:${tokenUsageMeta.labelName})
       WHERE ${NODE}.createdAt >= datetime($from) AND ${NODE}.createdAt <= datetime($to)
       ${companyMatch}
@@ -336,15 +333,9 @@ export class TokenUsageAdminRepository extends AbstractRepository<
     to: string;
     companyId?: string;
   }): Promise<Array<{ scope: string } & UsageMetrics>> {
-    const query = this.neo4j.initQuery();
-    query.queryParams = {
-      ...query.queryParams,
-      from: params.from,
-      to: params.to,
-      companyId: params.companyId ?? null,
-    };
+    const query = this._adminQuery({ from: params.from, to: params.to, companyId: params.companyId });
 
-    query.query += `
+    query.query = `
       MATCH (${NODE}:${tokenUsageMeta.labelName})
       WHERE ${NODE}.createdAt >= datetime($from) AND ${NODE}.createdAt <= datetime($to)
       OPTIONAL MATCH (${NODE})-[:BELONGS_TO]->(c:Company)
@@ -398,6 +389,46 @@ export class TokenUsageAdminRepository extends AbstractRepository<
       cached: r.cached,
       calls: r.calls,
     })) as TokenUsageAdminSummaryEntity[];
+  }
+
+  /**
+   * The query seed every aggregation in this file MUST use.
+   *
+   * It deliberately does NOT call `Neo4jService.initQuery()`. initQuery()
+   * PREPENDS `MATCH (company:Company {id: $companyId})` (plus a currentUser
+   * match hanging off it) whenever the CALLER's CLS session carries a
+   * `companyId` — the same CLS scoping the file header explains this dashboard
+   * must not have, reintroduced through a less obvious door than
+   * buildDefaultMatch().
+   *
+   * It is not merely redundant here, it is actively wrong: `$companyId` in this
+   * file means "the company the admin is FILTERING BY", which is `null` in the
+   * page's default state. Binding that to initQuery()'s prepended MATCH makes it
+   * `MATCH (:Company {id: null})` — zero rows, and because it is a plain MATCH
+   * it reduces the entire aggregation to zero rows. `_withTotal()` then
+   * zero-fills, so the dashboard renders as a successful, empty page. That was
+   * ADM-53..57: five e2e tests, no error anywhere, no data.
+   *
+   * Reachable only for an Administrator who ALSO belongs to a company (CLS has
+   * no companyId otherwise), which is exactly the dual-role shape the platform
+   * admin fixture — and real deployments — have.
+   */
+  private _adminQuery(params: {
+    from: string;
+    to: string;
+    companyId?: string;
+    granularity?: string | null;
+  }): { query: string; queryParams: Record<string, unknown> } {
+    return {
+      query: "",
+      queryParams: {
+        from: params.from,
+        to: params.to,
+        // The REQUESTED filter, never the caller's own company.
+        companyId: params.companyId ?? null,
+        ...(params.granularity === undefined ? {} : { granularity: params.granularity }),
+      },
+    };
   }
 
   /** The equal-length span immediately preceding `from`. */

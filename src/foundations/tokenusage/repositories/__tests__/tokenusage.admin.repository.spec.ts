@@ -7,9 +7,34 @@ function makeRecord(values: Record<string, unknown>) {
   return { get: (k: string) => values[k] };
 }
 
+/**
+ * Mirrors what the REAL `Neo4jService.initQuery()` returns when the calling
+ * user's CLS session carries a `companyId` — i.e. an Administrator who ALSO
+ * belongs to a company, which is exactly the shape the e2e platformAdmin
+ * fixture has. It PREPENDS a company/currentUser MATCH bound to `$companyId`
+ * and seeds `queryParams.companyId` with the CALLER's company.
+ *
+ * A `{ query: "", queryParams: {} }` stub is what let the CLS-scoping bug ship:
+ * with it, nothing in this spec could observe the prepended MATCH, nor the fact
+ * that this repository rebinds `$companyId` to the admin's REQUESTED company
+ * filter — poisoning the prepended MATCH with a value that means something else.
+ */
+const CLS_COMPANY_ID = "cls-company-id";
+const CLS_USER_ID = "cls-user-id";
+
+function initQueryLikeProduction() {
+  return {
+    query: `
+        MATCH (company:Company {id: $companyId})
+        MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company)
+    `,
+    queryParams: { companyId: CLS_COMPANY_ID, currentUserId: CLS_USER_ID },
+  };
+}
+
 function makeRepo(records: any[]) {
   const neo4j = {
-    initQuery: vi.fn(() => ({ query: "", queryParams: {} })),
+    initQuery: vi.fn(() => initQueryLikeProduction()),
     read: vi.fn(async () => ({ records })),
     writeOne: vi.fn(async () => undefined),
   } as any;
@@ -114,6 +139,62 @@ describe("TokenUsageAdminRepository", () => {
 
     expect(seen).not.toMatch(/\[:BELONGS_TO\]->\((?!:Company|c:Company)/);
     expect(seen).not.toMatch(/\[:TRIGGERED_BY\]->\((?!:User|u:User)/);
+  });
+
+  // Regression — ADM-53..57. Every aggregation here read zero rows on the live
+  // stack: initQuery() prepends `MATCH (company:Company {id: $companyId})` when
+  // the caller has a CLS company, and this repository then rebinds the SAME
+  // `$companyId` parameter to the admin's requested company FILTER — `null` in
+  // the page's default state. `MATCH (:Company {id: null})` matches nothing and,
+  // being a plain MATCH, reduces the whole aggregation to zero rows, which the
+  // JS zero-fill then renders as a normal-looking empty dashboard.
+  it("never inherits the caller's CLS company scoping — this dashboard is platform-wide", async () => {
+    const { repo, neo4j } = makeRepo([]);
+    const seen: Array<{ q: string; p: Record<string, unknown> }> = [];
+    neo4j.read.mockImplementation(async (q: string, p: Record<string, unknown>) => {
+      seen.push({ q, p });
+      return { records: [] };
+    });
+
+    const window = { from: "2026-08-01T00:00:00.000Z", to: "2026-08-07T00:00:00.000Z" };
+    await repo.findSummary(window);
+    await repo.findTimeline({ ...window, granularity: "day", stackBy: "scope" });
+    await repo.findBreakdown({ ...window, dimension: "company", scope: "customer", limit: 10 });
+
+    // findSummary issues two reads (current + previous window), plus one each
+    // for the timeline and the breakdown.
+    expect(seen).toHaveLength(4);
+    for (const { q, p } of seen) {
+      expect(q).not.toContain("MATCH (company:Company");
+      expect(q).not.toContain("currentUser");
+      expect(p.currentUserId).toBeUndefined();
+      // No company filter was requested, so the filter parameter is null — and
+      // nothing in the query text may treat null as "the caller's company".
+      expect(p.companyId).toBeNull();
+    }
+  });
+
+  it("binds $companyId to the REQUESTED company filter, never to the caller's own", async () => {
+    const { repo, neo4j } = makeRepo([]);
+    const seen: Array<Record<string, unknown>> = [];
+    neo4j.read.mockImplementation(async (_q: string, p: Record<string, unknown>) => {
+      seen.push(p);
+      return { records: [] };
+    });
+
+    const window = { from: "2026-08-01T00:00:00.000Z", to: "2026-08-07T00:00:00.000Z" };
+    await repo.findSummary({ ...window, companyId: "requested-company-id" });
+    await repo.findTimeline({ ...window, granularity: "day", stackBy: "scope", companyId: "requested-company-id" });
+    await repo.findBreakdown({
+      ...window,
+      dimension: "company",
+      scope: "customer",
+      limit: 10,
+      companyId: "requested-company-id",
+    });
+
+    expect(seen).toHaveLength(4);
+    for (const p of seen) expect(p.companyId).toBe("requested-company-id");
   });
 
   it("appends an 'other' rollup row holding the exact remainder beyond the limit", async () => {
