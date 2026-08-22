@@ -71,8 +71,6 @@ export class RationalNodeService {
   }
 
   async execute(params: { state: typeof ContextualiserContext.State }): Promise<Partial<ContextualiserContextState>> {
-    params.state.hops += 1;
-
     const inputParams: z.infer<typeof inputSchema> = {
       question: params.state.question,
       analysis: params.state.previousAnalysis,
@@ -84,6 +82,7 @@ export class RationalNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      metadata: { agentName: "contextualiser", nodeName: "rational_plan" },
       // Billed to the CALLING agent: its ledger category, its entity. Spread
       // LAST so nothing above can overwrite the attribution.
       ...buildInheritedAttribution(params.state),
@@ -99,6 +98,7 @@ export class RationalNodeService {
 
     return {
       hops: returnedHops,
+      llmCalls: 1,
       rationalPlan: llmResponse.rationalPlan,
       nextStep: "key_concepts",
       status: [llmResponse.status],

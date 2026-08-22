@@ -25,41 +25,21 @@ const createState = (overrides?: Partial<ContextualiserContextState>): Contextua
   }) as ContextualiserContextState;
 
 describe("ChunkVectorNodeService", () => {
-  let llmService: { call: ReturnType<typeof vi.fn> };
   let chunkRepository: {
     findPotentialChunks: ReturnType<typeof vi.fn>;
     findChunkNeighbors: ReturnType<typeof vi.fn>;
   };
-  let webSocketService: { sendMessageToUser: ReturnType<typeof vi.fn> };
-  let clsService: { get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> };
-  let configService: { get: ReturnType<typeof vi.fn> };
+  let embedderService: { vectoriseText: ReturnType<typeof vi.fn> };
 
   const build = (sources?: RetrievalSourceContribution[]): ChunkVectorNodeService =>
-    new ChunkVectorNodeService(
-      llmService as any,
-      chunkRepository as any,
-      webSocketService as any,
-      clsService as any,
-      configService as any,
-      sources,
-    );
+    new ChunkVectorNodeService(chunkRepository as any, embedderService as any, sources);
 
   beforeEach(() => {
-    llmService = {
-      call: vi.fn().mockResolvedValue({
-        status: "s",
-        note: { content: "c", reason: "r" },
-        chosenAction: "answer",
-        tokenUsage: { input: 1, output: 1 },
-      }),
-    };
     chunkRepository = {
       findPotentialChunks: vi.fn().mockResolvedValue([{ id: "c1", content: "text" }]),
       findChunkNeighbors: vi.fn().mockResolvedValue([]),
     };
-    webSocketService = { sendMessageToUser: vi.fn() };
-    clsService = { get: vi.fn(), set: vi.fn() };
-    configService = { get: vi.fn().mockReturnValue({}) };
+    embedderService = { vectoriseText: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]) };
   });
 
   it("merges contributed retrieval entries into the notebook alongside the package's own chunks", async () => {
@@ -73,8 +53,24 @@ describe("ChunkVectorNodeService", () => {
     const result = await service.execute({ state: createState() });
 
     expect(result.notebook).toEqual([
-      { chunkId: "c1", content: "c", reason: "r", sourceLayer: "case", metadata: undefined },
-      { chunkId: "m1", content: "[X] y", reason: "z", sourceLayer: "external", metadata: { refId: "j1" } },
+      {
+        chunkId: "c1",
+        content: "text",
+        coreContent: "text",
+        reason: "",
+        sourceLayer: "case",
+        metadata: undefined,
+        score: undefined,
+      },
+      {
+        chunkId: "m1",
+        content: "[X] y",
+        coreContent: undefined,
+        reason: "z",
+        sourceLayer: "external",
+        metadata: { refId: "j1" },
+        score: undefined,
+      },
     ]);
     expect(result.processedChunks).toEqual(["c1"]);
     expect(result.hops).toBe(1);
@@ -94,14 +90,15 @@ describe("ChunkVectorNodeService", () => {
     });
   });
 
-  it("returns an empty patch when neither the vector search nor the contributions produce anything", async () => {
+  it("returns an empty patch (bar the shared question embedding) when neither the vector search nor the contributions produce anything", async () => {
     chunkRepository.findPotentialChunks.mockResolvedValue([]);
     const service = build([{ search: async () => [] }]);
 
     const result = await service.execute({ state: createState() });
 
-    expect(result).toEqual({});
-    expect(llmService.call).not.toHaveBeenCalled();
+    // A turn that retrieves nothing must still share the embedding with key_concepts,
+    // and must report that it spent nothing of the run's call budget.
+    expect(result).toEqual({ llmCalls: 0, questionEmbedding: expect.any(Array) });
   });
 
   it("swallows a failing contribution and still returns the chunks it did retrieve", async () => {
@@ -116,22 +113,26 @@ describe("ChunkVectorNodeService", () => {
     const result = await service.execute({ state: createState() });
 
     expect(result.notebook).toEqual([
-      { chunkId: "c1", content: "c", reason: "r", sourceLayer: "case", metadata: undefined },
+      {
+        chunkId: "c1",
+        content: "text",
+        coreContent: "text",
+        reason: "",
+        sourceLayer: "case",
+        metadata: undefined,
+        score: undefined,
+      },
     ]);
   });
 
-  it("widens each chunk with its neighbours before handing it to the LLM", async () => {
+  it("widens each chunk with its neighbours before writing it to the notebook", async () => {
     chunkRepository.findChunkNeighbors.mockResolvedValue([{ chunkId: "c1", before: ["prev"], after: ["next"] }]);
     const service = build();
 
-    await service.execute({ state: createState() });
+    const result = await service.execute({ state: createState() });
 
     expect(chunkRepository.findChunkNeighbors).toHaveBeenCalledWith({ chunkIds: ["c1"], window: 1 });
-    expect(llmService.call).toHaveBeenCalledWith(
-      expect.objectContaining({
-        inputParams: expect.objectContaining({ text: "prev\n\ntext\n\nnext" }),
-      }),
-    );
+    expect(result.notebook?.[0].content).toBe("prev\n\ntext\n\nnext");
   });
 
   it("works without any contributed retrieval sources", async () => {
@@ -140,7 +141,9 @@ describe("ChunkVectorNodeService", () => {
     const result = await service.execute({ state: createState() });
 
     expect(result.notebook).toHaveLength(1);
-    expect(result.tokens).toEqual({ input: 1, output: 1 });
+    // The node no longer calls a model, so it spends no tokens of its own.
+    expect(result.tokens).toEqual({ input: 0, output: 0 });
+    expect(result.llmCalls).toBe(0);
   });
   // Embedding cost attribution (Task 8). The question embedding this node
   // triggers is billed to the scope the retrieval searches.
@@ -176,5 +179,61 @@ describe("ChunkVectorNodeService", () => {
         expect.objectContaining({ attribution: undefined }),
       );
     });
+  });
+});
+
+describe("chunk_vector embedding reuse", () => {
+  const MOCK_COMPANY_ID_2 = "550e8400-e29b-41d4-a716-446655440000";
+  const MOCK_CONTENT_ID_2 = "660e8400-e29b-41d4-a716-446655440001";
+
+  const createState2 = (overrides?: Partial<ContextualiserContextState>): ContextualiserContextState =>
+    ({
+      companyId: MOCK_COMPANY_ID_2,
+      contentId: MOCK_CONTENT_ID_2,
+      contentType: "HowTo",
+      hops: 0,
+      limits: {},
+      question: "Test question",
+      rationalPlan: "Test rational plan",
+      notebook: [],
+      status: [],
+      processedChunks: [],
+      nextStep: "key_concepts",
+      tokens: { input: 0, output: 0 },
+      ...overrides,
+    }) as ContextualiserContextState;
+
+  let chunkRepository: {
+    findPotentialChunks: ReturnType<typeof vi.fn>;
+    findChunkNeighbors: ReturnType<typeof vi.fn>;
+  };
+  let embedderService: { vectoriseText: ReturnType<typeof vi.fn> };
+
+  const build = (): ChunkVectorNodeService =>
+    new ChunkVectorNodeService(chunkRepository as any, embedderService as any, undefined);
+
+  beforeEach(() => {
+    chunkRepository = {
+      findPotentialChunks: vi.fn().mockResolvedValue([{ id: "c1", content: "text" }]),
+      findChunkNeighbors: vi.fn().mockResolvedValue([]),
+    };
+    embedderService = { vectoriseText: vi.fn().mockResolvedValue([0.5, 0.5]) };
+  });
+
+  it("passes a precomputed embedding to retrieval and returns it on the state", async () => {
+    const node = build();
+    const result = await node.execute({ state: createState2() });
+
+    expect(embedderService.vectoriseText).toHaveBeenCalledTimes(1);
+    expect(chunkRepository.findPotentialChunks).toHaveBeenCalledWith(
+      expect.objectContaining({ queryEmbedding: expect.any(Array) }),
+    );
+    expect(result.questionEmbedding).toEqual(expect.any(Array));
+  });
+
+  it("reuses an embedding already on the state instead of recomputing", async () => {
+    const node = build();
+    await node.execute({ state: { ...createState2(), questionEmbedding: [0.5, 0.5] } as any });
+    expect(embedderService.vectoriseText).not.toHaveBeenCalled();
   });
 });

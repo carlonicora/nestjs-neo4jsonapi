@@ -1,3 +1,13 @@
+## [2.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.10...v2.15.0) (2026-08-22)
+
+### 🚀 Features
+
+* **contextualiser:** `notebook[].content` now carries source text rather than an AI-written paraphrase — same type, deliberately different content
+* **contextualiser:** retrieval selection reworked — results are ordered by relevance, key concepts are reranked by index, and `NOTEBOOK_BUDGET_CHARS` is the single bound on what reaches the answer
+* **agents:** token-ledger accounting corrected — a node now returns a delta rather than accumulated state
+
+There are no public signature changes.
+
 ## [2.14.10](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.9...v2.14.10) (2026-08-21)
 
 ### 🐛 Bug Fixes

@@ -57,6 +57,15 @@ export const ContextualiserContext = Annotation.Root({
     default: () => undefined,
     reducer: (current, update) => update ?? current ?? 0,
   }),
+  /**
+   * Provider calls made so far this run. Additive; every node reports the calls
+   * it made. Routing reads this, not `hops` — `hops` counts NODES and three of
+   * them advance it by two, so it was never a call budget.
+   */
+  llmCalls: Annotation<number>({
+    default: () => 0,
+    reducer: (current, update) => (current ?? 0) + (update ?? 0),
+  }),
   previousAnalysis: Annotation<string>({
     default: () => undefined,
     reducer: (current) => current,
@@ -78,6 +87,14 @@ export const ContextualiserContext = Annotation.Root({
     reducer: (current) => current,
   }),
   question: Annotation<string>({
+    default: () => undefined,
+    reducer: (current, update) => update ?? current,
+  }),
+  /**
+   * The question's embedding, computed once per turn by the first node that needs
+   * it and reused by every later one. Absent until chunk_vector has run.
+   */
+  questionEmbedding: Annotation<number[] | undefined>({
     default: () => undefined,
     reducer: (current, update) => update ?? current,
   }),

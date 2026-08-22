@@ -58,6 +58,44 @@ const createMockAgentScopeFilter = () => ({
   predicate: vi.fn(() => null as any),
 });
 
+/**
+ * Constructs a standalone `KeyConceptRepository` (matching the constructor at
+ * HEAD) without going through Nest's `TestingModule`. Used by tests that need
+ * a fresh, isolated set of mocks per call rather than the shared `beforeEach`
+ * instance above.
+ */
+const buildKeyConceptRepositoryUnderTest = () => {
+  const neo4j = createMockNeo4jService();
+  neo4j.initQuery.mockImplementation(() => ({ query: "", queryParams: {} }));
+  neo4j.readMany.mockResolvedValue([]);
+
+  const model = createMockModelService();
+  const embedder = createMockEmbedderService();
+  const security = createMockSecurityService();
+  const cls = createMockClsService();
+  cls.get.mockImplementation((key: string) => {
+    if (key === "companyId") return TEST_IDS.companyId;
+    if (key === "userId") return TEST_IDS.userId;
+    return null;
+  });
+  const aiSourceQuery = {
+    build: () => ({ cypher: "MATCH (data)-[:BELONGS_TO]->(company) WITH data", params: {} }),
+  };
+  const agentScope = createMockAgentScopeFilter();
+
+  const repository = new KeyConceptRepository(
+    neo4j as any,
+    embedder as any,
+    model as any,
+    security as any,
+    cls as any,
+    aiSourceQuery as any,
+    agentScope as any,
+  );
+
+  return { repository, neo4j, embedder, model, security, cls, aiSourceQuery, agentScope };
+};
+
 describe("KeyConceptRepository", () => {
   let repository: KeyConceptRepository;
   let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
@@ -211,6 +249,25 @@ describe("KeyConceptRepository", () => {
           dataLimits: {},
         }),
       ).rejects.toThrow("Embedding failed");
+    });
+
+    it("over-fetches well beyond the previous hardcoded 1000", async () => {
+      const { repository, neo4j } = buildKeyConceptRepositoryUnderTest();
+      await repository.findPotentialKeyConcepts({ question: "q", dataLimits: {} });
+
+      const cypher = String(neo4j.readMany.mock.calls.at(-1)![0].query);
+      expect(cypher).not.toMatch(/queryNodes\('keyconcepts',\s*1000\s*,/);
+      expect(cypher).toMatch(/toInteger\(\$overFetch\)/);
+    });
+
+    it("does not embed the question when one is supplied", async () => {
+      const { repository, embedder } = buildKeyConceptRepositoryUnderTest();
+      await repository.findPotentialKeyConcepts({
+        question: "q",
+        dataLimits: {},
+        queryEmbedding: [0.1, 0.2],
+      });
+      expect(embedder.vectoriseText).not.toHaveBeenCalled();
     });
   });
 

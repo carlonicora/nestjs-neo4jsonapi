@@ -43,6 +43,15 @@ export interface UnifiedTrace {
   answer: {
     branchesUsed: ("graph" | "contextualiser" | "drift")[];
     tokens: { input: number; output: number };
+    /**
+     * ChunkIds of the notebook entries that survived the NOTEBOOK_BUDGET_CHARS
+     * trim, in emission order. Absent on turns where the answer node did not
+     * run or died before building the section — consumers must treat absence
+     * as "not observed", never as "nothing kept".
+     */
+    keptChunkIds?: string[];
+    /** Subset of keptChunkIds kept in core (unwidened) form — their neighbour text did NOT reach the model. */
+    coreOnlyChunkIds?: string[];
   };
   totalTokens: { input: number; output: number };
 }

@@ -221,6 +221,10 @@ export class ResponderService {
             });
             return {
               driftContext: result,
+              // DRIFT's spend goes into the ADDITIVE `tokens` channel as well as
+              // the trace. Trace-only reporting is what left the turn total
+              // short of the per-node sum (see planner.node.service.ts).
+              tokens: (result as any).tokens ?? { input: 0, output: 0 },
               trace: {
                 drift: {
                   confidence: result.confidence ?? 0,

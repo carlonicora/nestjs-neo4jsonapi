@@ -16,6 +16,7 @@ import { RationalNodeService } from "../../contextualiser/nodes/rational.node.se
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
+import { MAX_LLM_CALLS_PER_RUN } from "../../../foundations/chunk/repositories/retrieval.constants";
 import { CallerAttributionState, classifyCallerAttribution } from "../../common/usage-attribution";
 
 /**
@@ -59,7 +60,9 @@ export class ContextualiserService {
      */
     attribution?: CallerAttributionState;
   }): Promise<ContextualiserContextState> {
-    const maxHops = 20;
+    // Supersteps, not spend. LangGraph needs an absolute ceiling so a routing
+    // bug cannot loop forever; the SPEND bound is MAX_LLM_CALLS_PER_RUN below.
+    const maxSupersteps = 20;
 
     // Log proportionately. A caller that named NOTHING is opting out — MCP tool
     // calls do this on every single request and are right to — so it gets a
@@ -97,8 +100,8 @@ export class ContextualiserService {
         contentType: params.contentType,
         messagesCount: params.messages.length,
         question: params.question ?? "none",
-        maxHops: maxHops,
-        recursionLimit: maxHops + 2,
+        maxSupersteps: maxSupersteps,
+        recursionLimit: maxSupersteps + 2,
         initialNode: initial,
       },
     });
@@ -108,92 +111,142 @@ export class ContextualiserService {
         this.clsService.set("ragStatus", `${params.state.status.join("\n\n")}`);
       }
       const nextStep = params.forceNextStep ?? params.state.nextStep;
-      const finalNextStep = params.state.hops === maxHops ? "answer" : nextStep;
-
-      return finalNextStep;
+      // The budget is on PROVIDER CALLS. `hops` counts nodes and three of them
+      // advance it by two, so it was never a spend bound.
+      const budgetSpent = (params.state.llmCalls ?? 0) >= MAX_LLM_CALLS_PER_RUN;
+      if (budgetSpent) {
+        this.logger.warn(
+          `contextualiser call budget spent (${params.state.llmCalls}/${MAX_LLM_CALLS_PER_RUN}) — routing to answer`,
+        );
+      }
+      return budgetSpent ? "answer" : nextStep;
     };
 
     const workflow = new StateGraph(ContextualiserContext)
       .addNode("question_refiner", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: question_refiner - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: question_refiner - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.questionRefinedNode.execute({ state: state });
-        this.tracer.addSpanEvent(`Node: question_refiner complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: question_refiner complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("rational_plan", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: rational_plan - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: rational_plan - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.rationalNode.execute({ state: state });
-        this.tracer.addSpanEvent(`Node: rational_plan complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: rational_plan complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("key_concepts", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: key_concepts - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: key_concepts - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.keyConceptsNode.execute({
           state: state,
         });
-        this.tracer.addSpanEvent(`Node: key_concepts complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: key_concepts complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("atomic_facts", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: atomic_facts - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: atomic_facts - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.atomicFactsNode.execute({
           state: state,
         });
-        this.tracer.addSpanEvent(`Node: atomic_facts complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: atomic_facts complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("chunk_vector", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: chunk_vector - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: chunk_vector - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.chunkVectorNode.execute({ state });
-        this.tracer.addSpanEvent(`Node: chunk_vector complete - hop ${state.hops}/${maxHops}`);
+        this.tracer.addSpanEvent(
+          `Node: chunk_vector complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+        );
         return result;
       })
       .addNode("chunks", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: chunks - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: chunks - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.chunkNode.execute({
           state: state,
         });
-        this.tracer.addSpanEvent(`Node: chunks complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: chunks complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("neighbouring_nodes", async (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: neighbouring_nodes - hop ${state.hops}/${maxHops}`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: neighbouring_nodes - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            hopCount: state.hops,
+          },
+        );
         const result = await this.keyConceptsNode.execute({
           state: state,
         });
-        this.tracer.addSpanEvent(`Node: neighbouring_nodes complete - hop ${state.hops}/${maxHops}`, {
-          nextStep: result.nextStep,
-        });
+        this.tracer.addSpanEvent(
+          `Node: neighbouring_nodes complete - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN}`,
+          {
+            nextStep: result.nextStep,
+          },
+        );
         return result;
       })
       .addNode("answer", (state: ContextualiserGraphState) => {
-        this.tracer.addSpanEvent(`Node: answer - hop ${state.hops}/${maxHops} (final)`, {
-          hopCount: state.hops,
-        });
+        this.tracer.addSpanEvent(
+          `Node: answer - hop ${state.hops} calls ${state.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN} (final)`,
+          {
+            hopCount: state.hops,
+          },
+        );
         return { ...state, tokens: { input: 0, output: 0 } };
       })
       .addEdge(START, initial)
@@ -232,7 +285,7 @@ export class ContextualiserService {
 
     try {
       finalState = await app.invoke(initialState, {
-        recursionLimit: maxHops + 2,
+        recursionLimit: maxSupersteps + 2,
       } as any);
 
       this.tracer.addSpanEvent("Workflow Completed", {
@@ -241,7 +294,7 @@ export class ContextualiserService {
       });
 
       this.logger.log(
-        `contextualiser END hops=${finalState.hops}/${maxHops} ` +
+        `contextualiser END hops=${finalState.hops} calls=${finalState.llmCalls ?? 0}/${MAX_LLM_CALLS_PER_RUN} ` +
           `processedKeyConcepts=${finalState.processedKeyConcepts?.length ?? 0} ` +
           `processedAtomicFacts=${finalState.processedAtomicFacts?.length ?? 0} ` +
           `processedChunks=${finalState.processedChunks?.length ?? 0} ` +

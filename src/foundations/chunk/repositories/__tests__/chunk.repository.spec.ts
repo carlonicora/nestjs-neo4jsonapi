@@ -13,6 +13,7 @@ import { TokenResolverService } from "../../../../core/neo4j/services/token-reso
 import { Chunk, ChunkDescriptor } from "../../entities/chunk.entity";
 import { AiStatus } from "../../../../common/enums/ai.status";
 import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
+import { CHUNK_VECTOR_OVERFETCH, EXACT_SCAN_MAX_SCOPED_CHUNKS } from "../retrieval.constants";
 
 // Test IDs
 const TEST_IDS = {
@@ -54,6 +55,11 @@ const createMockClsService = () => ({
   has: vi.fn(),
   get: vi.fn(),
   set: vi.fn(),
+});
+
+// A driver row of the `id` / `score` shape the cosine read returns.
+const scoreRecord = (id: string, score: number) => ({
+  get: (key: string) => (key === "id" ? id : key === "score" ? score : undefined),
 });
 
 const createMockAgentScopeFilter = () => ({
@@ -126,10 +132,26 @@ describe("ChunkRepository", () => {
     }).compile();
 
     repository = module.get<ChunkRepository>(ChunkRepository);
+
+    // Sane defaults so tests that don't explicitly wire every read/write still
+    // exercise the method under test without crashing on `undefined.records`.
+    // Individual tests override these with mockReturnValue/mockResolvedValueOnce.
+    neo4jService.initQuery.mockImplementation(() => createMockQuery());
+    neo4jService.read.mockResolvedValue({ records: [] });
+    neo4jService.readMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  // buildChunkRepositoryUnderTest: the spec file already builds a fresh
+  // repository + mocks per test via beforeEach; this just exposes them under
+  // the names the plan's test snippets use.
+  const buildChunkRepositoryUnderTest = () => ({
+    repository,
+    neo4j: neo4jService,
+    embedder: embedderService,
   });
 
   describe("onModuleInit", () => {
@@ -174,30 +196,35 @@ describe("ChunkRepository", () => {
     });
   });
 
-  // Hybrid retrieval (Task 1): scope id-set via the AI_SOURCE_QUERY provider, then a
-  // vector branch + a lexical (fulltext) branch, fused with reciprocal rank fusion.
+  // Hybrid retrieval (Task 1, reshaped by Task A into scope-first retrieval):
+  // a cheap COUNT decides exact-scan vs index-overfetch for the vector branch,
+  // a lexical (fulltext) branch runs the same scope-first shape, fused with RRF.
   describe("findPotentialChunks (hybrid retrieval)", () => {
     const makeRecord = (key: string, value: unknown) => ({
       get: (k: string) => (k === key ? value : undefined),
     });
 
-    const SCOPE_CHUNK_IDS = ["c1", "c2", "c3"];
     const chunkC1: Chunk = { ...MOCK_CHUNK, id: "c1" };
     const chunkC2: Chunk = { ...MOCK_CHUNK, id: "c2" };
     const chunkC3: Chunk = { ...MOCK_CHUNK, id: "c3" };
 
-    // Wire the three reads (scope id-set, vector branch, lexical branch) plus the
+    // Below EXACT_SCAN_MAX_SCOPED_CHUNKS -> exact-scan branch (the common case).
+    const SCOPE_COUNT_SMALL = 3;
+    // Above EXACT_SCAN_MAX_SCOPED_CHUNKS -> index-overfetch fallback branch.
+    const SCOPE_COUNT_LARGE = EXACT_SCAN_MAX_SCOPED_CHUNKS + 1000;
+
+    // Wire the three reads (scoped count, vector branch, lexical branch) plus the
     // final ordered hydration via readMany.
-    const wireHybridReads = () => {
+    const wireHybridReads = (scopedCount: number = SCOPE_COUNT_SMALL) => {
       neo4jService.initQuery.mockImplementation(() => createMockQuery());
       neo4jService.read
-        .mockResolvedValueOnce({ records: [makeRecord("chunkIds", SCOPE_CHUNK_IDS)] })
+        .mockResolvedValueOnce({ records: [makeRecord("scopedCount", scopedCount)] })
         .mockResolvedValueOnce({ records: [makeRecord("id", "c1"), makeRecord("id", "c2")] })
         .mockResolvedValueOnce({ records: [makeRecord("id", "c2"), makeRecord("id", "c3")] });
       neo4jService.readMany.mockResolvedValue([chunkC1, chunkC2, chunkC3]);
     };
 
-    it("derives the access-scoped id-set from the AI_SOURCE_QUERY provider", async () => {
+    it("derives the access-scoped chunk count from the AI_SOURCE_QUERY provider", async () => {
       wireHybridReads();
 
       await repository.findPotentialChunks({ question: "test question", dataLimits: {} });
@@ -205,34 +232,62 @@ describe("ChunkRepository", () => {
       expect(embedderService.vectoriseText).toHaveBeenCalledWith({ text: "test question" });
       expect(aiSourceQueryBuild).toHaveBeenCalledWith(expect.objectContaining({ returnsData: true }));
 
-      const scopeReadQuery = neo4jService.read.mock.calls[0][0] as string;
-      expect(scopeReadQuery).toContain("MATCH (data)-[:BELONGS_TO]->(company) WITH data");
-      expect(scopeReadQuery).toContain("MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)");
-      expect(scopeReadQuery).toContain("RETURN COLLECT(DISTINCT chunk.id) AS chunkIds");
+      const countReadQuery = neo4jService.read.mock.calls[0][0] as string;
+      expect(countReadQuery).toContain("MATCH (data)-[:BELONGS_TO]->(company) WITH data");
+      expect(countReadQuery).toContain("MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)");
+      expect(countReadQuery).toContain("count(DISTINCT chunk) AS scopedCount");
     });
 
-    it("runs the vector branch scoped to the id-set", async () => {
-      wireHybridReads();
+    it("runs the exact-scan vector branch (cosine over the scoped set) when the scope is small", async () => {
+      wireHybridReads(SCOPE_COUNT_SMALL);
+
+      await repository.findPotentialChunks({ question: "test question", dataLimits: {} });
+
+      const [vectorQuery, vectorParams] = neo4jService.read.mock.calls[1] as [string, Record<string, unknown>];
+      expect(vectorQuery).toContain("vector.similarity.cosine(chunk.embedding, $queryEmbedding)");
+      expect(vectorQuery).not.toContain("db.index.vector.queryNodes");
+      expect(vectorParams.queryEmbedding).toEqual(MOCK_EMBEDDING);
+    });
+
+    it("falls back to the vector index with an overfetch when the scoped set is large", async () => {
+      wireHybridReads(SCOPE_COUNT_LARGE);
 
       await repository.findPotentialChunks({ question: "test question", dataLimits: {} });
 
       const [vectorQuery, vectorParams] = neo4jService.read.mock.calls[1] as [string, Record<string, unknown>];
       expect(vectorQuery).toContain("db.index.vector.queryNodes('chunks'");
       expect(vectorParams.queryEmbedding).toEqual(MOCK_EMBEDDING);
-      expect(vectorParams.chunkIds).toEqual(SCOPE_CHUNK_IDS);
+      expect(vectorParams.overFetch).toBe(CHUNK_VECTOR_OVERFETCH);
     });
 
-    it("runs the lexical branch with an escaped fulltext term scoped to the id-set", async () => {
+    it("runs the lexical branch with a Lucene-escaped fulltext term scoped to the id-set", async () => {
       wireHybridReads();
 
       await repository.findPotentialChunks({ question: "contract (terms)?", dataLimits: {} });
 
       const [lexicalQuery, lexicalParams] = neo4jService.read.mock.calls[2] as [string, Record<string, unknown>];
       expect(lexicalQuery).toContain("db.index.fulltext.queryNodes('chunk_content_search'");
-      expect(lexicalParams.chunkIds).toEqual(SCOPE_CHUNK_IDS);
-      // Lucene special characters are escaped so a user question cannot break the query.
-      expect(lexicalParams.term).toContain("\\(");
-      expect(lexicalParams.term).toContain("\\?");
+      // Reserved characters are ESCAPED, not tokenised. `buildFulltextTerm`
+      // AND-joins a wildcard per token, which is correct for a search box and
+      // fatal for a natural-language question: every token becomes a required
+      // clause, so a 28-word question matches nothing at all.
+      expect(lexicalParams.term).toBe("contract \\(terms\\)\\?");
+    });
+
+    it("does NOT AND-join the question into per-token wildcards", async () => {
+      wireHybridReads();
+
+      // Regression guard. Measured against the eval corpus, the AND-joined form
+      // of this question returned 0 fulltext hits where the escaped form
+      // returned 1,786 — hybrid retrieval silently lost its lexical half.
+      await repository.findPotentialChunks({
+        question: "Quale termine di adempimento prevede il contratto di locazione",
+        dataLimits: {},
+      });
+
+      const [, lexicalParams] = neo4jService.read.mock.calls[2] as [string, Record<string, unknown>];
+      expect(String(lexicalParams.term)).not.toContain(" AND ");
+      expect(String(lexicalParams.term)).not.toContain("*");
     });
 
     it("fuses the vector + lexical rankings (RRF) and returns chunks in fused order", async () => {
@@ -242,19 +297,72 @@ describe("ChunkRepository", () => {
 
       // vector=[c1,c2], lexical=[c2,c3] => RRF rewards the shared c2 first, then c1, then c3.
       expect(result.map((chunk) => chunk.id)).toEqual(["c2", "c1", "c3"]);
-      expect(neo4jService.read).toHaveBeenCalledTimes(3);
+      // count + vector + lexical, then the cosine-score read the hydration attaches
+      // in JS: `readMany` maps rows through the descriptor's generated mapper, which
+      // only reads the descriptor's own fields, so a projected `score` column never
+      // reaches the entity and has to be fetched separately.
+      expect(neo4jService.read).toHaveBeenCalledTimes(4);
       expect(neo4jService.readMany).toHaveBeenCalledTimes(1);
+    });
+
+    // Both retrieval halves must reach the notebook on ONE scale: the answer node
+    // orders entries best-score-first and fills a character budget, so a document-half
+    // chunk with no score sorts last regardless of how good it is. Cosine (not the
+    // rank-derived RRF score) is that scale.
+    it("returns chunks carrying a cosine score against the question embedding", async () => {
+      wireHybridReads();
+      neo4jService.read.mockResolvedValueOnce({
+        records: [scoreRecord("c1", 0.61), scoreRecord("c2", 0.83), scoreRecord("c3", 0.42)],
+      });
+
+      const result = await repository.findPotentialChunks({ question: "test question", dataLimits: {} });
+
+      expect(result.map((chunk) => chunk.id)).toEqual(["c2", "c1", "c3"]);
+      expect(result.map((chunk) => chunk.score)).toEqual([0.83, 0.61, 0.42]);
+
+      const [scoreQuery, scoreParams] = neo4jService.read.mock.calls[3] as [string, Record<string, unknown>];
+      expect(scoreQuery).toMatch(/vector\.similarity\.cosine/);
+      expect(scoreParams.queryEmbedding).toEqual(MOCK_EMBEDDING);
+    });
+
+    // Task 3a-A was deliberately NOT implemented: measurement showed the spec's bar
+    // admits every candidate on this corpus, and the owner's decision is that the
+    // notebook's character budget — not a floor or a count cap — decides what reaches
+    // the answer. A floor reintroduced here would silently drop candidates.
+    it("applies no cosine floor to the exact-scan branch", async () => {
+      wireHybridReads();
+
+      await repository.findPotentialChunks({ question: "test question", dataLimits: {} });
+
+      const exactScanQuery = String(neo4jService.read.mock.calls[1][0]);
+      expect(exactScanQuery).toContain("vector.similarity.cosine(chunk.embedding, $queryEmbedding)");
+      expect(exactScanQuery).not.toContain("$relativeFloor");
+      expect(exactScanQuery).not.toContain("$absoluteFloor");
     });
 
     it("returns an empty array when the scope yields no chunks (no vector/lexical reads)", async () => {
       neo4jService.initQuery.mockImplementation(() => createMockQuery());
-      neo4jService.read.mockResolvedValueOnce({ records: [makeRecord("chunkIds", [])] });
+      neo4jService.read.mockResolvedValueOnce({ records: [makeRecord("scopedCount", 0)] });
 
       const result = await repository.findPotentialChunks({ question: "nothing", dataLimits: {} });
 
       expect(result).toEqual([]);
       expect(neo4jService.read).toHaveBeenCalledTimes(1);
       expect(neo4jService.readMany).not.toHaveBeenCalled();
+    });
+
+    it("does not embed the question when a queryEmbedding is supplied", async () => {
+      wireHybridReads();
+
+      await repository.findPotentialChunks({
+        question: "test question",
+        dataLimits: {},
+        queryEmbedding: [0.9, 0.8, 0.7],
+      });
+
+      expect(embedderService.vectoriseText).not.toHaveBeenCalled();
+      const [, vectorParams] = neo4jService.read.mock.calls[1] as [string, Record<string, unknown>];
+      expect(vectorParams.queryEmbedding).toEqual([0.9, 0.8, 0.7]);
     });
 
     it("propagates embedding errors", async () => {
@@ -264,6 +372,197 @@ describe("ChunkRepository", () => {
       await expect(repository.findPotentialChunks({ question: "test", dataLimits: {} })).rejects.toThrow(
         "Embedding failed",
       );
+    });
+  });
+
+  // Task A (Phase 2): the scope gate runs first (a COUNT), so no query ever
+  // materialises the full in-scope chunk id-set into the Node heap / a query
+  // parameter — that materialisation plus a single global vector-index top-1000
+  // is the cross-tenant recall cliff this task removes.
+  describe("findPotentialChunks — scope-first retrieval", () => {
+    it("issues no query that materialises the full in-scope id set", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      await repository.findPotentialChunks({ question: "q", dataLimits: {} });
+
+      const cyphers = neo4j.read.mock.calls.map((call: any[]) => String(call[0]));
+      for (const cypher of cyphers) {
+        expect(cypher).not.toMatch(/COLLECT\(DISTINCT\s+chunk\.id\)/i);
+      }
+    });
+
+    it("does not embed the question when one is supplied", async () => {
+      const { repository, embedder } = buildChunkRepositoryUnderTest();
+      await repository.findPotentialChunks({
+        question: "q",
+        dataLimits: {},
+        queryEmbedding: [0.1, 0.2, 0.3],
+      });
+      expect(embedder.vectoriseText).not.toHaveBeenCalled();
+    });
+
+    it("embeds the question when none is supplied", async () => {
+      const { repository, embedder } = buildChunkRepositoryUnderTest();
+      await repository.findPotentialChunks({ question: "q", dataLimits: {} });
+      expect(embedder.vectoriseText).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("findChunkNeighbors — bounded walk", () => {
+    it("bounds the NEXT traversal to the requested window", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      await repository.findChunkNeighbors({ chunkIds: ["c1"], window: 1 });
+
+      const cypher = String(neo4j.read.mock.calls.at(-1)![0]);
+      expect(cypher).not.toMatch(/\[:NEXT\*1\.\.\]/);
+      expect(cypher).toMatch(/\[:NEXT\*1\.\.\d+\]/);
+    });
+
+    it("clamps an out-of-range window into [1, 5]", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      await repository.findChunkNeighbors({ chunkIds: ["c1"], window: 999 });
+
+      const cypher = String(neo4j.read.mock.calls.at(-1)![0]);
+      expect(cypher).toContain("[:NEXT*1..5]");
+    });
+
+    it("no longer passes window as a query parameter", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      await repository.findChunkNeighbors({ chunkIds: ["c1"], window: 2 });
+
+      const [, params] = neo4j.read.mock.calls.at(-1)! as [string, Record<string, unknown>];
+      expect(params.window).toBeUndefined();
+    });
+  });
+
+  describe("findChunksByIds", () => {
+    it("hydrates every id in ONE query", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.read.mockClear();
+      await repository.findChunksByIds({ chunkIds: ["c1", "c2", "c3"], dataLimits: {} });
+      expect(neo4j.readMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns an empty array without querying when given no ids", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.readMany.mockClear();
+      await expect(repository.findChunksByIds({ chunkIds: [] })).resolves.toEqual([]);
+      expect(neo4j.readMany).not.toHaveBeenCalled();
+    });
+
+    it("mirrors findChunkById's scope gate exactly (same EXISTS shape)", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      agentScopeFilter.predicate.mockReturnValue({
+        cypher: "(data:Child)",
+        params: { agentScopeId: "root-1" },
+      } as any);
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      await repository.findChunksByIds({ chunkIds: ["c1"], dataLimits: {} });
+
+      expect(mockQuery.query).toContain("EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE (data:Child) }");
+      expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
+    });
+
+    it("does not gate when the run is unscoped", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      await repository.findChunksByIds({ chunkIds: ["c1"] });
+
+      expect(mockQuery.query).not.toContain("EXISTS");
+    });
+
+    // The loop this method replaced hydrated in queue order. That order reaches the
+    // contextualiser's per-chunk fan-out and the notebook entries it writes, so a
+    // store-ordered result silently changes what the answer node cites.
+    it("returns chunks in the caller's id order, not the store's row order", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.readMany.mockResolvedValue([
+        { id: "c3", content: "three" },
+        { id: "c1", content: "one" },
+        { id: "c2", content: "two" },
+      ]);
+
+      const chunks = await repository.findChunksByIds({ chunkIds: ["c1", "c2", "c3"], dataLimits: {} });
+
+      expect(chunks.map((chunk) => chunk.id)).toEqual(["c1", "c2", "c3"]);
+    });
+
+    // The graph half arrives from a fact join with no score of its own. Without one it
+    // sorts last in the notebook budget regardless of quality — which is exactly why an
+    // LLM had to judge these chunks before. Cosine against the question embedding puts
+    // this half on the same scale as the document half.
+    it("scores each chunk against the question embedding when one is supplied", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.read.mockClear();
+      neo4j.readMany.mockResolvedValue([
+        { id: "c1", content: "one" },
+        { id: "c2", content: "two" },
+      ]);
+      neo4j.read.mockResolvedValue({ records: [scoreRecord("c1", 0.55), scoreRecord("c2", 0.31)] });
+
+      const chunks = await repository.findChunksByIds({
+        chunkIds: ["c1", "c2"],
+        dataLimits: {},
+        queryEmbedding: MOCK_EMBEDDING,
+      });
+
+      const [scoreQuery, scoreParams] = neo4j.read.mock.calls.at(-1)! as [string, Record<string, unknown>];
+      expect(scoreQuery).toMatch(/vector\.similarity\.cosine/);
+      expect(scoreParams.queryEmbedding).toEqual(MOCK_EMBEDDING);
+      expect(chunks.map((chunk) => chunk.score)).toEqual([0.55, 0.31]);
+    });
+
+    it("emits no scoring clause at all when no embedding is supplied", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.read.mockClear();
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4j.readMany.mockResolvedValue([{ id: "c1", content: "one" }]);
+
+      const chunks = await repository.findChunksByIds({ chunkIds: ["c1"], dataLimits: {} });
+
+      expect(mockQuery.query).not.toMatch(/vector\.similarity\.cosine/);
+      for (const call of neo4j.read.mock.calls) expect(String(call[0])).not.toMatch(/vector\.similarity\.cosine/);
+      expect(chunks[0].score).toBeUndefined();
+    });
+
+    // Same regression guard as above, with scoring on: attaching a score must not be
+    // allowed to re-order the result into store order.
+    it("returns scored chunks in the caller's id order, not the store's row order", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.read.mockClear();
+      neo4j.readMany.mockResolvedValue([
+        { id: "c3", content: "three" },
+        { id: "c1", content: "one" },
+        { id: "c2", content: "two" },
+      ]);
+      neo4j.read.mockResolvedValue({
+        records: [scoreRecord("c2", 0.9), scoreRecord("c3", 0.1), scoreRecord("c1", 0.5)],
+      });
+
+      const chunks = await repository.findChunksByIds({
+        chunkIds: ["c1", "c2", "c3"],
+        dataLimits: {},
+        queryEmbedding: MOCK_EMBEDDING,
+      });
+
+      expect(chunks.map((chunk) => chunk.id)).toEqual(["c1", "c2", "c3"]);
+      expect(chunks.map((chunk) => chunk.score)).toEqual([0.5, 0.9, 0.1]);
+    });
+
+    it("drops ids the query did not return without disturbing the order of the rest", async () => {
+      const { repository, neo4j } = buildChunkRepositoryUnderTest();
+      neo4j.readMany.mockResolvedValue([
+        { id: "c3", content: "three" },
+        { id: "c1", content: "one" },
+      ]);
+
+      const chunks = await repository.findChunksByIds({ chunkIds: ["c1", "c2", "c3"], dataLimits: {} });
+
+      expect(chunks.map((chunk) => chunk.id)).toEqual(["c1", "c3"]);
     });
   });
 

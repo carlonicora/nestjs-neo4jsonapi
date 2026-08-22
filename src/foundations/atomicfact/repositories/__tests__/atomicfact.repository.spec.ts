@@ -7,6 +7,7 @@ import { SecurityService } from "../../../../core/security/services/security.ser
 import { AI_SOURCE_QUERY } from "../../../../common/repositories/ai-source-query.provider";
 import { AtomicFact } from "../../entities/atomic.fact.entity";
 import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
+import { MAX_ATOMIC_FACTS } from "../../../chunk/repositories/retrieval.constants";
 
 // Test IDs
 const TEST_IDS = {
@@ -146,6 +147,23 @@ describe("AtomicFactRepository", () => {
       expect(mockQuery.query).toContain("WHERE keyconcept.value IN $keyConcepts");
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_ATOMIC_FACT]);
+    });
+
+    it("should bound the result set with MAX_ATOMIC_FACTS", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([MOCK_ATOMIC_FACT]);
+
+      await repository.findAtomicFactsByKeyConcepts({
+        keyConcepts: ["concept1"],
+        skipChunkIds: [],
+        skipAtomicFactIds: [],
+        dataLimits: {},
+      });
+
+      const query = neo4jService.readMany.mock.calls.at(-1)![0];
+      expect(String(query.query)).toMatch(/LIMIT toInteger\(\$maxAtomicFacts\)/);
+      expect(query.queryParams.maxAtomicFacts).toBe(MAX_ATOMIC_FACTS);
     });
 
     it("should add skip chunk IDs clause when skipChunkIds is not empty", async () => {

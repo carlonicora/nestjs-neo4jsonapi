@@ -1,108 +1,26 @@
-import { DynamicStructuredTool } from "@langchain/core/tools";
-import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { ClsService } from "nestjs-cls";
-import { z } from "zod";
-import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
-import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
-import { LLMService } from "../../../core/llm/services/llm.service";
-import { WebSocketService } from "../../../core/websocket/services/websocket.service";
-import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
+import { Injectable, Logger } from "@nestjs/common";
 import { ChunkRepository } from "../../../foundations/chunk/repositories/chunk.repository";
 import {
   ContextualiserContext,
   ContextualiserContextState,
 } from "../../contextualiser/contexts/contextualiser.context";
 import { NotebookContext } from "../../contextualiser/contexts/notebook.context";
-import { CONTEXTUALISER_TOOLS } from "../interfaces/retrieval.source.interface";
-import { buildInheritedAttribution } from "../../common/usage-attribution";
 
-export const defaultChunkPrompt = `
-As an intelligent assistant, your primary objective is to assess a specific **text chunk** and determine whether the available information suffices to answer the question.
-
-Given the **question**, and the **rational plan** to answer the question you have to:
-1. Analyse the text and determine if it is relevant to answer the user question
-  - The text chunk should be examined for key information that directly relates to the question being asked.
-
-2. Write an note summarizing the key points from the current text chunk that are relevant to the question
-  - The note should contain all the information required to provide a detailed answer
-  - The note should be a comprehensive summary that can be used to generate a precise, contextualised response to the question, containing all the required details enough to cover all relevant aspects.
-
-3. Write a reason describing how the text chunk is relevant to the question
-  - The reason should explain why the text chunk is relevant or not to answer the question.
-
-4. Select the appropriate next action to take based on your assessment of the current information.
-  - **queuePreviousChunk**: Choose this action if you feel that the current chunk of text might have relevant information in a previous text chunk that would **significantly** enhance your answer. Do not select this action if you believe the current chunk is either sufficient or completely irrelevant.
-  - **queueNextChunk**: Choose this action if you feel that the current chunk of text might have relevant information in a subsequent text chunk that would **significantly** enhance your answer. Do not select this action if you believe the current chunk is either sufficient or completely irrelevant.
-  - **readNeighbouringNodes**: Choose this action if you believe that this text chunk does not contain relevant information and that exploring neighbouring chunks could provide valuable context.
-  - **answer**: Choose this action if you believe that the information in this text chunk is sufficient to provide a **comprehensive and accurate** answer to the question.
-  - **skip**: Choose this action if you believe that the current chunk of text is not relevant to the question and that you want to move on to the next chunk without taking any further action.
-
-5. **Provide a Status Message**:
-  - Write a **short, friendly message** (maximum 40 characters) about your action.
-  - **Avoid technical terms** such as "nodes", "atomic facts", or "key concepts".
-  - The status message should make the user understand the action being taken
-  - The status message **MUST** contain clear information contextualised to the current question and the gathered information.
-  - The status message should be specific to the context and clearly convey the next steps or actions being taken.
-  - The status message **MUST NOT** be something unrelated to the text, such as "success", "sufficient information", "insufficient information", "chunk analysed", "chunk processed" or similar generic messages.
-
-### Important Notes:
-  - **Proceed to Answer When Appropriate**: If the current information is sufficient to provide a reliable answer, do not hesitate to proceed to select **answer** as the next step.
-  - **Gather More Information When Needed**: If you identify gaps or uncertainties that could be addressed by additional information, choose the appropriate action to gather that information.
-  - **Use Judgment in Decision-Making**: Apply thoughtful consideration to decide whether additional information is necessary.
-  - If the content contains acronyms and their definition, include the definition of the acronym in your answer.
-
-### **Please strictly follow the above instructions and format. Let's begin.**
-`;
-
-const outputSchema = z.object({
-  status: z
-    .string()
-    .describe(
-      `Write a short, friendly message (max 40 characters) about your action, avoiding technical terms such as "nodes" or "atomic facts" or  "key concepts". Give flavour to the message and avoid repeating the same message.`,
-    ),
-  note: z
-    .object({
-      content: z.string().describe("The new insights and findings about the question from current text"),
-      reason: z.string().describe("The reason describing how the text chunk is relevant to the question"),
-    })
-    .describe("The note summarizing the key points from the current text chunk that are relevant to the question"),
-  chosenAction: z.string()
-    .describe(`This is the action you have decided to do in the next step. You **MUST** pick one of the following actions:
-- **queuePreviousChunk**: Choose this action if you feel that the previous text chunk contains valuable information for answering the question. Do not select this action if you believe the current chunk is either sufficient or completely irrelevant.
-- **queueNextChunk**: Choose this action if you feel that the subsequent text chunk contains valuable information for answering the question. Do not select this action if you believe the current chunk is either sufficient or completely irrelevant.
-- **readNeighbouringNodes**: Choose this action if you feel that the current text contains valuable, but somewhat incomplete information that could be clarified by exploring related concepts.
-- **answer**: Choose this action if you believe that the information you have currently obtained is enough to answer the question. This will allow you to summarize the gathered information and provide a final answer.
-- **skip**: Choose this action if you believe that the current chunk of text is not relevant to the question and that you want to move on to the next chunk without taking any further action.
-`),
-});
-
-const inputSchema = z.object({
-  question: z.string().describe("The question asked by the user"),
-  rationalPlan: z
-    .string()
-    .describe("The rational plan you designed to provide a comprehensive answer to the user question"),
-  text: z.string().describe("The content of the text you must analyse to provide an answer to the user question"),
-});
+/**
+ * How many chunks either side of a retrieved chunk are read with it. The same
+ * value, for the same reason, as in `chunk.vector.node.service.ts`: a chunk
+ * boundary is an artefact of the splitter, not of the document, so the sentence
+ * that completes a fact often sits one chunk away. Duplicating one integer is
+ * cheaper than a shared import across two node files; the value is documented
+ * in both.
+ */
+const NEIGHBOR_WINDOW = 1;
 
 @Injectable()
 export class ChunkNodeService {
   private readonly logger = new Logger(ChunkNodeService.name);
-  private readonly systemPrompt: string;
 
-  constructor(
-    private readonly llmService: LLMService,
-    private readonly chunkRepository: ChunkRepository,
-    private readonly webSocketService: WebSocketService,
-    private readonly clsService: ClsService,
-    private readonly configService: ConfigService<BaseConfigInterface>,
-    @Optional()
-    @Inject(CONTEXTUALISER_TOOLS)
-    private readonly contributedTools?: DynamicStructuredTool[],
-  ) {
-    const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
-    this.systemPrompt = prompts?.contextualiser?.chunk ?? defaultChunkPrompt;
-  }
+  constructor(private readonly chunkRepository: ChunkRepository) {}
 
   async execute(params: { state: typeof ContextualiserContext.State }): Promise<Partial<ContextualiserContextState>> {
     if (params.state.queuedChunks.length === 0) {
@@ -111,171 +29,81 @@ export class ChunkNodeService {
           `(no queued chunks): processedChunks=${params.state.processedChunks.length}`,
       );
       return {
+        llmCalls: 0,
         nextStep: params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes",
       };
     }
-
-    const chunks: Chunk[] = [];
 
     const chunkIdsToProcess = params.state.queuedChunks.filter(
       (chunkId) => !params.state.processedChunks.includes(chunkId),
     );
 
-    const queuedCount = chunkIdsToProcess.length;
-
-    while (chunkIdsToProcess.length > 0) {
-      const chunkId = chunkIdsToProcess.shift();
-      const chunk = await this.chunkRepository.findChunkById({
-        chunkId: chunkId,
-        dataLimits: params.state.limits,
-      });
-      if (chunk) chunks.push(chunk);
-    }
+    const fetched = await this.chunkRepository.findChunksByIds({
+      chunkIds: chunkIdsToProcess,
+      dataLimits: params.state.limits,
+      queryEmbedding: params.state.questionEmbedding,
+    });
 
     this.logger.log(
-      `chunk lookup → ${chunks.length}/${queuedCount} chunks found by id ` + `(missing=${queuedCount - chunks.length})`,
+      `chunk lookup → ${fetched.length}/${chunkIdsToProcess.length} chunks found by id ` +
+        `(missing=${chunkIdsToProcess.length - fetched.length})`,
     );
 
-    if (chunks.length === 0) {
+    if (fetched.length === 0) {
       this.logger.warn(
         `chunks → ${params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes"} ` +
-          `(0 chunks resolved from ${queuedCount} ids — chunkIds may belong to deleted HowTos or company-scoped MATCH failed)`,
+          `(0 chunks resolved from ${chunkIdsToProcess.length} ids — chunkIds may belong to deleted HowTos or company-scoped MATCH failed)`,
       );
       return {
         queuedChunks: [],
+        llmCalls: 0,
         nextStep: params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes",
       };
     }
 
-    const llmResponses: ({
-      chunkId: string;
-      status?: string;
-      note: {
-        content: string;
-        reason: string;
-      };
-      chosenAction: string;
-      tokens: TokenUsageInterface;
-    } | null)[] = (await Promise.all(
-      chunks.map(async (chunk: { id: string; content: string }) => {
-        if (!chunk.content || chunk.content.trim() === "") return null;
-
-        const inputParams: z.infer<typeof inputSchema> = {
-          rationalPlan: params.state.rationalPlan,
-          question: params.state.question,
-          text: chunk.content,
-        };
-
-        const llmResponse = await this.llmService.call<z.infer<typeof outputSchema>>({
-          inputSchema: inputSchema,
-          inputParams: inputParams,
-          outputSchema: outputSchema,
-          systemPrompts: [this.systemPrompt],
-          temperature: 0.1,
-          ...(this.contributedTools?.length ? { tools: this.contributedTools } : {}),
-          // Billed to the CALLING agent: its ledger category, its entity. Spread
-          // LAST so nothing above can overwrite the attribution.
-          ...buildInheritedAttribution(params.state),
-        });
-
-        if (params.state.contentType === "Conversation")
-          await this.webSocketService.sendMessageToUser(this.clsService.get("userId"), "contextualiser", {
-            message: llmResponse.status,
-            conversationId: params.state.contentId,
-          });
-
-        return {
-          chunkId: chunk.id,
-          status: llmResponse.chosenAction === "answer" ? llmResponse.status : undefined,
-          note: {
-            content: llmResponse.note?.content ?? "",
-            reason: llmResponse.note?.reason ?? "",
-          },
-          chosenAction: llmResponse.chosenAction,
-          tokens: llmResponse.tokenUsage,
-        };
-      }),
-    )) as any;
-
-    const tokenUsed: TokenUsageInterface = {
-      input: 0,
-      output: 0,
-    };
-    const newNotebookEntries: (typeof NotebookContext.State)[] = [];
-
-    const statuses = [];
-    for (const llmResponse of llmResponses.filter((response) => !!response)) {
-      tokenUsed.input += llmResponse.tokens.input;
-      tokenUsed.output += llmResponse.tokens.output;
-      if (llmResponse.chosenAction !== "skip")
-        newNotebookEntries.push({
-          chunkId: llmResponse.chunkId,
-          content: llmResponse.note.content,
-          reason: llmResponse.note.reason,
-          sourceLayer: "case",
-          metadata: undefined,
-        });
-      if (!statuses.includes(llmResponse.status) && !params.state.status.includes(llmResponse.status))
-        statuses.push(llmResponse.status);
-    }
-
-    const newChunksToQuery: string[] = [];
-
-    await Promise.all(
-      llmResponses
-        .filter((response) => !!response)
-        .map(async (llmResponse) => {
-          switch (llmResponse.chosenAction) {
-            case "queueNextChunk":
-              const nextChunk = await this.chunkRepository.findSubsequentChunkId({
-                chunkId: llmResponse.chunkId,
-              });
-              if (nextChunk) newChunksToQuery.push(nextChunk.id);
-              break;
-            case "queuePreviousChunk":
-              const previousChunk = await this.chunkRepository.findPreviousChunkId({
-                chunkId: llmResponse.chunkId,
-              });
-              if (previousChunk) newChunksToQuery.push(previousChunk.id);
-              break;
-          }
-        }),
+    // Every fetched chunk is kept. Filtering by score was measured to be
+    // either inert (the relative bar admits everything on this corpus) or
+    // lossy (a count cap of 8 loses required evidence), so the notebook
+    // character budget in responder.answer.node.service.ts is what decides
+    // what reaches the answer. Ordering is how the budget knows what to drop.
+    const kept = [...fetched].sort(
+      (a, b) => ((b as { score?: number }).score ?? 0) - ((a as { score?: number }).score ?? 0),
     );
 
-    let nextStep: string;
-    if (newChunksToQuery.length > 0) {
-      nextStep = "chunks";
-    } else if (
-      llmResponses.filter((response) => !!response).some((llmResponse) => llmResponse.chosenAction === "answer") ===
-      true
-    ) {
-      nextStep = "answer";
-    } else {
-      if (params.state.neighbouringAlreadyExplored) nextStep = "answer";
-      else nextStep = "neighbouring_nodes";
-    }
+    // Neighbour-window widening: each chunk is carried into the notebook
+    // together with the chunks immediately before/after it, so the answer node
+    // reads continuous prose instead of a splitter's arbitrary slice. This is
+    // the automatic replacement for the per-chunk LLM decision that used to
+    // queue a previous/next chunk for another round.
+    const neighborRecords = await this.chunkRepository.findChunkNeighbors({
+      chunkIds: kept.map((chunk) => chunk.id),
+      window: NEIGHBOR_WINDOW,
+    });
+    const neighborById = new Map(neighborRecords.map((neighbour) => [neighbour.chunkId, neighbour]));
 
-    // Safety checks to prevent excessive looping:
-    // 1. Local check: If we've gone through chunks more than 3 times
-    // 2. Global check: If we're approaching the maxHops limit (typically 20, leave 5 hop buffer)
-    const approachingMaxHops = params.state.hops >= 15;
-
-    if (params.state.chunkLevel > 3 || approachingMaxHops) {
-      newChunksToQuery.length = 0;
-      nextStep = "answer";
-    }
-
-    const returnedHops = params.state.hops + 1;
+    const newNotebookEntries: (typeof NotebookContext.State)[] = kept
+      .filter((chunk) => chunk.content && chunk.content.trim() !== "")
+      .map((chunk) => {
+        const neighbours = neighborById.get(chunk.id);
+        return {
+          chunkId: chunk.id,
+          content: neighbours ? [...neighbours.before, chunk.content, ...neighbours.after].join("\n\n") : chunk.content,
+          reason: "",
+          sourceLayer: "case",
+          metadata: undefined,
+          score: (chunk as { score?: number }).score,
+          coreContent: chunk.content,
+        };
+      });
 
     return {
-      hops: returnedHops,
+      hops: params.state.hops + 1,
+      llmCalls: 0,
       notebook: newNotebookEntries,
-      chunkLevel: params.state.chunkLevel + 1,
-      processedChunks: chunks.map((c) => c.id),
-      queuedChunks: newChunksToQuery,
-      nextStep: nextStep,
-      status: statuses.filter((status) => status),
-      tokens: tokenUsed,
+      processedChunks: fetched.map((chunk) => chunk.id),
+      queuedChunks: [],
+      nextStep: params.state.neighbouringAlreadyExplored ? "answer" : "neighbouring_nodes",
+      tokens: { input: 0, output: 0 },
     };
   }
 }

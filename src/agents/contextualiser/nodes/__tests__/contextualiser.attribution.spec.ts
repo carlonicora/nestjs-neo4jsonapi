@@ -23,6 +23,9 @@ describe("contextualiser — inherited usage attribution", () => {
   let configService: { get: ReturnType<typeof vi.fn> };
   let clsService: { get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> };
   let webSocketService: { sendMessageToUser: ReturnType<typeof vi.fn> };
+  // chunk_vector now embeds the question ONCE per turn and shares the vector
+  // through the graph state, so the node takes EmbedderService directly.
+  let embedderService: { vectoriseText: ReturnType<typeof vi.fn> };
   let logger: { log: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn> };
   let tracer: { addSpanEvent: ReturnType<typeof vi.fn> };
 
@@ -43,6 +46,7 @@ describe("contextualiser — inherited usage attribution", () => {
     configService = { get: vi.fn().mockReturnValue({}) };
     clsService = { get: vi.fn(), set: vi.fn() };
     webSocketService = { sendMessageToUser: vi.fn() };
+    embedderService = { vectoriseText: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]) };
     logger = { log: vi.fn(), warn: vi.fn(), debug: vi.fn() };
     tracer = { addSpanEvent: vi.fn() };
   });
@@ -76,6 +80,11 @@ describe("contextualiser — inherited usage attribution", () => {
     }) as ContextualiserContextState;
 
   /** Every node, built with just enough collaborators to reach its `llm.call`. */
+  // `chunks` and `chunk_vector` are DELIBERATELY absent from this table. Block
+  // 3c removed their per-chunk LLM call entirely, so there is no call left to
+  // carry attribution — asserting `llmService.call` was billed correctly would
+  // assert a call that can never happen. Their remaining attribution duty is the
+  // retrieval EMBEDDING, covered by its own test below.
   const nodes: { name: string; run: (state: ContextualiserContextState) => Promise<unknown> }[] = [
     {
       name: "rational_plan",
@@ -120,31 +129,6 @@ describe("contextualiser — inherited usage attribution", () => {
           } as never,
           logger as never,
           tracer as never,
-          webSocketService as never,
-          clsService as never,
-          configService as never,
-        ).execute({ state: state as never }),
-    },
-    {
-      name: "chunks",
-      run: (state) =>
-        new ChunkNodeService(
-          llmService as never,
-          { findChunkById: vi.fn().mockResolvedValue({ id: "chunk-1", content: "text" }) } as never,
-          webSocketService as never,
-          clsService as never,
-          configService as never,
-        ).execute({ state: state as never }),
-    },
-    {
-      name: "chunk_vector",
-      run: (state) =>
-        new ChunkVectorNodeService(
-          llmService as never,
-          {
-            findPotentialChunks: vi.fn().mockResolvedValue([{ id: "chunk-1", content: "text" }]),
-            findChunkNeighbors: vi.fn().mockResolvedValue([]),
-          } as never,
           webSocketService as never,
           clsService as never,
           configService as never,
@@ -211,13 +195,9 @@ describe("contextualiser — inherited usage attribution", () => {
       findPotentialChunks: vi.fn().mockResolvedValue([{ id: "chunk-1", content: "text" }]),
       findChunkNeighbors: vi.fn().mockResolvedValue([]),
     };
-    await new ChunkVectorNodeService(
-      llmService as never,
-      chunkRepository as never,
-      webSocketService as never,
-      clsService as never,
-      configService as never,
-    ).execute({ state: createState({ contentId: "content-1", contentType: "campaigns" }) as never });
+    await new ChunkVectorNodeService(chunkRepository as never, embedderService as never).execute({
+      state: createState({ contentId: "content-1", contentType: "campaigns" }) as never,
+    });
 
     expect(chunkRepository.findPotentialChunks).toHaveBeenCalledWith(
       expect.objectContaining({

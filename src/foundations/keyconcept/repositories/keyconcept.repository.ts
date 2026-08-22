@@ -7,6 +7,7 @@ import { DataLimits } from "../../../common/types/data.limits";
 import { EmbedderAttribution, EmbedderService, ModelService } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import { KEYCONCEPT_VECTOR_OVERFETCH } from "../../chunk/repositories/retrieval.constants";
 import { KeyConcept } from "../../keyconcept/entities/key.concept.entity";
 import { keyConceptMeta } from "../../keyconcept/entities/key.concept.meta";
 import { KeyConceptModel } from "../../keyconcept/entities/key.concept.model";
@@ -150,13 +151,18 @@ export class KeyConceptRepository implements OnModuleInit {
     question: string;
     dataLimits: DataLimits;
     attribution?: EmbedderAttribution;
+    /** See `findPotentialChunks`. */
+    queryEmbedding?: number[];
   }): Promise<KeyConcept[]> {
     const query = this.neo4j.initQuery({ serialiser: KeyConceptModel });
 
-    const queryEmbedding = await this.embedderService.vectoriseText({
-      text: params.question,
-      attribution: params.attribution,
-    });
+    // Embedded once per turn — see findPotentialChunks for the rationale.
+    const queryEmbedding =
+      params.queryEmbedding ??
+      (await this.embedderService.vectoriseText({
+        text: params.question,
+        attribution: params.attribution,
+      }));
 
     const scope = this.aiSourceQuery.build({
       dataLimits: params.dataLimits,
@@ -173,6 +179,7 @@ export class KeyConceptRepository implements OnModuleInit {
     query.queryParams = {
       ...query.queryParams,
       queryEmbedding,
+      overFetch: KEYCONCEPT_VECTOR_OVERFETCH,
       ...scope.params,
       ...scopeFilter.params,
     };
@@ -183,7 +190,7 @@ export class KeyConceptRepository implements OnModuleInit {
       MATCH (data)-[:HAS_CHUNK]->()-[:HAS_ATOMIC_FACT]->()-[:HAS_KEY_CONCEPT]->(keyconcept:KeyConcept)
       WITH COLLECT(DISTINCT keyconcept.id) AS topicKeyConceptIds
 
-      CALL db.index.vector.queryNodes('keyconcepts', 1000, $queryEmbedding)
+      CALL db.index.vector.queryNodes('keyconcepts', toInteger($overFetch), $queryEmbedding)
       YIELD node AS candidateKeyConcept, score
       WHERE candidateKeyConcept.id IN topicKeyConceptIds
 

@@ -82,7 +82,12 @@ export class GraphNodeService {
         tokens: { input: 0, output: 0 },
         status: "skipped_no_modules",
       };
-      return { graphContext: out, graphError: null, trace: { graph: this.traceFromOutput(out) } as any };
+      return {
+        graphContext: out,
+        graphError: null,
+        tokens: out.tokens,
+        trace: { graph: this.traceFromOutput(out) } as any,
+      };
     }
 
     const recorder: ToolCallRecord[] = [];
@@ -303,7 +308,12 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         tokens: response.tokenUsage ?? { input: 0, output: 0 },
         status,
       };
-      return { graphContext: out, graphError: null, trace: { graph: this.traceFromOutput(out) } as any };
+      return {
+        graphContext: out,
+        graphError: null,
+        tokens: out.tokens,
+        trace: { graph: this.traceFromOutput(out) } as any,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`graph node failed: ${message}`);
@@ -315,7 +325,12 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         status: "failed",
         errorMessage: message,
       };
-      return { graphContext: out, graphError: message, trace: { graph: this.traceFromOutput(out) } as any };
+      return {
+        graphContext: out,
+        graphError: message,
+        tokens: out.tokens,
+        trace: { graph: this.traceFromOutput(out) } as any,
+      };
     }
   }
 

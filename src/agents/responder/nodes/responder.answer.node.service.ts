@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
+import { NOTEBOOK_BUDGET_CHARS } from "../../../foundations/chunk/repositories/retrieval.constants";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { buildScopeAttribution } from "../../common/usage-attribution";
 import { ResponderContext, ResponderContextState } from "../../responder/contexts/responder.context";
@@ -68,6 +69,9 @@ system internals.
    a relevance score 0–100. Use only chunkIds that actually appear in
    \`notebookSection\`. If \`notebookSection\` is empty, \`citations\` MUST be
    \`[]\`.
+   Give each citation a one-sentence \`reason\` saying what that chunk
+   contributed to the answer you wrote. It is shown to the user beside the
+   citation, so write it for them, not for a log.
 
 5. **Cite the entities that grounded the answer.** Every entity whose
    information the answer relies on goes into \`references\` as
@@ -102,7 +106,7 @@ Return strictly:
 - \`finalAnswer\` — the user-facing markdown answer. Use headings sparingly,
   bullet lists where they help, and field values from the graph branch's
   prose and entity field blocks. No handles, no UUIDs.
-- \`citations\` — array of \`{ chunkId, relevance }\` for chunks you used.
+- \`citations\` — array of \`{ chunkId, relevance, reason }\` for chunks you used.
 - \`references\` — array of \`{ ref, relevance, reason }\` for entities you used.
 - \`questions\` — array of follow-up question strings.
 `;
@@ -144,6 +148,9 @@ export const buildResponderOutputSchema = (descriptions?: { analyse?: string; fi
             .describe(
               `The relevance of the information in the line of your notebook in percentage between 0 and 100. This defines if the information is relevant to the question or not and if it will be used as a citation.`,
             ),
+          reason: z
+            .string()
+            .describe("One short sentence: what this chunk contributed to the answer you wrote. Shown to the user."),
         }),
       )
       .describe(
@@ -240,8 +247,11 @@ export class ResponderAnswerNodeService {
       fields: e.fields,
     }));
 
-    const notebookSection =
-      branchPlan.runContextualiser && state.context ? this.buildNotebookSection(state.context) : "";
+    const notebookResult =
+      branchPlan.runContextualiser && state.context
+        ? this.buildNotebookSection(state.context)
+        : { text: "", keptChunkIds: [] as string[], coreOnlyChunkIds: [] as string[] };
+    const notebookSection = notebookResult.text;
     const graphAnswer = state.graphContext?.answer ?? "";
     const graphSection = branchPlan.runGraph && state.graphContext ? this.buildGraphSection(graphAnswer, refMap) : "";
     const driftSection = branchPlan.runDrift && state.driftContext ? this.buildDriftSection(state.driftContext) : "";
@@ -319,7 +329,12 @@ export class ResponderAnswerNodeService {
     const sources: AnswerSource[] = (llmResponse.citations ?? []).map((c) => ({
       chunkId: c.chunkId ?? "",
       relevance: c.relevance ?? 0,
-      reason: "",
+      // The synthesizer's own one-liner about what this chunk contributed. It
+      // used to be backfilled from the notebook entry, but that text was written
+      // by the per-chunk LLM call Block 3c deleted, so the notebook no longer
+      // carries prose here. `reason` is user-visible (it renders in a tooltip in
+      // the web app), so it must come from the answer call itself.
+      reason: c.reason ?? "",
       sourceLayer: undefined as string | undefined,
       metadata: undefined as Record<string, unknown> | undefined,
     }));
@@ -327,7 +342,6 @@ export class ResponderAnswerNodeService {
       for (const s of sources) {
         const note = state.context.notebook?.find((n) => n.chunkId === s.chunkId);
         if (note) {
-          s.reason = note.reason;
           s.sourceLayer = note.sourceLayer ?? "case";
           s.metadata = note.metadata;
         }
@@ -370,9 +384,17 @@ export class ResponderAnswerNodeService {
     state.references = references;
     state.ontologies = state.context?.ontology ?? [];
 
-    state.tokens = {
-      input: (state.tokens?.input || 0) + (llmResponse.tokenUsage?.input || 0),
-      output: (state.tokens?.output || 0) + (llmResponse.tokenUsage?.output || 0),
+    // Tokens are an ADDITIVE channel (responder.context.ts). Returning the
+    // accumulated total makes the reducer add the contextualiser's spend a
+    // second time — the 2C + A identity that inflated every archived chat
+    // ledger entry. Return this call's own usage and let the reducer sum.
+    const answerTokens = {
+      input: llmResponse.tokenUsage?.input ?? 0,
+      output: llmResponse.tokenUsage?.output ?? 0,
+    };
+    const totalTokens = {
+      input: (state.tokens?.input ?? 0) + answerTokens.input,
+      output: (state.tokens?.output ?? 0) + answerTokens.output,
     };
 
     state.finalAnswer = {
@@ -385,18 +407,124 @@ export class ResponderAnswerNodeService {
 
     state.trace = {
       ...state.trace,
-      answer: { branchesUsed, tokens: llmResponse.tokenUsage ?? { input: 0, output: 0 } },
-      totalTokens: state.tokens,
+      answer: {
+        branchesUsed,
+        tokens: answerTokens,
+        keptChunkIds: notebookResult.keptChunkIds,
+        coreOnlyChunkIds: notebookResult.coreOnlyChunkIds,
+      },
+      // `totalTokens` is a REPORT of the run total, computed locally — it is not
+      // fed back into the additive channel.
+      totalTokens,
     } as any;
 
-    return state;
+    return { ...state, tokens: answerTokens };
   }
 
-  private buildNotebookSection(ctx: ContextField): string {
+  /**
+   * Renders the contextualiser's notebook under `NOTEBOOK_BUDGET_CHARS`.
+   *
+   * C3: the budget lives HERE and nowhere else. `buildSeedSection`'s material is
+   * assembled by `execute` from `state.seedContexts` and never passes through
+   * this method, so seed contexts are structurally out of the trim's reach.
+   *
+   * Since Block 3c deleted the per-chunk LLM calls, and neither a relevance
+   * floor nor a chunk-count cap replaced them (owner decision, 2026-08-22), this
+   * is the ONLY thing deciding what reaches the answer. Two rules:
+   *
+   * 1. ORDERING IS A DESIGN PROPERTY, not a side effect. Scored entries are
+   *    emitted strongest-first because accuracy degrades measurably when the
+   *    material that matters sits mid-context (Lost in the Middle,
+   *    arXiv 2307.03172), and 80,000 chars is ~20k tokens — inside the regime
+   *    where that effect is measured.
+   * 2. UNSCORED ENTRIES ARE APP CONTRIBUTIONS (massime, laws, anything from
+   *    `RETRIEVAL_SOURCES`) and are admitted BEFORE any scored entry. A missing
+   *    score is a missing signal, not evidence of irrelevance, so they are never
+   *    dropped in favour of a scored entry — but they carry no relevance
+   *    ordering, so they are emitted after the scored block rather than
+   *    interleaved into it. They are few and small in practice; the budget still
+   *    bounds them, so a pathological app contribution cannot run unbounded.
+   */
+  private buildNotebookSection(ctx: ContextField): {
+    text: string;
+    keptChunkIds: string[];
+    coreOnlyChunkIds: string[];
+  } {
     const lines: string[] = ["", "--- NOTEBOOK (chunks discovered) ---"];
     if (ctx.annotations) lines.push(ctx.annotations);
-    for (const n of ctx.notebook ?? []) lines.push(`${n.chunkId}: ${n.content}`);
-    return lines.join("\n");
+
+    const entries = (ctx.notebook ?? []).map((n) => ({
+      id: n.chunkId,
+      score: n.score,
+      line: `${n.chunkId}: ${n.content}`,
+      lineCore:
+        typeof n.coreContent === "string" && n.coreContent !== n.content ? `${n.chunkId}: ${n.coreContent}` : undefined,
+    }));
+    const scored = entries
+      .filter((e) => typeof e.score === "number")
+      .sort((a, b) => (b.score as number) - (a.score as number));
+    const unscored = entries.filter((e) => typeof e.score !== "number");
+
+    // Fill in RETENTION order (unscored first, then scored strongest-first) and
+    // stop at the first entry that no longer fits, so what survives is always a
+    // prefix of the score ordering — the weakest are what get dropped.
+    const keptUnscored: typeof entries = [];
+    const keptScored: typeof entries = [];
+    const coreOnly: typeof entries = [];
+    // Charge the header and `annotations` against the budget before anything
+    // else. `annotations` is model-written prose from up to three atomic-fact
+    // batches and carries no length bound of its own, so starting the count at
+    // zero let it consume the answer's context for free. Since Block 3c dropped
+    // the relevance bar and both chunk caps, this budget is the ONLY thing
+    // bounding what reaches the answer — an unbilled contributor to it is a
+    // hole in the last remaining bound.
+    let used = lines.join("\n").length;
+    for (const e of unscored) {
+      const cost = e.line.length + 1;
+      if (used + cost > NOTEBOOK_BUDGET_CHARS) break;
+      used += cost;
+      keptUnscored.push(e);
+    }
+    for (const e of scored) {
+      const cost = e.line.length + 1;
+      if (used + cost <= NOTEBOOK_BUDGET_CHARS) {
+        used += cost;
+        keptScored.push(e);
+        continue;
+      }
+      // Shed the ±1 widening before dropping the entry: the core chunk is what
+      // retrieval actually scored; the neighbours are context, not evidence of
+      // their own. Spec 2026-08-22 §3b.
+      const coreCost = e.lineCore ? e.lineCore.length + 1 : Number.POSITIVE_INFINITY;
+      if (used + coreCost <= NOTEBOOK_BUDGET_CHARS) {
+        used += coreCost;
+        keptScored.push(e);
+        coreOnly.push(e);
+        continue;
+      }
+      break; // fits in neither form — prefix property holds, nothing weaker follows
+    }
+
+    const kept = keptScored.length + keptUnscored.length;
+    if (kept < entries.length || coreOnly.length > 0) {
+      this.logger.log(
+        `notebook budget: kept ${kept - coreOnly.length} widened + ${coreOnly.length} core of ${entries.length} entries ` +
+          `(${used} of ${NOTEBOOK_BUDGET_CHARS} chars) — ${entries.length - kept} dropped lowest-score-first`,
+      );
+    }
+
+    // Emission order: strongest scored material first, unscored app
+    // contributions last (rule 2 above). Each scored entry emits whichever
+    // form was actually kept — widened, unless it was shed to core.
+    lines.push(
+      ...keptScored.map((e) => (coreOnly.includes(e) && e.lineCore ? e.lineCore : e.line)),
+      ...keptUnscored.map((e) => e.line),
+    );
+    return {
+      text: lines.join("\n"),
+      keptChunkIds: [...keptScored, ...keptUnscored].map((e) => e.id),
+      coreOnlyChunkIds: coreOnly.map((e) => e.id),
+    };
   }
 
   private buildGraphSection(

@@ -174,7 +174,7 @@ describe("ContextualiserService", () => {
           contentType: "Document",
           messagesCount: 0,
           question: "What is this?",
-          maxHops: 20,
+          maxSupersteps: 20,
           recursionLimit: 22,
           initialNode: "rational_plan",
         }),

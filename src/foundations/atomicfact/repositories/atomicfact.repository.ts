@@ -7,6 +7,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { AtomicFact } from "../../atomicfact/entities/atomic.fact.entity";
 import { AtomicFactModel } from "../../atomicfact/entities/atomic.fact.model";
+import { MAX_ATOMIC_FACTS } from "../../chunk/repositories/retrieval.constants";
 
 @Injectable()
 export class AtomicFactRepository implements OnModuleInit {
@@ -48,9 +49,14 @@ export class AtomicFactRepository implements OnModuleInit {
       keyConcepts: params.keyConcepts,
       skipChunkIds: params.skipChunkIds,
       skipAtomicFactIds: params.skipAtomicFactIds,
+      maxAtomicFacts: MAX_ATOMIC_FACTS,
       ...scope.params,
       ...scopeFilter.params,
     };
+    // Deliberate: the facts are NOT ordered before the cut. Atomic facts carry no
+    // embedding (spec §2.4), so there is no relevance signal to order by — this is
+    // a spend bound, not a ranking. Giving facts embeddings is out of scope and has
+    // its own spec.
     query.query += `
       ${scope.cypher}
       ${scopeFilter.cypher}
@@ -59,6 +65,7 @@ export class AtomicFactRepository implements OnModuleInit {
       ${params.skipChunkIds.length > 0 ? `AND NOT atomicfact_chunk.id IN $skipChunkIds` : ""}
       ${params.skipAtomicFactIds.length > 0 ? `AND NOT atomicfact.id IN $skipAtomicFactIds` : ""}
       RETURN atomicfact, atomicfact_chunk
+      LIMIT toInteger($maxAtomicFacts)
   `;
     return this.neo4j.readMany(query);
   }

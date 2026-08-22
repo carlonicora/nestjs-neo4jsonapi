@@ -20,7 +20,19 @@ export interface ConfigPromptsInterface {
     rationalPlan?: string;
     keyConceptExtractor?: string;
     atomicFactsExtractor?: string;
+    /**
+     * @deprecated No longer read. The chunks node stopped making a per-chunk
+     * LLM call — it writes the retrieved source text to the notebook verbatim —
+     * so there is no prompt to override. Kept declared so apps that still set
+     * it keep compiling; the value is ignored.
+     */
     chunk?: string;
+    /**
+     * @deprecated No longer read. The chunk_vector node stopped making a
+     * per-chunk LLM call — it writes the retrieved source text to the notebook
+     * verbatim — so there is no prompt to override. Kept declared so apps that
+     * still set it keep compiling; the value is ignored.
+     */
     chunkVector?: string;
   };
   responder?: string;

@@ -12,6 +12,7 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { Chunk, ChunkDescriptor } from "../../chunk/entities/chunk.entity";
 import { chunkMeta } from "../entities/chunk.meta";
+import { CHUNK_VECTOR_OVERFETCH, EXACT_SCAN_MAX_SCOPED_CHUNKS } from "./retrieval.constants";
 import { reciprocalRankFusion } from "../services/reciprocal-rank-fusion";
 
 @Injectable()
@@ -106,88 +107,200 @@ export class ChunkRepository implements OnModuleInit {
    * lives with the caller (the contextualiser knows which content the run is
    * bound to), which is why it is passed down rather than derived here. Absent,
    * `EmbedderService.persistUsage` records nothing.
+   *
+   * Each returned chunk carries `score`: the cosine similarity of that chunk against
+   * the question embedding. Both retrieval halves have to reach the notebook on ONE
+   * scale — the answer node orders entries best-score-first and fills a character
+   * budget, so an unscored half sorts last however good it is. The RRF score is NOT
+   * usable for that: it is rank-derived (the top hit scores ≈1/61 whether it is a
+   * perfect match or noise) and is not comparable with a cosine from the graph half.
    */
   async findPotentialChunks(params: {
     question: string;
     dataLimits: DataLimits;
     attribution?: EmbedderAttribution;
-  }): Promise<Chunk[]> {
-    const queryEmbedding = await this.embedderService.vectoriseText({
-      text: params.question,
-      attribution: params.attribution,
-    });
+    /**
+     * Precomputed question embedding. When supplied the repository does NOT
+     * embed again — the same question is otherwise embedded twice per turn,
+     * once here and once in findPotentialKeyConcepts. Optional so existing
+     * callers are unaffected.
+     */
+    queryEmbedding?: number[];
+  }): Promise<Array<Chunk & { score?: number }>> {
+    // The question is embedded ONCE per turn. When the caller already has the
+    // vector (chunk_vector computes it and shares it through the graph state),
+    // do not pay for a second identical embedding.
+    const queryEmbedding =
+      params.queryEmbedding ??
+      (await this.embedderService.vectoriseText({
+        text: params.question,
+        attribution: params.attribution,
+      }));
 
     // Lucene special-character escape so user questions can't break the fulltext query.
+    //
+    // NOT `buildFulltextTerm`: that helper tokenises and AND-joins a
+    // contains-wildcard per token, which is right for a search BOX (a few
+    // words) and wrong for a natural-language question. A 28-token question
+    // becomes 28 AND-ed clauses that no chunk can satisfy — measured against
+    // the eval corpus, the identical question went from 1,786 fulltext hits to
+    // 0, silently collapsing hybrid retrieval to its vector branch alone.
     const term = params.question.replace(/([+\-!(){}\[\]^"~*?:\\\/]|&&|\|\|)/g, "\\$1");
 
-    // The access-scoped id-set both retrieval branches are filtered to.
     const scope = this.aiSourceQuery.build({
       dataLimits: params.dataLimits,
       currentUserId: this.clsService.get("userId"),
       securityService: this.securityService,
       returnsData: true,
     });
-    // Both the vector and the lexical branch below are filtered to this id-set,
-    // so confining it to the run's scope root confines the whole hybrid search.
     const scopeFilter = this.agentScope.build({ alias: "data", dataLimits: params.dataLimits });
 
-    const scopeQuery = this.neo4j.initQuery();
-    scopeQuery.queryParams = { ...scopeQuery.queryParams, ...scope.params, ...scopeFilter.params };
-    scopeQuery.query += `
-        ${scope.cypher}
-        ${scopeFilter.cypher}
-        MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
-        RETURN COLLECT(DISTINCT chunk.id) AS chunkIds
-      `;
+    // How large is the scoped set? One cheap count decides which shape to use.
+    // Scope-first exact cosine has no recall cliff but reads every in-scope
+    // embedding; the index is cheaper at volume but can only post-filter a
+    // GLOBAL top-K, which is the cliff this task exists to remove.
+    const countQuery = this.neo4j.initQuery();
+    countQuery.queryParams = { ...countQuery.queryParams, ...scope.params, ...scopeFilter.params };
+    countQuery.query += `
+      ${scope.cypher}
+      ${scopeFilter.cypher}
+      MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
+      RETURN count(DISTINCT chunk) AS scopedCount
+    `;
+    const countResult = await this.neo4j.read(countQuery.query, countQuery.queryParams);
+    const scopedCount = Number(countResult.records[0]?.get("scopedCount") ?? 0);
+    if (scopedCount === 0) return [];
 
-    const scopeResult = await this.neo4j.read(scopeQuery.query, scopeQuery.queryParams);
-    const chunkIds = (scopeResult.records[0]?.get("chunkIds") as string[]) ?? [];
+    const vectorIds =
+      scopedCount <= EXACT_SCAN_MAX_SCOPED_CHUNKS
+        ? await this.vectorIdsByExactScan({ scope, scopeFilter, queryEmbedding })
+        : await this.vectorIdsByIndex({ scope, scopeFilter, queryEmbedding });
 
-    if (chunkIds.length === 0) return [];
-
-    const vectorResult = await this.neo4j.read(
-      `
-        CALL db.index.vector.queryNodes('chunks', 1000, $queryEmbedding)
-        YIELD node AS candidateChunk, score
-        WHERE candidateChunk.id IN $chunkIds
-        RETURN candidateChunk.id AS id
-        ORDER BY score DESC
-        LIMIT 50
-      `,
-      { queryEmbedding, chunkIds },
-    );
-    const vectorIds = vectorResult.records.map(
-      (record: { get: (key: string) => unknown }) => record.get("id") as string,
-    );
-
-    let lexicalIds: string[] = [];
-    if (term.trim()) {
-      const lexicalResult = await this.neo4j.read(
-        `
-          CALL db.index.fulltext.queryNodes('chunk_content_search', $term)
-          YIELD node, score
-          WHERE node.id IN $chunkIds
-          RETURN node.id AS id
-          ORDER BY score DESC
-          LIMIT 50
-        `,
-        { term, chunkIds },
-      );
-      lexicalIds = lexicalResult.records.map((record: { get: (key: string) => unknown }) => record.get("id") as string);
-    }
+    const lexicalIds = term.trim() ? await this.lexicalIdsInScope({ scope, scopeFilter, term }) : [];
 
     const fusedIds = reciprocalRankFusion([vectorIds, lexicalIds]).slice(0, 20);
-
-    return this.findChunksByIdsOrdered(fusedIds);
+    return this.findChunksByIdsOrdered({ ids: fusedIds, queryEmbedding });
   }
 
-  private async findChunksByIdsOrdered(ids: string[]): Promise<Chunk[]> {
-    if (ids.length === 0) return [];
+  /**
+   * Exact cosine over the scoped set. No recall cliff by construction: every
+   * in-scope chunk is scored, so a small tenant can never be crowded out of a
+   * global top-K by a large one.
+   */
+  private async vectorIdsByExactScan(params: {
+    scope: { cypher: string; params?: Record<string, unknown> };
+    scopeFilter: { cypher: string; params?: Record<string, unknown> };
+    queryEmbedding: number[];
+  }): Promise<string[]> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = {
+      ...query.queryParams,
+      ...params.scope.params,
+      ...params.scopeFilter.params,
+      queryEmbedding: params.queryEmbedding,
+    };
+    query.query += `
+      ${params.scope.cypher}
+      ${params.scopeFilter.cypher}
+      MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
+      WHERE chunk.embedding IS NOT NULL
+      WITH DISTINCT chunk
+      WITH chunk, vector.similarity.cosine(chunk.embedding, $queryEmbedding) AS score
+      WHERE score IS NOT NULL
+      RETURN chunk.id AS id
+      ORDER BY score DESC
+      LIMIT 50
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record: { get: (key: string) => unknown }) => record.get("id") as string);
+  }
+
+  /**
+   * Index-backed fallback for scoped sets too large to scan exactly. Still
+   * post-filters, so it still has a cliff — the over-fetch is what pushes that
+   * cliff out of reach, and it is deliberately far above the previous 1,000.
+   */
+  private async vectorIdsByIndex(params: {
+    scope: { cypher: string; params?: Record<string, unknown> };
+    scopeFilter: { cypher: string; params?: Record<string, unknown> };
+    queryEmbedding: number[];
+  }): Promise<string[]> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = {
+      ...query.queryParams,
+      ...params.scope.params,
+      ...params.scopeFilter.params,
+      queryEmbedding: params.queryEmbedding,
+      overFetch: CHUNK_VECTOR_OVERFETCH,
+    };
+    query.query += `
+      ${params.scope.cypher}
+      ${params.scopeFilter.cypher}
+      MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
+      WITH collect(DISTINCT chunk.id) AS scopedChunkIds
+      CALL db.index.vector.queryNodes('chunks', toInteger($overFetch), $queryEmbedding)
+      YIELD node AS candidateChunk, score
+      WITH scopedChunkIds, candidateChunk, score
+      WHERE candidateChunk.id IN scopedChunkIds
+      RETURN candidateChunk.id AS id
+      ORDER BY score DESC
+      LIMIT 50
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record: { get: (key: string) => unknown }) => record.get("id") as string);
+  }
+
+  /**
+   * Lexical branch, scoped the same way. Previously filtered against the
+   * client-side id list; now joined in the database like the vector branch.
+   */
+  private async lexicalIdsInScope(params: {
+    scope: { cypher: string; params?: Record<string, unknown> };
+    scopeFilter: { cypher: string; params?: Record<string, unknown> };
+    term: string;
+  }): Promise<string[]> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = {
+      ...query.queryParams,
+      ...params.scope.params,
+      ...params.scopeFilter.params,
+      term: params.term,
+    };
+    query.query += `
+      ${params.scope.cypher}
+      ${params.scopeFilter.cypher}
+      MATCH (chunk:Chunk)<-[:HAS_CHUNK]-(data)
+      WITH collect(DISTINCT chunk.id) AS scopedChunkIds
+      CALL db.index.fulltext.queryNodes('chunk_content_search', $term)
+      YIELD node, score
+      WITH scopedChunkIds, node, score
+      WHERE node.id IN scopedChunkIds
+      RETURN node.id AS id
+      ORDER BY score DESC
+      LIMIT 50
+    `;
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    return result.records.map((record: { get: (key: string) => unknown }) => record.get("id") as string);
+  }
+
+  /**
+   * INPUT ORDER IS PART OF THE CONTRACT here too: `WHERE chunk.id IN $ids` yields rows
+   * in store order, and the fused RRF order is what the caller means by "best first".
+   *
+   * `queryEmbedding` attaches the cosine score of each chunk against the question, on
+   * the same scale `findChunksByIds` puts on the graph half. No floor and no count cap
+   * are applied — the notebook's character budget decides what reaches the answer.
+   */
+  private async findChunksByIdsOrdered(params: {
+    ids: string[];
+    queryEmbedding?: number[];
+  }): Promise<Array<Chunk & { score?: number }>> {
+    if (params.ids.length === 0) return [];
 
     const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
     query.queryParams = {
       ...query.queryParams,
-      ids,
+      ids: params.ids,
     };
 
     query.query += `
@@ -197,8 +310,55 @@ export class ChunkRepository implements OnModuleInit {
     `;
 
     const chunks = await this.neo4j.readMany(query);
-    const byId = new Map(chunks.map((chunk) => [chunk.id, chunk]));
-    return ids.map((id) => byId.get(id)).filter((chunk): chunk is Chunk => chunk !== undefined);
+    const scored = await this.attachCosineScores({ chunks, queryEmbedding: params.queryEmbedding });
+    const byId = new Map(scored.map((chunk) => [chunk.id, chunk]));
+    return params.ids
+      .map((id) => byId.get(id))
+      .filter((chunk): chunk is Chunk & { score?: number } => chunk !== undefined);
+  }
+
+  /**
+   * Attaches `vector.similarity.cosine(chunk.embedding, $queryEmbedding)` to already
+   * hydrated chunks, by id, in JS.
+   *
+   * Why a separate read rather than one extra column on the hydration query: the
+   * hydration goes through `readMany`, which maps every row with the descriptor's
+   * generated mapper, and that mapper only ever reads the descriptor's own fields,
+   * computed fields and virtual fields (`define-entity.ts`). A projected column such
+   * as `score` is therefore silently DROPPED before the caller ever sees it. Reading
+   * the id/score pairs on their own and merging them here keeps entity mapping on
+   * `readMany` — this repository never hand-maps raw Neo4j records.
+   *
+   * SCOPE: this read scores only ids that the caller's own scope-gated query already
+   * returned, so it cannot widen the scope by construction.
+   */
+  private async attachCosineScores<T extends Chunk>(params: {
+    chunks: T[];
+    queryEmbedding?: number[];
+  }): Promise<Array<T & { score?: number }>> {
+    if (!params.queryEmbedding || params.chunks.length === 0) return params.chunks;
+
+    const query = this.neo4j.initQuery();
+    query.queryParams = {
+      ...query.queryParams,
+      ids: params.chunks.map((chunk) => chunk.id),
+      queryEmbedding: params.queryEmbedding,
+    };
+    query.query += `
+      MATCH (chunk:Chunk)
+      WHERE chunk.id IN $ids AND chunk.embedding IS NOT NULL
+      RETURN chunk.id AS id, vector.similarity.cosine(chunk.embedding, $queryEmbedding) AS score
+    `;
+
+    const result = await this.neo4j.read(query.query, query.queryParams);
+    const scoreById = new Map<string, number>();
+    for (const record of result.records as Array<{ get: (key: string) => unknown }>) {
+      const id = record.get("id");
+      const score = record.get("score");
+      if (typeof id === "string" && typeof score === "number") scoreById.set(id, score);
+    }
+
+    return params.chunks.map((chunk) => ({ ...chunk, score: scoreById.get(chunk.id) }));
   }
 
   async findParentName(params: { id: string; nodeType: string }): Promise<string | undefined> {
@@ -270,6 +430,59 @@ export class ChunkRepository implements OnModuleInit {
     `;
 
     return this.neo4j.readOne(query);
+  }
+
+  /**
+   * Hydrates many chunks in ONE query, with the same scope gate `findChunkById`
+   * applies to one. The caller previously looped with an `await` inside,
+   * costing one round trip per queued chunk. Returns only the chunks that
+   * exist and are in scope; the caller must not assume a 1:1 mapping with
+   * `chunkIds`.
+   *
+   * ORDER IS PART OF THE CONTRACT. `WHERE chunk.id IN $chunkIds` returns rows in
+   * whatever order the store yields them, but the loop this replaced hydrated in
+   * queue order, and that order reaches the contextualiser's per-chunk fan-out and
+   * the notebook entries it writes. Returning them shuffled changes what the answer
+   * node cites. The input order is therefore restored here, exactly as
+   * `findChunksByIdsOrdered` does for the retrieval path.
+   *
+   * `queryEmbedding` is OPTIONAL and, when given, attaches `score`: the cosine
+   * similarity of the chunk against the question. These chunks arrive from a fact
+   * join with no score of their own, which is precisely why an LLM used to have to
+   * judge them; cosine puts this half on the SAME scale as the document half, so the
+   * answer node can order both together. When it is absent the scoring clause is not
+   * in the Cypher at all. No floor is applied at any point: the notebook's character
+   * budget, not a threshold, decides what reaches the answer.
+   */
+  async findChunksByIds(params: {
+    chunkIds: string[];
+    dataLimits?: DataLimits;
+    queryEmbedding?: number[];
+  }): Promise<Array<Chunk & { score?: number }>> {
+    if (params.chunkIds.length === 0) return [];
+
+    const query = this.neo4j.initQuery({ serialiser: ChunkDescriptor.model });
+    const scopePredicate = this.agentScope.predicate({ alias: "data", dataLimits: params.dataLimits });
+
+    query.queryParams = {
+      ...query.queryParams,
+      chunkIds: params.chunkIds,
+      ...(scopePredicate?.params ?? {}),
+    };
+
+    query.query += `
+      MATCH (chunk:Chunk)
+      WHERE chunk.id IN $chunkIds
+      ${scopePredicate ? `AND EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE ${scopePredicate.cypher} }` : ""}
+      RETURN chunk
+    `;
+
+    const chunks = await this.neo4j.readMany(query);
+    const scored = await this.attachCosineScores({ chunks, queryEmbedding: params.queryEmbedding });
+    const byId = new Map(scored.map((chunk) => [chunk.id, chunk]));
+    return params.chunkIds
+      .map((id) => byId.get(id))
+      .filter((chunk): chunk is Chunk & { score?: number } => chunk !== undefined);
   }
 
   /**
@@ -679,16 +892,23 @@ export class ChunkRepository implements OnModuleInit {
   }): Promise<{ chunkId: string; before: string[]; after: string[] }[]> {
     if (params.chunkIds.length === 0) return [];
     const query = this.neo4j.initQuery();
-    query.queryParams = { ...query.queryParams, chunkIds: params.chunkIds, window: params.window };
+    query.queryParams = { ...query.queryParams, chunkIds: params.chunkIds };
+
+    // Neo4j will not take a parameter as a variable-length bound, so the window
+    // is clamped to a small integer and interpolated. It is never user input —
+    // the only caller passes the NEIGHBOR_WINDOW constant — and Number() plus
+    // the clamp make injection impossible.
+    const window = Math.max(1, Math.min(5, Math.trunc(Number(params.window) || 1)));
+
     query.query = `
       UNWIND $chunkIds AS cid
       MATCH (c:Chunk {id: cid})
-      OPTIONAL MATCH pBefore = (b:Chunk)-[:NEXT*1..]->(c)
+      OPTIONAL MATCH pBefore = (b:Chunk)-[:NEXT*1..${window}]->(c)
       WITH cid, c, b, length(pBefore) AS beforeDist ORDER BY beforeDist ASC
-      WITH cid, c, [x IN collect(b) WHERE x IS NOT NULL][0..$window] AS befores
-      OPTIONAL MATCH pAfter = (c)-[:NEXT*1..]->(a:Chunk)
+      WITH cid, c, [x IN collect(b) WHERE x IS NOT NULL][0..${window}] AS befores
+      OPTIONAL MATCH pAfter = (c)-[:NEXT*1..${window}]->(a:Chunk)
       WITH cid, befores, a, length(pAfter) AS afterDist ORDER BY afterDist ASC
-      WITH cid, befores, [x IN collect(a) WHERE x IS NOT NULL][0..$window] AS afters
+      WITH cid, befores, [x IN collect(a) WHERE x IS NOT NULL][0..${window}] AS afters
       RETURN cid AS chunkId, [x IN befores | x.content] AS before, [x IN afters | x.content] AS after
     `;
     const result = await this.neo4j.read(query.query, query.queryParams);

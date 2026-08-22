@@ -105,6 +105,12 @@ export class PlannerNodeService {
         branchPlan,
         question: out.refinedQuestion,
         plannerError: null,
+        // The planner's spend belongs in the ADDITIVE `tokens` channel, not just
+        // in the trace. Reporting it only in `trace.planner` left `state.tokens`
+        // (and therefore the turn's user-facing total) short by exactly one
+        // planner call on every turn — the mirror of the 2C + A double-count,
+        // and what the eval harness's token self-check caught on its first run.
+        tokens,
         trace: {
           planner: { reasoning: out.reasoning, branchPlan, tokens },
           totalTokens: tokens,
@@ -123,6 +129,9 @@ export class PlannerNodeService {
         branchPlan,
         question: state.rawQuestion,
         plannerError: message,
+        // The fallback made no successful call, so it contributes nothing — but
+        // it says so explicitly rather than omitting the channel.
+        tokens: { input: 0, output: 0 },
         trace: {
           planner: { reasoning: "planner_fallback", branchPlan, tokens: { input: 0, output: 0 } },
           totalTokens: { input: 0, output: 0 },

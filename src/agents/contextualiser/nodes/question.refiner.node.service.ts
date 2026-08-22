@@ -91,9 +91,11 @@ export class QuestionRefinerNodeService {
   }
 
   async execute(params: { state: typeof ContextualiserContext.State }): Promise<Partial<ContextualiserContextState>> {
-    params.state.hops += 1;
-
-    if (params.state.chatHistory.length === 0) return params.state;
+    // Nothing to refine on a fresh conversation. Return a DELTA rather than the
+    // whole state — see keyconcepts.node.service.ts for why. The node still
+    // consumed one graph hop, so the delta carries `hops`; it made no provider
+    // call, so it reports no `llmCalls`.
+    if (params.state.chatHistory.length === 0) return { hops: params.state.hops + 1 };
 
     const inputParams: z.infer<typeof inputSchema> = {
       chatHistory: [
@@ -111,6 +113,7 @@ export class QuestionRefinerNodeService {
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
       temperature: 0.1,
+      metadata: { agentName: "contextualiser", nodeName: "question_refiner" },
       // Billed to the CALLING agent: its ledger category, its entity. Spread
       // LAST so nothing above can overwrite the attribution.
       ...buildInheritedAttribution(params.state),
@@ -125,6 +128,7 @@ export class QuestionRefinerNodeService {
     const returnedHops = params.state.hops + 1;
     return {
       hops: returnedHops,
+      llmCalls: 1,
       question: llmResponse.response,
       tokens: llmResponse.tokenUsage,
     };

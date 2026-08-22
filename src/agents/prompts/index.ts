@@ -21,8 +21,12 @@ export { defaultQuestionRefinerPrompt } from "../contextualiser/nodes/question.r
 export { defaultRationalPlanPrompt } from "../contextualiser/nodes/rational.node.service";
 export { defaultKeyConceptsPrompt } from "../contextualiser/nodes/keyconcepts.node.service";
 export { defaultAtomicFactsPrompt } from "../contextualiser/nodes/atomicfacts.node.service";
-export { defaultChunkPrompt } from "../contextualiser/nodes/chunk.node.service";
-export { defaultChunkVectorPrompt } from "../contextualiser/nodes/chunk.vector.node.service";
+// NOTE: `defaultChunkPrompt` is gone: the chunks node no longer makes a
+// per-chunk LLM call — it puts the graph-walk's own chunks on the notebook
+// verbatim, so there is no prompt left to override.
+// NOTE: `defaultChunkVectorPrompt` is gone: the chunk_vector node no longer
+// makes a per-chunk LLM call — it puts the retrieved source text on the
+// notebook verbatim, so there is no prompt left to override.
 
 // Summariser default prompts
 export { defaultMapPrompt, defaultCombinePrompt, defaultTldrPrompt } from "../summariser/services/summariser.service";

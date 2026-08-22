@@ -8,7 +8,7 @@ import { modelRegistry } from "../../../../common/registries/registry";
 interface LLMResponse {
   title: string;
   analyse: string;
-  citations: { chunkId: string; relevance: number }[];
+  citations: { chunkId: string; relevance: number; reason?: string }[];
   references: { ref: string; relevance: number; reason: string }[];
   questions: string[];
   finalAnswer: string;
@@ -216,9 +216,9 @@ describe("ResponderAnswerNodeService.execute", () => {
     (llm.call as unknown as Mock).mockResolvedValue(
       makeLLMResponse({
         citations: [
-          { chunkId: "chunk-1", relevance: 70 },
+          { chunkId: "chunk-1", relevance: 70, reason: "defines X" },
           { chunkId: "chunk-1", relevance: 90 }, // duplicate, higher relevance
-          { chunkId: "chunk-2", relevance: 60 },
+          { chunkId: "chunk-2", relevance: 60, reason: "lists the properties" },
         ],
       }),
     );
@@ -241,7 +241,10 @@ describe("ResponderAnswerNodeService.execute", () => {
     expect(result.sources).toHaveLength(2);
     const chunk1 = result.sources!.find((s) => s.chunkId === "chunk-1")!;
     expect(chunk1.relevance).toBe(90); // dedup picks higher
-    expect(chunk1.reason).toBe("definition");
+    // `reason` is the synthesizer's own one-liner from the citation, NOT the
+    // notebook entry's "definition" — the per-chunk call that wrote that text
+    // no longer exists (Block 3c).
+    expect(chunk1.reason).toBe("defines X");
     expect(result.references).toEqual([]);
     expect(result.ontologies).toEqual(["concept-X", "concept-Y"]);
   });
@@ -374,8 +377,12 @@ describe("ResponderAnswerNodeService.execute", () => {
     expect(result.references).toHaveLength(1);
     expect(result.references?.[0]).toMatchObject({ type: "orders", id: "o-1" });
 
-    // Tokens accumulate
-    expect(result.tokens).toEqual({ input: 250, output: 105 });
+    // The node returns its OWN token delta — `ResponderContext.tokens` is an
+    // additive channel, so returning the accumulated total (250/105) made the
+    // reducer add the pre-existing 50/25 a second time. The run total is
+    // reported on the trace instead.
+    expect(result.tokens).toEqual({ input: 200, output: 80 });
+    expect((result.trace as any).totalTokens).toEqual({ input: 250, output: 105 });
     expect((result.trace as any).answer.tokens).toEqual({ input: 200, output: 80 });
     expect((result.trace as any).answer.branchesUsed).toEqual(["graph", "contextualiser", "drift"]);
   });
@@ -435,10 +442,10 @@ describe("ResponderAnswerNodeService.execute", () => {
     (llm.call as unknown as Mock).mockResolvedValue(
       makeLLMResponse({
         citations: [
-          { chunkId: "chunk-1", relevance: 70 },
+          { chunkId: "chunk-1", relevance: 70, reason: "states what X is" },
           { chunkId: "chunk-1", relevance: 95 }, // duplicate — dedup keeps the first, enriched entry
-          { chunkId: "chunk-2", relevance: 60 },
-          { chunkId: "chunk-unknown", relevance: 40 }, // not in the notebook — stays bare
+          { chunkId: "chunk-2", relevance: 60, reason: "lists the properties" },
+          { chunkId: "chunk-unknown", relevance: 40, reason: "cited but unknown" }, // not in the notebook — stays bare
         ],
       }),
     );
@@ -467,7 +474,9 @@ describe("ResponderAnswerNodeService.execute", () => {
 
     const chunk1 = result.sources!.find((s) => s.chunkId === "chunk-1")! as any;
     expect(chunk1.relevance).toBe(95); // dedup raises the kept entry's relevance
-    expect(chunk1.reason).toBe("definition");
+    // `reason` comes from the citation; only `sourceLayer` / `metadata` are
+    // backfilled from the notebook entry.
+    expect(chunk1.reason).toBe("states what X is");
     expect(chunk1.sourceLayer).toBe("reference");
     expect(chunk1.metadata).toEqual({ docId: "d-1", docName: "Handbook" });
 
@@ -476,7 +485,7 @@ describe("ResponderAnswerNodeService.execute", () => {
     expect(chunk2.metadata).toBeUndefined();
 
     const unknown = result.sources!.find((s) => s.chunkId === "chunk-unknown")! as any;
-    expect(unknown.reason).toBe("");
+    expect(unknown.reason).toBe("cited but unknown"); // from the citation, even with no notebook entry
     expect(unknown.sourceLayer).toBeUndefined();
     expect(unknown.metadata).toBeUndefined();
   });

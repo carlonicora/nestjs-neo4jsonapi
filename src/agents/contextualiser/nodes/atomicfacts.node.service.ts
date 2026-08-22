@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { ClsService } from "nestjs-cls";
 import { z } from "zod";
 import { TokenUsageInterface } from "../../../common/interfaces/token.usage.interface";
+import { allSettledKeepingSuccesses } from "../../../common/utils/settled";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
@@ -143,13 +144,8 @@ export class AtomicFactsNodeService {
       atomicFactGroups.push(filteredAtomicFacts.slice(i, i + MAX_GROUP_SIZE));
     }
 
-    const llmResponses: {
-      chunkIds: string[];
-      annotations: string;
-      status: string;
-      tokenUsage: TokenUsageInterface;
-    }[] = await Promise.all(
-      atomicFactGroups.map(async (atomicFacts: AtomicFact[]) => {
+    const llmResponses = await allSettledKeepingSuccesses(
+      atomicFactGroups.map((atomicFacts: AtomicFact[]) => async () => {
         const atomicFactList: { chunkId: string; fact: string }[] = atomicFacts.map((atomicFact: AtomicFact) => ({
           chunkId: atomicFact.chunk.id,
           fact: atomicFact.content,
@@ -167,6 +163,7 @@ export class AtomicFactsNodeService {
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],
           temperature: 0.1,
+          metadata: { agentName: "contextualiser", nodeName: "atomic_facts" },
           // Billed to the CALLING agent: its ledger category, its entity. Spread
           // LAST so nothing above can overwrite the attribution.
           ...buildInheritedAttribution(params.state),
@@ -190,7 +187,25 @@ export class AtomicFactsNodeService {
           tokenUsage: llmResponse.tokenUsage,
         };
       }),
+      (error, index) =>
+        this.logger.warn(
+          `atomic_facts: batch ${index + 1}/${atomicFactGroups.length} failed, continuing without it: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
     );
+
+    if (llmResponses.length === 0) {
+      this.logger.warn(
+        `atomic_facts: every batch failed (${atomicFactGroups.length} attempted) — routing on without new chunks`,
+      );
+      // Every batch failed, but a failed provider call is still billed, so the
+      // budget must see all of them.
+      return {
+        llmCalls: atomicFactGroups.length,
+        nextStep: params.state.queuedChunks.length > 0 ? "chunks" : "answer",
+      };
+    }
 
     const tokenUsed: TokenUsageInterface = {
       input: 0,
@@ -216,10 +231,7 @@ export class AtomicFactsNodeService {
     let queuedChunks = [];
     let nextStep = "neighbouring_nodes";
 
-    // Safety check: Don't queue new chunks if we're approaching the maxHops limit
-    const approachingMaxHops = params.state.hops >= 15;
-
-    if (validChunkIds.size === 0 || approachingMaxHops) {
+    if (validChunkIds.size === 0) {
       if (params.state.processedKeyConcepts.length === 0 || params.state.neighbouringAlreadyExplored) {
         nextStep = "answer";
       }
@@ -232,6 +244,9 @@ export class AtomicFactsNodeService {
 
     return {
       hops: returnedHops,
+      // Batches that actually completed. `allSettledKeepingSuccesses` drops the
+      // failures, so this can be fewer than `atomicFactGroups.length`.
+      llmCalls: llmResponses.length,
       annotations: annotations.join("\n"),
       processedKeyConcepts: filteredKeyConcepts,
       processedAtomicFacts: filteredAtomicFacts.map((atomicFact: AtomicFact) => atomicFact.id),
