@@ -1,3 +1,9 @@
+## [2.15.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.0...v2.15.1) (2026-08-22)
+
+### 🐛 Bug Fixes
+
+* **tokenusage:** stop the admin dashboard inheriting the caller's CLS company ([d2ad73b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d2ad73b9ab380ce760991c371885821a68009733))
+
 ## [2.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.11...v2.15.0) (2026-08-22)
 
 ### 🚀 Features
