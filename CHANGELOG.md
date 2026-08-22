@@ -1,3 +1,9 @@
+## [2.14.11](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.10...v2.14.11) (2026-08-22)
+
+### 🐛 Bug Fixes
+
+* **llm:** promote a JSON payload the provider delivered as `reasoning` ([3383489](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/338348913a91494bc623bdb2acb7d8e5932060b3))
+
 ## [2.14.10](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.14.9...v2.14.10) (2026-08-21)
 
 ### 🐛 Bug Fixes
