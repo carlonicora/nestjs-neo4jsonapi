@@ -21,6 +21,7 @@ import { vertexLocationParams } from "../utils/vertex.utils";
 import { AiConnectionResolverService } from "./ai-connection-resolver.service";
 import { EmbedderTokenBucketService } from "./embedder-token-bucket.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
+import { reasoningContentFetch } from "./reasoning-content-fetch";
 import { RateLimitedEmbedder } from "./rate-limited-embedder";
 import { unsupportedParamFetch } from "./unsupported-param-fetch";
 
@@ -992,8 +993,10 @@ export class ModelService implements OnModuleInit {
       configuration: {
         ...llmConfig.configuration,
         // Wraps whatever the provider switch installed (the OpenRouter pin
-        // included) rather than replacing it.
-        fetch: unsupportedParamFetch(modelKey, llmConfig.configuration.fetch),
+        // included) rather than replacing it. `reasoningContentFetch` sits
+        // OUTERMOST so it inspects the response that actually comes back —
+        // after `unsupportedParamFetch` has finished its repair round-trips.
+        fetch: reasoningContentFetch(unsupportedParamFetch(modelKey, llmConfig.configuration.fetch)),
       },
       // 1 hard attempt + 2 soft retries. Retries escalate the OpenRouter pin
       // (see openRouterEscalatingFetch) so a transient provider error can reroute.
