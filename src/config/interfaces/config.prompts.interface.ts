@@ -1,3 +1,16 @@
+export interface GraphNodeDomainPrompts {
+  /** What this system's data is about. Opens the prompt. */
+  role?: string;
+  /** How far to traverse before answering. Rendered after the tool list. */
+  depth?: string;
+  /** Worked example for same-name candidates of different types. */
+  disambiguation?: string;
+  /** Storage conventions the catalogue cannot express (units, encodings). */
+  dataConventions?: string;
+  /** How to render values in `answer` — formatting, output language. */
+  outputRules?: string;
+}
+
 export interface ConfigPromptsInterface {
   graphCreator?: string;
   /**
@@ -48,6 +61,16 @@ export interface ConfigPromptsInterface {
   };
   /** Temperature for the responder answer node's LLM call. Default 0.1. */
   responderTemperature?: number;
+  /**
+   * Domain layer for the graph retrieval branch.
+   *
+   * The kernel prompt states no domain: it serves an ERP, a legal practice
+   * system and a campaign planner, and a prompt that names one of them is
+   * wrong for the other two. Every slot is optional and falls back to the
+   * kernel; an app that supplies nothing gets a generic but complete prompt,
+   * not a broken one.
+   */
+  graphNodeDomain?: GraphNodeDomainPrompts;
   planner?: string;
   operator?: string;
   summariser?: {

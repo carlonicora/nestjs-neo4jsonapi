@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import { Test } from "@nestjs/testing";
+import { ConfigService } from "@nestjs/config";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { GraphNodeService, MAX_TOOL_ITERATIONS } from "../../../responder/nodes/graph.node.service";
@@ -35,6 +36,7 @@ describe("GraphNodeService", () => {
   const searchTool = mkBuild("search_entities") as unknown as SearchEntitiesTool;
   const readTool = mkBuild("read_entity") as unknown as ReadEntityTool;
   const traverseTool = mkBuild("traverse") as unknown as TraverseTool;
+  const config = { get: vi.fn().mockReturnValue(undefined) } as unknown as ConfigService;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -58,6 +60,7 @@ describe("GraphNodeService", () => {
         { provide: SearchEntitiesTool, useValue: searchTool },
         { provide: ReadEntityTool, useValue: readTool },
         { provide: TraverseTool, useValue: traverseTool },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
     service = moduleRef.get(GraphNodeService);

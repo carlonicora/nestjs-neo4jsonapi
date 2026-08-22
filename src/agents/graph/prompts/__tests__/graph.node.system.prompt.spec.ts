@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderGraphNodeSystemPrompt } from "../graph.node.system.prompt";
+import { renderGraphNodeSystemPrompt, describeDomainLayer } from "../graph.node.system.prompt";
 
 describe("renderGraphNodeSystemPrompt", () => {
   it("injects the graph map in place of {GRAPH_MAP}", () => {
@@ -228,5 +228,102 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(out).not.toContain("do not split a multi-word phrase");
     expect(out).not.toContain("you are a retrieval step, not a writer");
     expect(out).not.toContain("a separate synthesizer downstream will phrase the user-facing answer");
+  });
+});
+
+describe("renderGraphNodeSystemPrompt — domain slots", () => {
+  const fullDomain = {
+    role: "ROLE_SLOT_MARKER.",
+    depth: "DEPTH_SLOT_MARKER.",
+    disambiguation: "DISAMBIGUATION_SLOT_MARKER.",
+    dataConventions: "DATA_CONVENTIONS_SLOT_MARKER.",
+    outputRules: "OUTPUT_RULES_SLOT_MARKER.",
+  };
+
+  it("kernel-only render opens with the neutral role default", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).toContain("You help a user explore their organisation's data.");
+  });
+
+  it("a supplied role replaces the neutral default", () => {
+    const out = renderGraphNodeSystemPrompt("any", fullDomain);
+    expect(out).toContain("ROLE_SLOT_MARKER.");
+    expect(out).not.toContain("You help a user explore their organisation's data.");
+  });
+
+  it("renders every slot at its documented position", () => {
+    const out = renderGraphNodeSystemPrompt("any", fullDomain);
+    // role: inside # Role, before ## Your data
+    expect(out.indexOf("ROLE_SLOT_MARKER.")).toBeGreaterThan(out.indexOf("# Role"));
+    expect(out.indexOf("ROLE_SLOT_MARKER.")).toBeLessThan(out.indexOf("## Your data"));
+    // dataConventions: after the money mechanism, before ## Tools
+    expect(out.indexOf("DATA_CONVENTIONS_SLOT_MARKER.")).toBeGreaterThan(out.indexOf("_formatted"));
+    expect(out.indexOf("DATA_CONVENTIONS_SLOT_MARKER.")).toBeLessThan(out.indexOf("## Tools"));
+    // disambiguation: after the never-ask rule, before the resolve_entity bullet
+    expect(out.indexOf("DISAMBIGUATION_SLOT_MARKER.")).toBeGreaterThan(
+      out.indexOf("Never ask the user a clarifying question"),
+    );
+    expect(out.indexOf("DISAMBIGUATION_SLOT_MARKER.")).toBeLessThan(out.indexOf("- `resolve_entity"));
+    // depth: after the traverse bullet, before tool-error recovery
+    expect(out.indexOf("DEPTH_SLOT_MARKER.")).toBeGreaterThan(out.indexOf("- `traverse"));
+    expect(out.indexOf("DEPTH_SLOT_MARKER.")).toBeLessThan(out.indexOf("If a tool returns `{ error"));
+    // outputRules: after the answer bullet, before the entities bullet
+    expect(out.indexOf("OUTPUT_RULES_SLOT_MARKER.")).toBeGreaterThan(out.indexOf("- `answer`"));
+    expect(out.indexOf("OUTPUT_RULES_SLOT_MARKER.")).toBeLessThan(out.indexOf("- `entities`"));
+  });
+
+  it("leaves no stray {DOMAIN_*} token, with or without a domain", () => {
+    expect(renderGraphNodeSystemPrompt("any")).not.toMatch(/\{DOMAIN_/);
+    expect(renderGraphNodeSystemPrompt("any", fullDomain)).not.toMatch(/\{DOMAIN_/);
+    expect(renderGraphNodeSystemPrompt("any", { role: "only role" })).not.toMatch(/\{DOMAIN_/);
+  });
+
+  it("kernel-only output carries no ERP doctrine", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).not.toContain("ERP");
+    expect(out).not.toMatch(/cents/i);
+    expect(out).not.toMatch(/orders/i);
+    expect(out).not.toContain("typical question needs two or three");
+  });
+
+  it("keeps the money mechanism in the kernel", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).toMatch(/minor units/);
+    expect(out).toContain("_formatted");
+  });
+
+  it("keeps the generic type-fit rule and the state-assumption sentence in the kernel", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).toMatch(/pick the one whose type and connected relationships best fit/i);
+    expect(out).toMatch(/State the assumption you made in the `reason` clause/);
+  });
+
+  it("collapses blank runs left by empty slots", () => {
+    expect(renderGraphNodeSystemPrompt("any")).not.toMatch(/\n{3,}/);
+  });
+
+  it("inserts slot and graph-map text literally, even when it contains replacement patterns like $& or $'", () => {
+    const out = renderGraphNodeSystemPrompt("map with $& and $' inside", {
+      role: "Costs run $100, $200 & more — $& $` $' $1 stay literal.",
+      depth: "Budget $& check.",
+    });
+    expect(out).toContain("map with $& and $' inside");
+    expect(out).toContain("Costs run $100, $200 & more — $& $` $' $1 stay literal.");
+    expect(out).toContain("Budget $& check.");
+    expect(out).not.toContain("{DOMAIN_ROLE}");
+  });
+});
+
+describe("describeDomainLayer", () => {
+  it("reports kernel for every slot when no domain is configured", () => {
+    expect(describeDomainLayer(undefined)).toBe(
+      "graph node domain layer: role=kernel depth=kernel disambiguation=kernel dataConventions=kernel outputRules=kernel",
+    );
+  });
+
+  it("reports supplied per non-empty slot", () => {
+    expect(describeDomainLayer({ role: "r", depth: "d", disambiguation: " " })).toBe(
+      "graph node domain layer: role=supplied depth=supplied disambiguation=kernel dataConventions=kernel outputRules=kernel",
+    );
   });
 });

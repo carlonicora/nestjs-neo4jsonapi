@@ -48,6 +48,7 @@ describe("GraphNodeService — usage attribution", () => {
       recordingTool("search_entities", {}),
       recordingTool("read_entity", {}),
       recordingTool("traverse", {}),
+      { get: vi.fn(() => undefined) } as any,
     );
 
   const expectedAttribution = {

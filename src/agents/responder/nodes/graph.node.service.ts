@@ -1,6 +1,8 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
+import { BaseConfigInterface, ConfigPromptsInterface, GraphNodeDomainPrompts } from "../../../config/interfaces";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
@@ -12,7 +14,7 @@ import { DescribeEntityTool } from "../../graph/tools/describe-entity.tool";
 import { SearchEntitiesTool } from "../../graph/tools/search-entities.tool";
 import { ReadEntityTool } from "../../graph/tools/read-entity.tool";
 import { TraverseTool } from "../../graph/tools/traverse.tool";
-import { renderGraphNodeSystemPrompt } from "../../graph/prompts/graph.node.system.prompt";
+import { describeDomainLayer, renderGraphNodeSystemPrompt } from "../../graph/prompts/graph.node.system.prompt";
 import { collectEntityLabels, humanizeTool } from "../../graph/services/humanize-tool";
 import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.interface";
 import { ResponderContextState } from "../contexts/responder.context";
@@ -20,9 +22,9 @@ import { ResponderContextState } from "../contexts/responder.context";
 export const MAX_TOOL_ITERATIONS = 15;
 export const GRAPH_NODE_WALL_CLOCK_MS = 60_000;
 
-const RETRY_INSTRUCTION = `Your previous attempt did not call any tools. You cannot answer a question about the company's data without first looking it up.
+export const RETRY_INSTRUCTION = `Your previous attempt did not call any tools. You cannot answer a question about this system's data without first looking it up.
 
-You must call at least one tool BEFORE producing a final answer. For a question that names an entity (a customer, person, product, project, work order, anything that could correspond to a record in the graph), the first tool call is always:
+You must call at least one tool BEFORE producing a final answer. For a question that names an entity (a person, a place, an organisation, a project — anything that could correspond to a record in the graph), the first tool call is always:
 
     resolve_entity({ text: "<the user's literal phrase>" })
 
@@ -44,8 +46,9 @@ const graphOutputSchema = z.object({
 });
 
 @Injectable()
-export class GraphNodeService {
+export class GraphNodeService implements OnModuleInit {
   private readonly logger = new Logger(GraphNodeService.name);
+  private readonly domain?: GraphNodeDomainPrompts;
 
   constructor(
     private readonly llm: LLMService,
@@ -59,8 +62,16 @@ export class GraphNodeService {
     private readonly searchTool: SearchEntitiesTool,
     private readonly readTool: ReadEntityTool,
     private readonly traverseTool: TraverseTool,
+    private readonly configService: ConfigService<BaseConfigInterface>,
     @Optional() private readonly ws?: WebSocketService,
-  ) {}
+  ) {
+    const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
+    this.domain = prompts?.graphNodeDomain;
+  }
+
+  onModuleInit(): void {
+    this.logger.log(describeDomainLayer(this.domain));
+  }
 
   async execute(params: { state: ResponderContextState }): Promise<Partial<ResponderContextState>> {
     const state = params.state;
@@ -92,7 +103,7 @@ export class GraphNodeService {
 
     const recorder: ToolCallRecord[] = [];
     const typeIndex = this.graph.getTypeIndexFor(ctx.userModuleIds);
-    const systemPrompt = renderGraphNodeSystemPrompt(typeIndex);
+    const systemPrompt = renderGraphNodeSystemPrompt(typeIndex, this.domain);
 
     let tools: DynamicStructuredTool[] = [
       this.resolveTool.build(ctx, recorder),

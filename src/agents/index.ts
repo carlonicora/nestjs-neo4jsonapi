@@ -93,6 +93,11 @@ export { OperatorContext } from "./operator/contexts/operator.context";
 export type { OperatorCitation, OperatorContextState, OperatorFinalAnswer } from "./operator/contexts/operator.context";
 export { defaultOperatorSystemPrompt } from "./operator/prompts/operator.system.prompt";
 export {
+  GRAPH_NODE_SYSTEM_PROMPT_BASE,
+  renderGraphNodeSystemPrompt,
+  describeDomainLayer,
+} from "./graph/prompts/graph.node.system.prompt";
+export {
   OperatorCheckpointerService,
   OPERATOR_DEFAULT_APPROVAL_TTL_DAYS,
 } from "./operator/services/operator.checkpointer.service";
