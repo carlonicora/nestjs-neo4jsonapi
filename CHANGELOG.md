@@ -1,3 +1,9 @@
+## [2.15.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.1...v2.15.2) (2026-08-22)
+
+### 📦 Code Refactoring
+
+* **tokenusage:** simplify _adminQuery method signature ([d8e217a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d8e217aaf60fb2a84aca68bbfa0ecb1b9ae0d991))
+
 ## [2.15.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.0...v2.15.1) (2026-08-22)
 
 ### 🐛 Bug Fixes
