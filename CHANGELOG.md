@@ -1,3 +1,9 @@
+## [3.0.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.0.0...v3.0.1) (2026-08-23)
+
+### 🐛 Bug Fixes
+
+* **cache:** namespace the cache keys with the queue prefix ([995edad](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/995edad7a88376a7f2da0e5fc50ac7efff2525cc))
+
 ## [3.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v2.15.3...v3.0.0) (2026-08-22)
 
 ### ⚠ BREAKING CHANGES
