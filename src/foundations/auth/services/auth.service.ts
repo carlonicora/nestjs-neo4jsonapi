@@ -460,18 +460,29 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     const link: string = `${this.appConfig.url}${locale}/activation/${user.code}`;
 
-    await this.emailService.sendEmail(
-      "activationEmail",
-      {
-        to: user.email,
-        activationLink: link,
-        expirationDate: user.codeExpiration.toDateString(),
-        expirationTime: user.codeExpiration.toTimeString(),
-        expiresAt: user.codeExpiration.toISOString(),
-        companyName: user.company.name,
-      },
-      locale,
-    );
+    // Delivery failure must not fail registration. By this point the company, the
+    // user and its membership are already committed, so throwing here reports a
+    // failure for an account that demonstrably exists — and the caller cannot
+    // recover, because retrying now trips `expectNotExists` on the same email.
+    // The registration hook above is guarded for exactly this reason; so is the
+    // admin notification below. Log and continue: the activation mail can be
+    // re-sent, an unreachable SMTP host cannot be un-registered.
+    try {
+      await this.emailService.sendEmail(
+        "activationEmail",
+        {
+          to: user.email,
+          activationLink: link,
+          expirationDate: user.codeExpiration.toDateString(),
+          expirationTime: user.codeExpiration.toTimeString(),
+          expiresAt: user.codeExpiration.toISOString(),
+          companyName: user.company.name,
+        },
+        locale,
+      );
+    } catch (emailError) {
+      this.logger.error(`Failed to send activation email to ${user.email}:`, emailError);
+    }
   }
 
   async findAuthByCode(params: { code: string }): Promise<JsonApiDataInterface> {
