@@ -1,3 +1,9 @@
+## [3.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.1.0...v3.1.1) (2026-08-23)
+
+### 🐛 Bug Fixes
+
+* **auth:** handle email delivery failure during user activation registration ([2226184](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/222618494e6e650e4e7142d47b19cfaed2e3011b))
+
 ## [3.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.0.1...v3.1.0) (2026-08-23)
 
 ### 🚀 Features
