@@ -48,12 +48,16 @@ describe("CacheService", () => {
   let mockLogger: vi.Mocked<AppLoggingService>;
   let mockConfigService: vi.Mocked<ConfigService>;
 
+  // `queue` is the per-project namespace (REDIS_QUEUE) that BullMQ uses as its
+  // key prefix; the cache keys carry it too so two stacks sharing one Redis
+  // cannot read or invalidate each other's entries.
   const TEST_CONFIG = {
     redis: {
       host: "localhost",
       port: 6379,
       username: "",
       password: "",
+      queue: "testapp",
     },
     cache: {
       enabled: true,
@@ -101,11 +105,69 @@ describe("CacheService", () => {
     vi.clearAllMocks();
   });
 
+  // The namespace is what keeps two stacks on one Redis apart. Without it these
+  // keys were global to the INSTANCE: a dev and an e2e stack of the same app
+  // share seeded user ids by construction, so they would have served each other
+  // cached responses and cross-deleted entries through the pattern invalidators.
+  describe("key namespacing (redis.queue)", () => {
+    const buildService = async (redis: Record<string, unknown>): Promise<CacheService> => {
+      const configService = {
+        get: vi.fn((key: string) => {
+          if (key === "redis") return redis;
+          if (key === "cache") return TEST_CONFIG.cache;
+          return undefined;
+        }),
+      } as any;
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          CacheService,
+          { provide: AppLoggingService, useValue: mockLogger },
+          { provide: ConfigService, useValue: configService },
+        ],
+      }).compile();
+
+      return module.get<CacheService>(CacheService);
+    };
+
+    it("prefixes cache keys with the queue namespace", async () => {
+      const scoped = await buildService({ ...TEST_CONFIG.redis, queue: "projecta" });
+      expect(scoped.generateCacheKey("user123", "GET", "/users")).toContain("projecta:api_cache:user123:");
+    });
+
+    it("gives two stacks on the same Redis different keys for the same request", async () => {
+      const dev = await buildService({ ...TEST_CONFIG.redis, queue: "avvocato360" });
+      const e2e = await buildService({ ...TEST_CONFIG.redis, queue: "avvocato360e2e" });
+
+      // Same user id, same request — the seeded e2e user ids are fixed, so this
+      // is exactly the collision the namespace has to prevent.
+      const devKey = dev.generateCacheKey("same-user-id", "GET", "/users");
+      const e2eKey = e2e.generateCacheKey("same-user-id", "GET", "/users");
+
+      expect(devKey).not.toBe(e2eKey);
+    });
+
+    it("falls back to the bare prefix when no queue is configured", async () => {
+      const unscoped = await buildService({ host: "localhost", port: 6379, username: "", password: "" });
+      expect(unscoped.generateCacheKey("user123", "GET", "/users")).toContain("api_cache:user123:");
+      expect(unscoped.generateCacheKey("user123", "GET", "/users").startsWith("api_cache:")).toBe(true);
+    });
+
+    it("namespaces the element index used by invalidateByElement", async () => {
+      const scoped = await buildService({ ...TEST_CONFIG.redis, queue: "projecta" });
+      mockRedisInstance.smembers.mockResolvedValue([]);
+
+      await scoped.invalidateByElement("users", "123");
+
+      expect(mockRedisInstance.smembers).toHaveBeenCalledWith("projecta:element:users:123");
+    });
+  });
+
   describe("generateCacheKey", () => {
     it("should generate cache key with user, method, url, and hash", () => {
       const key = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined);
 
-      expect(key).toContain("api_cache:");
+      expect(key).toContain("testapp:api_cache:");
       expect(key).toContain("user123");
       expect(key).toContain("GET");
       expect(key).toContain("/api/users");
@@ -222,13 +284,13 @@ describe("CacheService", () => {
 
   describe("deleteUserCache", () => {
     it("should delete all cache keys for a user", async () => {
-      const userKeys = ["api_cache:user123:GET:/users", "api_cache:user123:GET:/roles"];
+      const userKeys = ["testapp:api_cache:user123:GET:/users", "testapp:api_cache:user123:GET:/roles"];
       mockRedisInstance.keys.mockResolvedValue(userKeys);
       mockRedisInstance.del.mockResolvedValue(2);
 
       await service.deleteUserCache("user123");
 
-      expect(mockRedisInstance.keys).toHaveBeenCalledWith("api_cache:user123:*");
+      expect(mockRedisInstance.keys).toHaveBeenCalledWith("testapp:api_cache:user123:*");
       expect(mockRedisInstance.del).toHaveBeenCalledWith(...userKeys);
     });
 
@@ -261,7 +323,7 @@ describe("CacheService", () => {
 
       await service.invalidateByElement("users", "123");
 
-      expect(mockRedisInstance.smembers).toHaveBeenCalledWith("element:users:123");
+      expect(mockRedisInstance.smembers).toHaveBeenCalledWith("testapp:element:users:123");
       expect(mockPipeline.del).toHaveBeenCalled();
       expect(mockPipeline.exec).toHaveBeenCalled();
     });
@@ -291,13 +353,13 @@ describe("CacheService", () => {
 
   describe("invalidateByType", () => {
     it("should invalidate all elements of a type", async () => {
-      const elementKeys = ["element:users:1", "element:users:2"];
+      const elementKeys = ["testapp:element:users:1", "testapp:element:users:2"];
       mockRedisInstance.keys.mockResolvedValue(elementKeys);
       mockRedisInstance.smembers.mockResolvedValue(["cache1"]);
 
       await service.invalidateByType("users");
 
-      expect(mockRedisInstance.keys).toHaveBeenCalledWith("element:users:*");
+      expect(mockRedisInstance.keys).toHaveBeenCalledWith("testapp:element:users:*");
     });
 
     it("should not do anything if no elements of type exist", async () => {
@@ -316,7 +378,7 @@ describe("CacheService", () => {
 
       const result = await service.getCacheKeysForElement("users", "123");
 
-      expect(mockRedisInstance.smembers).toHaveBeenCalledWith("element:users:123");
+      expect(mockRedisInstance.smembers).toHaveBeenCalledWith("testapp:element:users:123");
       expect(result).toEqual(cacheKeys);
     });
 
@@ -332,7 +394,7 @@ describe("CacheService", () => {
 
   describe("getAllTrackedElements", () => {
     it("should return all tracked element keys", async () => {
-      mockRedisInstance.keys.mockResolvedValue(["element:users:1", "element:roles:2"]);
+      mockRedisInstance.keys.mockResolvedValue(["testapp:element:users:1", "testapp:element:roles:2"]);
 
       const result = await service.getAllTrackedElements();
 
@@ -350,8 +412,8 @@ describe("CacheService", () => {
 
   describe("clearAll", () => {
     it("should clear all cache and element keys", async () => {
-      const cacheKeys = ["api_cache:key1", "api_cache:key2"];
-      const elementKeys = ["element:users:1"];
+      const cacheKeys = ["testapp:api_cache:key1", "testapp:api_cache:key2"];
+      const elementKeys = ["testapp:element:users:1"];
       mockRedisInstance.keys.mockResolvedValueOnce(cacheKeys).mockResolvedValueOnce(elementKeys);
       mockRedisInstance.del.mockResolvedValue(3);
 

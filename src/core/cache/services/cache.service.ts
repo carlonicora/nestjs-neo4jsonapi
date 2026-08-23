@@ -21,14 +21,35 @@ interface JsonApiResponse {
 @Injectable()
 export class CacheService implements OnModuleDestroy {
   private redis: Redis;
-  private readonly CACHE_KEY_PREFIX = "api_cache:";
-  private readonly ELEMENT_KEY_PREFIX = "element:";
+
+  /**
+   * Both key spaces are namespaced with `redis.queue` (REDIS_QUEUE), the same
+   * per-project namespace BullMQ already uses as its `prefix`
+   * (core/queue/queue.module.ts). Without it these keys were bare
+   * `api_cache:` / `element:` — global to the Redis INSTANCE — so two stacks
+   * sharing one Redis (a dev and an e2e stack of the same app, or two
+   * deployments) would read each other's cached responses whenever a user id
+   * collided, which for a seeded e2e stack is by construction. Worse, the
+   * pattern-based invalidators below call `redis.keys("element:*")` and
+   * `keys("api_cache:*")`: unprefixed, one stack's invalidation would delete
+   * another's entries.
+   *
+   * Falls back to the bare prefixes when no queue namespace is configured, so
+   * an app that never set REDIS_QUEUE keeps its existing key layout.
+   */
+  private readonly CACHE_KEY_PREFIX: string;
+  private readonly ELEMENT_KEY_PREFIX: string;
 
   constructor(
     private readonly logger: AppLoggingService,
     private readonly configService: ConfigService<BaseConfigInterface>,
   ) {
     const redisConfig = this.configService.get<ConfigRedisInterface>("redis");
+
+    const namespace = redisConfig?.queue ? `${redisConfig.queue}:` : "";
+    this.CACHE_KEY_PREFIX = `${namespace}api_cache:`;
+    this.ELEMENT_KEY_PREFIX = `${namespace}element:`;
+
     this.redis = new Redis({
       host: redisConfig.host,
       port: redisConfig.port,
