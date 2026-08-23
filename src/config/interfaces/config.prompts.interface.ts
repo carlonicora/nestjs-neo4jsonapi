@@ -9,6 +9,13 @@ export interface GraphNodeDomainPrompts {
   dataConventions?: string;
   /** How to render values in `answer` — formatting, output language. */
   outputRules?: string;
+  /**
+   * Not a kernel slot: overrides the traversal-guard retry instruction sent
+   * when `responder.graph.requireTraversalBeforeAnswer` is on and a turn made
+   * tool calls without one successful `traverse`. Falls back to the library's
+   * neutral instruction when unset.
+   */
+  traversalRetry?: string;
 }
 
 export interface ConfigPromptsInterface {

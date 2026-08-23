@@ -2,7 +2,12 @@ import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { BaseConfigInterface, ConfigPromptsInterface, GraphNodeDomainPrompts } from "../../../config/interfaces";
+import {
+  BaseConfigInterface,
+  ConfigPromptsInterface,
+  ConfigResponderInterface,
+  GraphNodeDomainPrompts,
+} from "../../../config/interfaces";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
@@ -20,6 +25,9 @@ import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.i
 import { ResponderContextState } from "../contexts/responder.context";
 
 export const MAX_TOOL_ITERATIONS = 15;
+// Enforced at retry boundaries: once a turn has spent this budget (or the
+// iteration cap) no further retry pass is launched — the in-flight llm.call
+// itself cannot be interrupted mid-loop. Also labels `status` after the fact.
 export const GRAPH_NODE_WALL_CLOCK_MS = 60_000;
 
 export const RETRY_INSTRUCTION = `Your previous attempt did not call any tools. You cannot answer a question about this system's data without first looking it up.
@@ -29,6 +37,14 @@ You must call at least one tool BEFORE producing a final answer. For a question 
     resolve_entity({ text: "<the user's literal phrase>" })
 
 Inspect the returned candidates, pick a type, then call describe_entity and proceed with the typed tools (read_entity, search_entities, traverse) until you have the data the answer needs. Do not respond with prose alone — call the tool now.`;
+
+export const TRAVERSAL_RETRY_INSTRUCTION = `Your previous attempt answered without a single successful traverse call. A record's own fields describe it as it was when the record was written; what has happened to it since lives on the records that reference it, and those are reachable only by walking a relationship.
+
+Decide which case this question is:
+- If it asks what a record IS and that record's own fields fully answer it, return your answer unchanged.
+- Otherwise, call describe_entity on the subject's type if you have not already, pick the relationships that lead to the records referencing it, call traverse along each, read what comes back, and rebuild your answer from those records.
+
+Do not return the previous answer unchanged unless the first case truly applies.`;
 
 const APOLOGY_REGEX = /^\s*(i am sorry|i'm sorry|i am unable|i cannot|please provide|could you (please )?specify)/i;
 
@@ -49,6 +65,7 @@ const graphOutputSchema = z.object({
 export class GraphNodeService implements OnModuleInit {
   private readonly logger = new Logger(GraphNodeService.name);
   private readonly domain?: GraphNodeDomainPrompts;
+  private readonly graphTuning?: ConfigResponderInterface["graph"];
 
   constructor(
     private readonly llm: LLMService,
@@ -67,10 +84,16 @@ export class GraphNodeService implements OnModuleInit {
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.domain = prompts?.graphNodeDomain;
+    this.graphTuning = this.configService.get<ConfigResponderInterface>("responder")?.graph;
   }
 
   onModuleInit(): void {
-    this.logger.log(describeDomainLayer(this.domain));
+    const t = this.graphTuning;
+    this.logger.log(
+      `${describeDomainLayer(this.domain)} | tier=${t?.modelWeight ?? "normal"} ` +
+        `effort=${t?.reasoningEffort ?? "tier-default"} ` +
+        `traversalGuard=${t?.requireTraversalBeforeAnswer ? "on" : "off"}`,
+    );
   }
 
   async execute(params: { state: ResponderContextState }): Promise<Partial<ResponderContextState>> {
@@ -155,10 +178,13 @@ export class GraphNodeService implements OnModuleInit {
       content: m.content,
     }));
     const startedAt = Date.now();
-
-    try {
-      let response: any = await this.llm.call({
-        systemPrompts: [systemPrompt],
+    // One shape for the first pass and every retry: same params, same knobs,
+    // same attribution — only the appended instruction differs. The graph
+    // tuning knobs (tier / effort) come from `responder.graph` config; unset
+    // keeps the Normal tier and its tier-default effort.
+    const call = (extraInstruction?: string) =>
+      this.llm.call({
+        systemPrompts: extraInstruction ? [systemPrompt, extraInstruction] : [systemPrompt],
         history,
         outputSchema: graphOutputSchema,
         inputParams: {
@@ -168,29 +194,30 @@ export class GraphNodeService implements OnModuleInit {
         tools,
         maxToolIterations: MAX_TOOL_ITERATIONS,
         temperature: 0.1,
+        ...(this.graphTuning?.modelWeight !== undefined ? { modelWeight: this.graphTuning.modelWeight } : {}),
+        ...(this.graphTuning?.reasoningEffort !== undefined
+          ? { reasoningEffort: this.graphTuning.reasoningEffort }
+          : {}),
         metadata: this.buildMetadata(state),
         ...this.attribution(state),
       });
+    // The recorder is shared across passes, so retries stacked on a full
+    // first pass are how a single turn once reached 23 tool calls and 1.4M
+    // input tokens. A retry only launches while the turn has budget left; the
+    // zero-tool retry stays unconditional because an empty recorder means the
+    // iteration budget is untouched and no answer exists yet.
+    const retryBudgetLeft = () =>
+      recorder.length < MAX_TOOL_ITERATIONS && Date.now() - startedAt < GRAPH_NODE_WALL_CLOCK_MS;
+
+    try {
+      let response: any = await call();
 
       // Zero-tool-call retry: the first attempt produced no searches at all.
       // Re-invoke with an explicit instruction that data must be looked up
       // before answering.
       if (recorder.length === 0) {
         this.logger.warn(`graph node: zero tool calls on first attempt — retrying with RETRY_INSTRUCTION`);
-        response = await this.llm.call({
-          systemPrompts: [systemPrompt, RETRY_INSTRUCTION],
-          history,
-          outputSchema: graphOutputSchema,
-          inputParams: {
-            question: state.question,
-            contentScope: state.contentId && state.contentType ? `${state.contentType}:${state.contentId}` : null,
-          },
-          tools,
-          maxToolIterations: MAX_TOOL_ITERATIONS,
-          temperature: 0.1,
-          metadata: this.buildMetadata(state),
-          ...this.attribution(state),
-        });
+        response = await call(RETRY_INSTRUCTION);
       }
 
       // Error-recovery retry: at least one tool call failed AND the model
@@ -198,7 +225,7 @@ export class GraphNodeService implements OnModuleInit {
       // Force another pass with the failing call's error message in context.
       const erroredCalls = recorder.filter((c) => c.error);
       const answerSoundsApologetic = APOLOGY_REGEX.test(typeof response.answer === "string" ? response.answer : "");
-      if (erroredCalls.length > 0 && answerSoundsApologetic) {
+      if (erroredCalls.length > 0 && answerSoundsApologetic && retryBudgetLeft()) {
         const lastError = erroredCalls[erroredCalls.length - 1];
         const recoveryInstruction = `A previous tool call failed and you responded to the user with an apology instead of retrying. That is wrong — the user did not cause the error. Read the error message carefully, correct the arguments, and call the tool again.
 
@@ -211,20 +238,7 @@ If the error lists valid fields or relationships, pick one of those and retry no
         this.logger.warn(
           `graph node: ${erroredCalls.length} tool error(s) + apologetic answer — retrying with recovery prompt`,
         );
-        response = await this.llm.call({
-          systemPrompts: [systemPrompt, recoveryInstruction],
-          history,
-          outputSchema: graphOutputSchema,
-          inputParams: {
-            question: state.question,
-            contentScope: state.contentId && state.contentType ? `${state.contentType}:${state.contentId}` : null,
-          },
-          tools,
-          maxToolIterations: MAX_TOOL_ITERATIONS,
-          temperature: 0.1,
-          metadata: this.buildMetadata(state),
-          ...this.attribution(state),
-        });
+        response = await call(recoveryInstruction);
       }
 
       // Structural data-loading retry: the LLM made tool calls but none of
@@ -235,7 +249,7 @@ If the error lists valid fields or relationships, pick one of those and retry no
       // Detected structurally — no regex on answer text.
       const dataLoadingTools = new Set(["read_entity", "search_entities", "traverse"]);
       const dataToolCallsBefore = recorder.filter((c) => dataLoadingTools.has(c.tool) && !c.error).length;
-      if (recorder.length > 0 && dataToolCallsBefore === 0) {
+      if (recorder.length > 0 && dataToolCallsBefore === 0 && retryBudgetLeft()) {
         const triedTools = Array.from(new Set(recorder.map((c) => c.tool))).join(", ");
         const dataLoadingRetry = `Your previous attempt called ${triedTools} but never successfully loaded data with read_entity, search_entities, or traverse. The user asked a data question; you must answer it.
 
@@ -250,20 +264,28 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         this.logger.warn(
           `graph node: ${recorder.length} tool call(s), 0 successful data loads — retrying with data-loading instruction`,
         );
-        response = await this.llm.call({
-          systemPrompts: [systemPrompt, dataLoadingRetry],
-          history,
-          outputSchema: graphOutputSchema,
-          inputParams: {
-            question: state.question,
-            contentScope: state.contentId && state.contentType ? `${state.contentType}:${state.contentId}` : null,
-          },
-          tools,
-          maxToolIterations: MAX_TOOL_ITERATIONS,
-          temperature: 0.1,
-          metadata: this.buildMetadata(state),
-          ...this.attribution(state),
-        });
+        response = await call(dataLoadingRetry);
+      }
+
+      // Traversal guard (opt-in via responder.graph.requireTraversalBeforeAnswer):
+      // tool calls happened — data may even have been read — but no edge was
+      // walked. That is the shape that answers a state question from the
+      // subject's own stale fields and presents the past as the present. One
+      // structural retry; the instruction explicitly lets a fields-only answer
+      // stand when the question is a pure identity lookup.
+      const successfulTraverses = recorder.filter((c) => c.tool === "traverse" && !c.error).length;
+      if (this.graphTuning?.requireTraversalBeforeAnswer && recorder.length > 0 && successfulTraverses === 0) {
+        if (retryBudgetLeft()) {
+          this.logger.warn(
+            `graph node: ${recorder.length} tool call(s), 0 successful traverses — retrying with traversal instruction`,
+          );
+          response = await call(this.domain?.traversalRetry?.trim() || TRAVERSAL_RETRY_INSTRUCTION);
+        } else {
+          this.logger.warn(
+            `graph node: traversal guard skipped — budget exhausted ` +
+              `(calls=${recorder.length}, elapsedMs=${Date.now() - startedAt})`,
+          );
+        }
       }
 
       // Honesty rewrite: even after the zero-tool retry the model produced no
