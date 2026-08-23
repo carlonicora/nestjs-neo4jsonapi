@@ -1,3 +1,9 @@
+## [3.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.0.1...v3.1.0) (2026-08-23)
+
+### 🚀 Features
+
+* **graph:** responder.graph tuning knobs, opt-in traversal guard, retry budget enforcement ([4c1ff34](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4c1ff344d5afbce089a1d1b81c73319602b20c29))
+
 ## [3.0.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.0.0...v3.0.1) (2026-08-23)
 
 ### 🐛 Bug Fixes
