@@ -1,3 +1,9 @@
+## [3.2.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.0...v3.2.1) (2026-08-24)
+
+### 🚨 Tests
+
+* **field-formatting:** add regression tests for 12-session traverse payload and optimize payload size ([79a6e5d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/79a6e5d2a67a9fe663df692faf139aa30d19c3ca))
+
 ## [3.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.1.1...v3.2.0) (2026-08-24)
 
 ### 🚀 Features
