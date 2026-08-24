@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import { describe, expect, it } from "vitest";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 import { CatalogEntity } from "../../interfaces/graph.catalog.interface";
@@ -193,74 +191,114 @@ describe("ToolFieldFormatterService", () => {
   });
 });
 
-describe("captured 12-session traverse payload", () => {
-  const DUMP = path.resolve(
-    __dirname,
-    "../../../../../../../apps/api/.llm-dumps/2026-08-22/e4f3c830-f853-414f-b378-1e414703050b/2026-08-22-23-53-39/23-53-43-653-graph-8f8dcb85-13cb-4f20-b91d-dd5d4a4d5c0e.json",
-  );
+/**
+ * Regression for the 12-session `traverse` tool result that motivated staged
+ * list projections: a 347,808-byte payload the model had to swallow whole.
+ *
+ * The payload below is rebuilt, not captured. The original version of this
+ * spec read the real tool result out of a machine-local
+ * `apps/api/.llm-dumps/<date>/<uuid>/…` capture, so the regression only ran on
+ * the one machine that happened to hold that file and hard-failed in every
+ * other checkout. This fixture reproduces what the assertion actually depends
+ * on — 12 sessions whose `recap` / `recapEvents` / `recapDebrief` BlockNote
+ * documents dominate a >300 KB payload, with only `recapEvents` among the
+ * richtext fields declared in `chat.list` — and runs anywhere.
+ */
+describe("12-session traverse payload", () => {
+  const LOREM =
+    "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore".split(" ");
 
-  it("dump file exists on this machine (regression must run, not skip)", () => {
-    expect(fs.existsSync(DUMP)).toBe(true);
+  const fillerText = (length: number, seed: number): string => {
+    let text = "";
+    let index = seed;
+    while (text.length < length) text += `${text.length === 0 ? "" : " "}${LOREM[index++ % LOREM.length]}`;
+    return text.slice(0, length);
+  };
+
+  /** A BlockNote document of `blocks` blocks, each holding `textChars` of prose. */
+  const blockNoteDoc = (params: { blocks: number; textChars: number; seed: number }): string =>
+    JSON.stringify(
+      Array.from({ length: params.blocks }, (_, index) => ({
+        id: `${params.seed}-${index}`,
+        type: index % 4 === 0 ? "bulletListItem" : "paragraph",
+        props: { textColor: "default", backgroundColor: "default", textAlignment: "left" },
+        content: [{ type: "text", text: fillerText(params.textChars, params.seed + index), styles: {} }],
+        children: [],
+      })),
+    );
+
+  // Block counts mirror the captured spread: long recaps, mid-length debriefs,
+  // and short bullet-per-event lists.
+  const items = Array.from({ length: 12 }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    type: "sessions",
+    summary: `Session ${index + 1}`,
+    fields: {
+      name: `Session ${index + 1}`,
+      description: blockNoteDoc({ blocks: 1, textChars: 180, seed: index }),
+      number: index + 1,
+      sessionDate: "2026-08-22",
+      inGameDate: "1499-03-14",
+      recap: blockNoteDoc({ blocks: 36 + ((index * 3) % 12), textChars: 200, seed: 100 + index }),
+      recapEvents: blockNoteDoc({ blocks: 14 + ((index * 5) % 24), textChars: 34, seed: 200 + index }),
+      recapDebrief: blockNoteDoc({ blocks: 24 + (index % 6), textChars: 75, seed: 300 + index }),
+      // Bookkeeping the captured payload also carried, catalogued nowhere.
+      recapStatus: "success",
+      recapGeneratedAt: "2026-08-22T23:53:39.000Z",
+    },
+  }));
+
+  const sessionsFixture = entity({
+    type: "sessions",
+    nodeName: "session",
+    labelName: "Session",
+    list: ["name", "number", "sessionDate", "inGameDate", "recapEvents"],
+    fields: [
+      { name: "name", type: "string", description: "d", filterable: true, sortable: true },
+      {
+        name: "description",
+        type: "string",
+        description: "d",
+        filterable: true,
+        sortable: true,
+        kind: { type: "richtext" },
+      },
+      { name: "number", type: "number", description: "d", filterable: true, sortable: true },
+      { name: "sessionDate", type: "date", description: "d", filterable: true, sortable: true },
+      { name: "inGameDate", type: "date", description: "d", filterable: true, sortable: true },
+      {
+        name: "recap",
+        type: "string",
+        description: "d",
+        filterable: true,
+        sortable: true,
+        kind: { type: "richtext" },
+      },
+      {
+        name: "recapEvents",
+        type: "string",
+        description: "d",
+        filterable: true,
+        sortable: true,
+        kind: { type: "richtext" },
+      },
+      {
+        name: "recapDebrief",
+        type: "string",
+        description: "d",
+        filterable: true,
+        sortable: true,
+        kind: { type: "richtext" },
+      },
+    ],
+  });
+
+  it("the raw payload is the size that motivated the regression", () => {
+    expect(items).toHaveLength(12);
+    expect(JSON.stringify({ items }).length).toBeGreaterThan(300_000);
   });
 
   it("renders the sessions list to under 20 KB (was 347,808 bytes)", () => {
-    expect(fs.existsSync(DUMP)).toBe(true);
-
-    const dump = JSON.parse(fs.readFileSync(DUMP, "utf-8"));
-    const toolResult = dump.iterations
-      .flatMap((it: any) => it.toolResults ?? [])
-      .find((tr: any) => tr.tool === "traverse" && tr.bytes > 100_000);
-    expect(toolResult).toBeDefined();
-
-    const payload = JSON.parse(toolResult.content);
-    const items: any[] = payload.items;
-    expect(items.length).toBe(12);
-
-    const sessionsFixture = entity({
-      type: "sessions",
-      nodeName: "session",
-      labelName: "Session",
-      list: ["name", "number", "sessionDate", "inGameDate", "recapEvents"],
-      fields: [
-        { name: "name", type: "string", description: "d", filterable: true, sortable: true },
-        {
-          name: "description",
-          type: "string",
-          description: "d",
-          filterable: true,
-          sortable: true,
-          kind: { type: "richtext" },
-        },
-        { name: "number", type: "number", description: "d", filterable: true, sortable: true },
-        { name: "sessionDate", type: "date", description: "d", filterable: true, sortable: true },
-        { name: "inGameDate", type: "date", description: "d", filterable: true, sortable: true },
-        {
-          name: "recap",
-          type: "string",
-          description: "d",
-          filterable: true,
-          sortable: true,
-          kind: { type: "richtext" },
-        },
-        {
-          name: "recapEvents",
-          type: "string",
-          description: "d",
-          filterable: true,
-          sortable: true,
-          kind: { type: "richtext" },
-        },
-        {
-          name: "recapDebrief",
-          type: "string",
-          description: "d",
-          filterable: true,
-          sortable: true,
-          kind: { type: "richtext" },
-        },
-      ],
-    });
-
     const svc = service();
     const rebuilt = items.map((item) => ({
       id: item.id,
@@ -271,7 +309,19 @@ describe("captured 12-session traverse payload", () => {
 
     const bytes = JSON.stringify(rebuilt).length;
 
-    console.log(`dump regression: rebuilt 12-session list = ${bytes} bytes (was 347,808)`);
+    console.log(`traverse regression: rebuilt 12-session list = ${bytes} bytes (was 347,808)`);
     expect(bytes).toBeLessThan(20_000);
+  });
+
+  it("emits the declared list as markdown and withholds the rest", () => {
+    const svc = service();
+    const result = svc.build({ entity: sessionsFixture, record: items[0].fields, stage: "list" });
+
+    expect(Object.keys(result.fields)).toEqual(["name", "number", "sessionDate", "inGameDate", "recapEvents"]);
+    expect(result.fields.recapEvents).not.toContain('"type":"paragraph"');
+    expect(result.availableOnRead).toEqual(expect.arrayContaining(["description", "recap", "recapDebrief"]));
+    // Uncatalogued bookkeeping never reaches the model, in either bucket.
+    expect(result.fields.recapStatus).toBeUndefined();
+    expect(result.availableOnRead).not.toContain("recapStatus");
   });
 });
