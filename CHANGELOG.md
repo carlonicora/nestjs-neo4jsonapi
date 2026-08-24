@@ -1,3 +1,9 @@
+## [3.2.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.1...v3.2.2) (2026-08-24)
+
+### 🚨 Tests
+
+* pin SWC as the only TypeScript transform, and use vitest eslint globals ([3f8c7fe](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3f8c7fef1246bba5c843f490872b92acb6d7a46f))
+
 ## [3.2.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.0...v3.2.1) (2026-08-24)
 
 ### 🚨 Tests
