@@ -1,3 +1,9 @@
+## [3.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.1.1...v3.2.0) (2026-08-24)
+
+### 🚀 Features
+
+* **graph:** staged tool payloads, read dedup, and polymorphic related traversal ([e9e8762](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e9e8762615e140703c6a4b0809e4814f938aa515))
+
 ## [3.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.1.0...v3.1.1) (2026-08-23)
 
 ### 🐛 Bug Fixes
