@@ -1,7 +1,11 @@
 import { vi, describe, it, expect } from "vitest";
 import { SearchEntitiesTool } from "../search-entities.tool";
+import { ToolFieldFormatterService } from "../../services/field-formatting";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 
 describe("SearchEntitiesTool", () => {
+  const formatter = new ToolFieldFormatterService(new BlockNoteService());
+
   const catalog: any = {
     getEntityDetail: (type: string) =>
       type === "accounts"
@@ -38,7 +42,7 @@ describe("SearchEntitiesTool", () => {
   const unusedSearch: any = {};
 
   it("rejects filter on undescribed field with explicit error", async () => {
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "secret", op: "eq", value: "x" }] },
       ctx,
@@ -48,7 +52,7 @@ describe("SearchEntitiesTool", () => {
   });
 
   it("rejects sort on undescribed field", async () => {
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -63,7 +67,7 @@ describe("SearchEntitiesTool", () => {
         fields: [{ name: "amount", type: "number", filterable: true, sortable: true }],
       }),
     };
-    const tool = new SearchEntitiesTool(factoryNum, unusedSearch);
+    const tool = new SearchEntitiesTool(factoryNum, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke(
       { type: "accounts", filters: [{ field: "amount", op: "like", value: "x" }] },
       ctx,
@@ -75,7 +79,7 @@ describe("SearchEntitiesTool", () => {
   it("clamps limit to [1, 50]", async () => {
     const svc = { findRecords: vi.fn(async () => []) };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     await tool.invoke({ type: "accounts", limit: 5000 }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -92,7 +96,7 @@ describe("SearchEntitiesTool", () => {
       ]),
     };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", limit: 2 }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -108,7 +112,7 @@ describe("SearchEntitiesTool", () => {
   it("omits hasMore and note when the result fits within the limit", async () => {
     const svc = { findRecords: vi.fn(async () => [{ id: "a1", name: "one", status: "active" }]) };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", limit: 2 }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -120,7 +124,7 @@ describe("SearchEntitiesTool", () => {
   it("returns matchMode='none' and per-item score=null for filter-only queries", async () => {
     const svc = { findRecords: vi.fn().mockResolvedValue([{ id: "a1", name: "foo", status: "active" }]) };
     registryGet.mockReturnValue(svc);
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke({ type: "accounts" }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -130,14 +134,14 @@ describe("SearchEntitiesTool", () => {
   });
 
   it("Zod schema rejects a `text` property at the build() surface", () => {
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const built: any = tool.build(ctx, []);
     const parsed = built.schema.safeParse({ type: "accounts", text: "Faby" });
     expect(parsed.success).toBe(false);
   });
 
   it("tool description does not mention name search or matchMode cascade", () => {
-    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const built: any = tool.build(ctx, []);
     expect(built.description).not.toMatch(/name/i);
     expect(built.description).not.toMatch(/matchMode/);
@@ -202,7 +206,14 @@ describe("SearchEntitiesTool", () => {
     const bridgeCatalog: any = { getEntityDetail: (t: string) => (t === "items" ? items : null) };
     const bridgeRegistry: any = { get: (t: string) => (t === "items" ? itemEdgeSvc : undefined) };
 
-    const tool = new SearchEntitiesTool(bridgeFactory, unusedSearch, bridgeCatalog, bridgeRegistry);
+    const tool = new SearchEntitiesTool(
+      bridgeFactory,
+      unusedSearch,
+      bridgeCatalog,
+      bridgeRegistry,
+      {} as any,
+      formatter,
+    );
     const out: any = await tool.invoke({ type: "bom-entries" }, { ...ctx, userModuleIds: [moduleId] }, [
       { tool: "describe_entity", input: { type: "bom-entries" }, durationMs: 0 },
     ]);
@@ -217,5 +228,44 @@ describe("SearchEntitiesTool", () => {
       __materialised: ["item"],
     });
     expect(out.items[0].item).toMatchObject({ id: "it-1", type: "items" });
+  });
+
+  it("stages list projection: short fields inline, long field name withheld to availableOnRead", async () => {
+    const longBio = "z".repeat(250);
+    const notesCatalog: any = {
+      getEntityDetail: (type: string) =>
+        type === "npcs"
+          ? {
+              type: "npcs",
+              moduleId: "55555555-5555-5555-5555-555555555555",
+              description: "An npc.",
+              fields: [
+                { name: "name", type: "string", filterable: true, sortable: true },
+                { name: "bio", type: "string", filterable: true, sortable: true },
+              ],
+              relationships: [],
+              nodeName: "npc",
+              labelName: "Npc",
+              summary: (d: any) => d.name,
+            }
+          : null,
+    };
+    const svc = { findRecords: vi.fn(async () => [{ id: "npc1", name: "Short", bio: longBio }]) };
+    const stagedFactory: any = {
+      resolveEntity: (t: string) => notesCatalog.getEntityDetail(t) ?? { error: "nope" },
+      resolveService: () => svc,
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+    const tool = new SearchEntitiesTool(stagedFactory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "npcs" }, ctx, [
+      { tool: "describe_entity", input: { type: "npcs" }, durationMs: 0 },
+    ]);
+    expect(out.items[0].fields.name).toBe("Short");
+    expect(out.items[0].fields.bio).toBeUndefined();
+    expect(out.items[0].availableOnRead).toEqual(["bio"]);
   });
 });

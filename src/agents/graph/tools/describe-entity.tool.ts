@@ -38,6 +38,7 @@ export class DescribeEntityTool {
             filterable: f.filterable,
             sortable: f.sortable,
             ...(f.kind ? { kind: f.kind } : {}),
+            ...(entity.list ? { stage: entity.list.includes(f.name) ? "list" : "detail" } : {}),
           })),
           relationships: entity.relationships.map((r) => ({
             name: r.name,

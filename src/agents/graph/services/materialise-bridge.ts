@@ -4,7 +4,7 @@ import { GraphCatalogService } from "./graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { UserContext } from "../tools/tool.factory";
 import { ScopeGuard } from "./scope.guard";
-import { buildToolFieldsOutput } from "./field-formatting";
+import { ToolFieldFormatterService } from "./field-formatting";
 
 const logger = new Logger("materialiseBridge");
 
@@ -13,7 +13,7 @@ export const MATERIALISE_LIMIT = 50;
 
 export interface BridgeRecordIn {
   id: string;
-  /** Already type-converted target-node fields, as returned by buildToolFieldsOutput. */
+  /** Already type-converted target-node fields, as returned by ToolFieldFormatterService.build. */
   fields: Record<string, unknown>;
 }
 
@@ -36,6 +36,8 @@ export interface MaterialiseBridgeDeps {
    * production call site. Only consulted for a scoped run.
    */
   scopeGuard?: ScopeGuard;
+  /** Stages the materialised targets' fields between list/detail. Required. */
+  formatter: ToolFieldFormatterService;
 }
 
 /**
@@ -118,12 +120,16 @@ export async function materialiseBridge(params: {
     const truncated = records.length > MATERIALISE_LIMIT;
     const visible = records.slice(0, MATERIALISE_LIMIT);
     const summariser = target.summary ?? ((d: any) => String(d.name ?? d.id));
-    const materialised = visible.map((r) => ({
-      id: r.id,
-      type: target.type,
-      summary: String(summariser(r)),
-      fields: buildToolFieldsOutput(target.fields, r),
-    }));
+    const materialised = visible.map((r) => {
+      const { fields, availableOnRead } = deps.formatter.build({ entity: target, record: r, stage: "list" });
+      return {
+        id: r.id,
+        type: target.type,
+        summary: String(summariser(r)),
+        fields,
+        ...(availableOnRead ? { availableOnRead } : {}),
+      };
+    });
 
     out[relName] = rel.cardinality === "one" ? (materialised[0] ?? null) : materialised;
     out.__materialised.push(relName);

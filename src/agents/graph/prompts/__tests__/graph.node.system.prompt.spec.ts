@@ -220,6 +220,12 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(resolveBlock).toMatch(/Do not refuse the user when at least one usable candidate exists/i);
   });
 
+  it("documents availableOnRead and the read_entity dedup notice", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    expect(out).toContain("availableOnRead");
+    expect(out).toContain("alreadyRead");
+  });
+
   it("does not contain predecessor's dead-end patches", () => {
     const out = renderGraphNodeSystemPrompt("any");
     expect(out).not.toContain("Important — `fields`");
@@ -325,5 +331,18 @@ describe("describeDomainLayer", () => {
     expect(describeDomainLayer({ role: "r", depth: "d", disambiguation: " " })).toBe(
       "graph node domain layer: role=supplied depth=supplied disambiguation=kernel dataConventions=kernel outputRules=kernel",
     );
+  });
+});
+
+describe("renderGraphNodeSystemPrompt — polymorphic related traversal", () => {
+  it("documents the polymorphic `related` traversal in the traverse bullet", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    const traverseIdx = out.indexOf("- `traverse");
+    const traverseBlock = out.substring(traverseIdx, out.indexOf("\n\n", traverseIdx));
+    expect(traverseBlock).toContain("related");
+    expect(traverseBlock).toContain("tagged");
+    expect(traverseBlock).toMatch(/mixed types/i);
+    expect(traverseBlock).toMatch(/filters and sort do not apply/i);
+    expect(traverseBlock).toMatch(/search_entities/);
   });
 });

@@ -128,11 +128,15 @@ export class GraphNodeService implements OnModuleInit {
     const typeIndex = this.graph.getTypeIndexFor(ctx.userModuleIds);
     const systemPrompt = renderGraphNodeSystemPrompt(typeIndex, this.domain);
 
+    // read_entity dedup, scoped to one llm.call pass — reset before every
+    // retry pass in `call` below (spec § "3b. read_entity dedup").
+    const readIds = new Set<string>();
+
     let tools: DynamicStructuredTool[] = [
       this.resolveTool.build(ctx, recorder),
       this.describeTool.build(ctx, recorder),
       this.searchTool.build(ctx, recorder),
-      this.readTool.build(ctx, recorder),
+      this.readTool.build(ctx, recorder, readIds),
       this.traverseTool.build(ctx, recorder),
     ];
 
@@ -182,8 +186,12 @@ export class GraphNodeService implements OnModuleInit {
     // same attribution — only the appended instruction differs. The graph
     // tuning knobs (tier / effort) come from `responder.graph` config; unset
     // keeps the Normal tier and its tier-default effort.
-    const call = (extraInstruction?: string) =>
-      this.llm.call({
+    const call = (extraInstruction?: string) => {
+      // Retry passes start with fresh message history: a record read in an
+      // earlier pass is not in this pass's context and must be readable
+      // again (spec § "3b. read_entity dedup").
+      readIds.clear();
+      return this.llm.call({
         systemPrompts: extraInstruction ? [systemPrompt, extraInstruction] : [systemPrompt],
         history,
         outputSchema: graphOutputSchema,
@@ -201,6 +209,7 @@ export class GraphNodeService implements OnModuleInit {
         metadata: this.buildMetadata(state),
         ...this.attribution(state),
       });
+    };
     // The recorder is shared across passes, so retries stacked on a full
     // first pass are how a single turn once reached 23 tool calls and 1.4M
     // input tokens. A retry only launches while the turn has budget left; the

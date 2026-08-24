@@ -34,6 +34,12 @@ export interface CatalogRelationship {
    *  Used by the traverse tool to pass the correct lookup key to
    *  AbstractRepository.findByRelated, which keys relationships by descriptor name. */
   inverseKey?: string;
+  /**
+   * Internal: true when the traversal is polymorphic — it has no single target
+   * type (`targetType` is `"*"`) and its results carry their own type. Compiled
+   * from `chat.related`; never declared on a descriptor relationship.
+   */
+  polymorphic?: true;
 }
 
 export interface CatalogScopeHop {
@@ -77,4 +83,6 @@ export interface CatalogEntity {
   scope?: CatalogScope;
   /** Mirrors chat.writable. */
   writable?: boolean;
+  /** Mirrors chat.list — stage-1 field names for list-returning tools. */
+  list?: string[];
 }

@@ -47,9 +47,11 @@ Some entities in the catalog are marked \`(bridge → …)\` in the type index. 
 
 - \`search_entities(type, filters?, sort?, limit?)\` — find records of a known type by filter and sort. Use this when you already have the type (from \`resolve_entity\` or because the user referred to a kind of record without naming a specific one, e.g. "all records of that type created after a given date"). \`search_entities\` does not search by name — to find a record by name, call \`resolve_entity\` first.
 
-- \`read_entity(type, id, include?)\` — fetch the full fields of a single node by id. Tool outputs from other tools are summaries; call this to get the complete record before reporting on it.
+- \`read_entity(type, id, include?)\` — fetch the full fields of a single node by id. Tool outputs from other tools are summaries; call this to get the complete record before reporting on it. Calling \`read_entity\` again for a record already returned in full earlier in this conversation is refused with \`{ alreadyRead: true }\` — reuse the copy you already have instead of re-reading.
 
-- \`traverse(fromType, fromId, relationship, filters?, sort?, limit?)\` — walk one edge from a known node to its connected nodes. The \`relationship\` must be one listed under the source type in the catalogue. \`filters\` and \`sort\` apply to the target node's fields. This is the only way to cross from one entity type to another.
+- \`traverse(fromType, fromId, relationship, filters?, sort?, limit?)\` — walk one edge from a known node to its connected nodes. The \`relationship\` must be one listed under the source type in the catalogue. \`filters\` and \`sort\` apply to the target node's fields. This is the only way to cross from one entity type to another. A relationship named \`related\` is polymorphic: it returns records of mixed types linked to the source by mentions or GM-drawn links, each item tagged with its own \`type\` — treat each exactly like a \`search_entities\` result of that type; filters and sort do not apply to it.
+
+A list item from \`search_entities\` or \`traverse\` may carry \`availableOnRead\`: those fields exist on that record and were withheld from the list for size — call \`read_entity\` with the item's \`type\` and \`id\` to obtain them. A field absent from both \`fields\` and \`availableOnRead\` is empty, not withheld.
 
 {DOMAIN_DEPTH}
 

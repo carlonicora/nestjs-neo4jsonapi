@@ -43,7 +43,15 @@ export interface DescriptorSource {
         reverse?: { name: string; description: string };
       }
     >;
-    chat?: { summary?: (d: any) => string; textSearchFields?: string[]; scope?: string; writable?: boolean };
+    chat?: {
+      summary?: (d: any) => string;
+      textSearchFields?: string[];
+      list?: string[];
+      scope?: string;
+      writable?: boolean;
+      /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
+      related?: boolean;
+    };
     bridge?: { materialiseTo: string[] };
   }>;
 }
@@ -90,6 +98,17 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           ...(def.kind ? { kind: def.kind } : {}),
         }));
 
+      if (d.chat?.list) {
+        const described = new Set(fields.map((f) => f.name));
+        for (const name of d.chat.list) {
+          if (!described.has(name)) {
+            throw new Error(
+              `Entity "${d.model.type}" declares chat.list field "${name}", which is not a described field on it.`,
+            );
+          }
+        }
+      }
+
       const relationships: CatalogRelationship[] = [];
       for (const [name, rel] of Object.entries(d.relationships)) {
         if (!rel.description) continue;
@@ -105,6 +124,20 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         });
       }
 
+      if (d.chat?.related) {
+        relationships.push({
+          name: "related",
+          sourceType: d.model.type,
+          targetType: "*",
+          cardinality: "many",
+          description: "Records linked to this one by mentions or GM-drawn links. Results carry their own type.",
+          cypherDirection: "out",
+          cypherLabel: "RELATES_TO",
+          isReverse: false,
+          polymorphic: true,
+        });
+      }
+
       const entity: CatalogEntity = {
         type: d.model.type,
         moduleId: d.moduleId,
@@ -117,6 +150,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         labelName: d.model.labelName,
         ...(d.bridge ? { bridge: { materialiseTo: [...d.bridge.materialiseTo] } } : {}),
         ...(d.chat?.writable ? { writable: true } : {}),
+        ...(d.chat?.list ? { list: [...d.chat.list] } : {}),
       };
 
       this.entities.set(d.model.type, entity);
@@ -283,13 +317,20 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       for (const r of e.relationships) {
         if (r.isReverse) continue; // forward-only in the rendered map; reverse names appear in the bracket pair
         const forwardName = r.name;
-        const reverse = this.entities
-          .get(r.targetType)
-          ?.relationships.find((x) => x.isReverse && x.sourceType === r.targetType && x.cypherLabel === r.cypherLabel);
+        // Polymorphic traversals have no single target type: render `(*)` and never
+        // look for a reverse counterpart (there is no target descriptor to carry one).
+        const renderedTarget = r.polymorphic ? "*" : r.targetType;
+        const reverse = r.polymorphic
+          ? undefined
+          : this.entities
+              .get(r.targetType)
+              ?.relationships.find(
+                (x) => x.isReverse && x.sourceType === r.targetType && x.cypherLabel === r.cypherLabel,
+              );
         const names = reverse
           ? `${e.type}.${forwardName} / ${r.targetType}.${reverse.name}`
           : `${e.type}.${forwardName}`;
-        relLines.push(`(${e.type}) --> (${r.targetType})  [${names}]  — ${r.description}`);
+        relLines.push(`(${e.type}) --> (${renderedTarget})  [${names}]  — ${r.description}`);
       }
     }
     return [
@@ -327,12 +368,18 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     const lines = fragment.split("\n");
     const out: string[] = [];
     for (const line of lines) {
-      const match = line.match(/^\(\w+\)\s+-->\s+\((\w+)\)/);
+      const match = line.match(/^\(\w+\)\s+-->\s+\(([\w*]+)\)/);
       if (!match) {
         out.push(line);
         continue;
       }
       const targetType = match[1];
+      // Polymorphic lines have no single target type, so there is no module to
+      // check them against: they are always in scope for the source's module.
+      if (targetType === "*") {
+        out.push(line);
+        continue;
+      }
       const target = this.entities.get(targetType);
       if (target && accessibleModuleIds.has(target.moduleId)) out.push(line);
     }

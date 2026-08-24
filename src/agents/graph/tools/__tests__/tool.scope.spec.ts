@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { SearchEntitiesTool } from "../search-entities.tool";
 import { ReadEntityTool } from "../read-entity.tool";
+import { ToolFieldFormatterService } from "../../services/field-formatting";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+
+const formatter = new ToolFieldFormatterService(new BlockNoteService());
 
 const npc = {
   type: "npcs",
@@ -42,6 +46,7 @@ describe("search_entities under scope", () => {
       {} as any,
       {} as any,
       { filter: async (p: any) => p.records } as any,
+      formatter,
     );
 
     const recorder = [{ tool: "describe_entity", input: { type: "npcs" }, durationMs: 0 }];
@@ -67,6 +72,7 @@ describe("search_entities under scope", () => {
       {} as any,
       {} as any,
       { filter: async (p: any) => p.records } as any,
+      formatter,
     );
 
     const recorder = [{ tool: "describe_entity", input: { type: "npcs" }, durationMs: 0 }];
@@ -90,7 +96,7 @@ describe("read_entity under scope", () => {
       capture: (_r: any, fn: any) => fn(),
     };
     const guard = { isInScope: vi.fn().mockResolvedValue(false), filter: async (p: any) => p.records };
-    const tool = new ReadEntityTool(factory as any, {} as any, {} as any, guard as any);
+    const tool = new ReadEntityTool(factory as any, {} as any, {} as any, guard as any, formatter);
 
     const recorder = [{ tool: "describe_entity", input: { type: "npcs" }, durationMs: 0 }];
     const result: any = await tool.invoke(

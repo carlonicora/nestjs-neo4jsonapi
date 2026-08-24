@@ -207,6 +207,116 @@ describe("GraphCatalogService", () => {
     });
   });
 
+  describe("chat.list", () => {
+    const npc = descriptor({
+      type: "npcs",
+      moduleId: "44444444-4444-4444-4444-444444444444",
+      description: "A non-player character.",
+      fields: {
+        name: { type: "string", description: "Display name." },
+        tldr: { type: "string", description: "One-line summary." },
+        summary: { type: "string", description: "Long-form summary." },
+      },
+      relationships: {},
+      chat: { list: ["name", "tldr", "summary"] },
+    });
+
+    const npcNoList = descriptor({
+      type: "npcs-no-list",
+      moduleId: "44444444-4444-4444-4444-444444444444",
+      description: "A non-player character without a declared list.",
+      fields: {
+        name: { type: "string", description: "Display name." },
+      },
+      relationships: {},
+    });
+
+    it("compiles chat.list onto CatalogEntity in declaration order", () => {
+      const svc = new GraphCatalogService({ loadAll: () => [npc] } as any);
+      svc.buildCatalog();
+      const detail = svc.getEntityDetail("npcs", ["44444444-4444-4444-4444-444444444444"]);
+      expect(detail?.list).toEqual(["name", "tldr", "summary"]);
+    });
+
+    it("throws at buildCatalog when chat.list names an undescribed field", () => {
+      const badNpc = descriptor({
+        type: "npcs",
+        moduleId: "44444444-4444-4444-4444-444444444444",
+        description: "A non-player character.",
+        fields: {
+          name: { type: "string", description: "Display name." },
+        },
+        relationships: {},
+        chat: { list: ["name", "nope"] },
+      });
+      const svc = new GraphCatalogService({ loadAll: () => [badNpc] } as any);
+      expect(() => svc.buildCatalog()).toThrow(/chat\.list.*"nope".*not a described field/);
+    });
+
+    it("leaves CatalogEntity.list undefined when chat.list is not declared", () => {
+      const svc = new GraphCatalogService({ loadAll: () => [npcNoList] } as any);
+      svc.buildCatalog();
+      const detail = svc.getEntityDetail("npcs-no-list", ["44444444-4444-4444-4444-444444444444"]);
+      expect(detail?.list).toBeUndefined();
+    });
+  });
+
+  describe("chat.related", () => {
+    const relatedModuleId = "55555555-5555-5555-5555-555555555555";
+
+    const things = descriptor({
+      type: "things",
+      moduleId: relatedModuleId,
+      description: "A thing.",
+      fields: { name: { type: "string", description: "Display name." } },
+      relationships: {},
+      chat: { related: true },
+    });
+
+    const plainThings = descriptor({
+      type: "plainthings",
+      moduleId: relatedModuleId,
+      description: "A thing that declares no related traversal.",
+      fields: { name: { type: "string", description: "Display name." } },
+      relationships: {},
+    });
+
+    it("compiles a polymorphic related relationship onto the entity", () => {
+      const svc = new GraphCatalogService({ loadAll: () => [things] } as any);
+      svc.buildCatalog();
+      const entity = svc.getAllEntities().find((x) => x.type === "things")!;
+      const rel = entity.relationships.find((r) => r.name === "related")!;
+      expect(rel).toMatchObject({
+        name: "related",
+        sourceType: "things",
+        targetType: "*",
+        cardinality: "many",
+        cypherDirection: "out",
+        cypherLabel: "RELATES_TO",
+        isReverse: false,
+        polymorphic: true,
+      });
+      expect(rel.description).toBe(
+        "Records linked to this one by mentions or GM-drawn links. Results carry their own type.",
+      );
+    });
+
+    it("omits related when chat.related is not declared", () => {
+      const svc = new GraphCatalogService({ loadAll: () => [plainThings] } as any);
+      svc.buildCatalog();
+      const entity = svc.getAllEntities().find((x) => x.type === "plainthings")!;
+      expect(entity.relationships.find((r) => r.name === "related")).toBeUndefined();
+    });
+
+    it("keeps the polymorphic line in the cross-module filtered map", () => {
+      const svc = new GraphCatalogService({ loadAll: () => [things, plainThings] } as any);
+      svc.buildCatalog();
+      const map = svc.getMapFor([relatedModuleId]);
+      expect(map).toContain("(things) --> (*)");
+      expect(map).toContain("[things.related]");
+    });
+  });
+
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
       type: "a",

@@ -330,11 +330,17 @@ export class EntityWriteTools {
   /**
    * A relationship the generic write path must never touch:
    * - reverse relationships are serialisation-only, with no edge on this side;
+   * - polymorphic relationships are a read-only chat traversal: they carry no
+   *   single target type, so there is nothing for the write path to resolve
+   *   (`targetType` is the "*" placeholder, which no scope check can honour);
    * - the scope relationship is what confines the record to the run's root, so
    *   re-pointing it would move the record into another scope.
    */
   private rejectUnwritableRelationship(entity: CatalogEntity, relationship: CatalogRelationship): string | null {
     if (relationship.isReverse) {
+      return `Relationship "${relationship.name}" on ${entity.type} is read-only and cannot be written.`;
+    }
+    if (relationship.polymorphic) {
       return `Relationship "${relationship.name}" on ${entity.type} is read-only and cannot be written.`;
     }
     if (relationship.name === this.scopeKeyOf(entity)) {

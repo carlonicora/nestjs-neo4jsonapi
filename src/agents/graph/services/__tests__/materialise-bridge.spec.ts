@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { materialiseBridge, MATERIALISE_LIMIT } from "../materialise-bridge";
+import { ToolFieldFormatterService } from "../field-formatting";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 
 const moduleId = "mod-1";
+const formatter = new ToolFieldFormatterService(new BlockNoteService());
 
 function makeBridgeEntity(overrides: any = {}) {
   return {
@@ -83,7 +86,7 @@ function deps(opts: { itemRecord?: any; partsRecords?: any[]; suppress?: string[
         ),
     }),
   } as any;
-  return { catalog, registry };
+  return { catalog, registry, formatter };
 }
 
 describe("materialiseBridge", () => {
@@ -149,5 +152,37 @@ describe("materialiseBridge", () => {
       onMaterialised,
     });
     expect(onMaterialised).toHaveBeenCalledTimes(2);
+  });
+
+  it("stages materialised target items: long field withheld to availableOnRead", async () => {
+    const longNotes = "y".repeat(250);
+    const richItem = {
+      ...itemEntity,
+      fields: [
+        { name: "name", type: "string", description: "n", filterable: true, sortable: true },
+        { name: "notes", type: "string", description: "notes", filterable: true, sortable: true },
+      ],
+    };
+    const catalog = {
+      getEntityDetail: (type: string) => (type === "items" ? richItem : type === "parts" ? partsEntity : null),
+    } as any;
+    const registry = {
+      get: (type: string) => ({
+        findRelatedRecordsByEdge: vi
+          .fn()
+          .mockResolvedValue(type === "items" ? [{ id: "it-1", name: "InstA", notes: longNotes }] : []),
+      }),
+    } as any;
+
+    const out = await materialiseBridge({
+      bridge: makeBridgeEntity({ bridge: { materialiseTo: ["item"] } }) as any,
+      record: { id: "be-1", fields: { position: 1 } },
+      ctx,
+      deps: { catalog, registry, formatter },
+    });
+
+    expect((out as any).item.fields.name).toBe("InstA");
+    expect((out as any).item.fields.notes).toBeUndefined();
+    expect((out as any).item.availableOnRead).toEqual(["notes"]);
   });
 });

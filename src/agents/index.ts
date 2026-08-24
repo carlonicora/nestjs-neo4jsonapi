@@ -81,6 +81,8 @@ export { DescribeEntityTool } from "./graph/tools/describe-entity.tool";
 export { SearchEntitiesTool } from "./graph/tools/search-entities.tool";
 export { ReadEntityTool } from "./graph/tools/read-entity.tool";
 export { TraverseTool } from "./graph/tools/traverse.tool";
+export { ToolFieldFormatterService } from "./graph/services/field-formatting";
+export { RelatedEdgesService } from "./graph/services/related-edges.service";
 export type { UserContext, ToolCallRecord } from "./graph/tools/tool.factory";
 
 // Operator

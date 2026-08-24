@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
-import { buildToolFieldsOutput } from "../services/field-formatting";
+import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
@@ -22,21 +22,27 @@ export class ReadEntityTool {
     private readonly factory: ToolFactory,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
-    // ScopeGuard is deliberately the LAST constructor parameter so existing
-    // positional call sites keep working.
     private readonly scopeGuard: ScopeGuard,
+    // ToolFieldFormatterService is deliberately the LAST constructor parameter
+    // so existing positional call sites keep working.
+    private readonly formatter: ToolFieldFormatterService,
   ) {}
 
-  build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
+  build(ctx: UserContext, recorder: ToolCallRecord[], readIds?: Set<string>): DynamicStructuredTool {
     return new DynamicStructuredTool({
       name: "read_entity",
       description: "Fetches one record by id, optionally pulling related records across described relationships.",
       schema: inputSchema,
-      func: async (input) => JSON.stringify(await this.invoke(input, ctx, recorder)),
+      func: async (input) => JSON.stringify(await this.invoke(input, ctx, recorder, readIds)),
     });
   }
 
-  async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
+  async invoke(
+    input: z.infer<typeof inputSchema>,
+    ctx: UserContext,
+    recorder: ToolCallRecord[],
+    readIds?: Set<string>,
+  ): Promise<unknown> {
     const localMaterialised: Array<{ relName: string; count: number }> = [];
     const result = await this.factory.capture(
       { tool: "read_entity", input },
@@ -50,6 +56,19 @@ export class ReadEntityTool {
           return {
             error: `You must call describe_entity({ type: "${input.type}" }) before reading a ${input.type} record. The schema is included below — either call describe_entity({ type: "${input.type}" }) to record the contract and retry this read, or proceed using the listed fields and relationships. Never stop on this error.`,
             schema: { fields: entity.fields, relationships: entity.relationships },
+          };
+        }
+
+        // A repeat read of a record already fetched in full earlier in this
+        // pass costs nothing further — checked before the (async) scope guard
+        // and the record fetch itself (spec § "3b. read_entity dedup"). Scope
+        // is one llm.call pass: the graph node clears readIds before every
+        // retry pass, since a retry's message history no longer contains it.
+        const dedupKey = `${input.type}:${input.id}`;
+        if (readIds?.has(dedupKey)) {
+          return {
+            alreadyRead: true,
+            note: "This record was already returned in full earlier in this conversation — reuse it. Do not call read_entity for it again.",
           };
         }
 
@@ -111,7 +130,7 @@ export class ReadEntityTool {
           }
         }
 
-        const baseFields = buildToolFieldsOutput(entity.fields, record);
+        const { fields: baseFields } = this.formatter.build({ entity, record, stage: "detail" });
 
         // Bridge fanout: if this entity is a bridge, replace the bare payload with
         // the materialised one. The existing `include` block (if any) stacks on top
@@ -122,12 +141,21 @@ export class ReadEntityTool {
             bridge: entity,
             record: { id: record.id, fields: baseFields },
             ctx,
-            deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
+            deps: {
+              catalog: this.catalog,
+              registry: this.registry,
+              scopeGuard: this.scopeGuard,
+              formatter: this.formatter,
+            },
             onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
           });
+          // Armed only on a successful read (spec § "3b. read_entity dedup").
+          readIds?.add(dedupKey);
           return input.include?.length ? { ...materialised, related } : materialised;
         }
 
+        // Armed only on a successful read (spec § "3b. read_entity dedup").
+        readIds?.add(dedupKey);
         return {
           id: record.id,
           type: entity.type,

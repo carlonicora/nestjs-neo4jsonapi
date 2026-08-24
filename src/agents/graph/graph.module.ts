@@ -1,12 +1,15 @@
 // packages/nestjs-neo4jsonapi/src/agents/graph/graph.module.ts
 import { Global, Module } from "@nestjs/common";
 import { SCOPE_PREDICATE_SOURCE } from "../../common/repositories/scope-predicate.source";
+import { BlockNoteModule } from "../../core/blocknote/blocknote.module";
 import { LLMModule } from "../../core/llm/llm.module";
 import { UserModulesRepository } from "./repositories/user-modules.repository";
 import { GraphIndexManager } from "./services/graph.index.manager";
 import { GraphSearchService } from "./services/graph.search.service";
 import { GraphDescriptorRegistry } from "./services/descriptor.source";
 import { GraphCatalogService } from "./services/graph.catalog.service";
+import { ToolFieldFormatterService } from "./services/field-formatting";
+import { RelatedEdgesService } from "./services/related-edges.service";
 import { ScopeGuard } from "./services/scope.guard";
 import { ScopePredicateService } from "./services/scope.predicate.service";
 import { DescribeEntityTool } from "./tools/describe-entity.tool";
@@ -26,7 +29,7 @@ import { TraverseTool } from "./tools/traverse.tool";
  */
 @Global()
 @Module({
-  imports: [LLMModule],
+  imports: [LLMModule, BlockNoteModule],
   providers: [
     GraphDescriptorRegistry,
     {
@@ -45,6 +48,8 @@ import { TraverseTool } from "./tools/traverse.tool";
     GraphSearchService,
     ScopeGuard,
     ScopePredicateService,
+    ToolFieldFormatterService,
+    RelatedEdgesService,
     { provide: SCOPE_PREDICATE_SOURCE, useExisting: ScopePredicateService },
   ],
   exports: [
@@ -60,6 +65,8 @@ import { TraverseTool } from "./tools/traverse.tool";
     GraphSearchService,
     ScopeGuard,
     ScopePredicateService,
+    ToolFieldFormatterService,
+    RelatedEdgesService,
     SCOPE_PREDICATE_SOURCE,
   ],
 })

@@ -92,6 +92,58 @@ describe("DescribeEntityTool", () => {
     expect((out as any).error).toMatch(/not available/);
   });
 
+  it("marks every field with stage when the entity declares chat.list", async () => {
+    const listCatalog = {
+      getEntityDetail: (_type: string, _mods: string[]) => ({
+        type: "npcs",
+        moduleId: "11111111-1111-1111-1111-111111111111",
+        description: "A non-player character.",
+        fields: [
+          { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
+          { name: "notes", type: "string", description: "Internal notes.", filterable: false, sortable: false },
+        ],
+        relationships: [],
+        nodeName: "npc",
+        labelName: "Npc",
+        list: ["name"],
+      }),
+    } as any;
+
+    const listFactory: any = {
+      resolveEntity: (t: string, c: any) =>
+        listCatalog.getEntityDetail(t, c.userModuleIds) ?? { error: `Entity type "${t}" is not available.` },
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+
+    const listTool = new DescribeEntityTool(listFactory);
+    const out: any = await listTool.invoke(
+      { type: "npcs" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+
+    const name = out.fields.find((f: any) => f.name === "name");
+    const notes = out.fields.find((f: any) => f.name === "notes");
+    expect(name.stage).toBe("list");
+    expect(notes.stage).toBe("detail");
+  });
+
+  it("emits no stage key for an entity without chat.list", async () => {
+    const out: any = await tool.invoke(
+      { type: "accounts" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+
+    for (const field of out.fields) {
+      expect(field).not.toHaveProperty("stage");
+    }
+  });
+
   it("includes bridge in the response when the entity is a bridge", async () => {
     const bridgeCatalog = {
       getEntityDetail: (_type: string, _mods: string[]) => ({

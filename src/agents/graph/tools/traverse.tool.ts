@@ -2,11 +2,13 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
-import { buildToolFieldsOutput } from "../services/field-formatting";
+import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
+import { CatalogEntity, CatalogRelationship } from "../interfaces/graph.catalog.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
+import { RelatedEdgesService } from "../services/related-edges.service";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -119,9 +121,11 @@ export class TraverseTool {
     private readonly factory: ToolFactory,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
-    // ScopeGuard is deliberately the LAST constructor parameter so existing
-    // positional call sites keep working.
     private readonly scopeGuard: ScopeGuard,
+    private readonly formatter: ToolFieldFormatterService,
+    // RelatedEdgesService is deliberately the LAST constructor parameter
+    // so existing positional call sites keep working.
+    private readonly relatedEdges: RelatedEdgesService,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -159,6 +163,10 @@ export class TraverseTool {
           return {
             error: `Relationship "${input.relationship}" is not available on ${source.type}. Valid relationships on ${source.type}: [${relationshipNames || "none"}].`,
           };
+        }
+
+        if (rel.polymorphic) {
+          return this.invokePolymorphic({ source, rel, input, filters, sort, ctx });
         }
 
         const target = this.factory.resolveEntity(rel.targetType, ctx);
@@ -228,12 +236,16 @@ export class TraverseTool {
             }
           : {};
 
-        const baseItems = records.map((r) => ({
-          id: r.id,
-          type: target.type,
-          summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
-          fields: buildToolFieldsOutput(target.fields, r),
-        }));
+        const baseItems = records.map((r) => {
+          const { fields, availableOnRead } = this.formatter.build({ entity: target, record: r, stage: "list" });
+          return {
+            id: r.id,
+            type: target.type,
+            summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
+            fields,
+            ...(availableOnRead ? { availableOnRead } : {}),
+          };
+        });
 
         if (!target.bridge) {
           return { items: baseItems, ...truncation };
@@ -246,7 +258,12 @@ export class TraverseTool {
               bridge: target,
               record: { id: item.id, fields: item.fields },
               ctx,
-              deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
+              deps: {
+                catalog: this.catalog,
+                registry: this.registry,
+                scopeGuard: this.scopeGuard,
+                formatter: this.formatter,
+              },
               onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
             }),
           ),
@@ -260,6 +277,108 @@ export class TraverseTool {
       recorder[recorder.length - 1].materialised = localMaterialised;
     }
     return result;
+  }
+
+  /**
+   * Polymorphic traversal: one edge label, no single target type. The edge
+   * lookup returns bare ids + labels; every surviving row is then re-read
+   * through its OWN type's service, so tenancy stays in the repository layer
+   * and each item is projected with its own type's stage-1 fields.
+   *
+   * Silent drops (unknown label, module-gated type, out-of-scope record) match
+   * the materialise-bridge contract: the model is never told a record exists
+   * that it may not see.
+   */
+  private async invokePolymorphic(params: {
+    source: CatalogEntity;
+    rel: CatalogRelationship;
+    input: z.infer<typeof inputSchema>;
+    filters: NormalisedFilter[];
+    sort: NormalisedSort[];
+    ctx: UserContext;
+  }): Promise<unknown> {
+    const { source, rel, input, filters, sort, ctx } = params;
+
+    if (filters.length || sort.length) {
+      return {
+        error: `Filters and sort are typed per-target and do not apply to the polymorphic "${rel.name}" traversal. Call traverse again without them, or traverse a typed relationship.`,
+      };
+    }
+
+    // Source gate: the same company-scoped read the read tool performs, and on
+    // a miss the byte-identical message — an id in another tenant must be
+    // indistinguishable from an id that does not exist.
+    const sourceSvc = this.factory.resolveService(source.type);
+    if (!sourceSvc) return { error: `Service not available for "${source.type}".` };
+    const sourceRecord = await sourceSvc.findRecordById({ id: input.fromId });
+    if (!sourceRecord) return { error: `No ${source.type} with id ${input.fromId}.` };
+
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+    // Probe one extra row so truncation is visible to the model: without this,
+    // a silently clipped list is reported as complete.
+    const pairs = await this.relatedEdges.findRelatedIds({
+      labelName: source.labelName,
+      id: input.fromId,
+      cypherLabel: rel.cypherLabel,
+      limit: limit + 1,
+    });
+    const hasMore = pairs.length > limit;
+    const kept = hasMore ? pairs.slice(0, limit) : pairs;
+    const truncation = hasMore
+      ? {
+          hasMore: true,
+          note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+        }
+      : {};
+
+    const typeByLabel = new Map(this.catalog.getAllEntities().map((e) => [e.labelName, e.type]));
+    const entityByType = new Map<string, CatalogEntity>();
+    const idsByType = new Map<string, string[]>();
+    const gatedTypes = new Set<string>();
+    const seenIds = new Set<string>();
+    for (const pair of kept) {
+      // The Cypher DISTINCT is the primary defence against a pair linked in
+      // both directions; this set keeps the guarantee local to the tool too.
+      if (seenIds.has(pair.id)) continue;
+      seenIds.add(pair.id);
+      const type = typeByLabel.get(pair.label);
+      if (!type || gatedTypes.has(type)) continue;
+      if (!entityByType.has(type)) {
+        const resolved = this.factory.resolveEntity(type, ctx);
+        if ("error" in resolved) {
+          gatedTypes.add(type);
+          continue;
+        }
+        entityByType.set(type, resolved);
+      }
+      idsByType.set(type, [...(idsByType.get(type) ?? []), pair.id]);
+    }
+
+    const items: unknown[] = [];
+    for (const [type, ids] of idsByType) {
+      const entity = entityByType.get(type)!;
+      const svc = this.factory.resolveService(type);
+      if (!svc) continue;
+      const records: any[] = [];
+      for (const id of ids) {
+        // Typed, company-scoped read — the only place a related record's
+        // contents are ever loaded.
+        const record: any = await svc.findRecordById({ id });
+        if (record) records.push(record);
+      }
+      for (const record of await this.filterInScope(type, records, ctx)) {
+        const { fields, availableOnRead } = this.formatter.build({ entity, record, stage: "list" });
+        items.push({
+          id: record.id,
+          type,
+          summary: entity.summary ? entity.summary(record) : String(record.name ?? record.id),
+          fields,
+          ...(availableOnRead ? { availableOnRead } : {}),
+        });
+      }
+    }
+
+    return { items, ...truncation };
   }
 
   /**

@@ -28,7 +28,7 @@ export type FieldTransformFn = (data: any, services: Record<string, any>) => Pro
  * The discriminator shape leaves room for non-money kinds (percent, duration,
  * etc.) without widening a plain string literal later.
  */
-export type FieldKind = { type: "money"; minorUnits?: number };
+export type FieldKind = { type: "money"; minorUnits?: number } | { type: "richtext" };
 
 /**
  * Field definition for entity schema
@@ -278,6 +278,8 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     summary?: (data: any) => string;
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
+    /** Stage-1 (list) field names, emitted in declaration order. Others go to availableOnRead. */
+    list?: string[];
     /**
      * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
      * root) or the key of a relationship on THIS descriptor pointing one hop
@@ -286,6 +288,8 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     scope?: string;
     /** When true, the operator's generic write tools may mutate this type. */
     writable?: boolean;
+    /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
+    related?: boolean;
   };
 
   /**
@@ -370,6 +374,8 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     summary?: (data: any) => string;
     /** Described string fields used for the `text` parameter in `search_entities`. */
     textSearchFields?: string[];
+    /** Stage-1 (list) field names, emitted in declaration order. Others go to availableOnRead. */
+    list?: string[];
     /**
      * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
      * root) or the key of a relationship on THIS descriptor pointing one hop
@@ -378,6 +384,8 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     scope?: string;
     /** When true, the operator's generic write tools may mutate this type. */
     writable?: boolean;
+    /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
+    related?: boolean;
   };
 
   /** See EntitySchemaInput.bridge. */

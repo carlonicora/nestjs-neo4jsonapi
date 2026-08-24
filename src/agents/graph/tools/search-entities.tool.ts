@@ -5,7 +5,7 @@ import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { CatalogEntity, CatalogField } from "../interfaces/graph.catalog.interface";
 import { GraphSearchService } from "../services/graph.search.service";
 import { GraphCatalogService } from "../services/graph.catalog.service";
-import { buildToolFieldsOutput } from "../services/field-formatting";
+import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
@@ -39,9 +39,10 @@ export class SearchEntitiesTool {
     private readonly _search: GraphSearchService,
     private readonly catalog: GraphCatalogService,
     private readonly registry: EntityServiceRegistry,
-    // ScopeGuard is deliberately the LAST constructor parameter so existing
-    // positional call sites keep working.
     private readonly scopeGuard: ScopeGuard,
+    // ToolFieldFormatterService is deliberately the LAST constructor parameter
+    // so existing positional call sites keep working.
+    private readonly formatter: ToolFieldFormatterService,
   ) {}
 
   build(ctx: UserContext, recorder: ToolCallRecord[]): DynamicStructuredTool {
@@ -172,13 +173,17 @@ export class SearchEntitiesTool {
     ctx: UserContext,
     localMaterialised: Array<{ relName: string; count: number }>,
   ) {
-    const baseItems = records.map((r) => ({
-      id: r.id,
-      type: entity.type,
-      summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
-      fields: buildToolFieldsOutput(entity.fields, r),
-      score: null as number | null,
-    }));
+    const baseItems = records.map((r) => {
+      const { fields, availableOnRead } = this.formatter.build({ entity, record: r, stage: "list" });
+      return {
+        id: r.id,
+        type: entity.type,
+        summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
+        fields,
+        ...(availableOnRead ? { availableOnRead } : {}),
+        score: null as number | null,
+      };
+    });
 
     if (!entity.bridge) return { matchMode: "none", items: baseItems };
 
@@ -190,7 +195,12 @@ export class SearchEntitiesTool {
           bridge: entity,
           record: { id: item.id, fields: item.fields },
           ctx,
-          deps: { catalog: this.catalog, registry: this.registry, scopeGuard: this.scopeGuard },
+          deps: {
+            catalog: this.catalog,
+            registry: this.registry,
+            scopeGuard: this.scopeGuard,
+            formatter: this.formatter,
+          },
           onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
         }).then((m) => ({ ...m, score })),
       ),

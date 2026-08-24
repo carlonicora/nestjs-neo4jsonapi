@@ -38,8 +38,19 @@ describe("ReadEntityTool", () => {
     },
   };
 
+  // Minimal stand-in for ToolFieldFormatterService: projects each described
+  // field straight off the record, mirroring the old buildToolFieldsOutput
+  // default behaviour closely enough for these fixtures.
+  const formatter: any = {
+    build: ({ entity, record }: any) => {
+      const fields: Record<string, unknown> = {};
+      for (const f of entity.fields) fields[f.name] = record[f.name];
+      return { fields };
+    },
+  };
+
   it("reads entity by id and returns described fields only", async () => {
-    const tool = new ReadEntityTool(factory, {} as any, {} as any);
+    const tool = new ReadEntityTool(factory, {} as any, {} as any, undefined as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -47,7 +58,7 @@ describe("ReadEntityTool", () => {
   });
 
   it("rejects include for undescribed relationship", async () => {
-    const tool = new ReadEntityTool(factory, {} as any, {} as any);
+    const tool = new ReadEntityTool(factory, {} as any, {} as any, undefined as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", id: "a1", include: ["ghost"] }, ctx, [
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
@@ -107,7 +118,7 @@ describe("ReadEntityTool", () => {
           : undefined,
     };
 
-    const tool = new ReadEntityTool(bridgeFactory, bridgeCatalog, bridgeRegistry);
+    const tool = new ReadEntityTool(bridgeFactory, bridgeCatalog, bridgeRegistry, undefined as any, formatter);
     const out: any = await tool.invoke({ type: "bom-entries", id: "be-1" }, { ...ctx, userModuleIds: [moduleId] }, [
       { tool: "describe_entity", input: { type: "bom-entries" }, durationMs: 0 },
     ]);
@@ -118,5 +129,109 @@ describe("ReadEntityTool", () => {
     expect(out.fields).toEqual({ position: 1 });
     expect(out.item).toMatchObject({ id: "it-1", type: "items" });
     expect(out.__materialised).toEqual(["item"]);
+  });
+
+  describe("read_entity dedup (per-pass)", () => {
+    const buildAccountsFactory = (recordOrNull: unknown = { id: "a1", name: "Acme" }) => {
+      const localSvc = { findRecordById: vi.fn(async () => recordOrNull) };
+      const localFactory: any = {
+        resolveEntity: (t: string) => (t === "accounts" ? accounts : { error: "nope" }),
+        resolveService: () => localSvc,
+        capture: async (_r: any, fn: any, rec: any[]) => {
+          const v = await fn();
+          rec.push({});
+          return v;
+        },
+      };
+      return { factory: localFactory, svc: localSvc };
+    };
+
+    it("returns the alreadyRead notice on a second read of the same (type,id) in one pass", async () => {
+      const { factory: f, svc: s } = buildAccountsFactory();
+      const tool = new ReadEntityTool(f, {} as any, {} as any, undefined as any, formatter);
+      const readIds = new Set<string>();
+      const recorder: any[] = [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }];
+
+      const first: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, recorder, readIds);
+      expect(first).toMatchObject({ id: "a1", type: "accounts", fields: { name: "Acme" } });
+
+      const second: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, recorder, readIds);
+      expect(second).toEqual({
+        alreadyRead: true,
+        note: expect.stringContaining("already returned in full"),
+      });
+
+      expect(s.findRecordById).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows a re-read after the dedup set is cleared (retry pass)", async () => {
+      const { factory: f, svc: s } = buildAccountsFactory();
+      const tool = new ReadEntityTool(f, {} as any, {} as any, undefined as any, formatter);
+      const readIds = new Set<string>();
+      const recorder: any[] = [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }];
+
+      const first: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, recorder, readIds);
+      expect(first).toMatchObject({ id: "a1", type: "accounts" });
+
+      readIds.clear();
+
+      const second: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, recorder, readIds);
+      expect(second).toMatchObject({ id: "a1", type: "accounts" });
+
+      expect(s.findRecordById).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not arm dedup on a failed read", async () => {
+      const { factory: f, svc: s } = buildAccountsFactory(null);
+      const tool = new ReadEntityTool(f, {} as any, {} as any, undefined as any, formatter);
+      const readIds = new Set<string>();
+      const recorder: any[] = [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }];
+
+      const first: any = await tool.invoke({ type: "accounts", id: "missing" }, ctx, recorder, readIds);
+      expect(first.error).toMatch(/No accounts with id missing/);
+
+      const second: any = await tool.invoke({ type: "accounts", id: "missing" }, ctx, recorder, readIds);
+      expect(second.error).toMatch(/No accounts with id missing/);
+
+      expect(s.findRecordById).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("renders richtext fields to markdown in detail stage", async () => {
+    const richAccounts = {
+      ...accounts,
+      fields: [
+        { name: "name", type: "string" },
+        { name: "description", type: "string", kind: { type: "richtext" as const } },
+      ],
+    };
+    const richSvc = {
+      findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme", description: "<blocknote-json>" })),
+    };
+    const richFactory: any = {
+      resolveEntity: (t: string) => (t === "accounts" ? richAccounts : { error: "nope" }),
+      resolveService: () => richSvc,
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    };
+    const richFormatter: any = {
+      build: vi.fn(() => ({ fields: { name: "Acme", description: "**Bold** markdown" } })),
+    };
+
+    const tool = new ReadEntityTool(richFactory, {} as any, {} as any, undefined as any, richFormatter);
+    const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+
+    expect(richFormatter.build).toHaveBeenCalledWith({
+      entity: richAccounts,
+      record: { id: "a1", name: "Acme", description: "<blocknote-json>" },
+      stage: "detail",
+    });
+    expect(out.fields.description).toBe("**Bold** markdown");
+    expect(out.availableOnRead).toBeUndefined();
   });
 });
