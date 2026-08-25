@@ -1,3 +1,9 @@
+## [3.2.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.3...v3.2.4) (2026-08-25)
+
+### 🐛 Bug Fixes
+
+* **jsonapi:** resolve injectServices lazily, not in the serialiser constructor ([aaaa956](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/aaaa95607d92d8f5205d424457cae210e895d60d))
+
 ## [3.2.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.2...v3.2.3) (2026-08-25)
 
 ### 🐛 Bug Fixes
