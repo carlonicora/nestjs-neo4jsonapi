@@ -201,7 +201,7 @@
     "nestjs-cls": "^6.2.2",
     "nestjs-i18n": "^10.8.5",
     "prettier": "^3.9.6",
-    "semantic-release": "^25.0.8",
+    "semantic-release": "25.0.8",
     "ts-node": "^10.9.2",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",

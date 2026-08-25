@@ -1,4 +1,5 @@
 export * from "./s3.module";
+export * from "./s3.service.module";
 export * from "./services/s3.service";
 export * from "./serialisers/s3.serialiser";
 export * from "./controllers/s3.controller";

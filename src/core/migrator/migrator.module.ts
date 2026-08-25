@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
 import { createWorkerProvider } from "../../common";
-import { S3Service } from "../../foundations/s3/services/s3.service";
+import { S3ServiceModule } from "../../foundations/s3/s3.service.module";
 import { MigratorService } from "./services/migrator.service";
 
 /**
@@ -28,10 +28,13 @@ import { MigratorService } from "./services/migrator.service";
  * ```
  */
 @Module({
-  // Provide S3Service directly (not via S3Module) so the migrator gets the
-  // uploader without registering S3Module's /s3 controller — importing the
-  // module double-declares GET /s3 when the app already serves it.
-  providers: [createWorkerProvider(MigratorService), S3Service],
+  // Import S3ServiceModule (NOT S3Module) so the migrator gets the uploader
+  // without registering S3Module's /s3 controller — importing S3Module here
+  // double-declares GET /s3 when the app already serves it. Importing rather
+  // than re-providing S3Service keeps S3Service to a SINGLE registration; see
+  // the comment in s3.service.module.ts for why that matters.
+  imports: [S3ServiceModule],
+  providers: [createWorkerProvider(MigratorService)],
   exports: [],
 })
 export class MigratorModule {}

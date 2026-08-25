@@ -19,7 +19,11 @@ import { JsonApiServiceInterface } from "../interfaces/jsonapi.service.interface
 @Injectable()
 export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser implements JsonApiServiceInterface {
   protected descriptor: EntityDescriptor<any, any>;
-  protected injectedServices: Record<string, any> = {};
+  /**
+   * Resolved lazily by `resolveInjectedServices()` — NEVER populate this in the
+   * constructor. See the comment there for why.
+   */
+  private resolvedServices?: Record<string, any>;
 
   constructor(
     serialiserFactory: JsonApiSerialiserFactory,
@@ -35,16 +39,55 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
    */
   protected setDescriptor(descriptor: EntityDescriptor<any, any>): void {
     this.descriptor = descriptor;
+    // NOTE: `descriptor.injectServices` are deliberately NOT resolved here.
+    // See resolveInjectedServices().
+  }
 
-    // Inject requested services using ModuleRef
-    for (const ServiceClass of descriptor.injectServices || []) {
+  /**
+   * Resolve `injectServices` on FIRST USE, never at construction time.
+   *
+   * WHY THIS IS LAZY — this is load-bearing, do not inline it back into
+   * setDescriptor(). setDescriptor() runs from a subclass CONSTRUCTOR, i.e.
+   * while Nest is still instantiating the provider graph. `ModuleRef.get()`
+   * does not participate in that graph: it returns whatever currently sits in
+   * the target provider's InstanceWrapper. Nest pre-fills every wrapper with a
+   * PLACEHOLDER before anything is constructed (instance-wrapper.js):
+   *
+   *   instancePerContext.instance = Object.create(this.metatype.prototype);
+   *
+   * and then, when it really instantiates the provider, it REPLACES that
+   * object rather than filling it in (injector.js, instantiateClass):
+   *
+   *   instanceHost.instance = wrapper.forwardRef
+   *     ? Object.assign(instanceHost.instance, new metatype(...instances))
+   *     : new metatype(...instances);
+   *
+   * So a serialiser constructed BEFORE its injected service captured the
+   * placeholder — an object with the right prototype and ZERO own properties.
+   * Every constructor-injected field on it (configService, logger, …) read as
+   * undefined, while every other consumer of the same service worked fine,
+   * because they held the replacement object. Whether it broke came down to
+   * provider instantiation order, so it surfaced as an unrelated dependency
+   * bump silently reordering the graph.
+   *
+   * Resolving here instead means the lookup happens on the first serialisation
+   * — long after the whole graph is constructed — so it always returns the
+   * real instance.
+   */
+  protected resolveInjectedServices(): Record<string, any> {
+    if (this.resolvedServices) return this.resolvedServices;
+
+    const services: Record<string, any> = {};
+    for (const ServiceClass of this.descriptor.injectServices || []) {
       try {
-        this.injectedServices[ServiceClass.name] = this.moduleRef.get(ServiceClass, { strict: false });
+        services[ServiceClass.name] = this.moduleRef.get(ServiceClass, { strict: false });
       } catch {
         // Service not available - transformer will receive undefined
         console.warn(`Service ${ServiceClass.name} not available for injection in serialiser`);
       }
     }
+    this.resolvedServices = services;
+    return services;
   }
 
   get type(): string {
@@ -60,7 +103,7 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
         if (fieldDef.transform) {
           // Wrap transformer with injected services
           const transformer = fieldDef.transform;
-          const services = this.injectedServices;
+          const services = this.resolveInjectedServices();
           attributes[fieldName] = async (data: any) => {
             return await transformer(data, services);
           };
@@ -86,7 +129,7 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
       if (fieldDef.meta && !fieldDef.excludeFromJsonApi) {
         if (fieldDef.transform) {
           const transformer = fieldDef.transform;
-          const services = this.injectedServices;
+          const services = this.resolveInjectedServices();
           meta[fieldName] = async (data: any) => {
             return await transformer(data, services);
           };
