@@ -1,3 +1,13 @@
+## [3.2.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.2...v3.2.3) (2026-08-25)
+
+### 🐛 Bug Fixes
+
+* **release:** restore the pinned conventional-changelog preset ([bac339c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/bac339c0980ee403842e02e43d0ac35fc2f7ce40))
+
+### ♻️ Chores
+
+* **deps:** dependency sweep 2026-08-25 ([d139499](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d13949964fe3cdac0c701c1f9ea8349045b218be))
+
 ## [3.2.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.1...v3.2.2) (2026-08-24)
 
 ### 🚨 Tests
