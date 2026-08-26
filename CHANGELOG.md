@@ -1,3 +1,9 @@
+## [3.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.4...v3.3.0) (2026-08-26)
+
+### 🚀 Features
+
+* **discord-user:** findByUserId — resolve the linked Discord account from a platform user ([5054ad9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5054ad980b72d9f241420d49277d17e2121286e1))
+
 ## [3.2.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.3...v3.2.4) (2026-08-25)
 
 ### 🐛 Bug Fixes
