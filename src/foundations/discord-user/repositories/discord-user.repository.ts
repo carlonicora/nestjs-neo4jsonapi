@@ -27,6 +27,35 @@ export class DiscordUserRepository extends AbstractRepository<DiscordUser, typeo
     `;
   }
 
+  /**
+   * The Discord account linked to a platform user, if there is one.
+   *
+   * The inverse of {@link findByDiscordId}, for the paths that start from an
+   * authenticated web user rather than from a Discord interaction (listing the
+   * servers that user shares with the bot, resolving a recording's game master
+   * when it was started from the web). Undefined when the user has never
+   * linked Discord — callers degrade rather than fail.
+   *
+   * A DiscordUser's `id` is NOT reliably the user's id (only accounts created
+   * through the Discord OAuth path share one), so this traverses the edge.
+   */
+  async findByUserId(params: { userId: string }): Promise<DiscordUser | undefined> {
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
+
+    query.queryParams = {
+      userId: params.userId,
+    };
+
+    query.query = `
+      MATCH (:${userMeta.labelName} { id: $userId })-[:HAS_DISCORD]->(${DiscordUserDescriptor.model.nodeName}:${DiscordUserDescriptor.model.labelName})
+      ${this.buildReturnStatement()}
+      LIMIT 1
+    `;
+
+    const users = await this.neo4j.readMany(query);
+    return users[0];
+  }
+
   async findByDiscordId(params: { discordId: string }): Promise<DiscordUser> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 
