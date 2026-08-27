@@ -1,3 +1,9 @@
+## [3.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.3.0...v3.3.1) (2026-08-27)
+
+### ♻️ Chores
+
+* **deps:** dependency sweep 2026-08-27 ([79276ef](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/79276ef78c78217e91ffea6bb18cb7040eacfbd1))
+
 ## [3.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.2.4...v3.3.0) (2026-08-26)
 
 ### 🚀 Features
