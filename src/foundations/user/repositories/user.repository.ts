@@ -294,7 +294,17 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     if (params.term && this.descriptor.fulltextIndexName) {
       query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
-      WHERE (node)-[:BELONGS_TO]->(company)
+      // Same tenant scoping as UserCypherService.default(): a company-scoped
+      // caller sees only its own users, a platform administrator (no company
+      // in context) sees everyone. EXISTS, not a bare pattern expression: with
+      // no company in context initQuery binds no company variable, and a
+      // pattern expression may not introduce one (Neo4j 42001), so the bare
+      // form 500s every platform-wide search. (No backtick may appear in this
+      // comment: the whole query is a template literal.)
+      WHERE $companyId IS NULL
+      OR EXISTS {
+        MATCH (node)-[:BELONGS_TO]->(company)
+      }
 
       WITH node as ${userMeta.nodeName}, score
       ORDER BY score DESC

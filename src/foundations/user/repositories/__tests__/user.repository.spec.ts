@@ -172,6 +172,26 @@ describe("UserRepository", () => {
     });
   });
 
+  describe("findMany with a search term", () => {
+    it("scopes the fulltext hits without a bare pattern expression on `company`", async () => {
+      // initQuery binds `company` only when a company is in context. A bare
+      // pattern expression `(node)-[:BELONGS_TO]->(company)` is therefore a
+      // Neo4j 42001 syntax error for a platform administrator (no company), and
+      // GET /users?search= answered 500. The scoping must use the same
+      // `$companyId IS NULL OR EXISTS { ... }` shape as UserCypherService.default().
+      mockNeo4jService.readMany.mockResolvedValue([]);
+      expect(UserDescriptor.fulltextIndexName, "User must have a fulltext index for this branch").toBeTruthy();
+
+      await repository.findMany({ term: "member" });
+
+      const query = mockNeo4jService.readMany.mock.calls[0][0].query as string;
+      expect(query).toContain(`db.index.fulltext.queryNodes("${UserDescriptor.fulltextIndexName}", $term)`);
+      expect(query).toContain("$companyId IS NULL");
+      expect(query).toMatch(/OR EXISTS \{\s*MATCH \(node\)-\[:BELONGS_TO\]->\(company\)\s*\}/);
+      expect(query).not.toMatch(/WHERE \(node\)-\[:BELONGS_TO\]->\(company\)/);
+    });
+  });
+
   describe("model resolution", () => {
     it("should expose the package descriptor as the inherited AbstractRepository member", () => {
       expect(repository["descriptor"]).toBe(UserDescriptor);
