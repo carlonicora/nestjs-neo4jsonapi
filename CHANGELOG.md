@@ -1,3 +1,9 @@
+## [4.1.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.1...v4.1.2) (2026-08-31)
+
+### ♻️ Chores
+
+* drop unused bindings flagged by no-unused-vars ([4d80f38](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4d80f38378c6cfdcc9cd959eadbdcf2b7825bc84))
+
 ## [4.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.0...v4.1.1) (2026-08-31)
 
 ### ♻️ Chores
