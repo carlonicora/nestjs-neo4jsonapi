@@ -1,3 +1,9 @@
+## [4.1.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.2...v4.1.3) (2026-08-31)
+
+### 🚨 Tests
+
+* add fulltext search term scoping for platform administrators in UserRepository ([5bc3b41](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5bc3b4155b5a7fc81f67490a1a897a8299133a19))
+
 ## [4.1.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.1...v4.1.2) (2026-08-31)
 
 ### ♻️ Chores
