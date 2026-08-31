@@ -196,7 +196,7 @@ export abstract class AbstractService<
    *   may use this to create related entities in the same transaction.
    *   The abstract implementation ignores it.
    */
-  async create(params: { id: string; [key: string]: any }, included?: unknown[]): Promise<JsonApiDataInterface> {
+  async create(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiDataInterface> {
     await this.repository.create(params);
 
     if (this.auditService) {
@@ -218,7 +218,7 @@ export abstract class AbstractService<
    *   may use this to update related entities in the same transaction.
    *   The abstract implementation ignores it.
    */
-  async put(params: { id: string; [key: string]: any }, included?: unknown[]): Promise<JsonApiDataInterface> {
+  async put(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiDataInterface> {
     const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
 
     await this.repository.put(params);

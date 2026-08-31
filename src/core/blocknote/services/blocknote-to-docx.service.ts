@@ -851,42 +851,6 @@ function blocksToMarkdown(blocks: any[]): string {
 }
 
 /**
- * Diagnostic helper: collect every templateField's fieldId/alias pair found
- * in a tree of BlockNote blocks. Used only for one-shot debugging of the
- * "placeholder didn't get replaced" class of bug.
- */
-function collectTemplateFieldIds(blocks: any[]): Array<{ fieldId: string; alias: string }> {
-  const out: Array<{ fieldId: string; alias: string }> = [];
-  const walk = (nodes: any[]): void => {
-    for (const block of nodes ?? []) {
-      if (Array.isArray(block?.content)) {
-        for (const item of block.content) {
-          if (item?.type === "templateField") {
-            out.push({ fieldId: String(item.props?.fieldId ?? ""), alias: String(item.props?.alias ?? "") });
-          }
-        }
-      }
-      if (Array.isArray(block?.children)) walk(block.children);
-      if (Array.isArray(block?.content?.rows)) {
-        for (const row of block.content.rows) {
-          for (const cell of row.cells ?? []) {
-            if (Array.isArray(cell)) {
-              for (const item of cell) {
-                if (item?.type === "templateField") {
-                  out.push({ fieldId: String(item.props?.fieldId ?? ""), alias: String(item.props?.alias ?? "") });
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  };
-  walk(blocks);
-  return out;
-}
-
-/**
  * Recursively walk BlockNote JSON and replace `templateField` inline nodes
  * with plain text nodes containing the field value from fieldContext.
  */

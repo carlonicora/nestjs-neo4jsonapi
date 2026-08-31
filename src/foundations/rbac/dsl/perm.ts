@@ -1,9 +1,9 @@
 // packages/nestjs-neo4jsonapi/src/foundations/rbac/dsl/perm.ts
 import { Action, PermToken } from "./types";
 
-type Scoped<A extends Action> = (path: string) => PermToken;
+type Scoped = (path: string) => PermToken;
 
-type PermFn<A extends Action> = { action: A; scope: true } & Scoped<A>;
+type PermFn<A extends Action> = { action: A; scope: true } & Scoped;
 
 function build<A extends Action>(action: A): PermFn<A> {
   const fn = (path: string): PermToken => ({ action, scope: path });
