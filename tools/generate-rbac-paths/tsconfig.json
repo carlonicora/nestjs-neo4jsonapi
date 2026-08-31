@@ -3,15 +3,26 @@
     "target": "ES2021",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2021"],
+    "lib": [
+      "ES2021"
+    ],
     "strict": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "outDir": "../../dist/tools/generate-rbac-paths",
-    "rootDir": "."
+    "rootDir": ".",
+    "types": [
+      "node"
+    ]
   },
-  "include": ["./**/*.ts"],
-  "exclude": ["node_modules", "dist", "__fixtures__"]
+  "include": [
+    "./**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "__fixtures__"
+  ]
 }
