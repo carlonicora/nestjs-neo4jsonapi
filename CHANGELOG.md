@@ -1,3 +1,9 @@
+## [4.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.0.0...v4.1.0) (2026-08-31)
+
+### 🚀 Features
+
+* **reasoning-content-fetch:** enhance error handling for response body reads ([456e5c2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/456e5c2d8538016ecc0972693547b28ff8459780))
+
 ## [4.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.3.1...v4.0.0) (2026-08-31)
 
 ### ⚠ BREAKING CHANGES
