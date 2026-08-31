@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
     "types": ["node"],
     "target": "ES2021",
     "module": "NodeNext",
@@ -18,7 +17,6 @@
     "strictFunctionTypes": false,
     "strictPropertyInitialization": false,
     "noImplicitThis": false,
-    "alwaysStrict": false,
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "noUnusedLocals": false,
