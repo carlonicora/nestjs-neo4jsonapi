@@ -1,3 +1,9 @@
+## [4.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.0...v4.1.1) (2026-08-31)
+
+### ♻️ Chores
+
+* **deps:** remove the TypeScript 6 deprecation hatch ([f4c4c65](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f4c4c6590b1c0466f226e70342957d6bd720704b))
+
 ## [4.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.0.0...v4.1.0) (2026-08-31)
 
 ### 🚀 Features
