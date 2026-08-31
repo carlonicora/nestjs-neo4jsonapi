@@ -1,3 +1,17 @@
+## [4.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.3.1...v4.0.0) (2026-08-31)
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** peerDependencies now require @nestjs/* ^12. Consumers
+still on NestJS 11 must remain on 3.x. Requires Node >= 20.19 (or >=
+22.12 on the 22.x line) and TypeScript 6.
+
+Claude-Session: https://claude.ai/code/session_01Wba98Y5hPFXesiFnvTUjya
+
+### 🚀 Features
+
+* **deps:** require NestJS 12 and TypeScript 6 ([d11e0a0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d11e0a01d15b2f3f6bf9cb778ca4d9ff51ab1790))
+
 ## [3.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v3.3.0...v3.3.1) (2026-08-27)
 
 ### ♻️ Chores
