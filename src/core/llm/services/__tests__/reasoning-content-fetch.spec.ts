@@ -153,6 +153,60 @@ describe("reasoningContentFetch", () => {
     expect(body.choices[0].finish_reason).toBe("stop");
   });
 
+  /** The production failure this file's single-read rule exists for (2026-08-31,
+   *  game creation): the OpenAI SDK's request timeout fires WHILE the middleware
+   *  is reading the body of a slow generation. A `clone()` tees the stream, so
+   *  the failed read leaves the ORIGINAL disturbed; handing that back made the
+   *  caller's `response.text()` throw undici's opaque "Body is unusable: Body has
+   *  already been read", burying the real AbortError 120s upstream. */
+  const abortingBody = () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"choices":[{"message":{"content":'));
+          setTimeout(() => controller.error(new Error("This operation was aborted")), 5);
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  it("propagates a failed body read instead of handing back a consumed response", async () => {
+    const wrapped = reasoningContentFetch(fakeFetch(abortingBody()));
+
+    await expect(wrapped("u", {} as any)).rejects.toThrow(/aborted/i);
+  });
+
+  it("never surfaces undici's 'Body is unusable' in place of the real read failure", async () => {
+    const wrapped = reasoningContentFetch(fakeFetch(abortingBody()));
+
+    await expect(wrapped("u", {} as any)).rejects.not.toThrow(/Body is unusable/i);
+  });
+
+  it("hands back a readable body when the payload is not JSON after all", async () => {
+    const mislabelled = new Response("<html>gateway timeout</html>", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    const res = await reasoningContentFetch(fakeFetch(mislabelled))("u", {} as any);
+
+    expect(await res.text()).toBe("<html>gateway timeout</html>");
+  });
+
+  it("drops transfer headers that no longer describe the body it rebuilt", async () => {
+    // The wire response is gzipped and chunked; what we hand on is decoded text,
+    // so carrying `content-encoding: gzip` forward would describe it wrongly.
+    const gzipped = new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "hi" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json", "content-encoding": "gzip", "content-length": "412" },
+    });
+    const res = await reasoningContentFetch(fakeFetch(gzipped))("u", {} as any);
+
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(res.headers.get("content-length")).toBeNull();
+    expect(res.headers.get("content-type")).toBe("application/json");
+    expect((await messageOf(res)).content).toBe("hi");
+  });
+
   it("wraps an inner fetch, forwarding input and init unchanged", async () => {
     const inner = vi.fn(async () => reasoningOnly('{"a": 1}'));
     const init = { method: "POST", body: "{}" };

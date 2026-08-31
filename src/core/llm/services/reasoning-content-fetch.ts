@@ -113,35 +113,71 @@ const promoteReasoningToContent = (body: any): boolean => {
 };
 
 /**
+ * Re-wraps `text` as the response the caller will read, carrying `source`'s
+ * status and headers MINUS the ones that described the wire body.
+ *
+ * `content-encoding` and `content-length` describe the compressed, chunked
+ * bytes undici already decoded on our behalf; the body attached here is decoded
+ * text of a different length. Forwarding them would hand the caller a response
+ * whose headers contradict its body — and the OpenAI SDK reads `content-length`
+ * to decide whether a body is worth parsing at all (`content-length: "0"` short
+ * circuits it), so a stale value is not inert.
+ */
+const rebuild = (source: Response, text: string): Response => {
+  const headers = new Headers(source.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return new Response(text, { status: source.status, statusText: source.statusText, headers });
+};
+
+/**
  * A `fetch` middleware that repairs reasoning-only responses. Wraps an inner
  * fetch (the OpenRouter pin, the unsupported-parameter repair) rather than
  * replacing it, and forwards `input`/`init` untouched — it only ever inspects
  * the response.
+ *
+ * THE BODY IS READ EXACTLY ONCE, AND NEVER THROUGH `clone()`.
+ *
+ * `clone()` tees the body stream: the read that follows pulls through BOTH
+ * branches, so the original is no longer pristine the moment the clone is read.
+ * That is fine until the read FAILS. The OpenAI SDK bounds the whole fetch call
+ * — this middleware included — with `AI_REQUEST_TIMEOUT_MS`, and a generation
+ * that outruns the budget aborts the stream while we are mid-read. Returning
+ * "the original, untouched" then handed the caller a DISTURBED response, whose
+ * `.text()` threw undici's `Body is unusable: Body has already been read` and
+ * buried the real AbortError. Observed live 2026-08-31 on game creation, where
+ * an 88s turn crossed the 120s default (the payload was in `content` all along
+ * — this middleware had nothing to repair and still broke the call).
+ *
+ * So: one read, and a read failure PROPAGATES. The caller owns the timeout and
+ * must see its own error. Everything downstream of the read is handed on as a
+ * rebuilt Response — a repair is no longer the only path that constructs one,
+ * because the single read has consumed the original either way.
  */
 export function reasoningContentFetch(innerFetch: typeof fetch = fetch): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const response = await innerFetch(input, init);
     if (!response.ok || !isJsonResponse(response)) return response;
 
+    // Deliberately unguarded: an abort or a truncated stream is the caller's
+    // error to classify, not ours to convert into a body it cannot read.
+    const raw = await response.text();
+
     let body: any;
     try {
-      body = JSON.parse(await response.clone().text());
+      body = JSON.parse(raw);
     } catch {
       // Not a JSON document after all (a gateway's HTML error page mislabelled,
-      // a truncated body) — hand back the original, untouched.
-      return response;
+      // a truncated body) — hand the bytes on exactly as they arrived.
+      return rebuild(response, raw);
     }
 
-    if (!promoteReasoningToContent(body)) return response;
+    if (!promoteReasoningToContent(body)) return rebuild(response, raw);
 
     console.warn(
       "[reasoningContentFetch] provider returned the payload in `reasoning` with empty `content` — promoted it",
     );
 
-    return new Response(JSON.stringify(body), {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
+    return rebuild(response, JSON.stringify(body));
   }) as typeof fetch;
 }
