@@ -1,3 +1,9 @@
+## [4.1.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.3...v4.1.4) (2026-09-01)
+
+### 🐛 Bug Fixes
+
+* **summariser:** coerce array content parts to text instead of String() ([e95571d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e95571d0502c412318fde85736716fbc2370b2dd))
+
 ## [4.1.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.2...v4.1.3) (2026-08-31)
 
 ### 🚨 Tests
