@@ -13,6 +13,7 @@ export * from "./services/llm.service";
 export * from "./services/model.service";
 export * from "./services/rate-limited-embedder";
 export * from "./services/vision.llm.service";
+export * from "./utils/message.content";
 export * from "./utils/mock-from-zod";
 export * from "./utils/tools.utils";
 export * from "./utils/vertex.utils";

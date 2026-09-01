@@ -9,6 +9,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { ConfigSummariserInterface } from "../../../config/interfaces/config.summariser.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Chunk } from "../../../foundations/chunk/entities/chunk.entity";
+import { extractMessageText } from "../../../core/llm/utils/message.content";
 import { sanitizeTldr } from "../utils/tldr.sanitizer";
 
 export const defaultMapPrompt = `Summarize the following content using clean markdown formatting.
@@ -96,7 +97,7 @@ export class SummariserService {
 
       const tokens = response.usage_metadata as UsageMetadata;
       return {
-        summary: String(response.content),
+        summary: extractMessageText(response.content),
         inputTokens: tokens?.input_tokens || 0,
         outputTokens: tokens?.output_tokens || 0,
       };
@@ -116,7 +117,7 @@ export class SummariserService {
     totalInputTokens += reduceTokens?.input_tokens || 0;
     totalOutputTokens += reduceTokens?.output_tokens || 0;
 
-    const summary = String(reduceResponse.content);
+    const summary = extractMessageText(reduceResponse.content);
 
     // Sentinel short-circuit: when the input has nothing meaningful to summarise, the
     // configured prompt can instruct the model to emit a literal sentinel token instead of a
@@ -147,8 +148,8 @@ export class SummariserService {
     return {
       content: summary,
       tldr: this.summariserConfig?.sanitizeTldr
-        ? sanitizeTldr(String(tldrResponse.content))
-        : String(tldrResponse.content),
+        ? sanitizeTldr(extractMessageText(tldrResponse.content))
+        : extractMessageText(tldrResponse.content),
       tokens: {
         input: totalInputTokens,
         output: totalOutputTokens,
