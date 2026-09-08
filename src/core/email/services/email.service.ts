@@ -137,6 +137,31 @@ export class EmailService {
     const to = emailParams.to;
     const subject = emailParams.subject || extractedTitle;
 
+    await this.dispatch(to, subject, html, attachments);
+  }
+
+  /**
+   * Send an already-rendered HTML email through the configured platform
+   * provider. No template loading, no Handlebars: callers that render their
+   * own body (a360ai's client mailer wraps the studio's layout around the
+   * notification body) use this so the fallback path shares the exact
+   * Brevo / SendGrid / SMTP transports that `sendEmail` uses.
+   */
+  async sendRendered(params: {
+    to: string | string[];
+    subject: string;
+    html: string;
+    attachments?: EmailAttachment[];
+  }): Promise<void> {
+    await this.dispatch(params.to, params.subject, params.html, params.attachments);
+  }
+
+  private async dispatch(
+    to: string | string[],
+    subject: string,
+    html: string,
+    attachments?: EmailAttachment[],
+  ): Promise<void> {
     try {
       const emailConfig = this.config.get<ConfigEmailInterface>("email");
       if (emailConfig.emailProvider === "brevo") {
@@ -151,6 +176,7 @@ export class EmailService {
       throw error;
     }
   }
+
   private async sendEmailWithBrevo(to: string | string[], subject: string, html: string): Promise<void> {
     const emailConfig = this.config.get<ConfigEmailInterface>("email");
     const client = new BrevoClient({ apiKey: emailConfig.emailApiKey });

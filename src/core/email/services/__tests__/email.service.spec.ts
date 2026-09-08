@@ -534,4 +534,49 @@ describe("EmailService", () => {
       expect(readPaths.some((p) => p.includes(join("en", "taskCompleted.hbs")))).toBe(false);
     });
   });
+
+  describe("sendRendered", () => {
+    it("sends pre-rendered html through the SMTP transport without touching templates", async () => {
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "abc" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+      vi.mocked(fs.readFileSync).mockClear();
+
+      await service.sendRendered({
+        to: "client@example.com",
+        subject: "Accesso alla tua pratica",
+        html: "<html><body>ciao</body></html>",
+        attachments: [{ filename: "a.pdf", content: Buffer.from("x"), contentType: "application/pdf" }],
+      });
+
+      expect(mockSendMail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          from: emailConfig.emailFrom,
+          to: "client@example.com",
+          subject: "Accesso alla tua pratica",
+          html: "<html><body>ciao</body></html>",
+          attachments: [{ filename: "a.pdf", content: Buffer.from("x"), contentType: "application/pdf" }],
+        }),
+      );
+      expect(Handlebars.compile).not.toHaveBeenCalled();
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it("routes to SendGrid when the provider is sendgrid", async () => {
+      emailConfig.emailProvider = "sendgrid";
+      const spy = vi.spyOn(service as any, "sendEmailWithSendGrid").mockResolvedValue(undefined);
+
+      await service.sendRendered({ to: ["a@x.it", "b@x.it"], subject: "S", html: "<p>h</p>" });
+
+      expect(spy).toHaveBeenCalledWith(["a@x.it", "b@x.it"], "S", "<p>h</p>", undefined);
+    });
+
+    it("rethrows a transport failure after logging it", async () => {
+      vi.mocked(nodemailer.createTransport).mockReturnValue({
+        sendMail: vi.fn().mockRejectedValue(new Error("boom")),
+      } as any);
+
+      await expect(service.sendRendered({ to: "c@x.it", subject: "S", html: "<p>h</p>" })).rejects.toThrow("boom");
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+  });
 });
