@@ -1,3 +1,9 @@
+## [4.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.4...v4.2.0) (2026-09-08)
+
+### 🚀 Features
+
+* **email:** add sendRendered to send pre-rendered html through the configured provider ([0d87c85](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0d87c85786426a7f549100ef8ef85336f8841520))
+
 ## [4.1.4](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.3...v4.1.4) (2026-09-01)
 
 ### 🐛 Bug Fixes
