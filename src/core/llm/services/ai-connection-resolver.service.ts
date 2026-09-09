@@ -73,10 +73,19 @@ export function toCandidate(connection: AiConnection, decrypt: (value: string) =
     cachedInputCostPer1MTokens: connection.cachedInputCostPer1MTokens,
     costPerMinute: connection.costPerMinute,
     costPerPage: connection.costPerPage,
+    costPerImage: connection.costPerImage,
     directUrl: connection.directUrl,
     language: connection.language,
     directFormat: connection.directFormat,
     directProvider: connection.directProvider,
+    negativePrompt: connection.negativePrompt,
+    width: connection.width,
+    height: connection.height,
+    steps: connection.steps,
+    cfgScale: connection.cfgScale,
+    safeMode: connection.safeMode,
+    hideWatermark: connection.hideWatermark,
+    imageFormat: connection.imageFormat,
   };
 }
 
@@ -299,10 +308,19 @@ export class AiConnectionResolverService implements OnModuleInit {
       cachedInputCostPer1MTokens: asNumber(block.cachedInputCostPer1MTokens),
       costPerMinute: asNumber(block.costPerMinute),
       costPerPage: asNumber(block.costPerPage),
+      costPerImage: asNumber(block.costPerImage),
       directUrl: asString(block.directUrl),
       language: asString(block.language),
       directFormat: asString(block.directFormat),
       directProvider: asString(block.directProvider),
+      negativePrompt: asString(block.negativePrompt),
+      width: asNumber(block.width),
+      height: asNumber(block.height),
+      steps: asNumber(block.steps),
+      cfgScale: asNumber(block.cfgScale),
+      safeMode: asBoolean(block.safeMode),
+      hideWatermark: asBoolean(block.hideWatermark),
+      imageFormat: asString(block.imageFormat),
     };
   }
 

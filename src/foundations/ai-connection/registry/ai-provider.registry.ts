@@ -103,6 +103,16 @@ const CHAT_PROVIDERS: AiProviderDescriptor[] = [
     ],
   },
   {
+    provider: "venice",
+    fields: [
+      { field: "model", kind: "text", required: true },
+      { field: "apiKey", kind: "secret", required: true },
+      { field: "url", kind: "text", default: "https://api.venice.ai/api/v1" },
+      REASONING_EFFORT_FIELD,
+      MAX_OUTPUT_TOKENS_FIELD,
+    ],
+  },
+  {
     provider: "ollama",
     fields: [
       { field: "model", kind: "text", required: true },
@@ -134,8 +144,8 @@ const EMBEDDER_COST_FIELDS: AiProviderFieldDescriptor[] = [{ field: "inputCostPe
 
 /**
  * Embedder providers mirror the `buildInnerEmbedder` switch in `model.service.ts`
- * (`openrouter`, `requesty`, `openai`, `azure`, `vertex` — `local` throws there and
- * is therefore not offered).
+ * (`openrouter`, `requesty`, `openai`, `venice`, `azure`, `vertex` — `local` throws
+ * there and is therefore not offered).
  */
 const EMBEDDER_PROVIDERS: AiProviderDescriptor[] = [
   {
@@ -162,6 +172,15 @@ const EMBEDDER_PROVIDERS: AiProviderDescriptor[] = [
       { field: "model", kind: "text", required: true },
       { field: "dimensions", kind: "number", required: true },
       { field: "apiKey", kind: "secret", required: true },
+    ],
+  },
+  {
+    provider: "venice",
+    fields: [
+      { field: "model", kind: "text", required: true },
+      { field: "dimensions", kind: "number", required: true },
+      { field: "apiKey", kind: "secret", required: true },
+      { field: "url", kind: "text", default: "https://api.venice.ai/api/v1" },
     ],
   },
   {
@@ -209,21 +228,48 @@ const TRANSCRIBER_PROVIDERS: AiProviderDescriptor[] = [
 ];
 
 /**
- * Image GENERATION rates: input prompt tokens and output image tokens. No cached
- * rate — image endpoints have no prompt-cache discount to describe. Note the
+ * Image GENERATION rates: input prompt tokens, output image tokens, and a flat
+ * per-image price. No cached rate — image endpoints have no prompt-cache
+ * discount to describe. Note the
  * output rate prices generated-IMAGE tokens, which providers bill far above text
  * tokens (used only as fallback when the provider reports no `usage.cost`).
  */
 const IMAGE_COST_FIELDS: AiProviderFieldDescriptor[] = [
   { field: "inputCostPer1MTokens", kind: "number" },
   { field: "outputCostPer1MTokens", kind: "number" },
+  // Flat price of ONE image. The only figure that can price a per-image biller
+  // such as Venice, which returns no usage block at all — with neither this nor
+  // a provider-reported cost, the generation is recorded as free.
+  { field: "costPerImage", kind: "number" },
 ];
 
 /**
- * Image GENERATION providers, mirroring what `ImageLLMService` can call: an
- * OpenRouter-style chat-completions endpoint with `modalities: ["image","text"]`.
- * `custom` covers any OpenAI-compatible endpoint that supports image output.
+ * Image GENERATION providers, mirroring what `ImageLLMService` can call.
+ *
+ * `openrouter` / `custom` speak the OpenRouter-style chat-completions endpoint
+ * with `modalities: ["image","text"]`; `custom` covers any OpenAI-compatible
+ * endpoint that supports image output.
+ *
+ * `venice` speaks Venice's own `POST {url}/image/generate` and therefore
+ * exposes that endpoint's generation knobs as connection-level defaults. `url`
+ * is the API BASE (the service appends `/image/generate`, or uses the value
+ * verbatim when it already ends in it), so a gateway in front of Venice is a
+ * configuration change.
  */
+const VENICE_IMAGE_FIELDS: AiProviderFieldDescriptor[] = [
+  { field: "negativePrompt", kind: "text" },
+  { field: "width", kind: "number" },
+  { field: "height", kind: "number" },
+  { field: "steps", kind: "number" },
+  { field: "cfgScale", kind: "number" },
+  // Venice's own default is `true` (adult content is blurred). Left UNSET here
+  // rather than defaulted, so the form does not silently send a value the
+  // operator never chose — an unset flag is omitted from the request.
+  { field: "safeMode", kind: "boolean" },
+  { field: "hideWatermark", kind: "boolean" },
+  { field: "imageFormat", kind: "select", options: ["png", "jpeg", "webp"] },
+];
+
 const IMAGE_PROVIDERS: AiProviderDescriptor[] = [
   {
     provider: "openrouter",
@@ -231,6 +277,15 @@ const IMAGE_PROVIDERS: AiProviderDescriptor[] = [
       { field: "model", kind: "text", required: true },
       { field: "apiKey", kind: "secret", required: true },
       { field: "url", kind: "text", default: "https://openrouter.ai/api/v1" },
+    ],
+  },
+  {
+    provider: "venice",
+    fields: [
+      { field: "model", kind: "text", required: true },
+      { field: "apiKey", kind: "secret", required: true },
+      { field: "url", kind: "text", default: "https://api.venice.ai/api/v1" },
+      ...VENICE_IMAGE_FIELDS,
     ],
   },
   {

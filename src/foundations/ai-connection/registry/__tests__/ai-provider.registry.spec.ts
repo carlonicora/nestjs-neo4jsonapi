@@ -20,6 +20,77 @@ describe("AI_PROVIDER_REGISTRY", () => {
   });
 });
 
+describe("venice provider rows", () => {
+  it("is offered for chat, embedder and image", () => {
+    for (const type of ["ai", "aiLite", "aiLarge", "vision", "audio", "embedder", "image"] as const) {
+      expect(AI_PROVIDER_REGISTRY[type].map((row) => row.provider)).toContain("venice");
+    }
+  });
+
+  it("exposes the /image/generate knobs only on the image row", () => {
+    const imageFields = AI_PROVIDER_REGISTRY.image.find((r) => r.provider === "venice")!.fields.map((f) => f.field);
+    expect(imageFields).toEqual(
+      expect.arrayContaining([
+        "model",
+        "apiKey",
+        "url",
+        "negativePrompt",
+        "width",
+        "height",
+        "steps",
+        "cfgScale",
+        "safeMode",
+        "hideWatermark",
+        "imageFormat",
+        "costPerImage",
+      ]),
+    );
+
+    const chatFields = AI_PROVIDER_REGISTRY.ai.find((r) => r.provider === "venice")!.fields.map((f) => f.field);
+    expect(chatFields).not.toContain("cfgScale");
+  });
+
+  it("accepts a venice image connection and rejects an out-of-set format", () => {
+    expect(() =>
+      validateAiConnectionAttributes({
+        connectionType: "image",
+        provider: "venice",
+        attributes: {
+          model: "lustify-v8",
+          apiKey: "vk",
+          url: "https://api.venice.ai/api/v1",
+          width: 1024,
+          height: 1024,
+          steps: 30,
+          cfgScale: 5.5,
+          safeMode: false,
+          hideWatermark: true,
+          imageFormat: "png",
+          costPerImage: 0.01,
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      validateAiConnectionAttributes({
+        connectionType: "image",
+        provider: "venice",
+        attributes: { model: "lustify-v8", apiKey: "vk", imageFormat: "gif" },
+      }),
+    ).toThrow(BadRequestException);
+  });
+
+  it("refuses a venice image knob on a non-venice image provider", () => {
+    expect(() =>
+      validateAiConnectionAttributes({
+        connectionType: "image",
+        provider: "openrouter",
+        attributes: { model: "m", apiKey: "k", cfgScale: 5.5 },
+      }),
+    ).toThrow(BadRequestException);
+  });
+});
+
 describe("validateAiConnectionAttributes", () => {
   it("accepts a valid azure chat connection", () => {
     expect(() =>

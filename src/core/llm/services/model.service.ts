@@ -439,6 +439,15 @@ export class ModelService implements OnModuleInit {
           googleCredentialsBase64: image?.googleCredentialsBase64,
           inputCostPer1MTokens: image?.inputCostPer1MTokens,
           outputCostPer1MTokens: image?.outputCostPer1MTokens,
+          costPerImage: image?.costPerImage,
+          negativePrompt: image?.negativePrompt,
+          width: image?.width,
+          height: image?.height,
+          steps: image?.steps,
+          cfgScale: image?.cfgScale,
+          safeMode: image?.safeMode,
+          hideWatermark: image?.hideWatermark,
+          imageFormat: image?.imageFormat,
         };
       }
 
@@ -568,6 +577,7 @@ export class ModelService implements OnModuleInit {
    * - `llamacpp`/`local`: Local llama.cpp server (OpenAI-compatible API)
    * - `openrouter`: OpenRouter cloud service
    * - `requesty`: Requesty proxy service
+   * - `venice`: Venice.ai (OpenAI-compatible; defaults to https://api.venice.ai/api/v1)
    * - `vertex`: Google Vertex AI (Gemini models)
    * - `azure`: Azure OpenAI Service — chat branch speaks the Responses API on
    *   the GA v1 surface ({instance}.openai.azure.com/openai/v1), not chat-completions
@@ -690,6 +700,7 @@ export class ModelService implements OnModuleInit {
    * - `llamacpp`/`local`: Local llama.cpp server (OpenAI-compatible API)
    * - `openrouter`: OpenRouter cloud service
    * - `requesty`: Requesty service
+   * - `venice`: Venice.ai (OpenAI-compatible; defaults to https://api.venice.ai/api/v1)
    * - `vertex`: Google Vertex AI (Gemini models)
    * - `azure`: Azure OpenAI Service — chat branch speaks the Responses API on
    *   the GA v1 surface ({instance}.openai.azure.com/openai/v1), not chat-completions
@@ -861,6 +872,21 @@ export class ModelService implements OnModuleInit {
         validateAiUrl(cfg.url, cfg.provider);
         llmConfig.configuration.baseURL = cfg.url;
         break;
+
+      case "venice": {
+        // Venice exposes an OpenAI-compatible chat-completions surface, so the
+        // generic ChatOpenAI client below serves it unchanged. The case exists
+        // only to supply the documented base URL when none is configured —
+        // without it Venice would have to go through the `default` branch,
+        // which refuses a tier that sets no explicit AI_URL.
+        // Image GENERATION does NOT come through here: Venice's image endpoint
+        // is its own native `/image/generate` protocol, handled by
+        // ImageLLMService.
+        const veniceUrl = cfg.url || "https://api.venice.ai/api/v1";
+        validateAiUrl(veniceUrl, cfg.provider);
+        llmConfig.configuration.baseURL = veniceUrl;
+        break;
+      }
 
       case "ollama": {
         // Ollama exposes an OpenAI-compatible API. Unlike `llamacpp`, the model
@@ -1083,6 +1109,19 @@ export class ModelService implements OnModuleInit {
         response = new OpenAIEmbeddings({
           openAIApiKey: embedderConfig.apiKey,
           model: embedderConfig.model,
+        });
+        break;
+      case "venice":
+        // OpenAI-compatible `/embeddings`, so the OpenAI client serves it with
+        // only the base URL swapped. Venice accepts a string or an array of
+        // strings and answers a token-id array with a 400.
+        response = new OpenAIEmbeddings({
+          openAIApiKey: embedderConfig.apiKey,
+          model: embedderConfig.model,
+          dimensions: dimensions,
+          configuration: {
+            baseURL: embedderConfig.url || "https://api.venice.ai/api/v1",
+          },
         });
         break;
       case "azure":

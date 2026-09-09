@@ -43,8 +43,35 @@ export interface ResolvedAiCandidate {
   cachedInputCostPer1MTokens?: number;
   costPerMinute?: number;
   costPerPage?: number;
+  /**
+   * Flat price of ONE generated image, in the same currency as every other rate
+   * in this config. Venice (and every other per-image biller) reports no token
+   * usage at all, so `ImageLLMService` charges this as the request's cost
+   * override — the per-1M-token rates cannot express a per-image price.
+   */
+  costPerImage?: number;
   directUrl?: string;
   language?: string;
   directFormat?: string;
   directProvider?: string;
+
+  // --- Venice image generation (`/image/generate`) -------------------------
+  // Connection-level defaults for the native Venice image body. Each one is
+  // omitted from the request when unset, so the Venice server default applies.
+  /** `negative_prompt` — what the image must NOT contain. */
+  negativePrompt?: string;
+  /** `width` in pixels (pixel-based models; 1-1280). */
+  width?: number;
+  /** `height` in pixels (pixel-based models; 1-1280). */
+  height?: number;
+  /** `steps` — diffusion steps. */
+  steps?: number;
+  /** `cfg_scale` — prompt adherence strength (0-20). */
+  cfgScale?: number;
+  /** `safe_mode` — when true Venice blurs adult content. */
+  safeMode?: boolean;
+  /** `hide_watermark` — suppress the Venice watermark. */
+  hideWatermark?: boolean;
+  /** `format` — "png" | "jpeg" | "webp". Decides the returned data URL's MIME type. */
+  imageFormat?: string;
 }

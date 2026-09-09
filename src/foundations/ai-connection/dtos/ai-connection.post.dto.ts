@@ -54,10 +54,19 @@ export class AiConnectionPostAttributesDTO {
   @IsOptional() @IsNumber() cachedInputCostPer1MTokens?: number;
   @IsOptional() @IsNumber() costPerMinute?: number;
   @IsOptional() @IsNumber() costPerPage?: number;
+  @IsOptional() @IsNumber() costPerImage?: number;
   @IsOptional() @IsString() directUrl?: string;
   @IsOptional() @IsString() language?: string;
   @IsOptional() @IsString() directFormat?: string;
   @IsOptional() @IsString() directProvider?: string;
+  @IsOptional() @IsString() negativePrompt?: string;
+  @IsOptional() @IsNumber() width?: number;
+  @IsOptional() @IsNumber() height?: number;
+  @IsOptional() @IsNumber() steps?: number;
+  @IsOptional() @IsNumber() cfgScale?: number;
+  @IsOptional() @IsBoolean() safeMode?: boolean;
+  @IsOptional() @IsBoolean() hideWatermark?: boolean;
+  @IsOptional() @IsString() imageFormat?: string;
 }
 
 export class AiConnectionPostRelationshipsDTO {
