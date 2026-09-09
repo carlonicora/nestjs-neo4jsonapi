@@ -168,6 +168,41 @@ describe("ModelService.getLLM generic OpenAI-compatible providers", () => {
   });
 });
 
+describe("ModelService venice branch", () => {
+  it("builds a ChatOpenAI on Venice's documented base URL when the tier configures none", () => {
+    const svc = makeService({
+      ai: tier({ provider: "venice", model: "venice-uncensored", url: "", apiKey: "vk" }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    expect(llm.model ?? llm.modelName).toBe("venice-uncensored");
+    expect(llm.clientConfig?.baseURL ?? llm.configuration?.baseURL).toBe("https://api.venice.ai/api/v1");
+  });
+
+  it("honours an explicitly configured URL over the default", () => {
+    const svc = makeService({
+      ai: tier({ provider: "venice", model: "m", url: "https://gateway.example.com/venice/v1", apiKey: "vk" }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    expect(llm.clientConfig?.baseURL ?? llm.configuration?.baseURL).toBe("https://gateway.example.com/venice/v1");
+  });
+
+  it("builds a venice embedder against the OpenAI-compatible embeddings surface", () => {
+    const svc = makeService({
+      ai: tier(),
+      aiLite: tier(),
+      aiLarge: tier(),
+      embedder: { provider: "venice", apiKey: "vk", model: "text-embedding-bge-m3", url: "", dimensions: 1024 },
+    });
+    const embedder = svc.getEmbedder() as any;
+    expect(embedder.model ?? embedder.modelName).toBe("text-embedding-bge-m3");
+    expect(embedder.clientConfig?.baseURL ?? embedder.configuration?.baseURL).toBe("https://api.venice.ai/api/v1");
+  });
+});
+
 describe("ModelService.getLLM openrouter escalating pin", () => {
   /** Sends one request through the fetch the service installed, and returns the
    *  body that actually reached the wire. */

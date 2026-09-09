@@ -381,4 +381,187 @@ describe("ImageLLMService", () => {
       expect(modelService.notifyCandidateFailure).toHaveBeenCalledTimes(5);
     });
   });
+  describe("venice provider", () => {
+    /** The env link, switched onto Venice's native image protocol. */
+    const veniceCandidate = (overrides: Partial<ResolvedAiCandidate> = {}): ResolvedAiCandidate =>
+      makeCandidate({
+        provider: "venice",
+        model: "lustify-v8",
+        url: "https://api.venice.ai/api/v1",
+        inputCostPer1MTokens: undefined,
+        outputCostPer1MTokens: undefined,
+        ...overrides,
+      });
+
+    /** Venice answers RAW base64 plus its verdict in the response headers. */
+    const veniceResponse = (body: unknown, headers: Record<string, string> = {}) =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers(headers),
+        json: () => Promise.resolve(body),
+        text: () => Promise.resolve(JSON.stringify(body)),
+      }) as unknown as Response;
+
+    const bodyOf = (call = 0) => JSON.parse(fetchMock.mock.calls[call][1].body as string);
+
+    it("posts to /image/generate on the configured base URL", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({ prompt: "a lighthouse" });
+
+      expect(fetchMock.mock.calls[0][0]).toBe("https://api.venice.ai/api/v1/image/generate");
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer sk-image-test");
+    });
+
+    it("uses a url that already names the endpoint verbatim, so a gateway stays configurable", async () => {
+      modelService.getCandidatesForType.mockReturnValue([
+        veniceCandidate({ url: "https://gateway.example.com/venice/image/generate" }),
+      ]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({ prompt: "a lighthouse" });
+
+      expect(fetchMock.mock.calls[0][0]).toBe("https://gateway.example.com/venice/image/generate");
+    });
+
+    it("sends the connection's generation defaults and omits everything unset", async () => {
+      modelService.getCandidatesForType.mockReturnValue([
+        veniceCandidate({
+          negativePrompt: "watermark, text",
+          width: 1024,
+          height: 1024,
+          steps: 30,
+          cfgScale: 5.5,
+          safeMode: false,
+          hideWatermark: true,
+          imageFormat: "png",
+        }),
+      ]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({ prompt: "a lighthouse" });
+
+      expect(bodyOf()).toEqual({
+        model: "lustify-v8",
+        prompt: "a lighthouse",
+        negative_prompt: "watermark, text",
+        width: 1024,
+        height: 1024,
+        steps: 30,
+        cfg_scale: 5.5,
+        safe_mode: false,
+        hide_watermark: true,
+        format: "png",
+      });
+    });
+
+    it("omits every optional field when the connection configures none", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({ prompt: "a lighthouse" });
+
+      expect(bodyOf()).toEqual({ model: "lustify-v8", prompt: "a lighthouse" });
+    });
+
+    it("sends aspect_ratio only when no explicit dimensions are pinned", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({ prompt: "a lighthouse", aspectRatio: "16:9" });
+      expect(bodyOf()).toMatchObject({ aspect_ratio: "16:9" });
+
+      fetchMock.mockClear();
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate({ width: 832, height: 1216 })]);
+      await service.generate({ prompt: "a lighthouse", aspectRatio: "16:9" });
+      expect(bodyOf()).not.toHaveProperty("aspect_ratio");
+      expect(bodyOf()).toMatchObject({ width: 832, height: 1216 });
+    });
+
+    it("lets per-call overrides beat the connection defaults", async () => {
+      modelService.getCandidatesForType.mockReturnValue([
+        veniceCandidate({ width: 1024, height: 1024, negativePrompt: "connection default" }),
+      ]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      await service.generate({
+        prompt: "a lighthouse",
+        width: 832,
+        height: 1216,
+        negativePrompt: "per call",
+        seed: 12345,
+      });
+
+      expect(bodyOf()).toMatchObject({
+        width: 832,
+        height: 1216,
+        negative_prompt: "per call",
+        seed: 12345,
+      });
+    });
+
+    it("re-assembles the data URL from the requested format", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate({ imageFormat: "png" })]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      const result = await service.generate({ prompt: "a lighthouse" });
+
+      expect(result.imageBase64).toBe("data:image/png;base64,AAA");
+      expect(result.mimeType).toBe("image/png");
+    });
+
+    it("falls back to Venice's own webp default when the connection names no format", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      const result = await service.generate({ prompt: "a lighthouse" });
+
+      expect(result.mimeType).toBe("image/webp");
+      expect(result.imageBase64).toBe("data:image/webp;base64,AAA");
+    });
+
+    it("prices the call from costPerImage, because Venice reports no usage", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate({ costPerImage: 0.01 })]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      const result = await service.generate({ prompt: "a lighthouse" });
+
+      expect(result.tokenUsage).toEqual({ input: 0, output: 0 });
+      expect(result.cost).toBe(0.01);
+    });
+
+    it("leaves the cost undefined when the connection names no per-image price", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }));
+
+      expect((await service.generate({ prompt: "a lighthouse" })).cost).toBeUndefined();
+    });
+
+    it("raises a moderation error on a content-violation header", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }, { "x-venice-is-content-violation": "true" }));
+
+      await expect(service.generate({ prompt: "a lighthouse" })).rejects.toBeInstanceOf(ContentModerationError);
+    });
+
+    it("returns a blurred image and warns rather than failing", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      fetchMock.mockResolvedValue(veniceResponse({ images: ["AAA"] }, { "x-venice-is-blurred": "true" }));
+
+      const result = await service.generate({ prompt: "a lighthouse" });
+
+      expect(result.imageBase64).toBe("data:image/webp;base64,AAA");
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it("fails clearly when the response carries no image", async () => {
+      modelService.getCandidatesForType.mockReturnValue([veniceCandidate()]);
+      fetchMock.mockResolvedValue(veniceResponse({ images: [] }));
+
+      await expect(service.generate({ prompt: "a lighthouse" })).rejects.toThrow(/Image generation returned no image/);
+    });
+  });
 });

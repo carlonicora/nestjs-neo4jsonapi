@@ -31,10 +31,19 @@ export type AiConnection = Entity & {
   cachedInputCostPer1MTokens?: number;
   costPerMinute?: number;
   costPerPage?: number;
+  costPerImage?: number;
   directUrl?: string;
   language?: string;
   directFormat?: string;
   directProvider?: string;
+  negativePrompt?: string;
+  width?: number;
+  height?: number;
+  steps?: number;
+  cfgScale?: number;
+  safeMode?: boolean;
+  hideWatermark?: boolean;
+  imageFormat?: string;
   /** Computed — id of the CONFIGURES target; absent = global chain. */
   companyId?: string;
   company?: Company;
@@ -76,10 +85,20 @@ export const AiConnectionDescriptor = defineEntity<AiConnection>()({
     cachedInputCostPer1MTokens: { type: "number" },
     costPerMinute: { type: "number" },
     costPerPage: { type: "number" },
+    costPerImage: { type: "number" },
     directUrl: { type: "string", excludeFromSearch: true },
     language: { type: "string", excludeFromSearch: true },
     directFormat: { type: "string", excludeFromSearch: true },
     directProvider: { type: "string", excludeFromSearch: true },
+    // Venice image-generation body defaults — see ImageLLMService.
+    negativePrompt: { type: "string", excludeFromSearch: true },
+    width: { type: "number" },
+    height: { type: "number" },
+    steps: { type: "number" },
+    cfgScale: { type: "number" },
+    safeMode: { type: "boolean" },
+    hideWatermark: { type: "boolean" },
+    imageFormat: { type: "string", excludeFromSearch: true },
   },
 
   computed: {

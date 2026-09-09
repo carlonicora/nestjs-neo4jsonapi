@@ -216,8 +216,10 @@ export interface ConfigAiInterface {
     reasoningEffort?: string;
   };
   /**
-   * Image GENERATION (not analysis — that is `vision`). Drives ImageLLMService:
-   * an OpenRouter-style chat-completions call with modalities ["image","text"].
+   * Image GENERATION (not analysis — that is `vision`). Drives ImageLLMService,
+   * which speaks two wire protocols chosen by `provider`: Venice's native
+   * `POST {url}/image/generate`, and — for every other provider — an
+   * OpenRouter-style chat-completions call with modalities ["image","text"].
    * Driven exclusively by IMAGE_* env vars — deliberately NO AI_* fallback:
    * image generation defines its own provider, key, endpoint and pricing.
    * This block is the final (env) link of the "image" AiConnection chain, so
@@ -241,6 +243,28 @@ export interface ConfigAiInterface {
     googleCredentialsBase64?: string;
     inputCostPer1MTokens: number;
     outputCostPer1MTokens: number;
+    /**
+     * Flat price of ONE generated image (IMAGE_COST_PER_IMAGE). Providers that
+     * bill per image rather than per token — Venice among them — report no
+     * usage block at all, so this is the only figure that can price the call.
+     * Charged as the request's cost override; 0 or unset means image generation
+     * records no cost.
+     */
+    costPerImage?: number;
+
+    // --- Venice `/image/generate` body defaults ----------------------------
+    // Read only by the `venice` branch of ImageLLMService, and omitted from the
+    // request when unset so the Venice server default applies. Driven by
+    // IMAGE_NEGATIVE_PROMPT / IMAGE_WIDTH / IMAGE_HEIGHT / IMAGE_STEPS /
+    // IMAGE_CFG_SCALE / IMAGE_SAFE_MODE / IMAGE_HIDE_WATERMARK / IMAGE_FORMAT.
+    negativePrompt?: string;
+    width?: number;
+    height?: number;
+    steps?: number;
+    cfgScale?: number;
+    safeMode?: boolean;
+    hideWatermark?: boolean;
+    imageFormat?: string;
   };
   /**
    * SDK-based audio transcription (OpenAI / Azure OpenAI `audio.transcriptions`).

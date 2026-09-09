@@ -11,6 +11,31 @@ import { ConfigSummariserInterface } from "./interfaces/config.summariser.interf
 import { AiTierConfig } from "./interfaces/config.ai.interface";
 
 /**
+ * Reads an optional numeric env var, preserving the "unset" state.
+ *
+ * `parseFloat(x || "0")` — the pattern used for the mandatory rates — cannot
+ * express "not configured": it collapses an unset var onto a real, meaningful
+ * 0. Every field that omits itself from a provider request when absent needs
+ * the distinction, so it gets `undefined` instead. A non-numeric value is also
+ * `undefined`, so a typo falls back to the provider default rather than sending
+ * NaN on the wire.
+ */
+const optionalNumber = (value?: string): number | undefined => {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+/**
+ * Reads an optional boolean env var as a TRI-STATE: unset stays `undefined`
+ * (send nothing, let the provider default apply), "true" is true, anything else
+ * is false. `x === "true"` alone would turn every unset flag into an explicit
+ * `false` on the wire — which is a different request.
+ */
+const optionalBoolean = (value?: string): boolean | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value === "true";
+
+/**
  * Resolves one AI model tier from env. `suffix` is "" (normal), "_LITE", or
  * "_LARGE".
  *
@@ -389,6 +414,21 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         googleCredentialsBase64: process.env.IMAGE_GOOGLE_CREDENTIALS_BASE64 || "",
         inputCostPer1MTokens: parseFloat(process.env.IMAGE_INPUT_COST_PER_1M_TOKENS || "0"),
         outputCostPer1MTokens: parseFloat(process.env.IMAGE_OUTPUT_COST_PER_1M_TOKENS || "0"),
+        // Per-image billing (Venice and friends report no token usage at all).
+        // Undefined rather than 0 when unset, so "not configured" stays
+        // distinguishable from "configured as free".
+        costPerImage: optionalNumber(process.env.IMAGE_COST_PER_IMAGE),
+        // Venice `/image/generate` body defaults. Every one is undefined unless
+        // set, and ImageLLMService omits undefined keys from the request, so an
+        // unset var means "let Venice decide".
+        negativePrompt: process.env.IMAGE_NEGATIVE_PROMPT || undefined,
+        width: optionalNumber(process.env.IMAGE_WIDTH),
+        height: optionalNumber(process.env.IMAGE_HEIGHT),
+        steps: optionalNumber(process.env.IMAGE_STEPS),
+        cfgScale: optionalNumber(process.env.IMAGE_CFG_SCALE),
+        safeMode: optionalBoolean(process.env.IMAGE_SAFE_MODE),
+        hideWatermark: optionalBoolean(process.env.IMAGE_HIDE_WATERMARK),
+        imageFormat: process.env.IMAGE_FORMAT || undefined,
       },
       audio: {
         provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",
