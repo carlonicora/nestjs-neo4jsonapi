@@ -1,3 +1,9 @@
+## [4.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.2.0...v4.3.0) (2026-09-12)
+
+### 🚀 Features
+
+* **operator:** name-resolved approvals, writable allow-lists, DTO write path ([cc1a0f4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cc1a0f4b6b7734893a12e1a61626918e053de819))
+
 ## [4.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.1.4...v4.2.0) (2026-09-08)
 
 ### 🚀 Features
