@@ -1,3 +1,9 @@
+## [4.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.0...v4.3.1) (2026-09-12)
+
+### 🐛 Bug Fixes
+
+* **tests:** format BlockNote document structure in entity write tests ([1fcef1b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1fcef1be336a5995a257ebd0ad97e02522c28e3a))
+
 ## [4.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.2.0...v4.3.0) (2026-09-12)
 
 ### 🚀 Features
