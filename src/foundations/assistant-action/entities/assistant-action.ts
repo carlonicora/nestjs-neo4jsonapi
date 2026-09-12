@@ -20,6 +20,7 @@ export type AssistantAction = Entity & {
   status: AssistantActionStatus;
   toolName: string;
   toolArgs: string; // JSON string
+  proposal?: string; // JSON string — name-resolved OperatorActionProposal, what the approval card renders
   summary: string;
   threadId: string;
   userModuleIds: string; // JSON string
@@ -38,6 +39,7 @@ export const AssistantActionDescriptor = defineEntity<AssistantAction>()({
     status: { type: "string" },
     toolName: { type: "string" },
     toolArgs: { type: "string" },
+    proposal: { type: "string" },
     summary: { type: "string" },
     threadId: { type: "string" },
     userModuleIds: { type: "string" },

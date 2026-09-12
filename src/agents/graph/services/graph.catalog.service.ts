@@ -6,7 +6,9 @@ import {
   CatalogScope,
   CatalogScopeHop,
 } from "../interfaces/graph.catalog.interface";
-import { FieldKind } from "../../../common/interfaces/entity.schema.interface";
+import { ChatWritableConfig, FieldKind } from "../../../common/interfaces/entity.schema.interface";
+import { ownerMeta } from "../../../foundations/user/entities/user.meta";
+import { scopeKeyOf } from "./writable.rules";
 
 const FILTERABLE_TYPES = new Set(["string", "number", "boolean", "date", "datetime"]);
 const SORTABLE_TYPES = new Set(["string", "number", "date", "datetime"]);
@@ -17,6 +19,11 @@ function renderFieldKindMarker(kind: FieldKind | undefined): string {
     const minor = kind.minorUnits ?? 2;
     const factor = minor === 0 ? "1" : `10^${minor}`;
     return `, money [integer stored in minor units (${minor} decimals); divide by ${factor} to display]`;
+  }
+  if (kind.type === "richtext") {
+    // Consistent with describe_entity's `format: "markdown"` and the write
+    // tools' RICHTEXT_HINT: read as markdown, written as markdown.
+    return ", richtext [markdown; read and written as markdown, stored as a document]";
   }
   return "";
 }
@@ -41,6 +48,10 @@ export interface DescriptorSource {
         cardinality: "one" | "many";
         description?: string;
         reverse?: { name: string; description: string };
+        /** JSON:API `relationships` key override; the descriptor key when absent. */
+        dtoKey?: string;
+        /** Set when the value is filled from CLS instead of the DTO. */
+        contextKey?: string;
       }
     >;
     chat?: {
@@ -48,7 +59,7 @@ export interface DescriptorSource {
       textSearchFields?: string[];
       list?: string[];
       scope?: string;
-      writable?: boolean;
+      writable?: boolean | ChatWritableConfig;
       /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
       related?: boolean;
     };
@@ -114,6 +125,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         if (!rel.description) continue;
         relationships.push({
           name,
+          dtoKey: rel.dtoKey ?? name,
           sourceType: d.model.type,
           targetType: rel.model.type,
           cardinality: rel.cardinality,
@@ -124,9 +136,17 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         });
       }
 
+      // The owner edge is deliberately UNDESCRIBED (the assistant has no reason to
+      // read or write it), so the loop above never sees it: this lookup scans the
+      // full descriptor relationship set instead.
+      const ownerEntry = Object.entries(d.relationships).find(
+        ([, rel]) => rel.model.nodeName === ownerMeta.nodeName && !rel.contextKey,
+      );
+
       if (d.chat?.related) {
         relationships.push({
           name: "related",
+          dtoKey: "related",
           sourceType: d.model.type,
           targetType: "*",
           cardinality: "many",
@@ -138,6 +158,14 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         });
       }
 
+      // `writable` stays a plain boolean for BOTH forms — every caller that only
+      // asks "may this type be written at all?" keeps working unchanged. The
+      // object form additionally compiles its allow-lists; an omitted
+      // `relationships` means none, so it compiles to `[]`, never to undefined
+      // (which is the legacy "all of them").
+      const writableConfig: ChatWritableConfig | undefined =
+        d.chat?.writable && typeof d.chat.writable === "object" ? d.chat.writable : undefined;
+
       const entity: CatalogEntity = {
         type: d.model.type,
         moduleId: d.moduleId,
@@ -148,8 +176,23 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         textSearchFields: d.chat?.textSearchFields,
         nodeName: d.model.nodeName,
         labelName: d.model.labelName,
+        ...(ownerEntry
+          ? {
+              owner: {
+                key: ownerEntry[0],
+                dtoKey: ownerEntry[1].dtoKey ?? ownerEntry[0],
+                type: ownerEntry[1].model.type,
+              },
+            }
+          : {}),
         ...(d.bridge ? { bridge: { materialiseTo: [...d.bridge.materialiseTo] } } : {}),
         ...(d.chat?.writable ? { writable: true } : {}),
+        ...(writableConfig
+          ? {
+              writableFields: [...writableConfig.fields],
+              writableRelationships: [...(writableConfig.relationships ?? [])],
+            }
+          : {}),
         ...(d.chat?.list ? { list: [...d.chat.list] } : {}),
       };
 
@@ -190,6 +233,9 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         }
         target.relationships.push({
           name: rel.reverse.name,
+          // A reverse relationship has no edge on this side and is never written,
+          // so its DTO key is simply its own name.
+          dtoKey: rel.reverse.name,
           sourceType: rel.model.type,
           targetType: d.model.type,
           cardinality: rel.cardinality,
@@ -201,6 +247,12 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         });
       }
     }
+
+    // Pass 2b: validate the object form of chat.writable. Runs AFTER pass 2 so a
+    // listed relationship is checked against the FULL relationship set, reverse
+    // ones included — naming a reverse relationship is exactly the mistake this
+    // has to catch, and before pass 2 it would look like an unknown name.
+    this.validateWritableAllowLists();
 
     // Pass 3: render per-moduleId text fragments.
     const byModuleId = new Map<string, CatalogEntity[]>();
@@ -248,6 +300,48 @@ export class GraphCatalogService implements OnApplicationBootstrap {
   }
 
   /**
+   * A `chat.writable` object form names exactly what the assistant may write, so
+   * a typo in it silently narrows the assistant instead of failing — the model is
+   * simply told a field is not writable and gives up. Every listed name is
+   * therefore checked at boot, in the same style as the writable/scope check
+   * above: a misconfiguration is a boot failure, never a runtime surprise.
+   */
+  private validateWritableAllowLists(): void {
+    for (const entity of this.entities.values()) {
+      if (!entity.writableFields) continue;
+
+      const described = new Set(entity.fields.map((field) => field.name));
+      for (const name of entity.writableFields) {
+        if (!described.has(name)) {
+          throw new Error(
+            `Entity "${entity.type}" declares chat.writable field "${name}", which is not a described field on it.`,
+          );
+        }
+      }
+
+      const scopeKey = scopeKeyOf(entity);
+      for (const name of entity.writableRelationships ?? []) {
+        const relationship = entity.relationships.find((candidate) => candidate.name === name);
+        if (!relationship) {
+          throw new Error(
+            `Entity "${entity.type}" declares chat.writable relationship "${name}", which is not a catalogued relationship on it.`,
+          );
+        }
+        if (relationship.isReverse || relationship.polymorphic) {
+          throw new Error(
+            `Entity "${entity.type}" declares chat.writable relationship "${name}", which is read-only and cannot be written.`,
+          );
+        }
+        if (name === scopeKey) {
+          throw new Error(
+            `Entity "${entity.type}" declares chat.writable relationship "${name}", which is the scope relationship and cannot be changed.`,
+          );
+        }
+      }
+    }
+  }
+
+  /**
    * Resolve `chat.scope` into a Cypher-ready chain of hops ending at a
    * `chat.scope === "self"` root. Runs once, at catalog build time: a chain
    * that cannot be resolved is a configuration error, and an entity that is
@@ -291,6 +385,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
 
       path.push({
         key: current.scopeKey,
+        dtoKey: rel.dtoKey ?? current.scopeKey,
         cypherLabel: rel.relationship,
         cypherDirection: rel.direction,
         targetLabel: rel.model.labelName,

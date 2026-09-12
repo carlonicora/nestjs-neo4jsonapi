@@ -54,7 +54,7 @@ bootstrap({
 MCP_ENABLED=true                     # runtime switch; endpoint 404s when false
 MCP_SERVER_NAME=my-erp               # shown to connecting clients
 MCP_INSTRUCTIONS="Call describe_entity before reading or writing any entity type."
-MCP_PROMOTED_ENTITIES=orders,quotes  # JSON:API types promoted to dedicated tools
+MCP_PROMOTED_ENTITIES=orders,quotes  # OPTIONAL override of the descriptor-driven default
 
 # Required by the OAuth flow
 OAUTH_ENABLED=true
@@ -62,7 +62,14 @@ API_URL=https://api.example.com      # issuer + token/registration/discovery end
 APP_URL=https://app.example.com      # hosts the browser consent page
 ```
 
-`MCP_PROMOTED_ENTITIES` values are the **JSON:API `type` strings** from each
+`MCP_PROMOTED_ENTITIES` is **optional**. Leave it unset and promotion is
+descriptor-driven: every entity whose descriptor sets `chat.writable: true`
+gets `search_<type>` / `get_<type>` / `create_<type>` / `update_<type>` tools,
+in alphabetical order, filtered by the caller's module access. Set the
+variable only to override that list — it then wins outright, and the types it
+names are promoted whether or not they are `chat.writable`.
+
+When you do set it, the values are the **JSON:API `type` strings** from each
 entity's meta (`orderMeta.type === "orders"`, `"work-orders"`, …) — check the
 meta files, don't guess.
 
@@ -89,10 +96,12 @@ at `POST /oauth/register`, and the tool surface below.
 | `update_entity` | write | **Partial** update via `patchFromDTO` — only provided attributes change, relationships untouched |
 | `add_relationship` / `remove_relationship` | write | To-many edge changes via the relationship handlers |
 
-**Promoted tools:** each type in `MCP_PROMOTED_ENTITIES` also gets
-`search_<type>` / `get_<type>` / `create_<type>` / `update_<type>` with JSON
-Schemas generated from its descriptor — pure discoverability sugar delegating
-to the same executors.
+**Promoted tools:** every entity whose descriptor sets `chat.writable: true`
+also gets `search_<type>` / `get_<type>` / `create_<type>` / `update_<type>`
+with JSON Schemas generated from that descriptor — pure discoverability sugar
+delegating to the same executors. Setting `MCP_PROMOTED_ENTITIES` overrides
+that list: the promoted set becomes exactly the types it names, `chat.writable`
+or not.
 
 **App-contributed tools:** provide the `MCP_TOOLS` token (array of
 `McpToolContribution`, mirroring `OPERATOR_TOOLS`) to add curated workflow

@@ -36,6 +36,14 @@ export const OperatorContext = Annotation.Root({
     default: () => ({ input: 0, output: 0 }),
   }),
   finalAnswer: Annotation<OperatorFinalAnswer | null>({ reducer: (_, b) => b, default: () => null }),
+  /**
+   * Error the approved destructive tool of the last tools pass returned instead
+   * of writing. Last-write-wins, and written on EVERY pass that executed an
+   * approved destructive call — a successful one writes `null`, so a failure can
+   * never linger and mark a later action failed. The assistant layer reads it to
+   * transition the AssistantAction to `failed` instead of `executed`.
+   */
+  actionError: Annotation<string | null>({ reducer: (_, b) => b, default: () => null }),
 });
 
 /**
@@ -54,6 +62,13 @@ export const OperatorContext = Annotation.Root({
 type OperatorAttributionState = Pick<CallerAttributionState, "scopeLabel" | "assistantId">;
 
 /**
+ * Every channel added after the published state shape froze, declared OPTIONAL
+ * for the reason above: a consumer's existing state literal must keep compiling.
+ * `actionError` joins the attribution pair here for exactly that reason.
+ */
+type OperatorLateState = OperatorAttributionState & { actionError?: string | null };
+
+/**
  * The un-widened shape LangGraph itself hands to a node callback — every
  * channel required, `StateGraph`'s own view of the state.
  *
@@ -66,4 +81,4 @@ type OperatorAttributionState = Pick<CallerAttributionState, "scopeLabel" | "ass
  */
 export type OperatorGraphState = typeof OperatorContext.State;
 
-export type OperatorContextState = Omit<OperatorGraphState, keyof OperatorAttributionState> & OperatorAttributionState;
+export type OperatorContextState = Omit<OperatorGraphState, keyof OperatorLateState> & OperatorLateState;

@@ -16,6 +16,8 @@ Every fact in your final reply must come from a tool call that returned it. Do n
 
 When you are done, reply in plain prose with the answer or a summary of the actions performed. Quote real field values from tool results.
 
+- Never show a record id to the user. Ids are for tool calls only. Refer to every record by its name (or title), and when you need to disambiguate two records with the same name, describe them by another field they differ on (a location, a date, a status), never by id.
+
 - If the tool results do not contain the information needed to answer, say so plainly ("I could not find ...") instead of guessing.
 - Never claim to have performed, created, updated, or deleted anything unless a tool result in this conversation confirms that exact action. You have no ability to act outside your tools.
 `;

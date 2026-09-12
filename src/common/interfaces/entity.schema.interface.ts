@@ -94,6 +94,18 @@ export interface FieldDef {
 }
 
 /**
+ * Which parts of a `chat.writable` entity the operator's write tools may set.
+ * Declared by the host app on the descriptor, surfaced to the model through
+ * `describe_entity`, enforced by the write tools before any approval is asked.
+ */
+export interface ChatWritableConfig {
+  /** Field names the assistant may write on create and update. Every other field is refused. */
+  fields: string[];
+  /** Relationship keys the assistant may set on create and through link/unlink. Omitted: none. */
+  relationships?: string[];
+}
+
+/**
  * Function signature for computed field calculation
  * @param params.data - The raw Neo4j node data
  * @param params.record - The full Neo4j record (for accessing related data like totalScore)
@@ -286,8 +298,14 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
      * closer to the root. The catalog walks the chain at boot.
      */
     scope?: string;
-    /** When true, the operator's generic write tools may mutate this type. */
-    writable?: boolean;
+    /**
+     * Opts this type into the operator's generic write tools.
+     * `true` keeps the legacy meaning (every described field, every forward
+     * non-polymorphic relationship except the scope one). A `ChatWritableConfig`
+     * names exactly which fields and relationships the assistant may write;
+     * everything else is refused before the user is asked to approve.
+     */
+    writable?: boolean | ChatWritableConfig;
     /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
     related?: boolean;
   };
@@ -382,8 +400,14 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
      * closer to the root. The catalog walks the chain at boot.
      */
     scope?: string;
-    /** When true, the operator's generic write tools may mutate this type. */
-    writable?: boolean;
+    /**
+     * Opts this type into the operator's generic write tools.
+     * `true` keeps the legacy meaning (every described field, every forward
+     * non-polymorphic relationship except the scope one). A `ChatWritableConfig`
+     * names exactly which fields and relationships the assistant may write;
+     * everything else is refused before the user is asked to approve.
+     */
+    writable?: boolean | ChatWritableConfig;
     /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
     related?: boolean;
   };

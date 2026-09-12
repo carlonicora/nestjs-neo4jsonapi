@@ -107,11 +107,13 @@ export {
 // Operator (tool layer)
 export { OPERATOR_TOOLS } from "./operator/interfaces/operator.tool.interface";
 export type {
+  OperatorActionProposal,
   OperatorChunkCitation,
   OperatorRetrievalContext,
   OperatorToolCallRecord,
   OperatorToolContribution,
   OperatorToolDefinition,
+  ProposalRef,
 } from "./operator/interfaces/operator.tool.interface";
 export { SearchDocumentsTool } from "./operator/tools/search-documents.tool";
 export { SearchCommunitiesTool } from "./operator/tools/search-communities.tool";

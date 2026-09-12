@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { resolveBoundContent } from "../../../common/helpers/bound-content";
 import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
@@ -70,8 +71,15 @@ export class OperatorController {
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
+    // Same resolution as `AssistantController.create` — the two engines share
+    // `AssistantPostDto`, so an operator thread must bind to the scope the
+    // client sent (`relationships.content`) exactly as a responder thread does.
+    // Without it the thread had no BOUND_TO edge and every record the write
+    // tools created landed outside the caller's campaign.
+    const boundContent = resolveBoundContent(body.data.relationships?.content?.data);
     this.logger.log(
-      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}`,
+      `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}` +
+        (boundContent ? ` boundTo=${boundContent.type}/${boundContent.id}` : ""),
     );
     const { assistant, userMessage, assistantMessage, toolCalls, action } =
       await this.assistants.createWithFirstMessageOperator({
@@ -81,6 +89,7 @@ export class OperatorController {
         title,
         howToMode,
         limitToHowToId,
+        boundContent,
       });
     const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
     const messagesDoc = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [

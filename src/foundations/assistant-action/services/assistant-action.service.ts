@@ -34,6 +34,8 @@ export class AssistantActionService extends AbstractService<
     id?: string;
     toolName: string;
     toolArgs: string;
+    /** JSON string of the name-resolved `OperatorActionProposal`, when the tool produced one. */
+    proposal?: string;
     summary: string;
     threadId: string;
     userModuleIds: string;
@@ -52,6 +54,7 @@ export class AssistantActionService extends AbstractService<
           status: "pending",
           toolName: params.toolName,
           toolArgs: params.toolArgs,
+          ...(params.proposal !== undefined ? { proposal: params.proposal } : {}),
           summary: params.summary,
           threadId: params.threadId,
           userModuleIds: params.userModuleIds,

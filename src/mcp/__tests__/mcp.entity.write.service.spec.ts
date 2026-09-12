@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BlockNoteService } from "../../core/blocknote/services/blocknote.service";
 import { McpEntityWriteService } from "../services/mcp.entity.write.service";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
@@ -215,5 +216,94 @@ describe("McpEntityWriteService", () => {
       expect(entityService.createFromDTO).toHaveBeenCalled();
       expect(res.isError).toBeUndefined();
     });
+  });
+});
+
+/**
+ * A richtext attribute is READ as markdown (the tool layer renders the stored
+ * BlockNote document), so an MCP client writes markdown back. Stored verbatim it
+ * leaves a record the frontend cannot render, so the write converts it.
+ */
+describe("McpEntityWriteService — richtext attributes", () => {
+  const noteEntity = {
+    ...orderEntity,
+    fields: [
+      { name: "name", type: "string", description: "Order name", filterable: true, sortable: true },
+      {
+        name: "notes",
+        type: "string",
+        description: "Notes",
+        filterable: false,
+        sortable: false,
+        kind: { type: "richtext" },
+      },
+    ],
+  };
+
+  const entityService = {
+    createFromDTO: vi.fn(),
+    patchFromDTO: vi.fn(),
+    findRecordById: vi.fn(),
+  };
+  const registry = { get: vi.fn() };
+  const catalog = { getEntityDetail: vi.fn() };
+  const rbac = { can: vi.fn() };
+  let svc: McpEntityWriteService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    entityService.createFromDTO.mockResolvedValue({ data: { id: "n1", type: "orders" } });
+    entityService.patchFromDTO.mockResolvedValue({ data: { id: "o1", type: "orders" } });
+    entityService.findRecordById.mockResolvedValue({ id: "o1", name: "Old" });
+    registry.get.mockReturnValue(entityService);
+    catalog.getEntityDetail.mockReturnValue(noteEntity);
+    rbac.can.mockResolvedValue(true);
+    svc = new McpEntityWriteService(registry as any, catalog as any, rbac as any, new BlockNoteService());
+  });
+
+  it("creates: converts the richtext attribute and leaves the others alone", async () => {
+    await svc.createEntity(
+      { type: "orders", attributes: { name: "# Not richtext", notes: "# Title\n\nA paragraph." } },
+      ctx as any,
+    );
+
+    const attributes = entityService.createFromDTO.mock.calls[0][0].data.attributes;
+    expect(JSON.parse(attributes.notes).map((node: any) => node.type)).toEqual(["heading", "paragraph"]);
+    expect(attributes.name).toBe("# Not richtext");
+  });
+
+  it("updates: converts the richtext attribute", async () => {
+    await svc.updateEntity({ type: "orders", id: "o1", attributes: { notes: "A paragraph." } }, ctx as any);
+
+    const attributes = entityService.patchFromDTO.mock.calls[0][0].data.attributes;
+    expect(JSON.parse(attributes.notes)).toMatchObject([
+      { type: "paragraph", content: [{ type: "text", text: "A paragraph." }] },
+    ]);
+  });
+
+  it("leaves an already-stored BlockNote document and an empty value untouched", async () => {
+    const document = JSON.stringify([
+      { id: "b1", type: "paragraph", props: {}, content: [{ type: "text", text: "Stored.", styles: {} }], children: [] },
+    ]);
+    await svc.updateEntity({ type: "orders", id: "o1", attributes: { notes: document } }, ctx as any);
+    expect(entityService.patchFromDTO.mock.calls[0][0].data.attributes.notes).toBe(document);
+
+    await svc.updateEntity({ type: "orders", id: "o1", attributes: { notes: "" } }, ctx as any);
+    expect(entityService.patchFromDTO.mock.calls[1][0].data.attributes.notes).toBe("");
+  });
+
+  it("passes attributes through unchanged when no converter is injected", async () => {
+    const plain = new McpEntityWriteService(registry as any, catalog as any, rbac as any);
+    await plain.updateEntity({ type: "orders", id: "o1", attributes: { notes: "# Title" } }, ctx as any);
+    expect(entityService.patchFromDTO.mock.calls[0][0].data.attributes.notes).toBe("# Title");
+  });
+
+  it("tells the client that richtext fields take markdown", () => {
+    const byName = new Map(svc.buildTools(ctx as any).map((tool) => [tool.name, tool]));
+    for (const name of ["create_entity", "update_entity"]) {
+      expect(byName.get(name)!.description).toContain(
+        "Rich-text fields (kind richtext) take markdown; it is stored as a document.",
+      );
+    }
   });
 });

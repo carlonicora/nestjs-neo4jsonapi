@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantService, MAX_MESSAGES_TO_LLM } from "../services/assistant.service";
 import { assistantMessageMeta } from "../../assistant-message/entities/assistant-message.meta";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import { modelRegistry } from "../../../common/registries/registry";
+
+// `attachBoundContent` resolves the BOUND_TO target label from the model
+// registry, which no host app has populated inside a unit test.
+modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
 
 const COMPLETED_RESULT = {
   kind: "completed" as const,
@@ -19,6 +24,11 @@ const PENDING_RESULT = {
   toolName: "operator_test_action",
   toolArgs: { sku: "X-1", quantity: 2 },
   summary: "Create a purchase order for 2 x X-1",
+  proposal: {
+    type: "purchase-orders",
+    attributes: { quantity: 2 },
+    relationships: { product: [{ id: "prd-1", type: "products", label: "X-1" }] },
+  },
 };
 
 function makePersistedAssistant(title = "Hello there") {
@@ -87,6 +97,7 @@ describe("AssistantService — operator turns", () => {
       create: vi.fn(async () => undefined),
       find: vi.fn(async () => [makePersistedAssistant()]),
       findById: vi.fn(async () => makePersistedAssistant()),
+      bindContent: vi.fn(async () => undefined),
     } as any;
 
     const assistantMessages = {
@@ -117,6 +128,7 @@ describe("AssistantService — operator turns", () => {
           id: p.id ?? `act-created-${createdActions.length}`,
           toolName: p.toolName,
           toolArgs: p.toolArgs,
+          ...(p.proposal !== undefined ? { proposal: p.proposal } : {}),
           summary: p.summary,
           threadId: p.threadId,
           userModuleIds: p.userModuleIds,
@@ -254,6 +266,25 @@ describe("AssistantService — operator turns", () => {
       await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
       expect(createSpy).toHaveBeenCalledTimes(1);
       expect(createSpy.mock.calls[0][0].data.attributes).toEqual(expect.objectContaining({ engine: "operator" }));
+    });
+
+    it("binds the thread through bindContent, never through the generic create's relationships", async () => {
+      // Passing `content` to createFromDTO validates the campaign id against
+      // the placeholder Assistant model and 400s with "One or more related
+      // nodes do not exist." — the responder path binds after create, so must this.
+      const { service, repo } = buildSut();
+      const createSpy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      await service.createWithFirstMessageOperator({
+        companyId: "c",
+        userId: "u",
+        firstMessage: "go",
+        boundContent: { type: "campaigns", id: "camp-1" },
+      });
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(createSpy.mock.calls[0][0].data.relationships).toBeUndefined();
+      expect(repo.bindContent).toHaveBeenCalledWith(
+        expect.objectContaining({ targetLabel: "Campaign", targetId: "camp-1" }),
+      );
     });
 
     it("invokes operator.run with threadId `${assistantId}:${userMessageId}` and the question", async () => {
@@ -398,6 +429,58 @@ describe("AssistantService — operator turns", () => {
       expect(p.assistantId).toBe("asst-1");
       // the action returned to the caller is the one createPendingAction produced
       expect(result.action!.toolName).toBe("operator_test_action");
+    });
+
+    it("pending_approval persists the name-resolved proposal as a JSON string", async () => {
+      const { service, createdActions } = buildSut({ runResult: PENDING_RESULT });
+      await service.appendMessageOperator({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        newMessage: "buy it",
+      });
+
+      const p = createdActions[0];
+      expect(typeof p.proposal).toBe("string");
+      expect(JSON.parse(p.proposal)).toEqual(PENDING_RESULT.proposal);
+    });
+
+    it("pending_approval omits proposal entirely when the run produced none", async () => {
+      const { proposal: _proposal, ...withoutProposal } = PENDING_RESULT;
+      const { service, createdActions } = buildSut({ runResult: withoutProposal });
+      await service.appendMessageOperator({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        newMessage: "buy it",
+      });
+
+      expect(createdActions[0].proposal).toBeUndefined();
+    });
+
+    it("pending_approval reads the approval-request message only AFTER the pending action exists", async () => {
+      // The (AssistantMessage)-[:REQUESTED_IN]->(AssistantAction) edge is written by
+      // createPendingAction. Serialising the message before that edge exists strips
+      // `relationships.action`, so the client gets no actionId and renders a plain
+      // bubble instead of the Approve / Deny card.
+      const { service, createdMessages, assistantActions, assistantMessageRepo } = buildSut({
+        runResult: PENDING_RESULT,
+      });
+      await service.appendMessageOperator({
+        assistantId: "asst-1",
+        companyId: "c",
+        userId: "u",
+        newMessage: "buy it",
+      });
+
+      const approvalMessageId = createdMessages[1].data.id;
+      const findByIdCalls = (assistantMessageRepo.findById as any).mock.calls;
+      const approvalFetchIdx = findByIdCalls.findIndex((c: any[]) => c[0].id === approvalMessageId);
+      expect(approvalFetchIdx).toBeGreaterThanOrEqual(0);
+
+      const approvalFetchOrder = (assistantMessageRepo.findById as any).mock.invocationCallOrder[approvalFetchIdx];
+      const createActionOrder = (assistantActions.createPendingAction as any).mock.invocationCallOrder[0];
+      expect(createActionOrder).toBeLessThan(approvalFetchOrder);
     });
 
     it("pending_approval honours operator.approvalTtlDays from the app ConfigService", async () => {
@@ -567,6 +650,55 @@ describe("AssistantService — operator turns", () => {
         from: "approved",
         to: "executed",
       });
+    });
+
+    it("marks the action failed, not executed, when the approved tool returned an error", async () => {
+      // A write tool reports a refusal as a returned error, so the resume comes
+      // back normally with nothing written. `executed` would tell the user an
+      // action happened that did not.
+      const { service, assistantActionRepo, assistantMessages } = buildSut({
+        resumeResult: { ...COMPLETED_RESULT, actionError: 'A npcs record with id "ghost" was not found.' },
+      });
+
+      const result = await service.resolveAction({ actionId: "act-1", approved: true });
+
+      expect(assistantActionRepo.resolveStatus).toHaveBeenCalledWith({
+        id: "act-1",
+        from: "approved",
+        to: "failed",
+      });
+      const toStatuses = (assistantActionRepo.resolveStatus as any).mock.calls.map((c: any[]) => c[0].to);
+      expect(toStatuses).not.toContain("executed");
+      // the run's answer is still persisted and returned: only the status differs
+      expect(assistantMessages.createFromDTO).toHaveBeenCalledTimes(1);
+      expect(result.assistantMessage.id).toBeDefined();
+    });
+
+    it("marks the action failed when a resume that pauses again carries an actionError", async () => {
+      // The approved write refused and the model immediately proposed another
+      // action, so the resume returns pending_approval. The refused action is
+      // still a failure — reading actionError only off `completed` lost it.
+      const { service, assistantActionRepo } = buildSut({
+        resumeResult: { ...PENDING_RESULT, actionError: 'A npcs record with id "ghost" was not found.' },
+      });
+
+      await service.resolveAction({ actionId: "act-1", approved: true });
+
+      expect(assistantActionRepo.resolveStatus).toHaveBeenCalledWith({
+        id: "act-1",
+        from: "approved",
+        to: "failed",
+      });
+      const toStatuses = (assistantActionRepo.resolveStatus as any).mock.calls.map((c: any[]) => c[0].to);
+      expect(toStatuses).not.toContain("executed");
+    });
+
+    it("marks the action executed when a completed resume carries no actionError", async () => {
+      const { service, assistantActionRepo } = buildSut();
+      await service.resolveAction({ actionId: "act-1", approved: true });
+      const toStatuses = (assistantActionRepo.resolveStatus as any).mock.calls.map((c: any[]) => c[0].to);
+      expect(toStatuses).toContain("executed");
+      expect(toStatuses).not.toContain("failed");
     });
 
     it("passes contentId/contentType from the action's contentScope and the trimmed thread messages to resume", async () => {

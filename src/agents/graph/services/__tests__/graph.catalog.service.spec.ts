@@ -317,6 +317,110 @@ describe("GraphCatalogService", () => {
     });
   });
 
+  /**
+   * The write tools reach `AbstractService.*FromDTO`, which looks a relationship up
+   * by `dtoKey`. A catalog that only carried the descriptor KEY would build payloads
+   * the framework silently drops — no edge written, no error raised.
+   */
+  describe("dtoKey and owner", () => {
+    const dtoModuleId = "66666666-6666-6666-6666-666666666666";
+
+    const campaign = descriptor({
+      type: "campaigns",
+      moduleId: dtoModuleId,
+      description: "A campaign.",
+      fields: { name: { type: "string", description: "Name." } },
+      relationships: {},
+      chat: { scope: "self" },
+    });
+
+    /** The owner relationship is deliberately UNDESCRIBED — it is never catalogued. */
+    const ownerRelationship = (extra: Record<string, unknown> = {}) => ({
+      model: { type: "users", nodeName: "owner", labelName: "User" },
+      direction: "in" as const,
+      relationship: "CREATED",
+      cardinality: "one" as const,
+      dtoKey: "owner",
+      ...extra,
+    });
+
+    const npc = (relationships: Record<string, unknown>) =>
+      descriptor({
+        type: "npcs",
+        moduleId: dtoModuleId,
+        description: "A non-player character.",
+        fields: { name: { type: "string", description: "Name." } },
+        relationships: {
+          campaign: {
+            model: { type: "campaigns", nodeName: "campaign", labelName: "Campaign" },
+            direction: "out",
+            relationship: "PART_OF",
+            cardinality: "one",
+            dtoKey: "campaigns",
+            description: "The campaign this npc belongs to.",
+          },
+          scene: {
+            model: { type: "scenes", nodeName: "scene", labelName: "Scene" },
+            direction: "out",
+            relationship: "APPEARS_IN",
+            cardinality: "many",
+            dtoKey: "scenes",
+            description: "Scenes this npc appears in.",
+          },
+          player: {
+            model: { type: "users", nodeName: "user", labelName: "User" },
+            direction: "in",
+            relationship: "PLAYS",
+            cardinality: "one",
+            description: "The user who plays this npc.",
+          },
+          ...relationships,
+        },
+        chat: { scope: "campaign" },
+      });
+
+    const build = (relationships: Record<string, unknown>) => {
+      const svc = new GraphCatalogService({ loadAll: () => [campaign, npc(relationships)] } as any);
+      svc.buildCatalog();
+      return svc.getEntityDetail("npcs", [dtoModuleId])!;
+    };
+
+    it("compiles dtoKey from the descriptor, falling back to the relationship key", () => {
+      const entity = build({});
+      const byName = new Map(entity.relationships.map((r) => [r.name, r]));
+
+      expect(byName.get("scene")!.dtoKey).toBe("scenes");
+      expect(byName.get("player")!.dtoKey).toBe("player");
+    });
+
+    it("compiles dtoKey onto the scope hop", () => {
+      expect(build({}).scope!.path[0]).toMatchObject({ key: "campaign", dtoKey: "campaigns" });
+    });
+
+    it("compiles owner from the undescribed owner relationship", () => {
+      expect(build({ owner: ownerRelationship() }).owner).toEqual({
+        key: "owner",
+        dtoKey: "owner",
+        type: "users",
+      });
+    });
+
+    it("keeps the owner out of the catalogued relationships (it has no description)", () => {
+      const entity = build({ owner: ownerRelationship() });
+      expect(entity.relationships.map((r) => r.name)).not.toContain("owner");
+    });
+
+    it("leaves owner undefined when the descriptor declares none", () => {
+      expect(build({}).owner).toBeUndefined();
+    });
+
+    it("leaves owner undefined when the owner relationship is filled from CLS", () => {
+      // A contextKey relationship is set by the framework from the request context,
+      // so the write tools must NOT send it in the DTO.
+      expect(build({ owner: ownerRelationship({ contextKey: "userId" }) }).owner).toBeUndefined();
+    });
+  });
+
   it("throws on reverse-name collision at build time", () => {
     const a = descriptor({
       type: "a",
@@ -359,5 +463,151 @@ describe("GraphCatalogService", () => {
     });
     const svc = new GraphCatalogService({ loadAll: () => [a, b, c] } as any);
     expect(() => svc.buildCatalog()).toThrow(/reverse relationship name/i);
+  });
+
+  describe("chat.writable allow-lists", () => {
+    const writableModuleId = "55555555-5555-5555-5555-555555555555";
+
+    const campaign = descriptor({
+      type: "campaigns",
+      moduleId: writableModuleId,
+      description: "A campaign.",
+      fields: { name: { type: "string", description: "Name." } },
+      relationships: {},
+      chat: { scope: "self" },
+    });
+
+    // `scenes` carries a reverse, so `scenes.npcs` exists on the target and the
+    // reverse name is exactly the kind of mistake the boot check has to catch.
+    const npcDescriptor = (chat: any) =>
+      descriptor({
+        type: "npcs",
+        moduleId: writableModuleId,
+        description: "A non-player character.",
+        fields: {
+          name: { type: "string", description: "Name." },
+          description: { type: "string", description: "Notes." },
+          tldr: { type: "string", description: "Generated one-liner." },
+        },
+        relationships: {
+          campaign: {
+            model: { type: "campaigns", nodeName: "campaign", labelName: "Campaign" },
+            direction: "out",
+            relationship: "PART_OF",
+            cardinality: "one",
+            description: "The campaign this npc belongs to.",
+          },
+          scenes: {
+            model: { type: "scenes", nodeName: "scene", labelName: "Scene" },
+            direction: "out",
+            relationship: "APPEARS_IN",
+            cardinality: "many",
+            description: "Scenes this npc appears in.",
+            reverse: { name: "npcs", description: "Npcs appearing in this scene." },
+          },
+        },
+        chat,
+      });
+
+    const scene = descriptor({
+      type: "scenes",
+      moduleId: writableModuleId,
+      description: "A scene.",
+      fields: { name: { type: "string", description: "Name." } },
+      relationships: {},
+      chat: { scope: "campaign", related: true },
+    });
+
+    /** `scenes` needs its own one-hop scope, or the writable/scope check fires instead. */
+    const sceneWithScope = {
+      ...scene,
+      relationships: {
+        campaign: {
+          model: { type: "campaigns", nodeName: "campaign", labelName: "Campaign" },
+          direction: "out",
+          relationship: "PART_OF",
+          cardinality: "one",
+          description: "The campaign this scene belongs to.",
+        },
+      },
+    };
+
+    const build = (chat: any) => {
+      const svc = new GraphCatalogService({ loadAll: () => [campaign, sceneWithScope, npcDescriptor(chat)] } as any);
+      svc.buildCatalog();
+      return svc.getEntityDetail("npcs", [writableModuleId])!;
+    };
+
+    it("compiles the object form into writable field and relationship allow-lists", () => {
+      const entity = build({
+        scope: "campaign",
+        writable: { fields: ["name", "description"], relationships: ["scenes"] },
+      });
+
+      expect(entity.writable).toBe(true);
+      expect(entity.writableFields).toEqual(["name", "description"]);
+      expect(entity.writableRelationships).toEqual(["scenes"]);
+    });
+
+    it("compiles an omitted relationships list to none, not to all of them", () => {
+      const entity = build({ scope: "campaign", writable: { fields: ["name"] } });
+      expect(entity.writableRelationships).toEqual([]);
+    });
+
+    it("leaves both lists undefined for the legacy chat.writable: true", () => {
+      const entity = build({ scope: "campaign", writable: true });
+      expect(entity.writable).toBe(true);
+      expect(entity.writableFields).toBeUndefined();
+      expect(entity.writableRelationships).toBeUndefined();
+    });
+
+    it("throws when a writable field is not a described field", () => {
+      expect(() => build({ scope: "campaign", writable: { fields: ["name", "nickname"] } })).toThrow(
+        /chat\.writable field "nickname", which is not a described field/i,
+      );
+    });
+
+    it("throws when a writable relationship does not exist", () => {
+      expect(() => build({ scope: "campaign", writable: { fields: ["name"], relationships: ["places"] } })).toThrow(
+        /chat\.writable relationship "places", which is not a catalogued relationship/i,
+      );
+    });
+
+    it("throws when a writable relationship is a reverse one", () => {
+      // `npcs` is materialised on scenes, not on npcs — but a reverse name on the
+      // entity ITSELF must be refused too, so this uses scenes' own reverse view.
+      const svc = new GraphCatalogService({
+        loadAll: () => [
+          campaign,
+          { ...sceneWithScope, chat: { scope: "campaign", writable: { fields: ["name"], relationships: ["npcs"] } } },
+          npcDescriptor({ scope: "campaign" }),
+        ],
+      } as any);
+      expect(() => svc.buildCatalog()).toThrow(
+        /chat\.writable relationship "npcs", which is read-only and cannot be written/i,
+      );
+    });
+
+    it("throws when a writable relationship is the polymorphic related traversal", () => {
+      const svc = new GraphCatalogService({
+        loadAll: () => [
+          campaign,
+          {
+            ...sceneWithScope,
+            chat: { scope: "campaign", related: true, writable: { fields: ["name"], relationships: ["related"] } },
+          },
+          npcDescriptor({ scope: "campaign" }),
+        ],
+      } as any);
+      expect(() => svc.buildCatalog()).toThrow(
+        /chat\.writable relationship "related", which is read-only and cannot be written/i,
+      );
+    });
+
+    it("throws when a writable relationship is the scope relationship", () => {
+      expect(() => build({ scope: "campaign", writable: { fields: ["name"], relationships: ["campaign"] } })).toThrow(
+        /chat\.writable relationship "campaign", which is the scope relationship/i,
+      );
+    });
   });
 });

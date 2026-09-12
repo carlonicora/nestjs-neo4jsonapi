@@ -34,9 +34,15 @@ const orderEntity = {
   ],
 };
 
+/** Same shape, but the descriptor sets `chat.writable: true` (mirrored onto the catalog entity). */
+const writableOrderEntity = { ...orderEntity, writable: true };
+
+/** Accessible but NOT writable: must stay out of the descriptor-driven default set. */
+const invoiceEntity = { ...orderEntity, type: "invoices", labelName: "Invoice", nodeName: "invoice" };
+
 describe("McpPromotedToolsFactory", () => {
-  const config = { get: vi.fn().mockReturnValue({ promotedEntities: ["orders", "invoices"] }) };
-  const catalog = { getEntityDetail: vi.fn((type: string) => (type === "orders" ? orderEntity : null)) };
+  const config = { get: vi.fn() };
+  const catalog = { getEntityDetail: vi.fn(), getAccessibleTypes: vi.fn() };
   const searchTool = { invoke: vi.fn().mockResolvedValue([{ id: "o1" }]) };
   const readTool = { invoke: vi.fn() };
   const writeService = { createEntity: vi.fn(), updateEntity: vi.fn() };
@@ -44,6 +50,9 @@ describe("McpPromotedToolsFactory", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    config.get.mockReturnValue({ promotedEntities: ["orders", "invoices"] });
+    catalog.getAccessibleTypes.mockReturnValue([]);
+    catalog.getEntityDetail.mockImplementation((type: string) => (type === "orders" ? orderEntity : null));
     factory = new McpPromotedToolsFactory(
       config as any,
       catalog as any,
@@ -128,9 +137,46 @@ describe("McpPromotedToolsFactory", () => {
     expect(search.description).toContain("Customer orders");
   });
 
-  it("returns no tools when config has no promoted entities", () => {
+  it("returns no tools when config has no promoted entities and nothing is accessible", () => {
     config.get.mockReturnValueOnce({ promotedEntities: [] });
     expect(factory.build(ctx)).toEqual([]);
+  });
+
+  it("with an empty config, promotes only the accessible types whose descriptor is writable", () => {
+    config.get.mockReturnValueOnce({ promotedEntities: [] });
+    catalog.getAccessibleTypes.mockReturnValueOnce(["invoices", "orders"]);
+    catalog.getEntityDetail.mockImplementation((type: string) => {
+      if (type === "orders") return writableOrderEntity;
+      if (type === "invoices") return invoiceEntity;
+      return null;
+    });
+
+    const tools = factory.build(ctx);
+
+    expect(tools.map((t) => t.name).sort()).toEqual(["create_orders", "get_orders", "search_orders", "update_orders"]);
+    expect(catalog.getAccessibleTypes).toHaveBeenCalledWith(ctx.userModuleIds);
+  });
+
+  it("with an empty config and no writable type, returns no tools", () => {
+    config.get.mockReturnValueOnce({ promotedEntities: [] });
+    catalog.getAccessibleTypes.mockReturnValueOnce(["invoices", "orders"]);
+    catalog.getEntityDetail.mockImplementation((type: string) => {
+      if (type === "orders") return orderEntity;
+      if (type === "invoices") return invoiceEntity;
+      return null;
+    });
+
+    expect(factory.build(ctx)).toEqual([]);
+  });
+
+  it("a non-empty config is an explicit override: a non-writable type listed there is still promoted", () => {
+    config.get.mockReturnValueOnce({ promotedEntities: ["orders"] });
+
+    const tools = factory.build(ctx);
+
+    expect((orderEntity as { writable?: boolean }).writable).toBeUndefined();
+    expect(tools.map((t) => t.name).sort()).toEqual(["create_orders", "get_orders", "search_orders", "update_orders"]);
+    expect(catalog.getAccessibleTypes).not.toHaveBeenCalled();
   });
 });
 

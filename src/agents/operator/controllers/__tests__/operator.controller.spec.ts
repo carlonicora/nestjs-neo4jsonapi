@@ -1,5 +1,6 @@
 import { PATH_METADATA } from "@nestjs/common/constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { modelRegistry } from "../../../../common/registries/registry";
 import { assistantActionMeta } from "../../../../foundations/assistant-action/entities/assistant-action.meta";
 import { assistantMessageMeta } from "../../../../foundations/assistant-message/entities/assistant-message.meta";
 import { assistantMeta } from "../../../../foundations/assistant/entities/assistant.meta";
@@ -132,6 +133,37 @@ describe("OperatorController", () => {
         howToMode: true,
         limitToHowToId: "h-1",
       });
+    });
+
+    it("binds the thread to the scope sent in relationships.content", async () => {
+      // The route used to read only `data.attributes`, so the thread got no
+      // BOUND_TO edge and the write tools created records outside the caller's
+      // campaign. `resolveBoundContent` validates the polymorphic type against
+      // the model registry, so the target must be registered as at runtime.
+      modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as never);
+
+      await ctl.create(
+        {
+          data: {
+            type: assistantMeta.type,
+            attributes: { content: "hello" },
+            relationships: { content: { data: { type: "campaigns", id: "c1" } } },
+          },
+        } as any,
+        req,
+      );
+
+      expect(assistants.createWithFirstMessageOperator).toHaveBeenCalledWith(
+        expect.objectContaining({ boundContent: { type: "campaigns", id: "c1" } }),
+      );
+    });
+
+    it("passes boundContent: undefined when the body carries no scope relationship", async () => {
+      await ctl.create(postBody({ content: "hello" }), req);
+
+      const [params] = assistants.createWithFirstMessageOperator.mock.calls[0];
+      expect("boundContent" in params).toBe(true);
+      expect(params.boundContent).toBeUndefined();
     });
 
     it("returns the Assistant document with rich messages merged into included and toolCalls in meta", async () => {

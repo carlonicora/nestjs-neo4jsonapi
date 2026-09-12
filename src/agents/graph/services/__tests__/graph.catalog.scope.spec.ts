@@ -65,6 +65,7 @@ describe("GraphCatalogService scope compilation", () => {
       path: [
         {
           key: "recording",
+          dtoKey: "recording",
           cypherLabel: "FROM_RECORDING",
           cypherDirection: "out",
           targetLabel: "Recording",
@@ -72,6 +73,7 @@ describe("GraphCatalogService scope compilation", () => {
         },
         {
           key: "campaign",
+          dtoKey: "campaign",
           cypherLabel: "PART_OF",
           cypherDirection: "out",
           targetLabel: "Campaign",

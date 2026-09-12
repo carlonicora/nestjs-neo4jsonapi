@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
+import { isFieldWritable, isRelationshipWritable } from "../services/writable.rules";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 
 const inputSchema = z.object({
@@ -28,6 +29,13 @@ export class DescribeEntityTool {
       async () => {
         const entity = this.factory.resolveEntity(input.type, ctx);
         if ("error" in entity) return entity;
+        // The write tools refuse anything not marked writable here, so the model
+        // must be TOLD which fields and relationships it may set — without this
+        // it fills system-generated fields and read-only traversals, and the
+        // refusal only lands after the user has approved the action. Omitted
+        // entirely for a read-only type: a host that opts nothing in sees the
+        // response it has always seen.
+        const writable = entity.writable === true;
         return {
           type: entity.type,
           description: entity.description,
@@ -38,13 +46,20 @@ export class DescribeEntityTool {
             filterable: f.filterable,
             sortable: f.sortable,
             ...(f.kind ? { kind: f.kind } : {}),
+            // A richtext field is READ as markdown (the tool layer renders the
+            // stored BlockNote document), so it must be WRITTEN as markdown too —
+            // the write tools convert it back. Without saying so the model has no
+            // way to know the two directions match.
+            ...(f.kind?.type === "richtext" ? { format: "markdown" } : {}),
             ...(entity.list ? { stage: entity.list.includes(f.name) ? "list" : "detail" } : {}),
+            ...(writable ? { writable: isFieldWritable(entity, f.name) } : {}),
           })),
           relationships: entity.relationships.map((r) => ({
             name: r.name,
             targetType: r.targetType,
             cardinality: r.cardinality,
             description: r.description,
+            ...(writable ? { writable: isRelationshipWritable(entity, r) } : {}),
           })),
           ...(entity.bridge ? { bridge: { materialiseTo: [...entity.bridge.materialiseTo] } } : {}),
         };

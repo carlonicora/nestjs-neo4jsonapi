@@ -144,6 +144,131 @@ describe("DescribeEntityTool", () => {
     }
   });
 
+  describe("writable flags", () => {
+    // The model fills whatever describe_entity shows it, so a writable entity has
+    // to say which fields and relationships it may actually set — otherwise the
+    // refusal only lands after the user approved the action.
+    const npc = (writableOverrides: Record<string, unknown>) => ({
+      type: "npcs",
+      moduleId: "11111111-1111-1111-1111-111111111111",
+      description: "A non-player character.",
+      fields: [
+        { name: "name", type: "string", description: "Name.", filterable: true, sortable: true },
+        { name: "tldr", type: "string", description: "Generated one-liner.", filterable: false, sortable: false },
+      ],
+      relationships: [
+        {
+          name: "campaign",
+          sourceType: "npcs",
+          targetType: "campaigns",
+          cardinality: "one",
+          description: "Scope.",
+          cypherDirection: "out",
+          cypherLabel: "PART_OF",
+          isReverse: false,
+        },
+        {
+          name: "scenes",
+          sourceType: "npcs",
+          targetType: "scenes",
+          cardinality: "many",
+          description: "Scenes this npc appears in.",
+          cypherDirection: "out",
+          cypherLabel: "APPEARS_IN",
+          isReverse: false,
+        },
+        {
+          name: "clues",
+          sourceType: "npcs",
+          targetType: "clues",
+          cardinality: "many",
+          description: "Clues carried by this npc.",
+          cypherDirection: "in",
+          cypherLabel: "CARRIED_BY",
+          isReverse: true,
+          inverseKey: "carrier",
+        },
+        {
+          name: "related",
+          sourceType: "npcs",
+          targetType: "*",
+          cardinality: "many",
+          description: "Records linked to this one.",
+          cypherDirection: "out",
+          cypherLabel: "RELATES_TO",
+          isReverse: false,
+          polymorphic: true,
+        },
+      ],
+      nodeName: "npc",
+      labelName: "Npc",
+      scope: {
+        rootType: "campaigns",
+        rootLabel: "Campaign",
+        path: [
+          {
+            key: "campaign",
+            cypherLabel: "PART_OF",
+            cypherDirection: "out",
+            targetLabel: "Campaign",
+            targetType: "campaigns",
+          },
+        ],
+      },
+      writable: true,
+      ...writableOverrides,
+    });
+
+    const describeNpc = async (writableOverrides: Record<string, unknown>) => {
+      const writableFactory: any = {
+        resolveEntity: () => npc(writableOverrides),
+        capture: async (_r: any, fn: any, rec: any[]) => {
+          const v = await fn();
+          rec.push({});
+          return v;
+        },
+      };
+      return (await new DescribeEntityTool(writableFactory).invoke(
+        { type: "npcs" },
+        { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+        [],
+      )) as any;
+    };
+
+    const flags = (entries: any[]) =>
+      Object.fromEntries(entries.map((entry: any) => [entry.name, entry.writable])) as Record<string, unknown>;
+
+    it("marks every described field writable for the legacy chat.writable: true", async () => {
+      const out = await describeNpc({});
+      expect(flags(out.fields)).toEqual({ name: true, tldr: true });
+    });
+
+    it("marks only the listed fields writable for the allow-list form", async () => {
+      const out = await describeNpc({ writableFields: ["name"], writableRelationships: [] });
+      expect(flags(out.fields)).toEqual({ name: true, tldr: false });
+    });
+
+    it("never marks the scope, reverse or polymorphic relationships writable", async () => {
+      const out = await describeNpc({});
+      expect(flags(out.relationships)).toEqual({ campaign: false, scenes: true, clues: false, related: false });
+    });
+
+    it("marks only the listed relationships writable for the allow-list form", async () => {
+      const out = await describeNpc({ writableFields: ["name"], writableRelationships: [] });
+      expect(flags(out.relationships)).toEqual({ campaign: false, scenes: false, clues: false, related: false });
+    });
+
+    it("omits the flag entirely for a read-only entity", async () => {
+      const out: any = await tool.invoke(
+        { type: "accounts" },
+        { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+        [],
+      );
+      for (const field of out.fields) expect(field).not.toHaveProperty("writable");
+      for (const relationship of out.relationships) expect(relationship).not.toHaveProperty("writable");
+    });
+  });
+
   it("includes bridge in the response when the entity is a bridge", async () => {
     const bridgeCatalog = {
       getEntityDetail: (_type: string, _mods: string[]) => ({
@@ -188,5 +313,72 @@ describe("DescribeEntityTool", () => {
 
     expect((out as any).bridge).toEqual({ materialiseTo: ["item"] });
     expect((out as any).type).toBe("bom-entries");
+  });
+});
+
+/**
+ * A richtext field is rendered to markdown on read and converted back on write,
+ * so describe_entity has to say the field's wire format is markdown — otherwise
+ * the model has no way to know the two directions match.
+ */
+describe("DescribeEntityTool — richtext fields", () => {
+  const richtextCatalog = {
+    getEntityDetail: () => ({
+      type: "npcs",
+      moduleId: "11111111-1111-1111-1111-111111111111",
+      description: "An npc.",
+      fields: [
+        { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
+        {
+          name: "description",
+          type: "string",
+          description: "Notes.",
+          filterable: false,
+          sortable: false,
+          kind: { type: "richtext" },
+        },
+        {
+          name: "fee",
+          type: "number",
+          description: "Fee.",
+          filterable: true,
+          sortable: true,
+          kind: { type: "money", minorUnits: 2 },
+        },
+      ],
+      relationships: [],
+      nodeName: "npc",
+      labelName: "Npc",
+    }),
+  } as any;
+
+  const factory: any = {
+    resolveEntity: (t: string, c: any) => richtextCatalog.getEntityDetail(t, c.userModuleIds),
+    capture: async (_r: any, fn: any, rec: any[]) => {
+      const v = await fn();
+      rec.push({});
+      return v;
+    },
+  };
+
+  it('marks a richtext field format: "markdown" and leaves every other kind alone', async () => {
+    const out: any = await new DescribeEntityTool(factory).invoke(
+      { type: "npcs" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+    const byName = new Map(out.fields.map((field: any) => [field.name, field]));
+
+    expect(byName.get("description")).toEqual({
+      name: "description",
+      type: "string",
+      description: "Notes.",
+      filterable: false,
+      sortable: false,
+      kind: { type: "richtext" },
+      format: "markdown",
+    });
+    expect(byName.get("fee")).not.toHaveProperty("format");
+    expect(byName.get("name")).not.toHaveProperty("format");
   });
 });

@@ -53,6 +53,12 @@ import { TraverseTool } from "./tools/traverse.tool";
     { provide: SCOPE_PREDICATE_SOURCE, useExisting: ScopePredicateService },
   ],
   exports: [
+    // Re-exported: the operator's write tools (OperatorModule, which imports
+    // GraphModule) need BlockNoteService to store markdown in a rich-text field
+    // as a BlockNote document. A module that exports a consumer of a non-global
+    // provider must re-export that provider's module, or the consumer cannot be
+    // constructed in the importing module's injector.
+    BlockNoteModule,
     GraphDescriptorRegistry,
     GraphCatalogService,
     UserModulesRepository,

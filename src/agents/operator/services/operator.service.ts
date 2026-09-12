@@ -43,6 +43,12 @@ interface OperatorInterruptPayload {
   toolName: string;
   toolArgs: Record<string, unknown>;
   summary: string;
+  /**
+   * Name-resolved rendering of the pending write (`OperatorActionProposal`).
+   * Absent when the tool contributes no `present` hook, or when resolving the
+   * names failed — the approval still goes ahead on `summary` alone.
+   */
+  proposal?: Record<string, unknown>;
 }
 
 export type OperatorRunResult =
@@ -54,8 +60,32 @@ export type OperatorRunResult =
       citations: OperatorCitation[];
       toolCalls: ToolCallRecord[];
       tokens: { input: number; output: number };
+      /**
+       * Error the approved destructive tool returned instead of writing. Present
+       * only when an approved action failed: the caller must record the action as
+       * failed rather than executed.
+       */
+      actionError?: string;
     }
-  | { kind: "pending_approval"; toolName: string; toolArgs: Record<string, unknown>; summary: string };
+  | {
+      kind: "pending_approval";
+      toolName: string;
+      toolArgs: Record<string, unknown>;
+      summary: string;
+      /** Name-resolved rendering of the pending write; absent when it could not be built. */
+      proposal?: Record<string, unknown>;
+      /**
+       * Error the approved destructive tool returned instead of writing. Present
+       * only when an approved action failed: the caller must record the action as
+       * failed rather than executed.
+       *
+       * A resumed run can pause again on a SECOND approval — the model reacts to
+       * the refusal by proposing another destructive call — so the outcome of the
+       * action that was just approved has to travel on this variant too. Reading
+       * it only off `completed` silently marks a failed action `executed`.
+       */
+      actionError?: string;
+    };
 
 /**
  * OperatorService - the operator agent graph (START → agent ⇄ tools → finalise → END).
@@ -277,6 +307,8 @@ export class OperatorService {
 
         const toolMessages: ToolMessage[] = [];
         let destructiveHandled = false;
+        /** Set on every pass that EXECUTED an approved destructive call: the error, or null. */
+        let actionOutcome: { error: string | null } | undefined;
         for (const [index, call] of ordered.entries()) {
           const callId = call.id ?? `call_${index}`;
           const definition = toolMap.get(call.name);
@@ -297,11 +329,35 @@ export class OperatorService {
               );
               continue;
             }
+            const toolArgs = (call.args ?? {}) as Record<string, unknown>;
+            // Pre-flight the call BEFORE freezing the run. An invalid call that is
+            // only refused at execution time is refused AFTER the user approved
+            // it: they approve an action and nothing is written. A rejection here
+            // becomes a recoverable tool error instead, and — because
+            // `destructiveHandled` stays false — the model can still get one
+            // corrected action approved in this same pass.
+            const rejection = await this.validateDestructive(definition, call.name, toolArgs);
+            if (rejection) {
+              toolMessages.push(new ToolMessage({ content: `Tool error: ${rejection}`, tool_call_id: callId }));
+              continue;
+            }
+
             destructiveHandled = true;
+            // A proposal resolves referenced record NAMES, so it touches the
+            // database. It is presentation only: if it fails the approval must
+            // still be raised, with the summary alone.
+            let proposal: Record<string, unknown> | undefined;
+            try {
+              proposal = await definition.present?.(toolArgs);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              this.logger.warn(`operator tool "${call.name}" could not build an approval proposal: ${message}`);
+            }
             const payload: OperatorInterruptPayload = {
               toolName: call.name,
-              toolArgs: (call.args ?? {}) as Record<string, unknown>,
-              summary: definition.summarise?.(call.args ?? {}) ?? `${call.name}(${JSON.stringify(call.args ?? {})})`,
+              toolArgs,
+              summary: (await definition.summarise?.(toolArgs)) ?? `${call.name}(${JSON.stringify(toolArgs)})`,
+              ...(proposal ? { proposal } : {}),
             };
             const decision = interrupt(payload) as { approved: boolean };
             if (!decision?.approved) {
@@ -312,6 +368,12 @@ export class OperatorService {
 
           try {
             const result = await definition.tool.invoke(call.args ?? {});
+            // Only an APPROVED destructive call reaches this line (a denied one
+            // continued above), so its outcome is the action's outcome. A write
+            // tool reports a refusal as a returned `{ error }`, not a throw, so
+            // without reading it back the AssistantAction would be marked
+            // executed while nothing was written.
+            if (definition.destructive) actionOutcome = { error: this.extractActionError(result) };
             toolMessages.push(
               new ToolMessage({
                 content: typeof result === "string" ? result : JSON.stringify(result),
@@ -321,6 +383,7 @@ export class OperatorService {
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn(`operator tool "${call.name}" failed: ${message}`);
+            if (definition.destructive) actionOutcome = { error: message };
             toolMessages.push(new ToolMessage({ content: `Tool error: ${message}`, tool_call_id: callId }));
           }
         }
@@ -334,6 +397,9 @@ export class OperatorService {
           toolCalls: newRecords,
           references: this.collectReferences(newRecords),
           citations: this.collectCitations(newRecords),
+          // Written only by a pass that executed an approved destructive call, so
+          // a read-only pass never clears (nor invents) an action's outcome.
+          ...(actionOutcome ? { actionError: actionOutcome.error } : {}),
         };
       })
       .addNode("finalise", async (state) => {
@@ -395,6 +461,46 @@ export class OperatorService {
       .addEdge("finalise", END);
 
     return workflow.compile({ checkpointer: saver });
+  }
+
+  /**
+   * Runs a destructive tool's `validate` hook, if it has one. A hook that throws
+   * is treated as a rejection: the execution path already turns a throw into a
+   * `Tool error: ...` ToolMessage, and refusing the call is the safe direction —
+   * the alternative is asking the user to approve a call nothing could check.
+   */
+  private async validateDestructive(
+    definition: OperatorToolDefinition,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<string | null> {
+    if (!definition.validate) return null;
+    try {
+      return await definition.validate(args);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`operator tool "${name}" could not be validated: ${message}`);
+      return message;
+    }
+  }
+
+  /**
+   * The error a write tool returned instead of writing — write tools report a
+   * refusal as `{ error }` (JSON-stringified), never as a throw, so the string
+   * has to be parsed back.
+   */
+  private extractActionError(result: unknown): string | null {
+    let parsed: unknown = result;
+    if (typeof result === "string") {
+      try {
+        parsed = JSON.parse(result);
+      } catch {
+        return null;
+      }
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const error = (parsed as Record<string, unknown>).error;
+    return typeof error === "string" && error.length ? error : null;
   }
 
   /** Entity references derived deterministically from the tool-call recorder (never from the LLM). */
@@ -465,6 +571,10 @@ export class OperatorService {
         toolName: payload.toolName ?? "",
         toolArgs: payload.toolArgs ?? {},
         summary: payload.summary ?? "",
+        ...(payload.proposal ? { proposal: payload.proposal } : {}),
+        // The run paused again, but an action approved EARLIER in this same resume
+        // may already have failed; without this its status would stay `executed`.
+        ...(finalState.actionError ? { actionError: finalState.actionError } : {}),
       };
     }
 
@@ -476,6 +586,7 @@ export class OperatorService {
       citations: finalState.citations ?? [],
       toolCalls: finalState.toolCalls ?? [],
       tokens: finalState.tokens ?? { input: 0, output: 0 },
+      ...(finalState.actionError ? { actionError: finalState.actionError } : {}),
     };
   }
 }

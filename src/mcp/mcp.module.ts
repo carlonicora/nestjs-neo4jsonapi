@@ -3,6 +3,7 @@ import { AgentsModule } from "../agents/agents.modules";
 import { SearchDocumentsTool } from "../agents/operator/tools/search-documents.tool";
 import { OAuthModule } from "../foundations/oauth/oauth.module";
 import { RbacPermissionModule } from "../foundations/rbac/rbac-permission.module";
+import { BlockNoteModule } from "../core/blocknote/blocknote.module";
 import { McpController } from "./controllers/mcp.controller";
 import { McpEntityWriteService } from "./services/mcp.entity.write.service";
 import { McpGenericToolsService } from "./services/mcp.generic.tools.service";
@@ -29,9 +30,13 @@ import { McpToolRegistry } from "./services/mcp.tool.registry";
  *   ContextualiserService) are exported by AgentsModule's inner modules.
  * - EntityServiceRegistry, Neo4jService, ClsService and ConfigService resolve
  *   through the global core/cls/config modules.
+ * - `BlockNoteModule` is imported explicitly for McpEntityWriteService, which
+ *   converts markdown written into a rich-text attribute to a BlockNote
+ *   document. GraphModule re-exports it too, but stating it here keeps the
+ *   dependency visible where it is used.
  */
 @Module({
-  imports: [OAuthModule, RbacPermissionModule, AgentsModule],
+  imports: [OAuthModule, RbacPermissionModule, AgentsModule, BlockNoteModule],
   controllers: [McpController],
   providers: [
     McpServerFactory,

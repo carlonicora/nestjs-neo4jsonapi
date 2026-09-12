@@ -73,6 +73,10 @@ describe("OperatorService", () => {
         tool: destructiveTool,
         destructive: true,
         summarise: (args: Record<string, unknown>) => `Test action: ${String(args.note)}`,
+        present: async (args: Record<string, unknown>) => ({
+          type: "notes",
+          target: { id: "note-1", type: "notes", label: String(args.note) },
+        }),
       },
       { tool: throwingReadTool, destructive: false },
     ];
@@ -230,6 +234,8 @@ describe("OperatorService", () => {
     if (first.kind === "pending_approval") {
       expect(first.toolArgs).toEqual({ note: "x" });
       expect(first.summary).toBe("Test action: x");
+      // the name-resolved proposal the approval card renders instead of toolArgs
+      expect(first.proposal).toEqual({ type: "notes", target: { id: "note-1", type: "notes", label: "x" } });
     }
     expect(testToolExecutions).toHaveLength(0);
 
@@ -252,6 +258,219 @@ describe("OperatorService", () => {
     expect(second.kind).toBe("completed");
     expect(testToolExecutions).toHaveLength(1);
     expect(testToolExecutions[0]).toEqual({ note: "x" });
+  });
+
+  it("awaits an async summarise, and a failing present leaves the approval intact without a proposal", async () => {
+    const asyncTool = new DynamicStructuredTool({
+      name: "operator_async_action",
+      description: "Test-only destructive action whose hooks are async.",
+      schema: z.object({ note: z.string() }),
+      func: async () => JSON.stringify({ executed: true }),
+    });
+    registryBuild.mockImplementationOnce(() => [
+      {
+        tool: asyncTool,
+        destructive: true,
+        summarise: async (args: Record<string, unknown>) => `Async action: ${String(args.note)}`,
+        present: async () => {
+          throw new Error("name resolution exploded");
+        },
+      } satisfies OperatorToolDefinition,
+    ]);
+    callStep.mockResolvedValueOnce({
+      message: aiMessageWithToolCall("operator_async_action", { note: "y" }),
+      tokenUsage: { input: 1, output: 1 },
+    });
+
+    const first = await service.run({ ...baseParams, threadId: "assistant-1:msg-async" });
+
+    expect(first).toMatchObject({ kind: "pending_approval", toolName: "operator_async_action" });
+    if (first.kind === "pending_approval") {
+      expect(first.summary).toBe("Async action: y");
+      expect(first.proposal).toBeUndefined();
+    }
+  });
+
+  describe("pre-flight validation of destructive calls", () => {
+    /** A destructive tool whose `validate` verdict the test controls. */
+    const buildValidatedTool = (verdict: string | null) => {
+      const executions: Array<Record<string, unknown>> = [];
+      const present = vi.fn(async () => ({ type: "notes" }));
+      const tool = new DynamicStructuredTool({
+        name: "operator_validated_action",
+        description: "Test-only destructive action with a validate hook.",
+        schema: z.object({ note: z.string() }),
+        func: async (input: { note: string }) => {
+          executions.push(input);
+          return JSON.stringify({ executed: true });
+        },
+      });
+      const validate = vi.fn(async () => verdict);
+      registryBuild.mockImplementation(() => [
+        {
+          tool,
+          destructive: true,
+          summarise: () => "Validated action",
+          present,
+          validate,
+        } satisfies OperatorToolDefinition,
+      ]);
+      return { executions, present, validate };
+    };
+
+    it("turns a rejected call into a tool error instead of asking the user to approve it", async () => {
+      const { executions, present, validate } = buildValidatedTool(
+        'Field "tldr" on npcs is not writable. Writable fields: [name, description].',
+      );
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall("operator_validated_action", { note: "x" }),
+        tokenUsage: { input: 1, output: 1 },
+      });
+      callStep.mockResolvedValueOnce({ message: new AIMessage("understood"), tokenUsage: { input: 1, output: 1 } });
+      llmCall.mockResolvedValueOnce({
+        answer: "That field cannot be set.",
+        questions: [],
+        tokenUsage: { input: 1, output: 1 },
+        modelWeight: ModelWeight.Normal,
+      });
+
+      const result = await service.run({ ...baseParams, threadId: "assistant-1:msg-validate" });
+
+      // No interrupt, no approval card built, no execution.
+      expect(result.kind).toBe("completed");
+      expect(validate).toHaveBeenCalledWith({ note: "x" });
+      expect(present).not.toHaveBeenCalled();
+      expect(executions).toEqual([]);
+
+      const secondStepMessages = callStep.mock.calls[1][0].messages;
+      const errorMessage = secondStepMessages.find(
+        (m: unknown) => m instanceof ToolMessage && String(m.content).includes("Tool error:"),
+      ) as ToolMessage;
+      expect(String(errorMessage.content)).toContain("is not writable");
+    });
+
+    it("freezes the run as usual when validate passes", async () => {
+      const { validate } = buildValidatedTool(null);
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall("operator_validated_action", { note: "x" }),
+        tokenUsage: { input: 1, output: 1 },
+      });
+
+      const result = await service.run({ ...baseParams, threadId: "assistant-1:msg-validate-ok" });
+
+      expect(result).toMatchObject({ kind: "pending_approval", toolName: "operator_validated_action" });
+      expect(validate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("actionError", () => {
+    /** A destructive tool that REPORTS a refusal instead of throwing, like the write tools. */
+    const buildRefusingTool = (result: string) => {
+      const tool = new DynamicStructuredTool({
+        name: "operator_refusing_action",
+        description: "Test-only destructive action that refuses.",
+        schema: z.object({ note: z.string() }),
+        func: async () => result,
+      });
+      registryBuild.mockImplementation(() => [
+        { tool, destructive: true, summarise: () => "Refusing action" } satisfies OperatorToolDefinition,
+      ]);
+    };
+
+    const approveOne = async (threadId: string) => {
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall("operator_refusing_action", { note: "x" }),
+        tokenUsage: { input: 1, output: 1 },
+      });
+      const first = await service.run({ ...baseParams, threadId });
+      expect(first.kind).toBe("pending_approval");
+
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+      llmCall.mockResolvedValueOnce({
+        answer: "done",
+        questions: [],
+        tokenUsage: { input: 1, output: 1 },
+        modelWeight: ModelWeight.Normal,
+      });
+      return service.resume({
+        threadId,
+        approved: true,
+        companyId: baseParams.companyId,
+        userId: baseParams.userId,
+        userModuleIds: baseParams.userModuleIds,
+      });
+    };
+
+    it("carries the error an approved tool returned instead of writing", async () => {
+      buildRefusingTool(JSON.stringify({ error: 'A npcs record with id "ghost" was not found.' }));
+
+      const result = await approveOne("assistant-1:msg-refused");
+
+      expect(result.kind).toBe("completed");
+      if (result.kind === "completed") {
+        expect(result.actionError).toBe('A npcs record with id "ghost" was not found.');
+      }
+    });
+
+    it("carries the error onto a resume that pauses again on another approval", async () => {
+      // The approved write refuses, the model reacts by proposing ANOTHER
+      // destructive call, so the resume comes back pending instead of completed.
+      // Reading the error only off `completed` marked the refused action executed.
+      const refused = 'A npcs record with id "ghost" was not found.';
+      const secondTool = new DynamicStructuredTool({
+        name: "operator_second_action",
+        description: "Test-only second destructive action.",
+        schema: z.object({ note: z.string() }),
+        func: async () => JSON.stringify({ created: true }),
+      });
+      const refusingTool = new DynamicStructuredTool({
+        name: "operator_refusing_action",
+        description: "Test-only destructive action that refuses.",
+        schema: z.object({ note: z.string() }),
+        func: async () => JSON.stringify({ error: refused }),
+      });
+      registryBuild.mockImplementation(() => [
+        { tool: refusingTool, destructive: true, summarise: () => "Refusing action" },
+        { tool: secondTool, destructive: true, summarise: () => "Second action" },
+      ]);
+
+      const threadId = "assistant-1:msg-refused-then-pending";
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall("operator_refusing_action", { note: "x" }),
+        tokenUsage: { input: 1, output: 1 },
+      });
+      const first = await service.run({ ...baseParams, threadId });
+      expect(first.kind).toBe("pending_approval");
+
+      // After the refusal the model proposes a second destructive call.
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall("operator_second_action", { note: "y" }, "call_2"),
+        tokenUsage: { input: 1, output: 1 },
+      });
+
+      const result = await service.resume({
+        threadId,
+        approved: true,
+        companyId: baseParams.companyId,
+        userId: baseParams.userId,
+        userModuleIds: baseParams.userModuleIds,
+      });
+
+      expect(result.kind).toBe("pending_approval");
+      if (result.kind === "pending_approval") {
+        expect(result.toolName).toBe("operator_second_action");
+        expect(result.actionError).toBe(refused);
+      }
+    });
+
+    it("leaves actionError unset when the approved tool succeeded", async () => {
+      buildRefusingTool(JSON.stringify({ id: "npc-1", created: true }));
+
+      const result = await approveOne("assistant-1:msg-written");
+
+      expect(result.kind).toBe("completed");
+      if (result.kind === "completed") expect(result.actionError).toBeUndefined();
+    });
   });
 
   it("resume denied: tool not executed, model wraps up", async () => {

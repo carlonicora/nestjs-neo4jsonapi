@@ -8,6 +8,7 @@ import { ResponderService } from "../../../agents/responder/services/responder.s
 import { GraphCatalogService } from "../../../agents/graph/services/graph.catalog.service";
 import { ScopeGuard } from "../../../agents/graph/services/scope.guard";
 import { UserModulesRepository } from "../../../agents/graph/repositories/user-modules.repository";
+import { parseBlockNoteDocument } from "../../../agents/graph/services/richtext.write";
 import { EntityReference } from "../../../agents/responder/interfaces/entity.reference.interface";
 import type { ToolCallRecord, UserContext } from "../../../agents/graph/tools/tool.factory";
 import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.trace.interface";
@@ -389,20 +390,17 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
 
     // Persist the engine marker so clients can route follow-up turns to the
     // operator endpoints after a reload — absence means responder semantics.
+    // BOUND_TO goes through `attachBoundContent`, exactly like the responder
+    // path: passing `content` to the generic create validates the target
+    // against the placeholder model and 400s (see attachBoundContent).
     await this.createFromDTO({
       data: {
         type: assistantMeta.type,
         id: assistantId,
         attributes: { title, engine: "operator" },
-        ...(params.boundContent
-          ? {
-              relationships: {
-                content: { data: { type: params.boundContent.type, id: params.boundContent.id } },
-              },
-            }
-          : {}),
       },
     });
+    await this.attachBoundContent(assistantId, params.boundContent);
 
     await this.assistantMessages.createFromDTO({
       data: {
@@ -645,8 +643,26 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     // The truth of "executed" is the resume returning, NOT message persistence
     // — transition immediately so the status never lies if persistence fails.
     // Denied stays `denied` (set by the guard above).
+    //
+    // Unless the tool refused: a write tool reports a refusal as a returned
+    // error rather than a throw, so the resume returns normally with nothing
+    // written. Marking that `executed` tells the user an action happened that
+    // did not.
     if (params.approved) {
-      await this.assistantActionRepo.resolveStatus({ id: params.actionId, from: "approved", to: "executed" });
+      // Read off BOTH variants: a resume whose approved tool refused very often
+      // pauses again on the model's next destructive proposal, and reading the
+      // error only off `completed` would drop it and mark this action executed.
+      const actionError = result.actionError;
+      if (actionError) {
+        this.assistantLogger.warn(
+          `resolveAction: action=${params.actionId} was approved but the tool returned an error: ${actionError}`,
+        );
+      }
+      await this.assistantActionRepo.resolveStatus({
+        id: params.actionId,
+        from: "approved",
+        to: actionError ? "failed" : "executed",
+      });
     }
 
     let outcome: { assistantMessage: AssistantMessage; toolCalls: ToolCallRecord[]; action?: AssistantAction };
@@ -865,28 +881,6 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
-   * A BlockNote-backed field arrives as a JSON string in its own string
-   * attribute — the convention every host-app entity already uses (e.g.
-   * `Npc.description`: `JSON.stringify` out, `JSON.parse` back). Detect that
-   * shape without trusting it: a plain-text message must never be mistaken for
-   * a document, so this requires an array whose first entry is an object with
-   * a string `type`, which is the minimal shape of a BlockNote block.
-   */
-  private parseBlockNoteDocument(raw: string): unknown[] | null {
-    const trimmed = raw.trimStart();
-    if (!trimmed.startsWith("[")) return null;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      if (!Array.isArray(parsed) || parsed.length === 0) return null;
-      const first = parsed[0] as { type?: unknown } | null;
-      if (!first || typeof first !== "object" || typeof first.type !== "string") return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
    * Derive from a user message: the markdown to persist (mention links kept, so
    * the thread can re-render them), a plain-text form for the thread title, and
    * the validated entity mentions to pin into the turn's focus context.
@@ -898,7 +892,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     rawContent: string;
     ctx: UserContext;
   }): Promise<{ content: string; plainText: string; pinned: ExtractedMention[] }> {
-    const nodes = this.parseBlockNoteDocument(params.rawContent);
+    const nodes = parseBlockNoteDocument(params.rawContent);
     if (!nodes) return { content: params.rawContent, plainText: params.rawContent, pinned: [] };
 
     const content = this.blockNote.convertToMarkdown({ nodes, preserveMentions: true });
@@ -1103,8 +1097,6 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         },
       },
     });
-    const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
-
     const ttlDays =
       this.configService.get<ConfigOperatorInterface>("operator")?.approvalTtlDays ??
       OPERATOR_DEFAULT_APPROVAL_TTL_DAYS;
@@ -1114,6 +1106,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     const action = await this.assistantActions.createPendingAction({
       toolName: result.toolName,
       toolArgs: JSON.stringify(result.toolArgs),
+      // The name-resolved rendering the approval card shows. `toolArgs` stays
+      // the raw audit copy — it carries ids, which must never be displayed.
+      ...(result.proposal ? { proposal: JSON.stringify(result.proposal) } : {}),
       summary: result.summary,
       threadId: params.threadId,
       userModuleIds: JSON.stringify(params.userModuleIds),
@@ -1122,6 +1117,13 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       assistantId: params.assistantId,
       messageId: assistantMessageId,
     });
+
+    // Read the message only AFTER createPendingAction has written the
+    // (AssistantMessage)-[:REQUESTED_IN]->(AssistantAction) edge: reading it
+    // first serialises a message with no `action` relationship, so the client
+    // never learns the actionId and renders a plain bubble with no
+    // Approve / Deny buttons.
+    const assistantMessage = await this.assistantMessageRepo.findById({ id: assistantMessageId });
 
     return { assistantMessage, toolCalls: [], action };
   }

@@ -1,3 +1,4 @@
+export * from "./bound-content";
 export * from "./credit-gate";
 export * from "./define-entity";
 export * from "./map-with-concurrency";

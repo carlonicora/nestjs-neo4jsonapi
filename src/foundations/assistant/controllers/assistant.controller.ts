@@ -21,6 +21,7 @@ import {
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
+import { resolveBoundContent } from "../../../common/helpers/bound-content";
 import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { modelRegistry } from "../../../common/registries/registry";
@@ -112,7 +113,7 @@ export class AssistantController {
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
-    const boundContent = this.resolveBoundContent(body.data.relationships?.content?.data);
+    const boundContent = resolveBoundContent(body.data.relationships?.content?.data);
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}` +
         (boundContent ? ` boundTo=${boundContent.type}/${boundContent.id}` : ""),
@@ -215,21 +216,6 @@ export class AssistantController {
       return;
     }
     return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
-  }
-
-  /**
-   * Validate the polymorphic `content` relationship reference against the model
-   * registry. The DTO can only assert that `type` is a non-empty string —
-   * BOUND_TO accepts any registered model, and the registry is the only place
-   * that knows the full set.
-   */
-  private resolveBoundContent(reference?: { type: string; id: string }): { type: string; id: string } | undefined {
-    if (!reference) return undefined;
-    const model = modelRegistry.getByType(reference.type);
-    if (!model) {
-      throw new BadRequestException(`Unknown resource type "${reference.type}" for the assistant's bound content.`);
-    }
-    return { type: model.type, id: reference.id };
   }
 
   /**

@@ -3,11 +3,64 @@ import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { ToolCallRecord, UserContext } from "../../graph/tools/tool.factory";
 
+/**
+ * One referenced record, resolved to a display name.
+ *
+ * `id` exists for React keys only and must NEVER be rendered: the approval card
+ * shows names, never ids.
+ */
+export interface ProposalRef {
+  id: string;
+  /** JSON:API type, e.g. "npcs". */
+  type: string;
+  /** Display name; `"(not found)"` when the id is unknown or out of scope. */
+  label: string;
+}
+
+/**
+ * Name-resolved description of a pending write, stored on the AssistantAction as
+ * a JSON string and rendered by the approval card. `toolArgs` stays the raw
+ * audit copy and is no longer used for display.
+ */
+// A type alias, not an interface: only an alias gets TypeScript's implicit index
+// signature, which is what lets a proposal satisfy the hook's
+// `Record<string, unknown>` return without a cast.
+export type OperatorActionProposal = {
+  /** JSON:API type of the record being written. */
+  type: string;
+  /** update / delete / link / unlink: the target record's name. Absent on create. */
+  target?: ProposalRef;
+  /** create / update: the field values being written (raw, as the tool received them). */
+  attributes?: Record<string, unknown>;
+  /** create: related records, resolved. The scope relationship (e.g. campaign) is STRIPPED here. */
+  relationships?: Record<string, ProposalRef[]>;
+  /** link / unlink: the relationship name. */
+  relationship?: string;
+  /** link / unlink: the resolved targets. */
+  targets?: ProposalRef[];
+};
+
 export interface OperatorToolDefinition {
   tool: DynamicStructuredTool;
   destructive: boolean;
   /** Human-readable line shown in the approval card. Required when destructive. */
-  summarise?: (args: Record<string, unknown>) => string;
+  summarise?: (args: Record<string, unknown>) => string | Promise<string>;
+  /**
+   * Structured, name-resolved rendering of the pending write for the approval
+   * card — an `OperatorActionProposal`. Optional: a tool without it (or one that
+   * fails) simply produces no proposal and never blocks the approval.
+   */
+  present?: (args: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+  /**
+   * Pre-flight check, run BEFORE the approval interrupt. A non-null string is
+   * returned to the model as a tool error and no approval is requested; `null`
+   * lets the approval go ahead.
+   *
+   * Without it an invalid call is only refused when it executes — AFTER the user
+   * approved it — so the user approves an action and nothing is written. It must
+   * run the same checks the execution path runs and write nothing itself.
+   */
+  validate?: (args: Record<string, unknown>) => Promise<string | null>;
 }
 
 /** Chunk citation pushed into the per-turn recorder by retrieval tools. */

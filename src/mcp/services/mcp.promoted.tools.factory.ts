@@ -49,8 +49,14 @@ export function descriptorFieldToJsonSchema(field: { type: string; description?:
 
 /**
  * Generates dedicated per-entity MCP tools (`search_<type>`, `get_<type>`,
- * `create_<type>`, `update_<type>`) for every JSON:API type listed in
- * `ConfigMcpInterface.promotedEntities`.
+ * `create_<type>`, `update_<type>`).
+ *
+ * Descriptor-driven by default, env list is an optional override: when
+ * `ConfigMcpInterface.promotedEntities` (env `MCP_PROMOTED_ENTITIES`) is
+ * empty, every accessible type whose descriptor sets `chat.writable: true`
+ * (mirrored onto `CatalogEntity.writable`) is promoted, in alphabetical
+ * order. Setting the env list overrides that derivation entirely — the listed
+ * types are promoted as given, `writable` included or not.
  *
  * Types the user cannot access (unknown type or module not granted) are
  * skipped: `GraphCatalogService.getEntityDetail` returns `null` for both
@@ -70,11 +76,17 @@ export class McpPromotedToolsFactory {
 
   /**
    * Builds the promoted per-entity tool definitions for the given user
-   * context. Returns an empty array when no promoted entities are configured
-   * or none are accessible.
+   * context.
+   *
+   * Descriptor-driven by default: with no `MCP_PROMOTED_ENTITIES` configured,
+   * every accessible type whose descriptor sets `chat.writable: true` is
+   * promoted, alphabetically. A non-empty config list is an explicit override
+   * and is used verbatim. Returns an empty array when neither source yields an
+   * accessible type.
    */
   build(ctx: McpUserContext): McpToolDefinition[] {
-    const promotedEntities = this.config.get<ConfigMcpInterface>("mcp")?.promotedEntities ?? [];
+    const configured = this.config.get<ConfigMcpInterface>("mcp")?.promotedEntities ?? [];
+    const promotedEntities = configured.length ? configured : this.deriveWritableTypes(ctx);
     if (!promotedEntities.length) return [];
 
     // Shared per-build recorder, pre-seeded with a describe_entity record per
@@ -96,6 +108,18 @@ export class McpPromotedToolsFactory {
       );
     }
     return tools;
+  }
+
+  /**
+   * The default promotion set: every type the user can reach whose descriptor
+   * declares `chat.writable: true`, sorted alphabetically so the tool list is
+   * deterministic across boots.
+   */
+  private deriveWritableTypes(ctx: McpUserContext): string[] {
+    return this.catalog
+      .getAccessibleTypes(ctx.userModuleIds)
+      .filter((type) => this.catalog.getEntityDetail(type, ctx.userModuleIds)?.writable === true)
+      .sort();
   }
 
   private buildSearchTool(entity: CatalogEntity, ctx: McpUserContext, recorder: ToolCallRecord[]): McpToolDefinition {

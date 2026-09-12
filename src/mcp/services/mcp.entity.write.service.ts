@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { CatalogEntity } from "../../agents/graph/interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "../../agents/graph/services/graph.catalog.service";
+import { convertRichtextFields, RICHTEXT_HINT } from "../../agents/graph/services/richtext.write";
 import { EntityServiceRegistry } from "../../common/registries/entity.service.registry";
+import { BlockNoteService } from "../../core/blocknote/services/blocknote.service";
 import type { JsonApiDTOData } from "../../core/neo4j/abstracts/abstract.service";
 import { RbacPermissionService } from "../../foundations/rbac/services/rbac-permission.service";
 import type { McpToolDefinition, McpToolResult, McpUserContext } from "../interfaces/mcp.tool.interface";
@@ -28,6 +30,13 @@ export class McpEntityWriteService {
     private readonly registry: EntityServiceRegistry,
     private readonly catalog: GraphCatalogService,
     private readonly rbac: RbacPermissionService,
+    /**
+     * Optional in the TYPE signature only, so unit tests can construct the three
+     * collaborators they exercise. Nest has no notion of `?` and still resolves
+     * it from BlockNoteModule (imported by McpModule) — a missing provider fails
+     * loudly at boot rather than silently storing markdown in a rich-text field.
+     */
+    private readonly blockNote?: BlockNoteService,
   ) {}
 
   /**
@@ -45,7 +54,8 @@ export class McpEntityWriteService {
         name: "create_entity",
         description:
           "Create a new record of the given JSON:API entity type. " +
-          "Call describe_entity first to learn the valid attributes and relationships.",
+          "Call describe_entity first to learn the valid attributes and relationships. " +
+          RICHTEXT_HINT,
         inputSchema: {
           type: "object",
           properties: {
@@ -88,7 +98,7 @@ export class McpEntityWriteService {
       },
       {
         name: "update_entity",
-        description: `Update an existing record. ${UPDATE_SEMANTICS}`,
+        description: `Update an existing record. ${UPDATE_SEMANTICS} ${RICHTEXT_HINT}`,
         inputSchema: {
           type: "object",
           properties: {
@@ -167,10 +177,15 @@ export class McpEntityWriteService {
     const invalid = this.unknownAttributes(entity, params.attributes);
     if (invalid) return invalid;
     try {
+      // A rich-text field is read as markdown (the tool layer renders the stored
+      // BlockNote document for the model), so the model writes markdown back.
+      // Storing it verbatim leaves a record the frontend cannot render, so it is
+      // converted to a BlockNote document here, after validation.
+      const attributes = await convertRichtextFields(this.blockNote, entity, params.attributes);
       const data: JsonApiDTOData = {
         id: randomUUID(),
         type: params.type,
-        attributes: params.attributes,
+        attributes,
         ...(params.relationships ? { relationships: params.relationships } : {}),
       };
       const result = await service.createFromDTO({ data });
@@ -202,7 +217,9 @@ export class McpEntityWriteService {
     try {
       const before = await service.findRecordById({ id: params.id });
       if (!before) return mcpFlatError("not_found", `No ${params.type} record with id ${params.id}.`);
-      const data: JsonApiDTOData = { id: params.id, type: params.type, attributes: params.attributes };
+      // Markdown in a rich-text field becomes a BlockNote document; see createEntity.
+      const attributes = await convertRichtextFields(this.blockNote, entity, params.attributes);
+      const data: JsonApiDTOData = { id: params.id, type: params.type, attributes };
       const result = await service.patchFromDTO({ data });
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     } catch (e) {
