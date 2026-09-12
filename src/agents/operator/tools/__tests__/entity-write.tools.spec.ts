@@ -917,7 +917,13 @@ describe("EntityWriteTools — richtext fields", () => {
   it("leaves a value that already is a stored BlockNote document untouched", async () => {
     const { tools, service } = buildRichtextTools();
     const document = JSON.stringify([
-      { id: "b1", type: "paragraph", props: {}, content: [{ type: "text", text: "Stored.", styles: {} }], children: [] },
+      {
+        id: "b1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text: "Stored.", styles: {} }],
+        children: [],
+      },
     ]);
     await tools.updateEntity({ type: "npcs", id: MARCUS, fields: { description: document } }, ctx as any, []);
 

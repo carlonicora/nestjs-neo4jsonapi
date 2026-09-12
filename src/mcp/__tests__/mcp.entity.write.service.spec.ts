@@ -283,7 +283,13 @@ describe("McpEntityWriteService — richtext attributes", () => {
 
   it("leaves an already-stored BlockNote document and an empty value untouched", async () => {
     const document = JSON.stringify([
-      { id: "b1", type: "paragraph", props: {}, content: [{ type: "text", text: "Stored.", styles: {} }], children: [] },
+      {
+        id: "b1",
+        type: "paragraph",
+        props: {},
+        content: [{ type: "text", text: "Stored.", styles: {} }],
+        children: [],
+      },
     ]);
     await svc.updateEntity({ type: "orders", id: "o1", attributes: { notes: document } }, ctx as any);
     expect(entityService.patchFromDTO.mock.calls[0][0].data.attributes.notes).toBe(document);
