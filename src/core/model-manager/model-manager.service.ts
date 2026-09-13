@@ -187,7 +187,7 @@ export class ModelManagerService implements OnApplicationBootstrap {
     const needsDownload = await this.needsDownload(filePath, config);
     if (needsDownload) {
       const downloadUrl = `${this.baseUrl}/${config.modelId}/resolve/main/${config.path}`;
-      await this.downloadFile(downloadUrl, filePath, config.name);
+      await this.downloadFile(downloadUrl, filePath, config.version, config.name);
     }
 
     // Verify hash
@@ -209,7 +209,13 @@ export class ModelManagerService implements OnApplicationBootstrap {
 
         if (needsAdditionalDownload) {
           const additionalUrl = `${this.baseUrl}/${config.modelId}/resolve/main/${additionalFile.path}`;
-          await this.downloadFile(additionalUrl, additionalFilePath, config.name, path.basename(additionalFile.path));
+          await this.downloadFile(
+            additionalUrl,
+            additionalFilePath,
+            config.version,
+            config.name,
+            path.basename(additionalFile.path),
+          );
         }
 
         // Verify hash for additional file
@@ -259,7 +265,7 @@ export class ModelManagerService implements OnApplicationBootstrap {
       const needsDownload = await this.needsDownload(componentPath, config, component);
 
       if (needsDownload) {
-        await this.downloadFile(componentUrl, componentPath, config.name, component.name);
+        await this.downloadFile(componentUrl, componentPath, config.version, config.name, component.name);
       }
 
       // Verify hash
@@ -315,7 +321,13 @@ export class ModelManagerService implements OnApplicationBootstrap {
     return true;
   }
 
-  private async downloadFile(url: string, filePath: string, modelName: string, componentName?: string): Promise<void> {
+  private async downloadFile(
+    url: string,
+    filePath: string,
+    version: string,
+    modelName: string,
+    componentName?: string,
+  ): Promise<void> {
     const label = componentName ? `${modelName}/${componentName}` : modelName;
     this.logger.log(`[${label}] Downloading from ${url}...`);
 
@@ -380,12 +392,15 @@ export class ModelManagerService implements OnApplicationBootstrap {
       const fileSizeMB = (downloadedBytes / 1024 / 1024).toFixed(1);
       this.logger.log(`[${label}] Downloaded ${fileSizeMB} MB in ${duration}s`);
 
-      // Save metadata
+      // Save metadata. The version MUST be the one from models.config.yaml:
+      // needsDownload() compares it against the config, so a hardcoded value
+      // would make every model whose config version moves off it re-download on
+      // every startup, for ever.
       const metadataPath = filePath + ".metadata";
       fs.writeFileSync(
         metadataPath,
         JSON.stringify({
-          version: "1.0.0",
+          version,
           downloadedAt: new Date().toISOString(),
         }),
       );
