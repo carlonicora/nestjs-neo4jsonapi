@@ -1,3 +1,9 @@
+## [4.3.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.1...v4.3.2) (2026-09-13)
+
+### 🐛 Bug Fixes
+
+* **model-manager:** persist the configured model version in download metadata ([f6553da](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f6553daef6d12395309aba2b74b8b6bfc26fbbee))
+
 ## [4.3.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.0...v4.3.1) (2026-09-12)
 
 ### 🐛 Bug Fixes
