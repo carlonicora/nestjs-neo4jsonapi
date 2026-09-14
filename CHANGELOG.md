@@ -1,3 +1,9 @@
+## [4.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.2...v4.4.0) (2026-09-14)
+
+### 🚀 Features
+
+* **core:** forward structured filters through findByRelated ([6df52fb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6df52fb3c5cd6e3888f266a6238aac9913418960))
+
 ## [4.3.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.1...v4.3.2) (2026-09-13)
 
 ### 🐛 Bug Fixes
