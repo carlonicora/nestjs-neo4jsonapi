@@ -528,6 +528,7 @@ export abstract class AbstractService<
     term?: string;
     fetchAll?: boolean;
     orderBy?: string;
+    filters?: FilterCriterion[];
   }): Promise<JsonApiDataInterface> {
     const paginator = new JsonApiPaginator(params.query);
 
@@ -537,6 +538,7 @@ export abstract class AbstractService<
       fetchAll: params.fetchAll,
       term: params.term,
       orderBy: params.orderBy,
+      filters: params.filters,
       cursor: paginator.generateCursor(),
     });
 

@@ -1,5 +1,6 @@
 import { FastifyReply } from "fastify";
 import { AbstractService } from "../../core/neo4j/abstracts/abstract.service";
+import { FilterCriterion } from "../../core/neo4j/types/filter.criterion";
 
 /**
  * Parameters for findByRelated queries
@@ -11,6 +12,7 @@ export interface RelatedQueryParams {
   search?: string;
   fetchAll?: boolean;
   orderBy?: string;
+  filters?: FilterCriterion[];
 }
 
 /**
@@ -59,6 +61,7 @@ export function createRelationshipHandlers<TService extends AbstractService<any,
         query: params.query,
         fetchAll: params.fetchAll,
         orderBy: params.orderBy,
+        filters: params.filters,
       });
       reply.send(response);
     },
