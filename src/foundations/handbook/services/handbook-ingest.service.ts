@@ -380,8 +380,8 @@ export class HandbookIngestService {
     const blocks = readme.split(/^##\s+/m).slice(1);
     for (const block of blocks) {
       const lines = block.split(/\r?\n/);
-      const key = lines[0].trim();
-      sections.set(key, { title: this.sectionTitle(key), summary: this.blurbOf(lines.slice(1)) });
+      const { key, title } = this.headingOf(lines[0]);
+      sections.set(key, { title, summary: this.blurbOf(lines.slice(1)) });
     }
 
     // `- [Title](path) — summary` across the whole file, section blocks included.
@@ -392,6 +392,34 @@ export class HandbookIngestService {
     }
 
     return { sections, summaries };
+  }
+
+  /**
+   * Splits a section heading into the key it names and the title to print.
+   *
+   * Two forms are accepted:
+   *
+   * - `## 03-backend` — the bare directory key. The title is derived from it,
+   *   which is all a tree with no authored section names can offer.
+   * - `## 03-backend — Backend` — the key, a dash, and an authored title. The
+   *   title is taken as written.
+   *
+   * The second form is the only place a section name can be written at all: a
+   * section is a DIRECTORY, and a directory has no front matter to carry a
+   * title. It is what lets a translated index name its sections in its own
+   * language, and what lets an English one write "AI" where derivation would
+   * sentence-case `06-ai` into "Ai".
+   *
+   * The separator must carry whitespace on both sides. Keys contain hyphens
+   * (`00-start-here`), so a bare `-` would split the key itself.
+   */
+  private headingOf(heading: string): { key: string; title: string } {
+    const trimmed = heading.trim();
+    const split = trimmed.match(/^(\S+)\s+[—–-]\s+(.+)$/);
+
+    if (!split) return { key: trimmed, title: this.sectionTitle(trimmed) };
+
+    return { key: split[1], title: split[2].trim() };
   }
 
   /**

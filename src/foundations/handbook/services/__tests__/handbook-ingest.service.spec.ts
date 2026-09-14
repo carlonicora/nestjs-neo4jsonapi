@@ -282,6 +282,40 @@ describe("parseIndex", () => {
     expect(result.summaries.get("03-backend/testing.md")).toBe("the spec layout and what is mocked.");
   });
 
+  it("takes an authored title from a heading that carries one", () => {
+    const titled = ["## 06-ai — AI", "", "The model layer.", ""].join("\n");
+
+    const result = (service as any).parseIndex(titled);
+
+    // Not "Ai": derivation sentence-cases the key, and an acronym survives only
+    // when the index says so.
+    expect(result.sections.get("06-ai")).toEqual({ title: "AI", summary: "The model layer." });
+  });
+
+  it("accepts a translated title under the same English key", () => {
+    const titled = ["## 09-workflow — Flusso di lavoro", "", "Come si lavora.", ""].join("\n");
+
+    const result = (service as any).parseIndex(titled);
+
+    expect(result.sections.get("09-workflow")).toEqual({
+      title: "Flusso di lavoro",
+      summary: "Come si lavora.",
+    });
+  });
+
+  it("does not split a key on its own hyphens", () => {
+    const result = (service as any).parseIndex(["## 00-start-here", "", "Orientation.", ""].join("\n"));
+
+    expect([...result.sections.keys()]).toEqual(["00-start-here"]);
+    expect(result.sections.get("00-start-here")?.title).toBe("Start here");
+  });
+
+  it("accepts a plain hyphen separator as well as an em dash", () => {
+    const result = (service as any).parseIndex(["## 05-domains - Domini", "", "I domini.", ""].join("\n"));
+
+    expect(result.sections.get("05-domains")?.title).toBe("Domini");
+  });
+
   it("joins a blurb the index wrapped across several lines", () => {
     const wrapped = [
       "## 00-start-here",
