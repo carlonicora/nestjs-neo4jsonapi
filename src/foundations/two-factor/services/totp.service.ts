@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import * as crypto from "crypto";
 import * as OTPAuth from "otpauth";
 import * as QRCode from "qrcode";
+import { baseConfig } from "../../../config/base.config";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { TotpAuthenticatorDescriptor } from "../entities/totp-authenticator";
 import { TotpSetupDescriptor } from "../entities/totp-setup";
@@ -32,7 +33,7 @@ export interface TotpAuthenticatorInfo {
 @Injectable()
 export class TotpService {
   private readonly logger: Logger = new Logger(TotpService.name);
-  private readonly issuer = "Only35";
+  private readonly issuer = baseConfig.twoFactor.totpIssuer;
   private readonly algorithm = "SHA1";
   private readonly digits = 6;
   private readonly period = 30; // seconds

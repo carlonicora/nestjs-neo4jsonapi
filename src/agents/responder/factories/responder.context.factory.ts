@@ -10,7 +10,8 @@ export class ResponderContextFactoryService {
   constructor(private readonly contextualiserContextFactoryService: ContextualiserContextFactoryService) {}
 
   create(params: {
-    companyId: string;
+    /** Absent for a company-less caller — see ResponderService.run. */
+    companyId: string | undefined;
     contentId?: string;
     contentType?: string;
     dataLimits: DataLimits;

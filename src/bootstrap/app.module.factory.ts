@@ -135,6 +135,8 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                   contentExtension: options.contentExtension,
                   referral: options.referral,
                   userActivity: options.userActivity,
+                  handbook: options.handbook,
+                  howTo: options.howTo,
                   exclude: options.foundations?.exclude ?? [],
                 }),
               ]),

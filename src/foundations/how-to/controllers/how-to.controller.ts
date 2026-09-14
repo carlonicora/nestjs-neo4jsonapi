@@ -49,6 +49,19 @@ export class HowToController {
     return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
   }
 
+  /**
+   * Re-queue every guide for chunking — without it a guide that was never
+   * chunked (or lost its chunks) has no route back into the index.
+   *
+   * Declared before the `:howToId` routes so "reindex" is never read as an id.
+   */
+  @Post(`${howToMeta.endpoint}/reindex`)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async reindex(@Res() reply: FastifyReply) {
+    await this.howToService.reindexAll();
+    reply.send();
+  }
+
   @Get(`${howToMeta.endpoint}/:howToId`)
   @Audit(howToMeta, "howToId")
   async findById(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
@@ -89,13 +102,6 @@ export class HowToController {
   @CacheInvalidate(howToMeta, "howToId")
   async delete(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
     return this.crud.delete(reply, howToId);
-  }
-
-  @Post(`${howToMeta.endpoint}/reindex`)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async reindex(@Res() reply: FastifyReply) {
-    await this.howToService.reindexAll();
-    reply.send();
   }
 
   @Post(`${howToMeta.endpoint}/:howToId/related/:relatedId`)

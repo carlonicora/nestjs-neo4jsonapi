@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { AiStatus } from "../../../common/enums/ai.status";
+import { dropEmptyChunkDocuments } from "../../../common/utils/chunk-content.util";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
 import { QueueId } from "../../../config/enums/queue.id";
@@ -46,6 +47,10 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
   /**
    * Queue a HowTo for AI processing.
    * Converts BlockNote JSON to Markdown, then delegates to _chunkAndQueue.
+   *
+   * A whitespace-only guide settles at `completed` without enqueueing anything,
+   * and any throw inside the pipeline settles at `failed` before rethrowing —
+   * see _chunkAndQueue.
    */
   async queueHowToForProcessing(params: { howToId: string; description: string }): Promise<void> {
     const markdown = this.blockNoteService.convertToMarkdown({ nodes: JSON.parse(params.description) });
@@ -61,36 +66,56 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
       aiStatus: AiStatus.InProgress,
     });
 
-    await this.chunkService.deleteChunks({
-      id: params.howToId,
-      nodeType: howToMeta.labelName,
-    });
-
-    const data = await this.chunkerService.generateContentStructureFromMarkdown({
-      content: params.markdown,
-    });
-
-    const chunks: Chunk[] = await this.chunkService.createChunks({
-      id: params.howToId,
-      nodeType: howToMeta.labelName,
-      data: data,
-    });
-
-    await this.updateAiStatus({
-      id: params.howToId,
-      aiStatus: AiStatus.InProgress,
-    });
-
-    const chunkJobName = this.jobNames.process?.chunk ?? "process_chunk";
-
-    for (const chunk of chunks) {
-      await this.chunkQueue.add(chunkJobName, {
-        companyId: this.clsService.get("companyId") || undefined,
-        userId: this.clsService.get("userId"),
-        chunkId: chunk.id,
-        contentId: params.howToId,
-        contentType: howToMeta.labelName,
+    try {
+      await this.chunkService.deleteChunks({
+        id: params.howToId,
+        nodeType: howToMeta.labelName,
       });
+
+      const data = dropEmptyChunkDocuments(
+        await this.chunkerService.generateContentStructureFromMarkdown({
+          content: params.markdown,
+        }),
+      );
+
+      // A how-to with an empty (or whitespace-only) body is legitimate, not
+      // a failure — see dropEmptyChunkDocuments's doc comment.
+      if (data.length === 0) {
+        await this.updateAiStatus({ id: params.howToId, aiStatus: AiStatus.Completed });
+        return;
+      }
+
+      const chunks: Chunk[] = await this.chunkService.createChunks({
+        id: params.howToId,
+        nodeType: howToMeta.labelName,
+        data: data,
+      });
+
+      await this.updateAiStatus({
+        id: params.howToId,
+        aiStatus: AiStatus.InProgress,
+      });
+
+      const chunkJobName = this.jobNames.process?.chunk ?? "process_chunk";
+
+      for (const chunk of chunks) {
+        await this.chunkQueue.add(chunkJobName, {
+          companyId: this.clsService.get("companyId") || undefined,
+          userId: this.clsService.get("userId"),
+          chunkId: chunk.id,
+          contentId: params.howToId,
+          contentType: howToMeta.labelName,
+        });
+      }
+    } catch (error) {
+      // `failed` is a settled state; `in_progress` is not. Without this a crash
+      // anywhere after the status flip above leaves the how-to `in_progress`
+      // forever. Settle, then rethrow unchanged.
+      await this.updateAiStatus({
+        id: params.howToId,
+        aiStatus: AiStatus.Failed,
+      });
+      throw error;
     }
   }
 

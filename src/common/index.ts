@@ -49,3 +49,8 @@ export * from "./tokens";
 
 // Constants
 export * from "./constants/system.roles";
+
+// Utils
+// Exported by file, like ./constants/system.roles above: src/common/utils has no
+// barrel of its own and settled.ts is deliberately relative-import only.
+export * from "./utils/chunk-content.util";

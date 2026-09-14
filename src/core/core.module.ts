@@ -7,6 +7,10 @@ import { EntityServiceRegistry } from "../common/registries/entity.service.regis
 import { AI_SOURCE_QUERY, AiSourceQueryProvider } from "../common/repositories/ai-source-query.provider";
 import { AgentScopeFilterService } from "../common/repositories/agent-scope.filter";
 import { DefaultAiSourceQueryProvider } from "../common/repositories/default.ai-source-query.provider";
+import {
+  HandbookAiSourceQueryProvider,
+  INNER_AI_SOURCE_QUERY,
+} from "../common/repositories/handbook.ai-source-query.provider";
 import { BaseConfigInterface, ConfigJwtInterface } from "../config/interfaces";
 
 // Import all core modules
@@ -165,7 +169,13 @@ export class CoreModule {
   static forRoot(options?: CoreModuleOptions): DynamicModule {
     const providers: Provider[] = [
       EntityServiceRegistry,
-      { provide: AI_SOURCE_QUERY, useClass: options?.aiSourceQuery ?? DefaultAiSourceQueryProvider },
+      // The app-configured (or default) provider, bound behind the handbook
+      // decorator rather than directly to AI_SOURCE_QUERY.
+      { provide: INNER_AI_SOURCE_QUERY, useClass: options?.aiSourceQuery ?? DefaultAiSourceQueryProvider },
+      // Handbook scoping wraps it: an app that overrides its source query cannot
+      // drop developer-documentation isolation with it. Every non-handbook turn
+      // delegates to INNER_AI_SOURCE_QUERY unchanged.
+      { provide: AI_SOURCE_QUERY, useClass: HandbookAiSourceQueryProvider },
       // Applied on TOP of whatever AI_SOURCE_QUERY returns, so an app that
       // overrides its source query cannot drop scope enforcement with it.
       AgentScopeFilterService,

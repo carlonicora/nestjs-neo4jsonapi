@@ -243,4 +243,34 @@ describe("AssistantService — seed contexts", () => {
 
     expect(provider.provide).not.toHaveBeenCalled();
   });
+
+  it("does not call providers on handbook-mode turns", async () => {
+    const provider = { provide: vi.fn(async () => seed) };
+    const { service } = buildSut([provider]);
+    vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+    await service.createWithFirstMessage({
+      companyId: "c",
+      userId: "u",
+      firstMessage: "come funziona il modulo chunk?",
+      handbookMode: true,
+    });
+
+    expect(provider.provide).not.toHaveBeenCalled();
+  });
+
+  it("does not call providers when the turn is limited to one handbook page", async () => {
+    const provider = { provide: vi.fn(async () => seed) };
+    const { service } = buildSut([provider]);
+    vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+    await service.createWithFirstMessage({
+      companyId: "c",
+      userId: "u",
+      firstMessage: "come funziona il modulo chunk?",
+      limitToHandbookPageId: "page-1",
+    });
+
+    expect(provider.provide).not.toHaveBeenCalled();
+  });
 });

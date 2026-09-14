@@ -71,6 +71,14 @@ export class AssistantPostAttributesDto {
   @IsOptional()
   @IsString()
   limitToHowToId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  handbookMode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  limitToHandbookPageId?: string;
 }
 
 export class AssistantPostDataDto {

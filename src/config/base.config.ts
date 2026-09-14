@@ -510,6 +510,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     },
     twoFactor: {
       totpEncryptionKey: process.env.TOTP_ENCRYPTION_KEY || "",
+      totpIssuer: process.env.TOTP_ISSUER || process.env.WEBAUTHN_RP_NAME || "Application",
       webauthnRpId: process.env.WEBAUTHN_RP_ID || "localhost",
       webauthnRpName: process.env.WEBAUTHN_RP_NAME || "Application",
       webauthnOrigin: process.env.WEBAUTHN_ORIGIN

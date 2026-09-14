@@ -117,6 +117,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     title?: string;
     howToMode?: boolean;
     limitToHowToId?: string;
+    handbookMode?: boolean;
+    limitToHandbookPageId?: string;
     boundContent?: { type: string; id: string };
   }): Promise<{
     assistant: Assistant;
@@ -184,6 +186,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentScope: this.toContentScope(params.boundContent),
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      handbookMode: params.handbookMode,
+      limitToHandbookPageId: params.limitToHandbookPageId,
     });
 
     // 4. Create the assistant message at position 1 with denormalised references JSON.
@@ -240,6 +244,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     newMessage: string;
     howToMode?: boolean;
     limitToHowToId?: string;
+    handbookMode?: boolean;
+    limitToHandbookPageId?: string;
   }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
@@ -300,6 +306,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentScope,
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      handbookMode: params.handbookMode,
+      limitToHandbookPageId: params.limitToHandbookPageId,
     });
 
     const assistantMessageId = turn.id;
@@ -799,7 +807,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
 
   /**
    * Collects seed-context blocks from the app-registered providers for one
-   * turn. Help-mode turns are never seeded. A provider returning null
+   * turn. Documentation turns — help mode and handbook mode alike — are never
+   * seeded: a seed provider supplies the app's own domain context (the open
+   * proceeding, the selected client), which is exactly the material a question
+   * about the documentation is not asking about. A provider returning null
    * contributes nothing; a provider that throws is logged and skipped — the
    * turn must run (unseeded) no matter what a provider does.
    */
@@ -809,9 +820,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     question: string;
     howToMode?: boolean;
     limitToHowToId?: string;
+    handbookMode?: boolean;
+    limitToHandbookPageId?: string;
   }): Promise<AssistantSeedContext[]> {
     if (!this.seedContextProviders?.length) return [];
     if (params.howToMode || params.limitToHowToId) return [];
+    if (params.handbookMode || params.limitToHandbookPageId) return [];
     const collected: AssistantSeedContext[] = [];
     for (const provider of this.seedContextProviders) {
       try {
@@ -1156,6 +1170,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     contentScope: { contentId?: string; contentType?: string };
     howToMode?: boolean;
     limitToHowToId?: string;
+    handbookMode?: boolean;
+    limitToHandbookPageId?: string;
   }): Promise<AgentTurnResult> {
     // Anchor every LLMService.call() in this turn to the same assistant/turn
     // pair so the dumper can group dumps under
@@ -1187,6 +1203,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       question: params.newUserMessage.content,
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      handbookMode: params.handbookMode,
+      limitToHandbookPageId: params.limitToHandbookPageId,
     });
 
     const response = await this.responder.run({
@@ -1202,6 +1220,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       dataLimits: {
         howToMode: params.howToMode,
         limitToHowToId: params.limitToHowToId,
+        handbookMode: params.handbookMode,
+        limitToHandbookPageId: params.limitToHandbookPageId,
       },
       messages,
       question: params.newUserMessage.content,

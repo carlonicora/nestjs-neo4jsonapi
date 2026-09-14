@@ -5,6 +5,8 @@ import { SecurityService } from "../core/security/services/security.service";
 import { ContentExtensionConfig } from "../foundations/content/interfaces/content.extension.interface";
 import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
+import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
+import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
 
 /**
@@ -96,6 +98,41 @@ export interface BootstrapOptions {
    * ```
    */
   userActivity?: UserActivityModuleConfig;
+
+  /**
+   * Configuration for the handbook documentation RAG foundation.
+   * Forwarded to `FoundationsModule.forRoot({ handbook })`, exactly like
+   * `contentExtension` / `referral` / `userActivity` above — without this seam
+   * a consuming app has no way to tell `HandbookModule` where its docs live,
+   * and the foundation stays inert on the empty default path.
+   *
+   * @example
+   * ```typescript
+   * handbook: { path: "docs/handbook", exclude: ["it/**"] }
+   * ```
+   */
+  handbook?: HandbookModuleConfig;
+
+  /**
+   * Configuration for the how-to feature module.
+   * Forwarded to `FoundationsModule.forRoot({ howTo })`, exactly like
+   * `contentExtension` / `referral` / `userActivity` / `handbook` above —
+   * without this seam a consuming app has no way to switch on
+   * `HowToPublicController`, and the three unauthenticated `public/howtos/*`
+   * routes stay off for everyone.
+   *
+   * Omitted is fail-closed: the how-to foundation mounts its authenticated
+   * controller only. Set `publicRoutes` deliberately, and only where serving a
+   * public knowledge base is intended — the read filter is
+   * `draft IS NULL OR draft = false`, so a guide with no `draft` property is
+   * served.
+   *
+   * @example
+   * ```typescript
+   * howTo: { publicRoutes: true }
+   * ```
+   */
+  howTo?: HowToModuleConfig;
 
   /**
    * OpenAPI documentation configuration.

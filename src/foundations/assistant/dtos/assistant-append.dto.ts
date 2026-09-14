@@ -20,6 +20,14 @@ export class AssistantAppendAttributesDto {
   @IsOptional()
   @IsString()
   limitToHowToId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  handbookMode?: boolean;
+
+  @IsOptional()
+  @IsString()
+  limitToHandbookPageId?: string;
 }
 
 export class AssistantAppendDataDto {

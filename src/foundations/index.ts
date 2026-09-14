@@ -22,6 +22,7 @@ export * from "./discord";
 export * from "./discord-user";
 export * from "./feature";
 export * from "./google-user";
+export * from "./handbook";
 export * from "./how-to";
 export * from "./keyconcept";
 export * from "./membership";

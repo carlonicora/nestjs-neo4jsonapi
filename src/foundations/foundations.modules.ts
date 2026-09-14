@@ -13,7 +13,10 @@ import { ReferralModule } from "./referral/referral.module";
 import { ReferralModuleConfig } from "./referral/interfaces/referral.config.interface";
 import { DiscordUserModule } from "./discord-user/discord-user.module";
 import { FeatureModule } from "./feature/feature.module";
+import { HandbookModule } from "./handbook/handbook.module";
+import { HandbookModuleConfig } from "./handbook/interfaces/handbook.config.interface";
 import { HowToModule } from "./how-to/how-to.module";
+import { HowToModuleConfig } from "./how-to/interfaces/how-to.config.interface";
 import { KeyConceptModule } from "./keyconcept/keyconcept.module";
 import { MembershipModule } from "./membership/membership.module";
 import { ModuleModule } from "./module/module.module";
@@ -50,6 +53,10 @@ export interface FoundationsModuleConfig {
   referral?: ReferralModuleConfig;
   /** Optional configuration for the user-activity feature module */
   userActivity?: UserActivityModuleConfig;
+  /** Optional configuration for the handbook documentation RAG */
+  handbook?: HandbookModuleConfig;
+  /** Optional configuration for the how-to feature module (opt-in public routes) */
+  howTo?: HowToModuleConfig;
   /**
    * Foundation module classes to exclude from registration.
    * Default [] keeps all modules registered (neural-erp behavior unchanged).
@@ -62,7 +69,13 @@ export interface FoundationsModuleConfig {
 
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
- * UserActivityModule, ReferralModule) are assembled inside forRoot().
+ * UserActivityModule, ReferralModule, HandbookModule, HowToModule) are
+ * assembled inside forRoot().
+ *
+ * HowToModule is dynamic solely so an app can reach
+ * `forRoot({ publicRoutes: true })` through `config.howTo`: with no `howTo`
+ * config it registers the authenticated controller alone, exactly as it did
+ * when it was listed here.
  * Queue registration is handled centrally by QueueModule (via baseConfig.chunkQueues).
  */
 const STATIC_FOUNDATION_MODULES = [
@@ -76,7 +89,6 @@ const STATIC_FOUNDATION_MODULES = [
   CompanyModule,
   DiscordUserModule,
   FeatureModule,
-  HowToModule,
   KeyConceptModule,
   MembershipModule,
   ModuleModule,
@@ -156,6 +168,8 @@ export class FoundationsModule {
       { classRef: ContentModule, factory: () => ContentModule.forRoot(config?.contentExtension) },
       { classRef: UserActivityModule, factory: () => UserActivityModule.forRoot(config?.userActivity) },
       { classRef: ReferralModule, factory: () => ReferralModule.forRoot(config?.referral) },
+      { classRef: HandbookModule, factory: () => HandbookModule.forRoot(config?.handbook) },
+      { classRef: HowToModule, factory: () => HowToModule.forRoot(config?.howTo) },
     ].filter((entry) => !excluded.has(entry.classRef));
 
     return {

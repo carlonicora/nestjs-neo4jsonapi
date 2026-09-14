@@ -35,6 +35,20 @@ export const resolveAllowedBranches = (config?: BranchToggles, perCall?: BranchT
   drift: (config?.drift ?? true) && (perCall?.drift ?? true),
 });
 
+/**
+ * Documentation retrieval — how-to help and handbook — skips the planner and
+ * runs the contextualiser alone. A documentation corpus is small and flat:
+ * there is no case graph to walk and no drift to detect.
+ */
+export function usesDocumentationBranch(dataLimits: DataLimits): boolean {
+  return (
+    !!dataLimits.howToMode ||
+    !!dataLimits.limitToHowToId ||
+    !!dataLimits.handbookMode ||
+    !!dataLimits.limitToHandbookPageId
+  );
+}
+
 @Injectable()
 export class ResponderService {
   private readonly logger = new Logger(ResponderService.name);
@@ -50,7 +64,16 @@ export class ResponderService {
   ) {}
 
   async run(params: {
-    companyId: string;
+    /**
+     * The tenant the turn is billed and scoped to — ABSENT for a company-less
+     * caller. A platform administrator has no Company, and the handbook chat
+     * exists for exactly that user: the type says so rather than letting every
+     * such call site cast a lie. Token accounting already tolerates it
+     * (TokenUsageRepository makes the company edge conditional), and the
+     * branches that genuinely need a tenant (graph, drift) are the branches a
+     * documentation turn never runs.
+     */
+    companyId: string | undefined;
     userId: string;
     userModuleIds: string[];
     contentId?: string;
@@ -95,7 +118,7 @@ export class ResponderService {
     initialState.question = lastUserMessage;
     initialState.seedContexts = params.seedContexts;
 
-    const useHowToBranch = !!params.dataLimits.howToMode || !!params.dataLimits.limitToHowToId;
+    const useHowToBranch = usesDocumentationBranch(params.dataLimits);
 
     // Help-mode skips the planner node, so state.branchPlan stays undefined.
     // The answer node reads branchPlan to decide which sections to include —
@@ -107,7 +130,7 @@ export class ResponderService {
         runGraph: false,
         runContextualiser: true,
         runDrift: false,
-        reasoning: "help-mode: contextualiser-only retrieval over HowTo chunks",
+        reasoning: "documentation-mode: contextualiser-only retrieval",
       };
     }
 

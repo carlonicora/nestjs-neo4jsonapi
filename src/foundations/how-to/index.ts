@@ -1,4 +1,5 @@
 export * from "./how-to.module";
+export * from "./interfaces/how-to.config.interface";
 export * from "./entities/how-to";
 export * from "./entities/how-to.meta";
 export * from "./dtos/how-to.dto";

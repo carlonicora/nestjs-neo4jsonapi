@@ -269,7 +269,15 @@ export abstract class AbstractService<
     const userId = this.clsService.get("userId");
     const companyId = this.clsService.get("companyId");
 
-    if (!userId || (companyId ?? "") !== entity.company?.id) {
+    // The company-ownership comparison only makes sense for company-scoped entities.
+    // A descriptor with `isCompanyScoped: false` never hydrates `entity.company` —
+    // AbstractRepository only MATCHes the BELONGS_TO edge when `isCompanyScoped` is
+    // true — so `(companyId ?? "") !== undefined` would be true for every such entity
+    // and reject EVERY delete. Skip the comparison there; authentication is still
+    // required in both branches.
+    const ownsEntity = this.descriptor.isCompanyScoped ? (companyId ?? "") === entity.company?.id : true;
+
+    if (!userId || !ownsEntity) {
       throw new ForbiddenException();
     }
 

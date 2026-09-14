@@ -6,6 +6,13 @@ import { HowToService } from "../services/how-to.service";
 /**
  * Unauthenticated read surface for PUBLISHED help articles (draft = false).
  * Auth in this package is per-controller; omitting JwtAuthGuard makes these routes public.
+ *
+ * OPT-IN ONLY: this controller is registered exclusively by
+ * `HowToModule.forRoot({ publicRoutes: true })`. Importing `HowToModule`
+ * statically — or calling `forRoot()` with no arguments — mounts the
+ * authenticated `HowToController` alone, so no consumer publishes its guides by
+ * accident. The read filter is `draft IS NULL OR draft = false`, which means a
+ * guide created without a `draft` property is served here.
  */
 @Controller()
 export class HowToPublicController {

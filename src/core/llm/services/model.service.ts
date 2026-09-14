@@ -1126,6 +1126,30 @@ export class ModelService implements OnModuleInit {
   }
 
   /**
+   * Whether this installation can actually run the chunking pipeline.
+   *
+   * Resolution goes through `pickCandidate`, the path the runtime itself uses,
+   * so an installation whose AI lives in DB-backed AiConnection rows is judged
+   * on what it will really use rather than on what `.env` happens to hold.
+   *
+   * An apiKey is deliberately NOT required: a local or gateway provider
+   * legitimately has none, and demanding one would refuse installations that
+   * work. Under MOCK_AI only the embedder width matters — the mock embedder
+   * returns zero vectors of that size and calls no provider.
+   */
+  isAiConfigured(): boolean {
+    const embedder = this.pickCandidate("embedder");
+    const dimensions = embedder.dimensions ?? this.aiConfig?.embedder?.dimensions ?? 0;
+
+    if (this.aiConfig?.mock) return dimensions > 0;
+
+    if (!embedder.provider || !embedder.model || dimensions <= 0) return false;
+
+    const chat = this.pickCandidate("ai");
+    return !!chat.provider && !!chat.model;
+  }
+
+  /**
    * Builds an OpenAI / Azure OpenAI SDK client for audio transcription. This is
    * the SDK-based path (`audio.transcriptions.create`), distinct from
    * AudioLLMService (chat-LLM / OpenAI-style /audio/transcriptions HTTP). Driven

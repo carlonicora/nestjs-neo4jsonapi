@@ -173,7 +173,7 @@ describe("TotpService", () => {
       // Generate a real TOTP code for testing
       const secret = new OTPAuth.Secret({ size: 20 });
       const totp = new OTPAuth.TOTP({
-        issuer: "Only35",
+        issuer: "Test Issuer",
         algorithm: "SHA1",
         digits: 6,
         period: 30,
@@ -235,7 +235,7 @@ describe("TotpService", () => {
       const correctSecret = new OTPAuth.Secret({ size: 20 });
       const wrongSecret = new OTPAuth.Secret({ size: 20 }); // Generate another valid base32 secret
       const totp = new OTPAuth.TOTP({
-        issuer: "Only35",
+        issuer: "Test Issuer",
         algorithm: "SHA1",
         digits: 6,
         period: 30,
@@ -289,7 +289,7 @@ describe("TotpService", () => {
     it("should verify and mark authenticator as verified", async () => {
       const secret = new OTPAuth.Secret({ size: 20 });
       const totp = new OTPAuth.TOTP({
-        issuer: "Only35",
+        issuer: "Test Issuer",
         algorithm: "SHA1",
         digits: 6,
         period: 30,

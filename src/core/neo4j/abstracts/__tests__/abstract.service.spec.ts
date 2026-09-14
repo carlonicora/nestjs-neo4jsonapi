@@ -240,3 +240,149 @@ describe("AbstractService - Audit Integration", () => {
     });
   });
 });
+
+// delete() gates on CLS auth + company ownership. For a descriptor with
+// `isCompanyScoped: false` the repository never hydrates `entity.company`, so the
+// ownership comparison must be skipped — otherwise every delete throws Forbidden.
+describe("AbstractService - delete company-scope gate", () => {
+  const TEST_IDS = {
+    userId: "user-123",
+    companyId: "company-456",
+    entityId: "entity-789",
+  };
+
+  const genericDescriptor = {
+    fieldNames: ["name", "status"],
+    fieldDefaults: {},
+    relationships: {},
+    fields: {},
+    computed: {},
+    virtualFields: {},
+    isCompanyScoped: false,
+    model: { type: "tests", endpoint: "tests", nodeName: "test", labelName: "Test" },
+  } as unknown as EntityDescriptor<TestEntity, Record<string, RelationshipDef>>;
+
+  class GenericService extends AbstractService<TestEntity> {
+    protected readonly descriptor = genericDescriptor;
+  }
+
+  let repository: any;
+  let jsonApiService: any;
+
+  const makeCls = (values: Record<string, string | undefined>) =>
+    ({ get: vi.fn((key: string) => values[key]) }) as unknown as ClsService;
+
+  beforeEach(() => {
+    repository = {
+      create: vi.fn(),
+      put: vi.fn(),
+      patch: vi.fn(),
+      delete: vi.fn().mockResolvedValue(undefined),
+      findById: vi.fn(),
+      find: vi.fn(),
+    };
+    jsonApiService = {
+      buildSingle: vi.fn().mockReturnValue({ data: {} }),
+      buildList: vi.fn(),
+    };
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("company-scoped descriptor", () => {
+    it("deletes when the CLS companyId matches the entity's company", async () => {
+      repository.findById.mockResolvedValue({
+        id: TEST_IDS.entityId,
+        company: { id: TEST_IDS.companyId },
+      });
+      const service = new TestService(
+        jsonApiService,
+        repository,
+        makeCls({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
+        testModel,
+      );
+
+      await expect(service.delete({ id: TEST_IDS.entityId })).resolves.toBeUndefined();
+      expect(repository.delete).toHaveBeenCalledWith({ id: TEST_IDS.entityId });
+    });
+
+    it("throws ForbiddenException when the CLS companyId does not match", async () => {
+      repository.findById.mockResolvedValue({
+        id: TEST_IDS.entityId,
+        company: { id: "other-company" },
+      });
+      const service = new TestService(
+        jsonApiService,
+        repository,
+        makeCls({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
+        testModel,
+      );
+
+      await expect(service.delete({ id: TEST_IDS.entityId })).rejects.toThrow(ForbiddenException);
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+
+    it("throws ForbiddenException when there is no authenticated userId", async () => {
+      repository.findById.mockResolvedValue({
+        id: TEST_IDS.entityId,
+        company: { id: TEST_IDS.companyId },
+      });
+      const service = new TestService(
+        jsonApiService,
+        repository,
+        makeCls({ userId: undefined, companyId: TEST_IDS.companyId }),
+        testModel,
+      );
+
+      await expect(service.delete({ id: TEST_IDS.entityId })).rejects.toThrow(ForbiddenException);
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("non-company-scoped descriptor", () => {
+    it("deletes with an authenticated userId even though entity.company is undefined", async () => {
+      repository.findById.mockResolvedValue({ id: TEST_IDS.entityId });
+      const service = new GenericService(
+        jsonApiService,
+        repository,
+        makeCls({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }),
+        testModel,
+      );
+
+      await expect(service.delete({ id: TEST_IDS.entityId })).resolves.toBeUndefined();
+      expect(repository.delete).toHaveBeenCalledWith({ id: TEST_IDS.entityId });
+    });
+
+    it("deletes regardless of the CLS companyId value", async () => {
+      repository.findById.mockResolvedValue({ id: TEST_IDS.entityId });
+
+      for (const companyId of [undefined, "", "any-other-company"]) {
+        repository.delete.mockClear();
+        const service = new GenericService(
+          jsonApiService,
+          repository,
+          makeCls({ userId: TEST_IDS.userId, companyId }),
+          testModel,
+        );
+
+        await expect(service.delete({ id: TEST_IDS.entityId })).resolves.toBeUndefined();
+        expect(repository.delete).toHaveBeenCalledWith({ id: TEST_IDS.entityId });
+      }
+    });
+
+    it("still throws ForbiddenException when there is no authenticated userId", async () => {
+      repository.findById.mockResolvedValue({ id: TEST_IDS.entityId });
+      const service = new GenericService(
+        jsonApiService,
+        repository,
+        makeCls({ userId: undefined, companyId: TEST_IDS.companyId }),
+        testModel,
+      );
+
+      await expect(service.delete({ id: TEST_IDS.entityId })).rejects.toThrow(ForbiddenException);
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+  });
+});

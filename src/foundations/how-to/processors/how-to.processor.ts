@@ -7,6 +7,7 @@ import { QueueId } from "../../../config/enums/queue.id";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
+import { ChunkService } from "../../chunk/services/chunk.service";
 import { howToMeta } from "../entities/how-to.meta";
 import { HowToService } from "../services/how-to.service";
 
@@ -19,6 +20,7 @@ export class HowToProcessor extends WorkerHost {
     private readonly howToService: HowToService,
     private readonly chunkRepository: ChunkRepository,
     private readonly cls: ClsService,
+    private readonly chunkService: ChunkService,
     configService: ConfigService<BaseConfigInterface>,
   ) {
     super();
@@ -75,6 +77,11 @@ export class HowToProcessor extends WorkerHost {
       await this.howToService.updateAiStatus({
         id: params.howToId,
         aiStatus: AiStatus.InProgress,
+      });
+
+      await this.chunkService.propagateAndEmbedDates({
+        id: params.howToId,
+        nodeType: howToMeta.labelName,
       });
 
       await this.howToService.updateAiStatus({

@@ -112,7 +112,7 @@ export class AssistantController {
     if (this.creditValidator && req.user?.companyId)
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
-    const { content, title, howToMode, limitToHowToId } = body.data.attributes;
+    const { content, title, howToMode, limitToHowToId, handbookMode, limitToHandbookPageId } = body.data.attributes;
     const boundContent = resolveBoundContent(body.data.relationships?.content?.data);
     this.logger.log(
       `create: userId=${req.user.userId} companyId=${req.user.companyId} firstMessageLen=${content.length}` +
@@ -125,6 +125,8 @@ export class AssistantController {
       title,
       howToMode,
       limitToHowToId,
+      handbookMode,
+      limitToHandbookPageId,
       boundContent,
     });
     const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
@@ -169,7 +171,7 @@ export class AssistantController {
     if (this.creditValidator && req.user?.companyId)
       await this.creditValidator.validateCredits({ companyId: req.user.companyId });
 
-    const { content, howToMode, limitToHowToId } = body.data.attributes;
+    const { content, howToMode, limitToHowToId, handbookMode, limitToHandbookPageId } = body.data.attributes;
     this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);
     const { userMessage, assistantMessage, toolCalls } = await this.assistants.appendMessage({
       assistantId,
@@ -178,6 +180,8 @@ export class AssistantController {
       newMessage: content,
       howToMode,
       limitToHowToId,
+      handbookMode,
+      limitToHandbookPageId,
     });
 
     const document = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
