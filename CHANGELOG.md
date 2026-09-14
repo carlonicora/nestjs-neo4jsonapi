@@ -1,3 +1,9 @@
+## [4.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.4.0...v4.5.0) (2026-09-14)
+
+### 🚀 Features
+
+* **handbook:** handbook foundation with RAG-backed ask, plus how-to reindexing ([bac8ac4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/bac8ac423152b82ae9e5e973ed41d0b5ae004c41))
+
 ## [4.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.3.2...v4.4.0) (2026-09-14)
 
 ### 🚀 Features
