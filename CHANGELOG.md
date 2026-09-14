@@ -1,3 +1,9 @@
+## [4.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.5.0...v4.6.0) (2026-09-14)
+
+### 🚀 Features
+
+* **handbook:** let an index name its own sections ([f3fa7f8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f3fa7f845577bcc96bf686e70e2af3f13887e379))
+
 ## [4.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.4.0...v4.5.0) (2026-09-14)
 
 ### 🚀 Features
