@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   Res,
   UseGuards,
 } from "@nestjs/common";
@@ -19,6 +20,7 @@ import { ValidateId } from "../../../common/decorators/validate-id.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { createRelationshipHandlers } from "../../../common/handlers/relationship.handlers";
+import type { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { HowToPostDTO } from "../dtos/how-to.post.dto";
@@ -64,7 +66,7 @@ export class HowToController {
 
   @Get(`${howToMeta.endpoint}/:howToId`)
   @Audit(howToMeta, "howToId")
-  async findById(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
+  async findById(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Param("howToId") howToId: string) {
     return this.crud.findById(reply, howToId);
   }
 
@@ -85,7 +87,7 @@ export class HowToController {
   @Put(`${howToMeta.endpoint}/:howToId`)
   @ValidateId("howToId")
   @CacheInvalidate(howToMeta, "howToId")
-  async update(@Res() reply: FastifyReply, @Body() body: HowToPutDTO) {
+  async update(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Body() body: HowToPutDTO) {
     const response = await this.crud.update(reply, body);
 
     // Re-queue for AI processing after update
@@ -100,13 +102,14 @@ export class HowToController {
   @Delete(`${howToMeta.endpoint}/:howToId`)
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(howToMeta, "howToId")
-  async delete(@Res() reply: FastifyReply, @Param("howToId") howToId: string) {
+  async delete(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Param("howToId") howToId: string) {
     return this.crud.delete(reply, howToId);
   }
 
   @Post(`${howToMeta.endpoint}/:howToId/related/:relatedId`)
   @CacheInvalidate(howToMeta, "howToId")
   async addRelated(
+    @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("howToId") howToId: string,
     @Param("relatedId") relatedId: string,
@@ -119,6 +122,7 @@ export class HowToController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(howToMeta, "howToId")
   async removeRelated(
+    @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("howToId") howToId: string,
     @Param("relatedId") relatedId: string,
