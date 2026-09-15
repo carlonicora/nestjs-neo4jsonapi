@@ -1,3 +1,9 @@
+## [4.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.6.0...v4.7.0) (2026-09-15)
+
+### 🚀 Features
+
+* **how-to:** convert guide markdown fully and pass the request to decorated handlers ([a0d7e3d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a0d7e3d03c7c0bc3de23c081d659f4ad9d2a424f))
+
 ## [4.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.5.0...v4.6.0) (2026-09-14)
 
 ### 🚀 Features
