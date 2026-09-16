@@ -1,3 +1,9 @@
+## [4.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.7.0...v4.8.0) (2026-09-16)
+
+### 🚀 Features
+
+* **blocknote:** add isDocumentEmpty and emptyRichTextToNull helpers ([263b5a8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/263b5a82de42f3589b54a9bb670629a041a36a9b))
+
 ## [4.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.6.0...v4.7.0) (2026-09-15)
 
 ### 🚀 Features
