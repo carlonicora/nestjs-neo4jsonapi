@@ -1,3 +1,9 @@
+## [4.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.8.0...v4.9.0) (2026-09-17)
+
+### 🚀 Features
+
+* add audio diarization service and tests ([095b423](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/095b4235354f44e97c9c94d75d8381bec079a1a4))
+
 ## [4.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.7.0...v4.8.0) (2026-09-16)
 
 ### 🚀 Features
