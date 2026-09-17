@@ -59,7 +59,28 @@ export class BlockNoteService {
             children: [],
           });
           break;
-        case "paragraph":
+        case "paragraph": {
+          // A paragraph whose only inline token is an image becomes an image
+          // block: BlockNote has no inline image, and guides put every
+          // screenshot on its own line.
+          const only = token.tokens?.length === 1 ? token.tokens[0] : undefined;
+          if (only && only.type === "image") {
+            nodes.push({
+              id: randomUUID(),
+              type: "image",
+              props: {
+                backgroundColor: "default",
+                textAlignment: "left",
+                name: "",
+                url: String(only.href ?? ""),
+                caption: String(only.text ?? ""),
+                showPreview: true,
+                previewWidth: 1024,
+              },
+              children: [],
+            });
+            break;
+          }
           nodes.push({
             id: randomUUID(),
             type: "paragraph",
@@ -68,31 +89,50 @@ export class BlockNoteService {
             children: [],
           });
           break;
-        case "list":
-          for (const item of token.items) {
+        }
+        case "list": {
+          // An image between two steps splits one markdown list in two; the
+          // second list keeps its number (marked reports it as `start`), so the
+          // first item carries it or BlockNote would restart the count at 1.
+          const start = token.ordered && typeof token.start === "number" && token.start > 1 ? token.start : undefined;
+          for (const [index, item] of (token.items as any[]).entries()) {
+            const nested = (item.tokens ?? []).filter((t: any) => t.type === "list");
+            const inline = (item.tokens ?? []).filter((t: any) => t.type !== "list");
+            const content = this.inlineTokensToContent(
+              inline.flatMap((t: any) => (t.type === "text" && t.tokens ? t.tokens : [t])),
+            );
+            const children = nested.flatMap((t: any) => this.tokensToNodes([t]));
+            const base = { textColor: "default", backgroundColor: "default", textAlignment: "left" };
             if (item.task) {
               nodes.push({
                 id: randomUUID(),
                 type: "checkListItem",
-                props: {
-                  textColor: "default",
-                  backgroundColor: "default",
-                  textAlignment: "left",
-                  checked: item.checked || false,
-                },
-                content: this.inlineTokensToContent(item.tokens),
-                children: [],
+                props: { ...base, checked: item.checked || false },
+                content,
+                children,
               });
+            } else if (token.ordered) {
+              const props = index === 0 && start !== undefined ? { ...base, start } : base;
+              nodes.push({ id: randomUUID(), type: "numberedListItem", props, content, children });
             } else {
-              nodes.push({
-                id: randomUUID(),
-                type: "bulletListItem",
-                props: { textColor: "default", backgroundColor: "default", textAlignment: "left" },
-                content: this.inlineTokensToContent(item.tokens),
-                children: [],
-              });
+              nodes.push({ id: randomUUID(), type: "bulletListItem", props: base, content, children });
             }
           }
+          break;
+        }
+        case "blockquote":
+          nodes.push({
+            id: randomUUID(),
+            type: "quote",
+            props: { textColor: "default", backgroundColor: "default" },
+            content: this.inlineTokensToContent(
+              (token.tokens ?? []).flatMap((t: any) => (t.type === "paragraph" ? t.tokens : [t])),
+            ),
+            children: [],
+          });
+          break;
+        case "table":
+          // Tables are not supported by this converter; guides do not use them.
           break;
         case "code":
           nodes.push({
@@ -210,11 +250,11 @@ export class BlockNoteService {
               props: { id, entityType, alias: aliasText },
             });
           } else {
-            if (token.tokens && token.tokens.length > 0) {
-              content.push(...this.inlineTokensToContent(token.tokens));
-            } else {
-              content.push({ type: "text", text: token.text || "", styles: {} });
-            }
+            const inner =
+              token.tokens && token.tokens.length > 0
+                ? this.inlineTokensToContent(token.tokens).filter((c: any) => c.type === "text")
+                : [{ type: "text", text: token.text || "", styles: {} }];
+            content.push({ type: "link", href, content: inner });
           }
           break;
         }
@@ -244,6 +284,10 @@ export class BlockNoteService {
         return this.processCheckListItem(node, indentLevel, preserveMentions);
       case "codeBlock":
         return this.processCodeBlock(node, preserveMentions);
+      case "image":
+        return `![${node.props?.caption ?? ""}](${node.props?.url ?? ""})\n\n`;
+      case "quote":
+        return `> ${this.processContent(node.content, preserveMentions)}\n\n`;
       default:
         return "";
     }
@@ -278,7 +322,9 @@ export class BlockNoteService {
   protected processNumberedListItem(node: any, indentLevel: number, preserveMentions = false): string {
     const indent = "  ".repeat(indentLevel);
     const content = this.processContent(node.content, preserveMentions);
-    let markdown = `${indent}1. ${content}\n`;
+    // Markdown numbers a list from its first item, so only a resumed list
+    // (BlockNote `start`) needs a number other than 1 here.
+    let markdown = `${indent}${node.props?.start ?? 1}. ${content}\n`;
 
     if (node.children && node.children.length > 0) {
       node.children.forEach((child: any) => {
@@ -325,6 +371,8 @@ export class BlockNoteService {
           return this.processRelationship(contentNode);
         } else if (contentNode.type === "mention") {
           return this.processMention(contentNode, preserveMentions);
+        } else if (contentNode.type === "link") {
+          return "[" + this.processContent(contentNode.content, preserveMentions) + "](" + contentNode.href + ")";
         }
         return "";
       })
@@ -415,6 +463,10 @@ export class BlockNoteService {
         return this.processCheckListItemAsPlainText(node, indentLevel);
       case "codeBlock":
         return this.processCodeBlockAsPlainText(node);
+      case "quote":
+        return `${this.processContentAsPlainText(node.content)}\n\n`;
+      case "image":
+        return `${node.props?.caption ?? ""}\n\n`;
       default:
         return "";
     }
@@ -488,6 +540,8 @@ export class BlockNoteService {
           return contentNode.props?.alias || "";
         } else if (contentNode.type === "mention") {
           return contentNode.props?.alias || "";
+        } else if (contentNode.type === "link") {
+          return this.processContentAsPlainText(contentNode.content);
         }
         return "";
       })
