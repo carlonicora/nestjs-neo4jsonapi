@@ -462,6 +462,25 @@ describe("NotificationRepository", () => {
         expect(mockQuery.query).not.toContain("REFERS_TO");
       });
     });
+
+    it("sets message and actionUrl on the created node when given", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockResolvedValue(null);
+      neo4jService.readOne.mockResolvedValue(MOCK_NOTIFICATION);
+
+      await repository.createNotification({
+        notificationType: "transcript_ready",
+        userId: TEST_IDS.userId,
+        message: "m",
+        actionUrl: "/x",
+      });
+
+      const writeArg = neo4jService.writeOne.mock.calls[0][0];
+      expect(writeArg.query).toContain("message: $message");
+      expect(writeArg.query).toContain("actionUrl: $actionUrl");
+      expect(writeArg.queryParams.message).toBe("m");
+      expect(writeArg.queryParams.actionUrl).toBe("/x");
+    });
   });
 
   describe("createIdempotent", () => {
@@ -479,6 +498,25 @@ describe("NotificationRepository", () => {
       }));
     }
 
+    it("carries the company through the WITH so the BELONGS_TO merge links the real company", async () => {
+      primeMocks({ existing: false });
+
+      await repository.createIdempotent({
+        notificationType: "transcript_ready",
+        userId: TEST_IDS.userId,
+        targets: [{ id: TEST_IDS.taskId, label: "Recording" }],
+        idempotencyKey: "transcript_ready:x",
+      });
+
+      const writeArg = neo4jService.writeOne.mock.calls[0][0];
+      // Without `company` in the projection the variable is unbound inside the
+      // FOREACH and MERGE creates a label-less node (seen on 2026-09-15).
+      expect(writeArg.query).toMatch(
+        /WITH notification, recipient, actor, company, target0,\s*\n\s*notification\.id = \$notificationId AS justCreated/,
+      );
+      expect(writeArg.query).toContain("MERGE (notification)-[:BELONGS_TO]->(company)");
+    });
+
     it("creates a notification on first call and returns { created: true }", async () => {
       primeMocks({ existing: false });
 
@@ -490,7 +528,7 @@ describe("NotificationRepository", () => {
         idempotencyKey: `person.access_granted:${TEST_IDS.actorId}:${TEST_IDS.taskId}`,
       });
 
-      expect(result).toEqual({ created: true });
+      expect(result.created).toBe(true);
       const writeArg = neo4jService.writeOne.mock.calls[0][0];
       expect(writeArg.query).toContain("MERGE");
       expect(writeArg.query).toContain("idempotencyKey");
@@ -528,7 +566,7 @@ describe("NotificationRepository", () => {
         idempotencyKey: "person.access_granted:repeat",
       });
 
-      expect(result).toEqual({ created: false });
+      expect(result.created).toBe(false);
     });
 
     it("guards every edge write behind the justCreated flag", async () => {
@@ -602,19 +640,91 @@ describe("NotificationRepository", () => {
       );
     });
 
-    it("returns { created: false } when the follow-up read finds no record (data anomaly)", async () => {
+    it("createIdempotentOrThrow throws NOTIFICATION_NOT_WRITTEN when the follow-up read finds no record (recipient or company not matched)", async () => {
       neo4jService.initQuery.mockImplementation(() => createMockQuery());
       neo4jService.writeOne.mockResolvedValue(null);
       neo4jService.read.mockResolvedValue({ records: [] });
 
+      await expect(
+        repository.createIdempotentOrThrow({
+          notificationType: "transcript_ready",
+          userId: TEST_IDS.userId,
+          idempotencyKey: "transcript_ready:x",
+        }),
+      ).rejects.toThrow("NOTIFICATION_NOT_WRITTEN");
+    });
+
+    it("createIdempotent keeps the shipped contract for that same case: { created: false }, no throw", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockResolvedValue(null);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await expect(
+        repository.createIdempotent({
+          notificationType: "transcript_ready",
+          userId: TEST_IDS.userId,
+          idempotencyKey: "transcript_ready:x",
+        }),
+      ).resolves.toEqual({ created: false });
+    });
+
+    it("createIdempotent still surfaces any other failure", async () => {
+      neo4jService.initQuery.mockImplementation(() => createMockQuery());
+      neo4jService.writeOne.mockRejectedValue(new Error("neo4j down"));
+
+      await expect(
+        repository.createIdempotent({
+          notificationType: "transcript_ready",
+          userId: TEST_IDS.userId,
+          idempotencyKey: "transcript_ready:x",
+        }),
+      ).rejects.toThrow("neo4j down");
+    });
+
+    it("writes message and actionUrl ON CREATE when given and returns the generated id", async () => {
+      primeMocks({ existing: false });
+
       const result = await repository.createIdempotent({
-        notificationType: "person.access_granted",
+        notificationType: "transcript_ready",
         userId: TEST_IDS.userId,
-        actorId: TEST_IDS.actorId,
-        idempotencyKey: "test-key",
+        targets: [{ id: TEST_IDS.taskId, label: "Recording" }],
+        idempotencyKey: `transcript_ready:${TEST_IDS.taskId}`,
+        message: "Session 12 · Uploaded audio · 1141 clips",
+        actionUrl: "/sessions/s-1?section=recordings",
       });
 
-      expect(result).toEqual({ created: false });
+      const writeArg = neo4jService.writeOne.mock.calls[0][0];
+      expect(writeArg.query).toContain("notification.message = $message");
+      expect(writeArg.query).toContain("notification.actionUrl = $actionUrl");
+      expect(writeArg.queryParams.message).toBe("Session 12 · Uploaded audio · 1141 clips");
+      expect(writeArg.queryParams.actionUrl).toBe("/sessions/s-1?section=recordings");
+      expect(result).toEqual({ created: true, id: writeArg.queryParams.notificationId });
+    });
+
+    it("binds message and actionUrl as null when not given (ON CREATE SET of null removes nothing)", async () => {
+      primeMocks({ existing: false });
+
+      await repository.createIdempotent({
+        notificationType: "transcript_ready",
+        userId: TEST_IDS.userId,
+        idempotencyKey: "transcript_ready:x",
+      });
+
+      const writeArg = neo4jService.writeOne.mock.calls[0][0];
+      expect(writeArg.queryParams.message).toBeNull();
+      expect(writeArg.queryParams.actionUrl).toBeNull();
+    });
+
+    it("returns the existing node's id with created false when another call won", async () => {
+      primeMocks({ existing: true });
+
+      const result = await repository.createIdempotent({
+        notificationType: "transcript_ready",
+        userId: TEST_IDS.userId,
+        idempotencyKey: "transcript_ready:x",
+      });
+
+      expect(result).toEqual({ created: false, id: "existing-id" });
     });
   });
 

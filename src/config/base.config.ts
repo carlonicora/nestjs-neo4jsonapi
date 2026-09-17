@@ -8,7 +8,7 @@ import { ConfigOperatorInterface } from "./interfaces/config.operator.interface"
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
 import { ConfigResponderInterface } from "./interfaces/config.responder.interface";
 import { ConfigSummariserInterface } from "./interfaces/config.summariser.interface";
-import { AiTierConfig } from "./interfaces/config.ai.interface";
+import { AiTierConfig, AudioTierConfig } from "./interfaces/config.ai.interface";
 
 /**
  * Resolves one AI model tier from env. `suffix` is "" (normal), "_LITE", or
@@ -65,6 +65,68 @@ const buildAiTier = (suffix: string): AiTierConfig => {
     allowFallbacks,
     googleCredentialsBase64: env("AI_GOOGLE_CREDENTIALS_BASE64"),
   };
+};
+
+/**
+ * Resolves one AUDIO tier from env. `suffix` is "" (the transcription tier
+ * AudioLLMService.call uses) or "_DIARIZE" (AudioLLMService.diarize).
+ *
+ * Same fallback semantics as buildAiTier: field-by-field inheritance from
+ * the base audio tier unless the tier names a different provider, and
+ * `region` (the OpenRouter provider pin) never inherits — it is per-MODEL
+ * routing, so dragging the base tier's pin onto a different model makes the
+ * provider 404 (model not served there) or 422.
+ *
+ * The audio-only fields (directUrl / language / directFormat / directProvider /
+ * costPerMinute) never fall back to `AI_*`, exactly as the inline `audio` block
+ * they replace did not.
+ */
+const buildAudioTier = (suffix: string): AudioTierConfig => {
+  const base = (key: string): string => process.env[`AUDIO_${key}`] || process.env[`AI_${key}`] || "";
+  const baseOnly = (key: string): string => process.env[`AUDIO_${key}`] || "";
+  const baseProvider = base("PROVIDER");
+  const tierProvider = (suffix ? process.env[`AUDIO_PROVIDER${suffix}`] : baseProvider) || "";
+  const standalone = suffix !== "" && tierProvider !== "" && tierProvider !== baseProvider;
+  const env = (key: string): string => process.env[`AUDIO_${key}${suffix}`] || (standalone ? "" : base(key));
+  const envAudioOnly = (key: string): string =>
+    process.env[`AUDIO_${key}${suffix}`] || (standalone ? "" : baseOnly(key));
+  const own = (key: string): string => process.env[`AUDIO_${key}${suffix}`] || "";
+  return {
+    provider: tierProvider || baseProvider,
+    apiKey: env("API_KEY"),
+    model: env("MODEL"),
+    url: env("URL"),
+    region: suffix ? own("REGION") : base("REGION"),
+    secret: env("SECRET"),
+    instance: env("INSTANCE"),
+    apiVersion: env("API_VERSION"),
+    inputCostPer1MTokens: parseFloat(env("INPUT_COST_PER_1M_TOKENS") || "0"),
+    outputCostPer1MTokens: parseFloat(env("OUTPUT_COST_PER_1M_TOKENS") || "0"),
+    costPerMinute: parseFloat(envAudioOnly("COST_PER_MINUTE") || "0"),
+    googleCredentialsBase64: env("GOOGLE_CREDENTIALS_BASE64"),
+    directUrl: envAudioOnly("DIRECT_URL") || undefined,
+    // A language hint helps Whisper, but a diarizer given a hint on
+    // code-switched audio (an Italian table playing in English) answers with
+    // text and speakers and EVERY timestamp at zero, which is useless. So the
+    // hint never inherits: a suffixed tier sends one only when it sets its own.
+    language: (suffix ? own("LANGUAGE") : envAudioOnly("LANGUAGE")) || undefined,
+    directFormat: envAudioOnly("DIRECT_FORMAT") || undefined,
+    directProvider: envAudioOnly("DIRECT_PROVIDER") || undefined,
+  };
+};
+
+/** JSON passthrough for `provider.options`; a bad value fails boot loudly, naming the var. */
+const parseProviderOptions = (envName: string): Record<string, unknown> => {
+  const raw = process.env[envName];
+  if (!raw || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      throw new Error("must be a JSON object");
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`${envName} is not valid JSON: ${(err as Error).message}`);
+  }
 };
 
 /**
@@ -390,28 +452,10 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         inputCostPer1MTokens: parseFloat(process.env.IMAGE_INPUT_COST_PER_1M_TOKENS || "0"),
         outputCostPer1MTokens: parseFloat(process.env.IMAGE_OUTPUT_COST_PER_1M_TOKENS || "0"),
       },
-      audio: {
-        provider: process.env.AUDIO_PROVIDER || process.env.AI_PROVIDER || "",
-        apiKey: process.env.AUDIO_API_KEY || process.env.AI_API_KEY || "",
-        model: process.env.AUDIO_MODEL || process.env.AI_MODEL || "",
-        url: process.env.AUDIO_URL || process.env.AI_URL || "",
-        region: process.env.AUDIO_REGION || process.env.AI_REGION || "",
-        secret: process.env.AUDIO_SECRET || process.env.AI_SECRET || "",
-        instance: process.env.AUDIO_INSTANCE || process.env.AI_INSTANCE || "",
-        apiVersion: process.env.AUDIO_API_VERSION || process.env.AI_API_VERSION || "",
-        inputCostPer1MTokens: parseFloat(
-          process.env.AUDIO_INPUT_COST_PER_1M_TOKENS || process.env.AI_INPUT_COST_PER_1M_TOKENS || "0",
-        ),
-        outputCostPer1MTokens: parseFloat(
-          process.env.AUDIO_OUTPUT_COST_PER_1M_TOKENS || process.env.AI_OUTPUT_COST_PER_1M_TOKENS || "0",
-        ),
-        costPerMinute: parseFloat(process.env.AUDIO_COST_PER_MINUTE || "0"),
-        googleCredentialsBase64:
-          process.env.AUDIO_GOOGLE_CREDENTIALS_BASE64 || process.env.AI_GOOGLE_CREDENTIALS_BASE64 || "",
-        directUrl: process.env.AUDIO_DIRECT_URL || undefined,
-        language: process.env.AUDIO_LANGUAGE || undefined,
-        directFormat: process.env.AUDIO_DIRECT_FORMAT || undefined,
-        directProvider: process.env.AUDIO_DIRECT_PROVIDER || undefined,
+      audio: buildAudioTier(""),
+      audioDiarize: {
+        ...buildAudioTier("_DIARIZE"),
+        providerOptions: parseProviderOptions("AUDIO_PROVIDER_OPTIONS_DIARIZE"),
       },
       embedder: {
         provider: process.env.EMBEDDER_PROVIDER || "",

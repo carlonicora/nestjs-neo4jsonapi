@@ -210,6 +210,9 @@ export class NotificationRepository extends AbstractRepository<
    * target is validated (`validateExistingNodes`) before the write and then
    * written as `(notification)-[:REFERS_TO]->(target)`, grouped per label.
    *
+   * `message` and `actionUrl` are the two free-text fields of the entity, both
+   * optional: when omitted they are bound as null and Neo4j creates no property.
+   *
    * Named `createNotification` rather than `create` because
    * `AbstractRepository.create` is inherited with an incompatible signature —
    * see the class JSDoc.
@@ -219,6 +222,8 @@ export class NotificationRepository extends AbstractRepository<
     userId: string;
     actorId?: string;
     targets?: NotificationTarget[];
+    message?: string;
+    actionUrl?: string;
   }): Promise<Notification> {
     const query = this.neo4j.initQuery();
     const targets = (params.targets ?? []).filter((target) => !!target?.id);
@@ -238,6 +243,8 @@ export class NotificationRepository extends AbstractRepository<
       ...query.queryParams,
       notificationId: notificationId,
       notificationType: params.notificationType,
+      message: params.message ?? null,
+      actionUrl: params.actionUrl ?? null,
       userId: [params.userId],
       actorId: [params.actorId],
     };
@@ -247,6 +254,8 @@ export class NotificationRepository extends AbstractRepository<
       CREATE (notification:Notification {
         id: $notificationId,
         notificationType: $notificationType,
+        message: $message,
+        actionUrl: $actionUrl,
         createdAt: datetime(),
         updatedAt: datetime()
       })
@@ -329,15 +338,32 @@ export class NotificationRepository extends AbstractRepository<
    *
    * Every related node is matched through `company`, so a node that does not
    * belong to the current company is simply not linked.
+   *
+   * `message` and `actionUrl` are optional free-text fields of the entity,
+   * written in the same `ON CREATE SET` (bound as null when omitted, which
+   * creates no property).
+   *
+   * Returns the node id in BOTH outcomes — the generated one when this call
+   * created the record, the existing node's when a previous call won — so a
+   * caller can load the node and push it without a second lookup by key, and
+   * throws when the write matched nothing (no row read back: the recipient or
+   * the company did not match, so no notification exists at all).
+   *
+   * That throw is why this is a separate method from {@link createIdempotent}:
+   * the older name shipped returning `{ created: false }` for the no-row case,
+   * and apps outside this repo still call it without a try/catch. Prefer this
+   * one in new code — "nothing was written" is a failure, not a duplicate.
    */
-  async createIdempotent(params: {
+  async createIdempotentOrThrow(params: {
     notificationType: string;
     userId: string;
     actorId?: string;
     actorLabel?: string;
     targets?: NotificationTarget[];
     idempotencyKey: string;
-  }): Promise<{ created: boolean }> {
+    message?: string;
+    actionUrl?: string;
+  }): Promise<{ created: boolean; id: string }> {
     const notificationId = randomUUID();
     const actorLabel = this.assertSafeLabel(params.actorLabel ?? userMeta.labelName);
     const targets = (params.targets ?? []).filter((target) => !!target?.id);
@@ -349,6 +375,8 @@ export class NotificationRepository extends AbstractRepository<
       ...writeQuery.queryParams,
       notificationId,
       notificationType: params.notificationType,
+      message: params.message ?? null,
+      actionUrl: params.actionUrl ?? null,
       idempotencyKey: params.idempotencyKey,
       userId: params.userId,
       actorId: params.actorId ?? null,
@@ -375,11 +403,17 @@ export class NotificationRepository extends AbstractRepository<
       ON CREATE SET
         notification.id = $notificationId,
         notification.notificationType = $notificationType,
+        notification.message = $message,
+        notification.actionUrl = $actionUrl,
         notification.isRead = false,
         notification.createdAt = datetime(),
         notification.updatedAt = datetime()
 
-      WITH notification, recipient, actor${targetAliases.length ? `, ${targetAliases.join(", ")}` : ""},
+      // \`company\` must be carried through the WITH: a variable the projection
+      // drops is unbound inside the FOREACH, and MERGE would then create a
+      // label-less node instead of linking the company (the list query needs
+      // the BELONGS_TO edge, so such a notification is invisible).
+      WITH notification, recipient, actor, company${targetAliases.length ? `, ${targetAliases.join(", ")}` : ""},
            notification.id = $notificationId AS justCreated
 
       FOREACH (_ IN CASE WHEN justCreated THEN [1] ELSE [] END |
@@ -402,14 +436,44 @@ export class NotificationRepository extends AbstractRepository<
 
     await this.neo4j.writeOne(writeQuery);
 
-    // Step 2: Read back the node's id. If it equals the id we just generated, we created it;
-    // otherwise a prior call (same idempotencyKey) already exists and won.
+    // Step 2: Read back the node's id. Equal to the one we generated → this call
+    // created it; a different id → a previous call with the same key won; no row
+    // at all → the MERGE never ran because the recipient (or the company) did not
+    // match, and that is a failure the caller must see, not "already created".
     const readResult = await this.neo4j.read(
       // nja-lint-ignore: idempotency read-back by server-generated unique key — scalar id only
       `MATCH (n:${notificationMeta.labelName} {idempotencyKey: $idempotencyKey}) RETURN n.id AS id`,
       { idempotencyKey: params.idempotencyKey },
     );
-    const actualId = readResult.records[0]?.get("id");
-    return { created: actualId === notificationId };
+    const actualId = readResult.records[0]?.get("id") as string | undefined;
+    if (!actualId) {
+      throw new Error(
+        `NOTIFICATION_NOT_WRITTEN: no recipient ${params.userId} in the current company (key ${params.idempotencyKey})`,
+      );
+    }
+    return { created: actualId === notificationId, id: actualId };
+  }
+
+  /**
+   * Find-or-create keeping the contract this method shipped with: a write that
+   * matched no recipient resolves as `{ created: false }` rather than throwing.
+   *
+   * `id` is present whenever a node exists, and absent only in that no-row
+   * case — additive, so a caller that reads `created` alone is unaffected.
+   *
+   * New code should call {@link createIdempotentOrThrow} instead, which
+   * surfaces "nothing was written" as the failure it is. This wrapper exists so
+   * that fix did not become a breaking change for the apps already on this
+   * package.
+   */
+  async createIdempotent(
+    params: Parameters<NotificationRepository["createIdempotentOrThrow"]>[0],
+  ): Promise<{ created: boolean; id?: string }> {
+    try {
+      return await this.createIdempotentOrThrow(params);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("NOTIFICATION_NOT_WRITTEN")) return { created: false };
+      throw error;
+    }
   }
 }

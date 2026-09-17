@@ -359,6 +359,12 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
           return await tx.run(query, params ?? {});
         });
       });
+    } catch (error) {
+      // Same trail the read path leaves: without the statement and its
+      // parameters a driver error names nothing a caller can find.
+      this.logger.error(query, params);
+      this.logger.error(error);
+      throw error;
     } finally {
       if (session) {
         try {

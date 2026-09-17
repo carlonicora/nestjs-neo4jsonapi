@@ -186,6 +186,60 @@ describe("CompanyService", () => {
     });
   });
 
+  describe("hasAvailableCredits", () => {
+    it("keeps the any-credits rule when no amount is given", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 0.01,
+        availableExtraCredits: 0,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
+    });
+
+    it("compares the balance with the estimated cost converted to credits", async () => {
+      // creditCost 0.01 €/credit (beforeEach): 0.50 € → 50 credits
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 30,
+        availableExtraCredits: 19.9,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCostEur: 0.5 })).resolves.toBe(
+        false,
+      );
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 30,
+        availableExtraCredits: 20,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCostEur: 0.5 })).resolves.toBe(
+        true,
+      );
+    });
+
+    it("ignores a negative balance on one side when summing", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: -5,
+        availableExtraCredits: 50,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCostEur: 0.5 })).resolves.toBe(
+        true,
+      );
+    });
+
+    it("returns true for any amount when credits are disabled", async () => {
+      mockConfigService.get.mockReturnValue({ creditCost: 0, minCreditsPerRecord: 0.1 });
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 0,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCostEur: 99 })).resolves.toBe(
+        true,
+      );
+    });
+  });
+
   describe("isAiEnabled", () => {
     it("returns true when the company has no aiEnabled property (legacy row)", async () => {
       mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID });

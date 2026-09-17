@@ -212,6 +212,125 @@ describe("createBaseConfig — AI tiers", () => {
   });
 });
 
+describe("createBaseConfig — audio diarize tier", () => {
+  const KEYS = [
+    "AI_PROVIDER",
+    "AI_API_KEY",
+    "AI_MODEL",
+    "AUDIO_PROVIDER",
+    "AUDIO_API_KEY",
+    "AUDIO_MODEL",
+    "AUDIO_DIRECT_URL",
+    "AUDIO_DIRECT_FORMAT",
+    "AUDIO_DIRECT_PROVIDER",
+    "AUDIO_LANGUAGE",
+    "AUDIO_COST_PER_MINUTE",
+    "AUDIO_REGION",
+    "AUDIO_PROVIDER_DIARIZE",
+    "AUDIO_API_KEY_DIARIZE",
+    "AUDIO_MODEL_DIARIZE",
+    "AUDIO_DIRECT_URL_DIARIZE",
+    "AUDIO_DIRECT_FORMAT_DIARIZE",
+    "AUDIO_LANGUAGE_DIARIZE",
+    "AUDIO_COST_PER_MINUTE_DIARIZE",
+    "AUDIO_REGION_DIARIZE",
+    "AUDIO_PROVIDER_OPTIONS_DIARIZE",
+  ];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("inherits every AUDIO_* field when only the diarize model is set", () => {
+    process.env.AUDIO_PROVIDER = "openrouter";
+    process.env.AUDIO_API_KEY = "k";
+    process.env.AUDIO_MODEL = "openai/whisper-large-v3-turbo";
+    process.env.AUDIO_DIRECT_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
+    process.env.AUDIO_DIRECT_FORMAT = "json";
+    process.env.AUDIO_LANGUAGE = "en";
+    process.env.AUDIO_MODEL_DIARIZE = "microsoft/mai-transcribe-2";
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audio.model).toBe("openai/whisper-large-v3-turbo");
+    expect(cfg.audioDiarize).toMatchObject({
+      provider: "openrouter",
+      apiKey: "k",
+      model: "microsoft/mai-transcribe-2",
+      directUrl: "https://openrouter.ai/api/v1/audio/transcriptions",
+      directFormat: "json",
+      providerOptions: {},
+    });
+    // The language hint is the one field that never inherits: a diarizer
+    // hinted on code-switched audio returns every timestamp at zero.
+    expect(cfg.audioDiarize.language).toBeUndefined();
+  });
+
+  it("sends a language hint to the diarizer only when set on the diarize tier itself", () => {
+    process.env.AUDIO_PROVIDER = "openrouter";
+    process.env.AUDIO_LANGUAGE = "en";
+    process.env.AUDIO_LANGUAGE_DIARIZE = "it";
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audio.language).toBe("en");
+    expect(cfg.audioDiarize.language).toBe("it");
+  });
+
+  it("leaves the base audio tier byte-identical to the pre-tier shape", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "base-model";
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audio.provider).toBe("openrouter");
+    expect(cfg.audio.model).toBe("base-model");
+    expect(cfg.audio.directUrl).toBeUndefined();
+    expect(cfg.audio.language).toBeUndefined();
+    expect(cfg.audio.costPerMinute).toBe(0);
+    expect("providerOptions" in cfg.audio).toBe(false);
+  });
+
+  it("parses AUDIO_PROVIDER_OPTIONS_DIARIZE as JSON and reads its own per-minute rate", () => {
+    process.env.AUDIO_PROVIDER = "openrouter";
+    process.env.AUDIO_COST_PER_MINUTE = "0.00067";
+    process.env.AUDIO_COST_PER_MINUTE_DIARIZE = "0.00167";
+    process.env.AUDIO_PROVIDER_OPTIONS_DIARIZE = '{"azure":{"diarization":{"enabled":true}}}';
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audio.costPerMinute).toBe(0.00067);
+    expect(cfg.audioDiarize.costPerMinute).toBe(0.00167);
+    expect(cfg.audioDiarize.providerOptions).toEqual({ azure: { diarization: { enabled: true } } });
+  });
+
+  it("treats a diarize tier that switches provider as standalone", () => {
+    process.env.AUDIO_PROVIDER = "openrouter";
+    process.env.AUDIO_API_KEY = "base-key";
+    process.env.AUDIO_DIRECT_URL = "https://openrouter.ai/api/v1/audio/transcriptions";
+    process.env.AUDIO_PROVIDER_DIARIZE = "deepgram";
+    process.env.AUDIO_MODEL_DIARIZE = "nova-3";
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audioDiarize.provider).toBe("deepgram");
+    expect(cfg.audioDiarize.apiKey).toBe("");
+    expect(cfg.audioDiarize.directUrl).toBeUndefined();
+  });
+
+  it("never inherits AUDIO_REGION into the diarize tier", () => {
+    process.env.AUDIO_PROVIDER = "openrouter";
+    process.env.AUDIO_REGION = "Together";
+    const cfg = createBaseConfig().ai;
+    expect(cfg.audio.region).toBe("Together");
+    expect(cfg.audioDiarize.region).toBe("");
+  });
+
+  it("throws at config load when AUDIO_PROVIDER_OPTIONS_DIARIZE is not JSON", () => {
+    process.env.AUDIO_PROVIDER_OPTIONS_DIARIZE = "{not json";
+    expect(() => createBaseConfig()).toThrow(/AUDIO_PROVIDER_OPTIONS_DIARIZE/);
+  });
+});
+
 describe("createBaseConfig — chunker", () => {
   const KEYS = ["CHUNKER_STRATEGY", "OCR_LANGUAGE", "CHUNKER_TARGET_CHARS"];
   const saved: Record<string, string | undefined> = {};

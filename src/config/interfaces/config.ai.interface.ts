@@ -88,6 +88,86 @@ export interface AiTierConfig {
   googleCredentialsBase64?: string;
 }
 
+/**
+ * Configuration for one audio-transcription tier.
+ *
+ * Shared shape for the `audio` block (the `AUDIO_*` transcription tier
+ * `AudioLLMService.call` uses) and `audioDiarize` (the `AUDIO_*_DIARIZE`
+ * speaker-diarization tier `AudioLLMService.diarize` uses). Mirrors
+ * {@link AiTierConfig}, whose `AI_*_LITE` / `AI_*_LARGE` inheritance rules
+ * `buildAudioTier` copies field for field.
+ */
+export interface AudioTierConfig {
+  provider: string;
+  apiKey: string;
+  model: string;
+  url: string;
+  region?: string;
+  secret?: string;
+  instance?: string;
+  apiVersion?: string;
+  inputCostPer1MTokens: number;
+  outputCostPer1MTokens: number;
+  /**
+   * Price of one minute of transcribed audio, in the same currency as the
+   * per-token rates. Set via AUDIO_COST_PER_MINUTE.
+   *
+   * LAST of the three pricing clocks in `AudioLLMService.persistUsage`, and a
+   * pure estimate: it applies only when the engine reports neither a
+   * `usage.cost` of its own nor any token counts. Endpoints that DO report
+   * usage (OpenRouter's `/audio/transcriptions` returns
+   * `{seconds, input_tokens, output_tokens, cost}`) are billed on their own
+   * figures and ignore this rate entirely.
+   *
+   * Still worth setting on any `directUrl` deployment. A self-hosted Whisper
+   * or an endpoint that drops its usage block reports nothing billable, and
+   * under the zero-token rule that records NO usage row at all - which is how
+   * transcription silently became free work. With a rate here the cost falls
+   * back to measured audio duration, so the choice of engine never decides
+   * whether the work is billed.
+   *
+   * Leave unset (or 0) only if you accept that an engine reporting no usage
+   * bills nothing; AudioLLMService warns loudly in that case.
+   */
+  costPerMinute?: number;
+  /** Base64-encoded GCP service account JSON for Google Vertex AI */
+  googleCredentialsBase64?: string;
+  /**
+   * Full URL of an OpenAI-style /audio/transcriptions endpoint. When set,
+   * AudioLLMService POSTs a multipart request here (using `apiKey` as Bearer
+   * auth and `model` / `language` from this same audio config). When unset
+   * or empty, the chat-LLM path is used instead (via ModelService.getAudioLLM).
+   * No provider whitelist — any OpenAI-compatible STT endpoint works.
+   */
+  directUrl?: string;
+  /** ISO-639-1 hint passed to /audio/transcriptions. Ignored in chat mode. */
+  language?: string;
+  /**
+   * Request format for the direct (`directUrl`) endpoint:
+   *   - "multipart" (default) — OpenAI / self-hosted Whisper multipart form-data.
+   *   - "json" — OpenRouter-style JSON body with base64 `input_audio`.
+   * Set via AUDIO_DIRECT_FORMAT. Ignored in chat mode.
+   */
+  directFormat?: string;
+  /**
+   * Optional provider to pin for the JSON direct endpoint, sent as
+   * `provider.order` with `allow_fallbacks: false`. Lets you route around a
+   * dead provider (e.g. OpenRouter's Groq `whisper-large-v3` endpoint 400s
+   * everything — pin "Together" instead). Set via AUDIO_DIRECT_PROVIDER.
+   */
+  directProvider?: string;
+}
+
+/**
+ * Diarization tier — resolved from `AUDIO_*_DIARIZE`, inheriting field by field
+ * from `AUDIO_*` exactly as `AI_*_LITE` inherits from `AI_*` (see buildAudioTier).
+ * `providerOptions` is the passthrough block sent as `provider.options` on the
+ * OpenRouter-style JSON request (e.g. `{"azure":{"diarization":{"enabled":true}}}`).
+ */
+export interface AudioDiarizeTierConfig extends AudioTierConfig {
+  providerOptions: Record<string, unknown>;
+}
+
 export interface ConfigAiInterface {
   /**
    * MOCK_AI fail-closed safety gate. When `true`, the LLM/model/embedder layer
@@ -255,66 +335,20 @@ export interface ConfigAiInterface {
     url?: string;
     apiVersion?: string;
   };
-  audio: {
-    provider: string;
-    apiKey: string;
-    model: string;
-    url: string;
-    region?: string;
-    secret?: string;
-    instance?: string;
-    apiVersion?: string;
-    inputCostPer1MTokens: number;
-    outputCostPer1MTokens: number;
-    /**
-     * Price of one minute of transcribed audio, in the same currency as the
-     * per-token rates. Set via AUDIO_COST_PER_MINUTE.
-     *
-     * LAST of the three pricing clocks in `AudioLLMService.persistUsage`, and a
-     * pure estimate: it applies only when the engine reports neither a
-     * `usage.cost` of its own nor any token counts. Endpoints that DO report
-     * usage (OpenRouter's `/audio/transcriptions` returns
-     * `{seconds, input_tokens, output_tokens, cost}`) are billed on their own
-     * figures and ignore this rate entirely.
-     *
-     * Still worth setting on any `directUrl` deployment. A self-hosted Whisper
-     * or an endpoint that drops its usage block reports nothing billable, and
-     * under the zero-token rule that records NO usage row at all - which is how
-     * transcription silently became free work. With a rate here the cost falls
-     * back to measured audio duration, so the choice of engine never decides
-     * whether the work is billed.
-     *
-     * Leave unset (or 0) only if you accept that an engine reporting no usage
-     * bills nothing; AudioLLMService warns loudly in that case.
-     */
-    costPerMinute?: number;
-    /** Base64-encoded GCP service account JSON for Google Vertex AI */
-    googleCredentialsBase64?: string;
-    /**
-     * Full URL of an OpenAI-style /audio/transcriptions endpoint. When set,
-     * AudioLLMService POSTs a multipart request here (using `apiKey` as Bearer
-     * auth and `model` / `language` from this same audio config). When unset
-     * or empty, the chat-LLM path is used instead (via ModelService.getAudioLLM).
-     * No provider whitelist — any OpenAI-compatible STT endpoint works.
-     */
-    directUrl?: string;
-    /** ISO-639-1 hint passed to /audio/transcriptions. Ignored in chat mode. */
-    language?: string;
-    /**
-     * Request format for the direct (`directUrl`) endpoint:
-     *   - "multipart" (default) — OpenAI / self-hosted Whisper multipart form-data.
-     *   - "json" — OpenRouter-style JSON body with base64 `input_audio`.
-     * Set via AUDIO_DIRECT_FORMAT. Ignored in chat mode.
-     */
-    directFormat?: string;
-    /**
-     * Optional provider to pin for the JSON direct endpoint, sent as
-     * `provider.order` with `allow_fallbacks: false`. Lets you route around a
-     * dead provider (e.g. OpenRouter's Groq `whisper-large-v3` endpoint 400s
-     * everything — pin "Together" instead). Set via AUDIO_DIRECT_PROVIDER.
-     */
-    directProvider?: string;
-  };
+  /**
+   * Transcription tier used by `AudioLLMService.call` — the `AUDIO_*` env
+   * block, falling back field by field to `AI_*`. Distinct from `transcriber`
+   * above (the openai-SDK path) and from {@link audioDiarize} below.
+   */
+  audio: AudioTierConfig;
+  /**
+   * Speaker-diarization tier used by `AudioLLMService.diarize` — the
+   * `AUDIO_*_DIARIZE` env block, inheriting from `AUDIO_*` unless it names a
+   * different provider. Kept separate so the Discord transcription tier can
+   * stay on a cheap duration-priced model while diarization runs on one that
+   * returns per-speaker segments.
+   */
+  audioDiarize: AudioDiarizeTierConfig;
   embedder: {
     provider: string;
     apiKey: string;

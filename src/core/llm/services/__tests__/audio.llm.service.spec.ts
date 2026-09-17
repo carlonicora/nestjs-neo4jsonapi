@@ -993,4 +993,179 @@ describe("AudioLLMService", () => {
       });
     });
   });
+
+  // ─────────────── Diarization (AUDIO_*_DIARIZE tier) ───────────────
+  //
+  // A second, independent audio tier: `ai.audioDiarize`. The Discord
+  // transcription tier (`ai.audio`, whisper-large-v3-turbo) must stay untouched,
+  // so every assertion here reads the DIARIZE block's model / URL / options.
+  describe("diarize (audioDiarize tier)", () => {
+    let recordTokenUsage: Mock;
+    let fetchMock: Mock;
+
+    const buildDiarizeConfig = (overrides: Partial<Record<string, unknown>> = {}) => ({
+      ...buildAudioConfig(),
+      model: "microsoft/mai-transcribe-2",
+      directUrl: "https://stt.test/v1/audio/transcriptions",
+      providerOptions: { azure: { diarization: { enabled: true } } },
+      costPerMinute: 0.00167,
+      ...overrides,
+    });
+
+    const buildServiceWithRecorder = async (): Promise<AudioLLMService> => {
+      const moduleRef: TestingModule = await Test.createTestingModule({
+        providers: [
+          AudioLLMService,
+          { provide: ConfigService, useValue: configService },
+          { provide: ModelService, useValue: modelService },
+          { provide: LLMCallDumper, useValue: dumper },
+          { provide: TOKEN_USAGE_RECORDER, useValue: { recordTokenUsage } },
+        ],
+      }).compile();
+      return moduleRef.get(AudioLLMService);
+    };
+
+    beforeEach(() => {
+      recordTokenUsage = vi.fn().mockResolvedValue(undefined);
+      configService.get.mockReturnValue({ audio: buildAudioConfig(), audioDiarize: buildDiarizeConfig() });
+      fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: () =>
+          Promise.resolve({
+            text: "hello there",
+            language: "en",
+            duration: 630,
+            segments: [
+              { id: 0, start: 5, end: 10.4, text: "hello", speaker: 0 },
+              { id: 1, start: 12.2, end: 12.5, text: "there", speaker: 1 },
+              { id: 2, start: 13, end: 14, text: "no speaker" },
+            ],
+            usage: { seconds: 630, cost: 0.0175 },
+          }),
+      } as unknown as Response);
+      vi.stubGlobal("fetch", fetchMock);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("POSTs verbose_json + segment timestamps + provider options from the DIARIZE tier, without transcoding", async () => {
+      const billed = await buildServiceWithRecorder();
+
+      const result = await billed.diarize({ audioPath: tmpMp3 });
+
+      expect(mockedTranscodeForDirect).not.toHaveBeenCalled();
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe("https://stt.test/v1/audio/transcriptions");
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({
+        model: "microsoft/mai-transcribe-2",
+        input_audio: { format: "mp3" },
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment", "word"],
+        provider: { options: { azure: { diarization: { enabled: true } } } },
+      });
+      expect(body.input_audio.data).toBe(Buffer.from("fake-mp3-bytes").toString("base64"));
+      expect(result.segments).toEqual([
+        { start: 5, end: 10.4, text: "hello", speaker: 0 },
+        { start: 12.2, end: 12.5, text: "there", speaker: 1 },
+        { start: 13, end: 14, text: "no speaker", speaker: -1 },
+      ]);
+      expect(result.language).toBe("en");
+      expect(result.audioSeconds).toBe(630);
+      expect(result.providerCost).toBe(0.0175);
+    });
+
+    it("rebuilds segment spans from the words when the provider zeroes every segment", async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: () =>
+          Promise.resolve({
+            text: "hello there again",
+            duration: 20,
+            segments: [
+              { id: 0, start: 0, end: 0, text: "hello there", speaker: 0 },
+              { id: 1, start: 0, end: 0, text: "again", speaker: 1 },
+            ],
+            words: [
+              { word: "hello", start: 1.0, end: 1.4, speaker: 0 },
+              { word: "there", start: 1.5, end: 1.9, speaker: 0 },
+              { word: "again", start: 5.0, end: 5.6, speaker: 1 },
+            ],
+            usage: { seconds: 20, cost: 0.001 },
+          }),
+      } as unknown as Response);
+      const billed = await buildServiceWithRecorder();
+
+      const result = await billed.diarize({ audioPath: tmpMp3 });
+
+      expect(result.segments).toEqual([
+        { start: 1.0, end: 1.9, text: "hello there", speaker: 0 },
+        { start: 5.0, end: 5.6, text: "again", speaker: 1 },
+      ]);
+    });
+
+    it("throws naming AUDIO_MODEL_DIARIZE when the diarize tier has no model", async () => {
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig(),
+        audioDiarize: buildDiarizeConfig({ model: "", directUrl: "https://x", providerOptions: {} }),
+      });
+      const billed = await buildServiceWithRecorder();
+
+      await expect(billed.diarize({ audioPath: tmpMp3 })).rejects.toThrow(/AUDIO_MODEL_DIARIZE/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("throws naming AUDIO_DIRECT_URL when the diarize tier has no direct endpoint", async () => {
+      configService.get.mockReturnValue({
+        audio: buildAudioConfig(),
+        audioDiarize: buildDiarizeConfig({ model: "m", directUrl: undefined, providerOptions: {} }),
+      });
+      const billed = await buildServiceWithRecorder();
+
+      await expect(billed.diarize({ audioPath: tmpMp3 })).rejects.toThrow(/AUDIO_DIRECT_URL/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("bills the diarization from usage.cost against the caller's entity with tokenUsageType", async () => {
+      const billed = await buildServiceWithRecorder();
+
+      await billed.diarize({
+        audioPath: tmpMp3,
+        relationshipId: "sess-1",
+        relationshipType: "sessions",
+        tokenUsageType: "diarization",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          costOverride: 0.0175,
+          type: "diarization",
+          relationshipId: "sess-1",
+          model: "microsoft/mai-transcribe-2",
+          applyMinimum: false,
+        }),
+      );
+    });
+
+    it("wraps a non-2xx response with the canonical prefix and records no usage", async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: () => Promise.resolve('{"error":"large audio"}'),
+        headers: { get: () => null },
+      } as unknown as Response);
+      const billed = await buildServiceWithRecorder();
+
+      await expect(
+        billed.diarize({ audioPath: tmpMp3, relationshipId: "s", relationshipType: "sessions" }),
+      ).rejects.toThrow(/^Audio LLM service error: HTTP 400/);
+      expect(recordTokenUsage).not.toHaveBeenCalled();
+    });
+  });
 });

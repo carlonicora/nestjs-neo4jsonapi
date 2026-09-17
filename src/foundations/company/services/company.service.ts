@@ -93,14 +93,25 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       throw new HttpException("NO_CREDITS", HttpStatus.PAYMENT_REQUIRED);
   }
 
-  async hasAvailableCredits(params: { companyId: string }): Promise<boolean> {
+  /**
+   * Whether the company can pay for a call. Without `estimatedCostEur` this is
+   * the "has any credits" gate every existing caller relies on. With it, the
+   * cost is converted to credits exactly as TokenUsageService.recordTokenUsage
+   * does (round4(cost / creditCost), no per-record minimum) and compared with
+   * the sum of the two balances.
+   */
+  async hasAvailableCredits(params: { companyId: string; estimatedCostEur?: number }): Promise<boolean> {
     if (!this.creditsEnabled) return true;
 
     const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
-    return (
-      (!!company.availableMonthlyCredits && company.availableMonthlyCredits > 0) ||
-      (!!company.availableExtraCredits && company.availableExtraCredits > 0)
-    );
+    const monthly = Math.max(0, company.availableMonthlyCredits ?? 0);
+    const extra = Math.max(0, company.availableExtraCredits ?? 0);
+
+    if (!params.estimatedCostEur || params.estimatedCostEur <= 0) return monthly > 0 || extra > 0;
+
+    const creditCost = this.configService.get<ConfigCreditsInterface>("credits")!.creditCost;
+    const needed = Math.round((params.estimatedCostEur / creditCost) * 10000) / 10000;
+    return monthly + extra >= needed;
   }
 
   /**

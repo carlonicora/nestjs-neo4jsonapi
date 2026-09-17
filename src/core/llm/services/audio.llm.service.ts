@@ -3,9 +3,10 @@ import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as fs from "fs";
 import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
-import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
+import { AudioTierConfig, BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
 import { TokenUsageService } from "../../../foundations/tokenusage/services/tokenusage.service";
 import { transcodeForDirect, type TranscodeOptions, type TranscodeResult } from "./audio/ffmpeg-transcode";
+import { hasSegmentSpans, spansFromWords, type DiarizedWord } from "./audio/diarization-spans";
 import { DumpSession, LLMCallDumper } from "./llm-call-dumper.service";
 import { ModelService } from "./model.service";
 
@@ -85,6 +86,76 @@ export interface TranscriptionResult {
    * endpoint reports no usage at all.
    */
   providerSeconds?: number;
+}
+
+/**
+ * Parameters for {@link AudioLLMService.diarize}. No `prompt` and no
+ * `temperature`: a diarizing STT endpoint takes neither, and no `transcode`
+ * because the caller already produced the file that goes on the wire.
+ */
+export interface DiarizeCallParams {
+  audioPath: string;
+  /**
+   * Cost-attribution category written to the usage record. Free-form so each
+   * application owns its own vocabulary; defaults to "transcription".
+   */
+  tokenUsageType?: string;
+  /**
+   * Opt-in cost attribution, exactly like {@link AudioCallParams}: BOTH of
+   * these must be present or no usage record is written at all.
+   */
+  relationshipId?: string;
+  relationshipType?: string;
+}
+
+/** One diarized speech segment. Times are SECONDS from the start of the file sent. */
+export interface DiarizedSegment {
+  start: number;
+  end: number;
+  text: string;
+  /** Provider speaker index within THIS request; -1 when the provider sent none. */
+  speaker: number;
+}
+
+export interface DiarizationResult extends TranscriptionResult {
+  segments: DiarizedSegment[];
+  language?: string;
+}
+
+/** Narrows the provider's `words` array (needs "word" in timestamp_granularities); malformed entries are dropped. */
+function parseDiarizedWords(raw: unknown): DiarizedWord[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DiarizedWord[] = [];
+  for (const entry of raw as Array<Record<string, unknown>>) {
+    const start = usageNumber(entry?.start);
+    const end = usageNumber(entry?.end);
+    if (start === undefined || end === undefined || end < start || typeof entry.word !== "string") continue;
+    out.push({
+      word: entry.word,
+      start,
+      end,
+      speaker: typeof entry.speaker === "number" && Number.isInteger(entry.speaker) ? entry.speaker : -1,
+    });
+  }
+  return out;
+}
+
+/** Narrows the provider's `segments` array; malformed entries are dropped, a missing speaker becomes -1. */
+function parseDiarizedSegments(raw: unknown): DiarizedSegment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DiarizedSegment[] = [];
+  for (const entry of raw as Array<Record<string, unknown>>) {
+    const start = usageNumber(entry?.start);
+    const end = usageNumber(entry?.end);
+    if (start === undefined || end === undefined || end < start) continue;
+    out.push({
+      start,
+      end,
+      text: typeof entry.text === "string" ? entry.text.trim() : "",
+      speaker: typeof entry.speaker === "number" && Number.isInteger(entry.speaker) ? entry.speaker : -1,
+    });
+  }
+  return out;
 }
 
 /**
@@ -256,6 +327,120 @@ export class AudioLLMService {
   }
 
   /**
+   * Speaker-diarized transcription of ONE audio file through the DIARIZE tier
+   * (`ai.audioDiarize`, env `AUDIO_*_DIARIZE`). Direct JSON endpoint only —
+   * there is no chat-model diarization. No transcode: the caller already
+   * produced a 16 kHz mono mp3 sized under the provider's payload cap, and the
+   * universal transcode would re-encode to WAV and blow through it.
+   */
+  async diarize(params: DiarizeCallParams): Promise<DiarizationResult> {
+    const tier = this.config.get<ConfigAiInterface>("ai")?.audioDiarize;
+    if (!tier?.directUrl) {
+      throw new Error("Audio LLM service error: diarization needs AUDIO_DIRECT_URL (or AUDIO_DIRECT_URL_DIARIZE)");
+    }
+    if (!tier.model) throw new Error("Audio LLM service error: diarization needs AUDIO_MODEL_DIARIZE");
+
+    this.logger.log(
+      `audio-diarize: provider=${tier.provider} model=${tier.model} directUrl=${tier.directUrl} ` +
+        `language=${tier.language || "(unset)"} audioPath=${params.audioPath}`,
+    );
+
+    const session: DumpSession = this.dumper.startSession({
+      metadata: { nodeName: "audio_diarization", agentName: "audio_diarization", node_type: "audio_diarization" },
+      model: tier.model,
+      provider: tier.provider,
+      temperature: 0,
+    });
+
+    try {
+      const audioBuffer = await fs.promises.readFile(params.audioPath);
+      const format = params.audioPath.toLowerCase().endsWith(".wav") ? "wav" : "mp3";
+      const providerOptions = tier.providerOptions ?? {};
+      const body = JSON.stringify({
+        model: tier.model,
+        input_audio: { data: audioBuffer.toString("base64"), format },
+        response_format: "verbose_json",
+        // Words as well as segments: the diarization path sometimes returns
+        // every segment span as zero while the words keep theirs (see
+        // spansFromWords). Same price either way.
+        timestamp_granularities: ["segment", "word"],
+        ...(tier.language ? { language: tier.language } : {}),
+        ...(Object.keys(providerOptions).length > 0 ? { provider: { options: providerOptions } } : {}),
+      });
+
+      const response = await fetch(tier.directUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tier.apiKey}`, "Content-Type": "application/json" },
+        body,
+      });
+      this.logger.log(`audio-diarize: response status=${response.status} audioBytes=${audioBuffer.length}`);
+      if (!response.ok) {
+        const bodyText = await response.text().catch(() => "");
+        this.logger.error(`audio-diarize: UPSTREAM ERROR — status=${response.status} body=${bodyText}`);
+        throw new Error(`HTTP ${response.status} — ${bodyText.slice(0, 500)}`);
+      }
+
+      const json = (await response.json().catch(() => ({}))) as {
+        text?: unknown;
+        language?: unknown;
+        duration?: unknown;
+        segments?: unknown;
+        words?: unknown;
+        usage?: unknown;
+      };
+      const text = typeof json.text === "string" ? json.text : "";
+      let segments = parseDiarizedSegments(json.segments);
+      if (!hasSegmentSpans(segments)) {
+        const words = parseDiarizedWords(json.words);
+        this.logger.warn(
+          `audio-diarize: ${segments.length} segments came back without spans — ` +
+            (words.length > 0
+              ? `rebuilding them from ${words.length} timestamped words`
+              : "and no words to rebuild from"),
+        );
+        if (words.length > 0) segments = spansFromWords(segments, words);
+      }
+      const { tokens, providerCost, providerSeconds } = parseDirectUsage(json.usage);
+      const audioSeconds = usageNumber(json.duration) ?? providerSeconds ?? 0;
+
+      this.logger.log(
+        `audio-diarize: segments=${segments.length} speakers=${new Set(segments.map((s) => s.speaker)).size} ` +
+          `durationSeconds=${audioSeconds} providerCost=${providerCost ?? "(not reported)"}`,
+      );
+
+      session.recordResponse({ content: text, tokenUsage: tokens });
+      session.close({ finalStatus: "success", totalTokens: tokens });
+
+      this.warnIfDirectPathUnbilled(tier, tokens, providerCost);
+      await this.persistUsage(params, tokens, providerSeconds ?? audioSeconds, providerCost, tier);
+
+      return {
+        text,
+        segments,
+        ...(typeof json.language === "string" ? { language: json.language } : {}),
+        tokenUsage: tokens,
+        audioSeconds,
+        ...(providerCost !== undefined ? { providerCost } : {}),
+        ...(providerSeconds !== undefined ? { providerSeconds } : {}),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? (error.stack ?? "").split("\n").slice(0, 10).join("\n") : undefined;
+      this.dumpUpstreamError("audio-diarize", error);
+      session.close({
+        finalStatus: "error",
+        errorMessage: message,
+        errorStack: stack,
+        totalTokens: { input: 0, output: 0 },
+      });
+      // Duration is NOT passed: a failed call diarized no audio, so charging its
+      // minutes would bill for work never delivered (same rule as `call`).
+      await this.persistUsage(params, { input: 0, output: 0 }, undefined, undefined, tier);
+      throw new Error(message.startsWith("Audio LLM service error") ? message : `Audio LLM service error: ${message}`);
+    }
+  }
+
+  /**
    * True once the "direct STT reports no tokens" warning has been emitted by
    * this instance. The audio service is a singleton, so this throttles the
    * warning to once per process instead of once per utterance.
@@ -282,7 +467,7 @@ export class AudioLLMService {
    * boolean check.
    */
   private warnIfDirectPathUnbilled(
-    audio: ConfigAiInterface["audio"],
+    audio: AudioTierConfig,
     tokens: { input: number; output: number },
     providerCost?: number,
   ): void {
@@ -357,13 +542,20 @@ export class AudioLLMService {
     tokens: { input: number; output: number },
     audioSeconds?: number,
     providerCost?: number,
+    /**
+     * Which audio tier priced this call — `ai.audio` for `call`, `ai.audioDiarize`
+     * for `diarize`. Defaulted so `call`'s three existing call sites stay as they
+     * were; a caller on another tier MUST pass it, or the row is billed at the
+     * wrong rates and stamped with the wrong model.
+     */
+    tier: AudioTierConfig | undefined = this.config.get<ConfigAiInterface>("ai")?.audio,
   ): Promise<void> {
     if (!params.relationshipId || !params.relationshipType) return;
 
     const recorder = this.tokenUsageRecorder ?? this.tokenUsageService;
     if (!recorder) return;
 
-    const audio = this.config.get<ConfigAiInterface>("ai")?.audio;
+    const audio = tier;
     const costPerMinute = audio?.costPerMinute ?? 0;
     const hasProviderCost = (providerCost ?? 0) > 0;
     const hasTokens = tokens.input + tokens.output > 0;
