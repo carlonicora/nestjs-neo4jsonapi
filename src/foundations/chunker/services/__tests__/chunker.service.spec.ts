@@ -2,11 +2,13 @@ import { Document } from "@langchain/core/documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChunkerService } from "../chunker.service";
 
-// Only the temp-file write is stubbed — the downloaded bytes are never read back
-// (PdfService is a stub) and the real module stays available to everything else.
+// Only the temp-file write and read are stubbed — the downloaded bytes are never real
+// (PdfService is a stub) and the real module stays available to everything else. The
+// markdown path is the one that reads the temp file back, so it gets a fixed body.
 vi.mock("fs/promises", async (importOriginal) => ({
   ...((await importOriginal()) as object),
   writeFile: vi.fn().mockResolvedValue(undefined),
+  readFile: vi.fn().mockResolvedValue("# heading\n\nsome markdown body"),
 }));
 
 const makeConfig = (strategy: string, targetChars = 1500) =>
@@ -339,5 +341,52 @@ describe("ChunkerService image usage recording", () => {
 
     expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
     expect(docs.every((doc) => doc.metadata.totalPages === 1)).toBe(true);
+  });
+});
+
+describe("ChunkerService markdown title", () => {
+  const SIGNED_URL =
+    "http://minio.test:9000/bucket/judgements/3f6b3794-c6d6-441c-940d-db84d41b0984/" +
+    "3f6b3794-c6d6-441c-940d-db84d41b0984.md?X-Amz-Algorithm=AWS4-HMAC-SHA256" +
+    "&X-Amz-Credential=minioadmin%2F20260918%2Flocal%2Fs3%2Faws4_request" +
+    "&X-Amz-Signature=0b0d887592e6620deadbeef";
+
+  const makeService = (splitter: any) =>
+    new ChunkerService(splitter, splitter, stub, stub, stub, stub, stub, stub, stub, makeFullConfig());
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("uses the caller's title rather than anything derived from the file path", async () => {
+    stubFetchWithBytes();
+    const splitter = { splitMarkdownToChunks: vi.fn().mockResolvedValue([]) } as any;
+
+    await makeService(splitter).generateContentStructureFromFile({
+      fileType: "md",
+      filePath: SIGNED_URL,
+      title: "Garante, provv. n. 398/2026",
+    });
+
+    expect(splitter.splitMarkdownToChunks).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Garante, provv. n. 398/2026" }),
+    );
+  });
+
+  // Regression: the title used to be `filePath.split("/").pop()` with a `.md` strip that
+  // never matched, because a presigned URL ends in its query string. The signature and
+  // credential were written into chunk 0, and from there into embeddings and prompts.
+  it("never leaks the presigned query string into the title when no title is given", async () => {
+    stubFetchWithBytes();
+    const splitter = { splitMarkdownToChunks: vi.fn().mockResolvedValue([]) } as any;
+
+    await makeService(splitter).generateContentStructureFromFile({ fileType: "md", filePath: SIGNED_URL });
+
+    const { title } = splitter.splitMarkdownToChunks.mock.calls[0][0];
+    expect(title).toBe("3f6b3794-c6d6-441c-940d-db84d41b0984");
+    expect(title).not.toContain("X-Amz-Signature");
+    expect(title).not.toContain("X-Amz-Credential");
+    expect(title).not.toContain("?");
   });
 });

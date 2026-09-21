@@ -202,6 +202,13 @@ export class ChunkerService {
     fileType: string;
     filePath: string;
     attribution?: ChunkerAttribution;
+    /**
+     * Human-readable name of the document, used as the markdown title. Pass it whenever
+     * the caller knows it: `filePath` is often a PRESIGNED URL, and deriving a title from
+     * it put the signature and credential into the chunk text (and into every prompt and
+     * embedding built from it). Falls back to the file name when omitted.
+     */
+    title?: string;
   }): Promise<Document[]> {
     if (this.config.get<ConfigAiInterface>("ai").mock) {
       return [
@@ -242,6 +249,7 @@ export class ChunkerService {
         localFilePath,
         fileType: params.fileType,
         filePath: params.filePath,
+        title: params.title,
       }),
     );
     this._logChunkResult(params.fileType, docs);
@@ -252,6 +260,7 @@ export class ChunkerService {
     localFilePath: string;
     fileType: string;
     filePath: string;
+    title?: string;
   }): Promise<Document[]> {
     const docs = await this._loadLocalFileDocuments(params);
     // PDFs already carry their real page count (stamped by `_createFromPdf`);
@@ -265,10 +274,15 @@ export class ChunkerService {
     localFilePath: string;
     fileType: string;
     filePath: string;
+    title?: string;
   }): Promise<Document[]> {
     switch (params.fileType.toLowerCase()) {
       case "md":
-        return this._createFromMarkdown({ filePath: params.filePath, localFilePath: params.localFilePath });
+        return this._createFromMarkdown({
+          filePath: params.filePath,
+          localFilePath: params.localFilePath,
+          title: params.title,
+        });
       case "docx":
         return this._createFromDocX({ filePath: params.filePath, localFilePath: params.localFilePath });
       case "pptx":
@@ -576,12 +590,19 @@ export class ChunkerService {
     }
   }
 
-  private async _createFromMarkdown(params: { filePath: string; localFilePath: string }): Promise<Document[]> {
+  private async _createFromMarkdown(params: {
+    filePath: string;
+    localFilePath: string;
+    title?: string;
+  }): Promise<Document[]> {
     const markdown = await fs.readFile(params.localFilePath, "utf-8");
 
-    const urlParts = params.filePath.split("/");
-    const filename = urlParts[urlParts.length - 1];
-    const title = filename.replace(/\.md$/i, "");
+    // The caller's own name for the document wins. Otherwise fall back to the file
+    // name — with the query string dropped FIRST, because `filePath` is routinely a
+    // presigned URL: `…/<id>.md?X-Amz-Credential=…&X-Amz-Signature=…` never matched
+    // the `.md` strip, so the whole signed URL became the title and was written into
+    // the chunk text, the embeddings and every prompt built from them.
+    const title = params.title?.trim() || fileNameOf(params.filePath).replace(/\.md$/i, "");
 
     try {
       return await this.splitter.splitMarkdownToChunks({
@@ -799,4 +820,18 @@ export class ChunkerService {
       return [];
     }
   }
+}
+
+/**
+ * The file name of a path or URL, with any query string or fragment removed.
+ *
+ * `filePath` reaching the chunker is frequently a presigned URL whose last segment is
+ * `<name>.<ext>?X-Amz-Algorithm=…&X-Amz-Credential=…&X-Amz-Signature=…`. Splitting on
+ * "/" alone therefore yields a "file name" carrying the credential and signature, and
+ * no extension strip matches it because the string no longer ends in the extension.
+ */
+export function fileNameOf(filePath: string): string {
+  const withoutQuery = filePath.split(/[?#]/)[0];
+  const segments = withoutQuery.split("/");
+  return segments[segments.length - 1];
 }
