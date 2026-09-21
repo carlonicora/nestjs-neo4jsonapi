@@ -362,6 +362,72 @@ describe("LLMService", () => {
       expect(result.response).toBe("fallback parsed");
     });
 
+    // Regression: on the Azure Responses API surface (and Gemini) `raw.content` is an
+    // array of content parts, not a string. The salvage ladder treats it as a string
+    // (substring / JSON.parse / repairTruncatedJson / .length), so reading it raw threw
+    // `TypeError: rawContent.substring is not a function` and killed the caller instead
+    // of salvaging — it took out massima extraction across a whole corpus run.
+    it("salvages from array content parts instead of throwing on substring", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          usage_metadata: { input_tokens: 100, output_tokens: 50 },
+          response_metadata: { finish_reason: "stop" },
+          content: [{ type: "text", text: '{"response": "salvaged from parts"}' }],
+        },
+      });
+
+      const result = await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["You are a helpful assistant"],
+      });
+
+      expect(result.response).toBe("salvaged from parts");
+    });
+
+    // Regression: Azure cuts the stream mid-value on moderated subject matter, leaving the
+    // last array entry half-written. `repairTruncatedJson` closes the JSON, but a strict
+    // parse then rejects the whole payload because that entry is missing required fields —
+    // so every COMPLETE entry was binned with it, and the caller was marked failed. Drop the
+    // partial entry and keep the rest. Shape taken from a real massima-extraction payload.
+    it("keeps the complete entries when a truncated payload has one half-written entry", async () => {
+      const massimaSchema = z.object({
+        massime: z.array(
+          z.object({
+            type: z.string(),
+            content: z.string(),
+            referencedNorms: z.array(z.string()),
+          }),
+        ),
+      });
+
+      const truncated =
+        '{"massime":[' +
+        '{"type":"LEGAL_PRINCIPLE","content":"Prima massima completa.","referencedNorms":["art. 144-bis d.lgs. 196/2003"]},' +
+        '{"type":"LEGAL_PRINCIPLE","content":"Seconda massima completa.","referencedNorms":["art. 6 GDPR"]},' +
+        '{"type":"LEGAL_PRINCIPLE","content":"Terza massima tronc';
+
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          usage_metadata: { input_tokens: 2247, output_tokens: 1211 },
+          response_metadata: {},
+          content: truncated,
+        },
+      });
+
+      const result = await service.call({
+        inputParams: { message: "Hello" },
+        outputSchema: massimaSchema,
+        systemPrompts: ["You are a helpful assistant"],
+      });
+
+      expect(result.massime).toHaveLength(2);
+      expect(result.massime[0].content).toBe("Prima massima completa.");
+      expect(result.massime[1].content).toBe("Seconda massima completa.");
+    });
+
     it("should throw error when parsing and fallback both fail", async () => {
       mockStructuredLLM.invoke.mockResolvedValueOnce({
         parsed: null,

@@ -15,6 +15,7 @@ import {
   TokenUsageRatesInterface,
   TokenUsageService,
 } from "../../../foundations/tokenusage/services/tokenusage.service";
+import { extractMessageText } from "../utils/message.content";
 import { ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { ModelWeight } from "../enums/model.weight";
 import { ReasoningEffort } from "../enums/reasoning.effort";
@@ -181,6 +182,47 @@ export function isTransientNetworkError(err: unknown): boolean {
     haystack.includes("gateway timeout") ||
     haystack.includes("overloaded")
   );
+}
+
+/**
+ * Drop array entries that do not satisfy their element schema, leaving the rest intact.
+ *
+ * Zod validates a payload all-or-nothing, which is the wrong trade when a response is
+ * mostly good: one corrupt entry from the model, or one half-written entry left by a
+ * truncated stream, throws away every complete sibling alongside it. Filtering first
+ * keeps what parsed and loses only what did not.
+ *
+ * Shared by the lenient `tool_calls` rung and the truncation-repair rung of the salvage
+ * ladder. Returns the cleaned object and how many entries were dropped per field, so the
+ * caller can say what it discarded rather than silently shrinking the result.
+ */
+export function filterInvalidArrayEntries(
+  outputSchema: unknown,
+  args: Record<string, any>,
+): { cleaned: Record<string, any>; dropped: Record<string, { removed: number; total: number }> } {
+  const cleaned = { ...args };
+  const dropped: Record<string, { removed: number; total: number }> = {};
+  const shape = (outputSchema as any)?.shape;
+  if (!shape) return { cleaned, dropped };
+
+  for (const [key, fieldSchema] of Object.entries(shape)) {
+    if (!Array.isArray(cleaned[key])) continue;
+
+    // In Zod v4, ZodArray exposes .element as the element schema with .safeParse().
+    // Unwrap optional/default/nullable wrappers first if present.
+    let schema = fieldSchema as any;
+    while (schema?.unwrap && !schema?.element) schema = schema.unwrap();
+    const elementSchema = schema?.element;
+    if (!elementSchema || typeof elementSchema.safeParse !== "function") continue;
+
+    const original = cleaned[key] as any[];
+    const kept = original.filter((entry: any) => elementSchema.safeParse(entry).success);
+    if (kept.length < original.length)
+      dropped[key] = { removed: original.length - kept.length, total: original.length };
+    cleaned[key] = kept;
+  }
+
+  return { cleaned, dropped };
 }
 
 /**
@@ -1593,7 +1635,13 @@ export class LLMService {
      * declared schema came back unparseable and was salvaged.
      */
     const logCallSummary = (
-      outcome: "clean" | "fallback:tool_calls" | "fallback:lenient" | "fallback:raw" | "fallback:truncation-repair",
+      outcome:
+        | "clean"
+        | "fallback:tool_calls"
+        | "fallback:lenient"
+        | "fallback:raw"
+        | "fallback:truncation-repair"
+        | "fallback:truncation-repair-lenient",
     ) => {
       this.logger.log(
         `[${label}] complete (${outcome}): ${iterationsUsed} tool iteration(s), ${failedToolCalls} failed tool call(s), ` +
@@ -1619,7 +1667,13 @@ export class LLMService {
      * known until the ladder settles, and a degraded run must not be recorded as clean.
      */
     const salvageParse = (): T & { tokenUsage: { input: number; output: number; cached: number } } => {
-      const rawContent = raw?.content || "No content";
+      // `extractMessageText`, never the raw value: `.content` is an array of content
+      // parts on the Azure Responses API surface and on Gemini, and every rung below
+      // treats rawContent as a string (`substring`, `JSON.parse`, `repairTruncatedJson`,
+      // `.length`). Reading it raw turned a recoverable parse failure into a hard
+      // `TypeError: rawContent.substring is not a function`, which killed the caller
+      // instead of letting the salvage ladder run.
+      const rawContent = extractMessageText(raw?.content) || "No content";
       const finishReason = raw?.response_metadata?.finish_reason;
 
       console.error("[LLMService] Parsing failed:", {
@@ -1651,31 +1705,12 @@ export class LLMService {
           addParseFallback("lenient");
           try {
             console.warn("[LLMService] Attempting lenient tool_calls parsing (filtering invalid array entries)");
-            const cleanedArgs = { ...normaliseStrictOutput(toolCallArgs) };
-            const shape = (params.outputSchema as any)?.shape;
-
-            if (shape) {
-              for (const [key, fieldSchema] of Object.entries(shape)) {
-                if (Array.isArray(cleanedArgs[key])) {
-                  // In Zod v4, ZodArray exposes .element as the element schema with .safeParse()
-                  // Unwrap optional/default/nullable wrappers first if present
-                  let schema = fieldSchema as any;
-                  while (schema?.unwrap && !schema?.element) {
-                    schema = schema.unwrap();
-                  }
-                  const elementSchema = schema?.element;
-
-                  if (elementSchema && typeof elementSchema.safeParse === "function") {
-                    const original = cleanedArgs[key];
-                    cleanedArgs[key] = original.filter((entry: any) => elementSchema.safeParse(entry).success);
-                    if (cleanedArgs[key].length < original.length) {
-                      console.warn(
-                        `[LLMService] Filtered ${original.length - cleanedArgs[key].length}/${original.length} invalid entries from "${key}"`,
-                      );
-                    }
-                  }
-                }
-              }
+            const { cleaned: cleanedArgs, dropped } = filterInvalidArrayEntries(
+              params.outputSchema,
+              normaliseStrictOutput(toolCallArgs),
+            );
+            for (const [key, counts] of Object.entries(dropped)) {
+              console.warn(`[LLMService] Filtered ${counts.removed}/${counts.total} invalid entries from "${key}"`);
             }
 
             const validated = params.outputSchema.parse(cleanedArgs);
@@ -1729,8 +1764,32 @@ export class LLMService {
               tokenUsage: { input, output, cached },
             };
           } catch {
-            // Repaired text still does not satisfy the schema — fall through to
-            // the diagnostic below, which reports the ORIGINAL failure.
+            // The repair closed the JSON, but the entry the stream cut in half is
+            // still missing required fields, and Zod rejects all-or-nothing — so a
+            // strict parse here bins every COMPLETE entry alongside the partial one.
+            // Filter the partial entries out and validate what actually survived.
+            try {
+              const { cleaned, dropped } = filterInvalidArrayEntries(
+                params.outputSchema,
+                normaliseStrictOutput(JSON.parse(repaired)),
+              );
+              const removed = Object.values(dropped).reduce((sum, counts) => sum + counts.removed, 0);
+              const validated = params.outputSchema.parse(cleaned);
+              this.logger.warn(
+                `[${label}] parseFallback: "truncation-repair-lenient" — recovered a truncated payload ` +
+                  `by dropping ${removed} incomplete entr${removed === 1 ? "y" : "ies"} ` +
+                  `(finishReason=${finishReason}, ${rawContent.length}→${repaired.length} chars)`,
+              );
+              logCallSummary("fallback:truncation-repair-lenient");
+              addTokens(finalInput, finalOutput, finalCached);
+              return {
+                ...(validated as T),
+                tokenUsage: { input, output, cached },
+              };
+            } catch {
+              // Still unusable — fall through to the diagnostic below, which
+              // reports the ORIGINAL failure.
+            }
           }
         }
         // Every salvage attempt failed, so this call is about to throw — but the
