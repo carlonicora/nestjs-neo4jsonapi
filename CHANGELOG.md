@@ -1,3 +1,11 @@
+## [4.9.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.9.0...v4.9.1) (2026-09-21)
+
+### 🐛 Bug Fixes
+
+* **chunker:** stop writing presigned URLs into markdown chunks ([ba3d4ec](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ba3d4ecbc659a7e2619697d9d3b66da5ded4276d))
+* **company:** skip credit billing when no company is in context ([4c0feb5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4c0feb5f73da78a5d453282e16805ecb11fa5b05))
+* **llm:** make the salvage ladder survive array content and truncation ([9a589c2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9a589c2f1c484c9d35d900827d64216fa32cec63))
+
 ## [4.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.8.0...v4.9.0) (2026-09-17)
 
 ### 🚀 Features
