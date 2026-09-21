@@ -733,4 +733,38 @@ describe("CompanyService", () => {
       );
     });
   });
+
+  describe("handleTokenUsageRecorded", () => {
+    const payload = { input: 10, output: 5, cost: 0.01, credits: 1 };
+
+    it("deducts the credits of the company in the request context", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+      mockRepository.useCredits.mockResolvedValue({ availableMonthlyCredits: 4999, availableExtraCredits: 2000 });
+
+      await service.handleTokenUsageRecorded(payload);
+
+      expect(mockRepository.useCredits).toHaveBeenCalledWith({ credits: 1 });
+      expect(mockWebSocketService.sendMessageToCompany).toHaveBeenCalledWith(
+        MOCK_COMPANY_ID,
+        "company:credits_updated",
+        expect.objectContaining({ companyId: MOCK_COMPANY_ID, availableMonthlyCredits: 4999 }),
+      );
+    });
+
+    it("bills nothing when the request context has no company (global corpus or automated job)", async () => {
+      mockClsService.get.mockReturnValue(undefined);
+
+      await service.handleTokenUsageRecorded(payload);
+
+      expect(mockRepository.useCredits).not.toHaveBeenCalled();
+      expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
+    });
+
+    it("never throws back into the emitter when the deduction fails", async () => {
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+      mockRepository.useCredits.mockRejectedValue(new Error("Neo4j down"));
+
+      await expect(service.handleTokenUsageRecorded(payload)).resolves.toBeUndefined();
+    });
+  });
 });

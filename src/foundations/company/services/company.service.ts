@@ -219,6 +219,12 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
    */
   @OnEvent(TOKEN_USAGE_RECORDED_EVENT)
   async handleTokenUsageRecorded(payload: TokenUsageRecordedPayload): Promise<void> {
+    // Usage recorded with NO company in the request context is platform-level
+    // work (the global legal corpus, an automated job with no tenant): there is
+    // nothing to bill. Before this guard every corpus embedding/LLM call reached
+    // `useCredits`, whose Cypher then failed on the missing $companyId and
+    // logged an ERROR per call (observed 2026-09-18 on the corpus worker).
+    if (!this.cls.get("companyId")) return;
     try {
       await this.useCredits({ credits: payload.credits });
     } catch (error) {
