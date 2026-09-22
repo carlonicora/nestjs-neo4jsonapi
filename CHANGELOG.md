@@ -1,3 +1,9 @@
+## [4.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.9.1...v4.10.0) (2026-09-22)
+
+### 🚀 Features
+
+* **company:** let hasAvailableCredits take an amount already in credits ([d7aee3a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d7aee3ab31f81973b8e8fd47347283bbffd42bd7))
+
 ## [4.9.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.9.0...v4.9.1) (2026-09-21)
 
 ### 🐛 Bug Fixes
