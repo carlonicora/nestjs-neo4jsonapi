@@ -94,23 +94,35 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
   }
 
   /**
-   * Whether the company can pay for a call. Without `estimatedCostEur` this is
-   * the "has any credits" gate every existing caller relies on. With it, the
-   * cost is converted to credits exactly as TokenUsageService.recordTokenUsage
-   * does (round4(cost / creditCost), no per-record minimum) and compared with
-   * the sum of the two balances.
+   * Whether the company can pay for a call. Without an amount this is the
+   * "has any credits" gate every existing caller relies on. With
+   * `estimatedCostEur` the cost is converted to credits exactly as
+   * TokenUsageService.recordTokenUsage does (round4(cost / creditCost), no
+   * per-record minimum). With `estimatedCredits` the amount is already in
+   * credits (non-AI metered actions such as the YouTube import) and is compared
+   * as is. Both amounts given: they add up.
    */
-  async hasAvailableCredits(params: { companyId: string; estimatedCostEur?: number }): Promise<boolean> {
+  async hasAvailableCredits(params: {
+    companyId: string;
+    estimatedCostEur?: number;
+    estimatedCredits?: number;
+  }): Promise<boolean> {
     if (!this.creditsEnabled) return true;
 
     const company = await this.companyRepository.findByCompanyId({ companyId: params.companyId });
     const monthly = Math.max(0, company.availableMonthlyCredits ?? 0);
     const extra = Math.max(0, company.availableExtraCredits ?? 0);
 
-    if (!params.estimatedCostEur || params.estimatedCostEur <= 0) return monthly > 0 || extra > 0;
+    let needed = 0;
+    if (params.estimatedCostEur && params.estimatedCostEur > 0) {
+      const creditCost = this.configService.get<ConfigCreditsInterface>("credits")!.creditCost;
+      needed += Math.round((params.estimatedCostEur / creditCost) * 10000) / 10000;
+    }
+    if (params.estimatedCredits && params.estimatedCredits > 0) {
+      needed += Math.round(params.estimatedCredits * 10000) / 10000;
+    }
 
-    const creditCost = this.configService.get<ConfigCreditsInterface>("credits")!.creditCost;
-    const needed = Math.round((params.estimatedCostEur / creditCost) * 10000) / 10000;
+    if (needed <= 0) return monthly > 0 || extra > 0;
     return monthly + extra >= needed;
   }
 

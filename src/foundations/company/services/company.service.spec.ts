@@ -238,6 +238,43 @@ describe("CompanyService", () => {
         true,
       );
     });
+
+    it("compares the balance with an amount already expressed in credits", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 3,
+        availableExtraCredits: 1.5,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCredits: 5 })).resolves.toBe(
+        false,
+      );
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCredits: 4.5 })).resolves.toBe(
+        true,
+      );
+    });
+
+    it("treats a zero credit amount as the any-credits rule", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 0,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCredits: 0 })).resolves.toBe(
+        false,
+      );
+    });
+
+    it("returns true for any credit amount when credits are disabled", async () => {
+      mockConfigService.get.mockReturnValue({ creditCost: 0, minCreditsPerRecord: 0.1 });
+      mockRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_COMPANY,
+        availableMonthlyCredits: 0,
+        availableExtraCredits: 0,
+      });
+      await expect(service.hasAvailableCredits({ companyId: MOCK_COMPANY_ID, estimatedCredits: 99 })).resolves.toBe(
+        true,
+      );
+    });
   });
 
   describe("isAiEnabled", () => {
