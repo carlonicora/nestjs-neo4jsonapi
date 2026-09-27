@@ -44,11 +44,14 @@ const optionalBoolean = (value?: string): boolean | undefined =>
  *   provider as the base tier) inherits field-by-field from the normal `AI_*`
  *   vars — a lone `AI_MODEL_LITE` overrides only the model. Mirrors the
  *   existing VISION_ and AUDIO_ env fallback convention.
- * - EXCEPTION: `AI_REGION` and `AI_ALLOW_FALLBACKS` never inherit the base.
- *   They are per-MODEL routing (the OpenRouter provider pin), not provider-wide
- *   credentials, so inheriting them would pin a tier's overridden model to a
- *   provider that may not serve it (404/422). A tier that wants a pin must set
- *   `AI_REGION<suffix>` / `AI_ALLOW_FALLBACKS<suffix>` explicitly.
+ * - EXCEPTION: `AI_REGION` and `AI_ALLOW_FALLBACKS` inherit the base ONLY when
+ *   the tier also inherits the base MODEL (no `AI_MODEL<suffix>`). They are
+ *   per-MODEL routing (the OpenRouter provider pin), not provider-wide
+ *   credentials: a tier that overrides the model must not be pinned to a
+ *   provider that may not serve it (404/422), so it resolves them only from
+ *   `AI_REGION<suffix>` / `AI_ALLOW_FALLBACKS<suffix>`. A tier running the base
+ *   model keeps the base pin — dropping it silently routed that same model
+ *   through every OpenRouter provider, including ones the pin was set to avoid.
  * - A tier that switches to a DIFFERENT provider is standalone: no field
  *   inherits from the base tier, because base values (URL, API key, costs…)
  *   point at the wrong service. Each field resolves only from its suffixed
@@ -60,25 +63,27 @@ const buildAiTier = (suffix: string): AiTierConfig => {
   const standalone = suffix !== "" && tierProvider !== "" && tierProvider !== baseProvider;
   const env = (key: string): string => process.env[`${key}${suffix}`] || (standalone ? "" : process.env[key]) || "";
   // `region` and `allowFallbacks` describe per-MODEL routing (the OpenRouter
-  // provider pin), NOT shared credentials/endpoint. A tier that overrides only
+  // provider pin), NOT shared credentials/endpoint. A tier that overrides
   // AI_MODEL must not drag the base tier's pin onto a different model, or the
-  // provider 404s (model not served there) / 422s (rejects the oneOf). So these
-  // resolve strictly from the tier's own suffixed var and never inherit the
-  // base — unlike apiKey/url/instance/costs, which are provider-wide.
-  const own = (key: string): string => process.env[`${key}${suffix}`] || "";
+  // provider 404s (model not served there) / 422s (rejects the oneOf), so for
+  // it these resolve strictly from the tier's own suffixed var. A tier that
+  // runs the base model (same provider, no AI_MODEL<suffix>) inherits the pin.
+  const runsBaseModel = !standalone && !process.env[`AI_MODEL${suffix}`];
+  const routing = (key: string): string =>
+    process.env[`${key}${suffix}`] || (runsBaseModel ? process.env[key] : "") || "";
   const maxOutputTokens = env("AI_MAX_OUTPUT_TOKENS");
   // Conditional spread avoids `parseFloat("") = NaN` — when the env var is unset,
   // the field is omitted entirely so it stays `undefined` (no-discount fallback).
   const cachedInputCost = env("AI_CACHED_INPUT_COST_PER_1M_TOKENS");
   // Default true (matches OpenRouter's own default); only an explicit "false"
   // turns `region` into a hard pin.
-  const allowFallbacks = own("AI_ALLOW_FALLBACKS").toLowerCase() !== "false";
+  const allowFallbacks = routing("AI_ALLOW_FALLBACKS").toLowerCase() !== "false";
   return {
     provider: tierProvider || baseProvider,
     apiKey: env("AI_API_KEY"),
     model: env("AI_MODEL"),
     url: env("AI_URL"),
-    region: own("AI_REGION"),
+    region: routing("AI_REGION"),
     secret: env("AI_SECRET"),
     instance: env("AI_INSTANCE"),
     apiVersion: env("AI_API_VERSION"),

@@ -171,10 +171,11 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLarge.allowFallbacks).toBe(false);
   });
 
-  it("does NOT inherit the base AI_REGION into tiers that override only the model", () => {
+  it("does NOT inherit the base AI_REGION into a tier that overrides the model", () => {
     process.env.AI_PROVIDER = "openrouter";
     process.env.AI_MODEL = "normal-model";
     process.env.AI_REGION = "friendli";
+    process.env.AI_ALLOW_FALLBACKS = "false";
     process.env.AI_MODEL_LITE = "lite-model";
 
     const cfg = createBaseConfig().ai;
@@ -183,7 +184,38 @@ describe("createBaseConfig — AI tiers", () => {
     // provider may not serve there (would 404/422).
     expect(cfg.ai.region).toBe("friendli");
     expect(cfg.aiLite.region).toBe("");
+    expect(cfg.aiLite.allowFallbacks).toBe(true);
+    // Large runs the base model, so the base pin is its pin too.
+    expect(cfg.aiLarge.region).toBe("friendli");
+    expect(cfg.aiLarge.allowFallbacks).toBe(false);
+  });
+
+  it("inherits the base pin into tiers that run the base model", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_REGION = "coreweave/fp8";
+    process.env.AI_ALLOW_FALLBACKS = "false";
+
+    const cfg = createBaseConfig().ai;
+
+    for (const tier of [cfg.aiLite, cfg.aiLarge]) {
+      expect(tier.model).toBe("normal-model");
+      expect(tier.region).toBe("coreweave/fp8");
+      expect(tier.allowFallbacks).toBe(false);
+    }
+  });
+
+  it("does NOT inherit the base pin into a tier that switches provider", () => {
+    process.env.AI_PROVIDER = "openrouter";
+    process.env.AI_MODEL = "normal-model";
+    process.env.AI_REGION = "coreweave/fp8";
+    process.env.AI_ALLOW_FALLBACKS = "false";
+    process.env.AI_PROVIDER_LARGE = "venice";
+
+    const cfg = createBaseConfig().ai;
+
     expect(cfg.aiLarge.region).toBe("");
+    expect(cfg.aiLarge.allowFallbacks).toBe(true);
   });
 
   it("resolves AI_REGION per tier when set explicitly", () => {
@@ -191,6 +223,7 @@ describe("createBaseConfig — AI tiers", () => {
     process.env.AI_MODEL = "normal-model";
     process.env.AI_REGION = "friendli";
     process.env.AI_REGION_LARGE = "together";
+    process.env.AI_MODEL_LITE = "lite-model";
 
     const cfg = createBaseConfig().ai;
 
@@ -199,16 +232,17 @@ describe("createBaseConfig — AI tiers", () => {
     expect(cfg.aiLarge.region).toBe("together");
   });
 
-  it("does NOT inherit a base AI_ALLOW_FALLBACKS=false pin into the other tiers", () => {
+  it("lets a tier's own AI_ALLOW_FALLBACKS override the inherited one", () => {
     process.env.AI_PROVIDER = "openrouter";
     process.env.AI_MODEL = "normal-model";
     process.env.AI_ALLOW_FALLBACKS = "false";
+    process.env.AI_ALLOW_FALLBACKS_LITE = "true";
 
     const cfg = createBaseConfig().ai;
 
     expect(cfg.ai.allowFallbacks).toBe(false);
     expect(cfg.aiLite.allowFallbacks).toBe(true);
-    expect(cfg.aiLarge.allowFallbacks).toBe(true);
+    expect(cfg.aiLarge.allowFallbacks).toBe(false);
   });
 });
 
