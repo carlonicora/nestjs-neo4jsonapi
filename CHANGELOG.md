@@ -1,3 +1,13 @@
+## [4.11.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.10.0...v4.11.0) (2026-09-27)
+
+### 🚀 Features
+
+* **llm:** add venice.ai as a provider for chat, embeddings and images ([e2cd398](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e2cd39887108757c0931d7bf9bf6b0548478af72))
+
+### 🐛 Bug Fixes
+
+* **config:** update AI_REGION and AI_ALLOW_FALLBACKS inheritance logic for tiers ([8eb0930](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8eb0930e2f123d24b59399ae93648548c0210937))
+
 ## [4.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.9.1...v4.10.0) (2026-09-22)
 
 ### 🚀 Features
