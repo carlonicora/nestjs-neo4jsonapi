@@ -1039,6 +1039,73 @@ describe("AbstractRepository", () => {
     });
   });
 
+  describe("term search access (C4)", () => {
+    const ACCESS_MARKER = "WHERE EXISTS { (testEntity)<-[:OWNS]-(currentUser) }";
+    const OWNER_MARKER =
+      "WHERE (testEntity_owner:Company AND testEntity_owner.id = $companyId) OR (testEntity_owner:User AND testEntity_owner.id = $currentUserId)";
+
+    class AccessCheckedRepository extends TestRepository {
+      protected buildUserHasAccess(): string {
+        return `WITH testEntity ${ACCESS_MARKER} WITH testEntity`;
+      }
+    }
+
+    class OwnerScopedRepository extends TestRepository {
+      protected buildDefaultMatch(): string {
+        return `MATCH (testEntity:TestEntity)-[:INSURES]->(testEntity_owner) ${OWNER_MARKER} WITH testEntity`;
+      }
+    }
+
+    it("term search applies buildDefaultMatch and buildUserHasAccess", async () => {
+      const accessRepository = new AccessCheckedRepository(
+        neo4jService as unknown as Neo4jService,
+        securityService as unknown as SecurityService,
+        clsService as unknown as ClsService,
+      );
+      const findQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
+      const relatedQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
+      neo4jService.initQuery.mockReturnValueOnce(findQuery).mockReturnValueOnce(relatedQuery);
+      neo4jService.readMany.mockResolvedValue([MOCK_ENTITY]);
+
+      await accessRepository.find({ term: "test" });
+      await accessRepository.findByRelated({ relationship: "author", id: TEST_IDS.relatedId, term: "test" });
+
+      for (const q of [findQuery.query, relatedQuery.query]) {
+        expect(q).toContain("db.index.fulltext.queryNodes");
+        expect(q).toContain(ACCESS_MARKER);
+        expect(q).toContain("WHERE $companyId IS NULL");
+        expect(q).toContain("MATCH (testEntity)-[:BELONGS_TO]-(company)");
+        expect(q).toContain("ORDER BY score DESC");
+        // The access block runs AFTER the fulltext hits are bound to the entity alias.
+        expect(q.indexOf("WITH node AS testEntity, score")).toBeLessThan(q.indexOf(ACCESS_MARKER));
+        expect(q.indexOf(ACCESS_MARKER)).toBeLessThan(q.indexOf("ORDER BY score DESC"));
+      }
+      expect(relatedQuery.query).toContain("AUTHORED_BY");
+    });
+
+    it("term search on a non-company-scoped entity with an overridden buildDefaultMatch keeps that match", async () => {
+      const ownerRepository = new OwnerScopedRepository(
+        neo4jService as unknown as Neo4jService,
+        securityService as unknown as SecurityService,
+        clsService as unknown as ClsService,
+        false,
+      );
+      const findQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
+      const relatedQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
+      neo4jService.initQuery.mockReturnValueOnce(findQuery).mockReturnValueOnce(relatedQuery);
+      neo4jService.readMany.mockResolvedValue([MOCK_ENTITY]);
+
+      await ownerRepository.find({ term: "test" });
+      await ownerRepository.findByRelated({ relationship: "author", id: TEST_IDS.relatedId, term: "test" });
+
+      for (const q of [findQuery.query, relatedQuery.query]) {
+        expect(q).toContain("db.index.fulltext.queryNodes");
+        expect(q).toContain(OWNER_MARKER);
+        expect(q).toContain("ORDER BY score DESC");
+      }
+    });
+  });
+
   describe("Edge Cases", () => {
     it("should handle empty string values in create", async () => {
       const mockQuery = createMockQuery();

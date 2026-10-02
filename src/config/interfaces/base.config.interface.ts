@@ -22,6 +22,7 @@ import { ConfigModelManagerInterface } from "./config.model.manager.interface";
 import { ConfigNeo4jInterface } from "./config.neo4j.interface";
 import { ConfigOAuthInterface } from "./config.oauth.interface";
 import { ConfigOperatorInterface } from "./config.operator.interface";
+import { ConfigAssistantInterface } from "./config.assistant.interface";
 import { ConfigPromptsInterface } from "./config.prompts.interface";
 import { ConfigRateLimitInterface } from "./config.ratelimit.interface";
 import { ConfigRedisInterface } from "./config.redis.interface";
@@ -57,6 +58,7 @@ export interface BaseConfigInterface {
   responder?: ConfigResponderInterface;
   summariser?: ConfigSummariserInterface;
   operator?: ConfigOperatorInterface;
+  assistant?: ConfigAssistantInterface;
   chunker: ConfigChunkerInterface;
   chunkQueues: ConfigChunkQueuesInterface;
   contentTypes: ConfigContentTypesInterface;

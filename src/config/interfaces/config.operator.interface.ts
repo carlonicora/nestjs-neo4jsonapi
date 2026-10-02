@@ -5,4 +5,9 @@ export interface ConfigOperatorInterface {
    * @default 7
    */
   approvalTtlDays?: number;
+  /**
+   * Whether the operator gets the search_communities tool.
+   * @default true — set false to omit the search_communities (DRIFT) tool for hosts with no :Community nodes
+   */
+  communitySearch?: boolean;
 }

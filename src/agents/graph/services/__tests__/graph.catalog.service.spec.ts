@@ -379,8 +379,22 @@ describe("GraphCatalogService", () => {
         chat: { scope: "campaign" },
       });
 
+    // Relationship targets must be catalogued themselves, or buildCatalog drops the edge.
+    const scene = descriptor({
+      type: "scenes",
+      moduleId: dtoModuleId,
+      description: "A scene.",
+      fields: { name: { type: "string", description: "Name." } },
+    });
+    const user = descriptor({
+      type: "users",
+      moduleId: dtoModuleId,
+      description: "A user.",
+      fields: { name: { type: "string", description: "Name." } },
+    });
+
     const build = (relationships: Record<string, unknown>) => {
-      const svc = new GraphCatalogService({ loadAll: () => [campaign, npc(relationships)] } as any);
+      const svc = new GraphCatalogService({ loadAll: () => [campaign, scene, user, npc(relationships)] } as any);
       svc.buildCatalog();
       return svc.getEntityDetail("npcs", [dtoModuleId])!;
     };
@@ -608,6 +622,76 @@ describe("GraphCatalogService", () => {
       expect(() => build({ scope: "campaign", writable: { fields: ["name"], relationships: ["campaign"] } })).toThrow(
         /chat\.writable relationship "campaign", which is the scope relationship/i,
       );
+    });
+  });
+
+  describe("uncatalogued relationship targets", () => {
+    const moduleId = "66666666-6666-6666-6666-666666666666";
+
+    const ghost = (type: string) => ({ type, nodeName: type, labelName: type });
+
+    const folder = descriptor({
+      type: "folders",
+      moduleId,
+      description: "A folder.",
+      fields: { name: { type: "string", description: "Display name." } },
+      relationships: {
+        notes: {
+          model: ghost("notes"),
+          direction: "out",
+          relationship: "HOLDS",
+          cardinality: "many",
+          description: "Notes in this folder.",
+        },
+        versions: {
+          model: ghost("versions"),
+          direction: "out",
+          relationship: "HAS_VERSION",
+          cardinality: "many",
+          description: "Immutable versions of this folder.",
+          reverse: { name: "folder", description: "The folder this version belongs to." },
+        },
+      },
+      chat: { related: true },
+    });
+
+    const note = descriptor({
+      type: "notes",
+      moduleId,
+      description: "A note.",
+      fields: { title: { type: "string", description: "Title." } },
+      relationships: {},
+    });
+
+    // Registered, but without a top-level description: never catalogued.
+    const version = descriptor({
+      type: "versions",
+      moduleId,
+      fields: { number: { type: "number", description: "Version number." } },
+      relationships: {},
+    });
+
+    const build = () => {
+      const svc = new GraphCatalogService({ loadAll: () => [folder, note, version] } as any);
+      svc.buildCatalog();
+      return svc;
+    };
+
+    it("drops a relationship whose target type is not catalogued", () => {
+      const svc = build();
+      const entity = svc.getEntityDetail("folders", [moduleId])!;
+      expect(entity.relationships.map((r) => r.name)).toEqual(["notes", "related"]);
+      expect(svc.getMapFor([moduleId])).not.toContain("folders.versions");
+    });
+
+    it("keeps the polymorphic related traversal, which has no single target type", () => {
+      const entity = build().getEntityDetail("folders", [moduleId])!;
+      expect(entity.relationships.find((r) => r.name === "related")?.polymorphic).toBe(true);
+    });
+
+    it("leaves the descriptor itself untouched", () => {
+      build();
+      expect(Object.keys(folder.relationships)).toEqual(["notes", "versions"]);
     });
   });
 });

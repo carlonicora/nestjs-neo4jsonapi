@@ -12,6 +12,8 @@ export { TokenResolverService, type DynamicTokenResult } from "./services/token-
 export { EntityFactory } from "./factories/entity.factory";
 export { orderBy } from "./queries/order.by";
 export { buildFulltextTerm, escapeLuceneTerm } from "./helpers/build-fulltext-term";
+export { buildFilterClauses, type BuildFilterClausesResult } from "./helpers/build-filter-clauses";
+export { buildOrderByClause } from "./helpers/build-order-by";
 export { updateRelationshipQuery } from "./queries/update.relationship";
 
 // Abstracts

@@ -3,9 +3,9 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import { Audit, CacheInvalidate } from "../../../common/decorators";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
-import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
+import { isAiEnabledVia, pickInteractiveValidator } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
-import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
+import { CREDIT_VALIDATOR, CreditValidatorInterface, INTERACTIVE_CREDIT_VALIDATOR } from "../../../common/tokens";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AuditService } from "../../audit/services/audit.service";
@@ -31,7 +31,18 @@ export class AssistantActionController {
      * i.e. it runs the LLM. Same seam and same 404 as `AssistantController`.
      */
     @Optional() @Inject(CREDIT_VALIDATOR) private readonly creditValidator?: CreditValidatorInterface,
+    @Optional()
+    @Inject(INTERACTIVE_CREDIT_VALIDATOR)
+    private readonly interactiveCreditValidator?: CreditValidatorInterface,
   ) {}
+
+  /**
+   * Interactive gate: `INTERACTIVE_CREDIT_VALIDATOR` when bound, else `CREDIT_VALIDATOR`.
+   * Named `creditGate` because `gate()` below is the per-request check.
+   */
+  private get creditGate(): CreditValidatorInterface | undefined {
+    return pickInteractiveValidator(this.interactiveCreditValidator, this.creditValidator);
+  }
 
   // GET /assistant-actions/:actionId
   @Get(`${assistantActionMeta.endpoint}/:actionId`)
@@ -75,9 +86,9 @@ export class AssistantActionController {
     const companyId = request.user?.companyId;
     if (!companyId) return;
 
-    if (!(await isAiEnabledVia(this.creditValidator, { companyId }))) throw new NotFoundException();
+    if (!(await isAiEnabledVia(this.creditGate, { companyId }))) throw new NotFoundException();
 
-    if (this.creditValidator) await this.creditValidator.validateCredits({ companyId });
+    if (this.creditGate) await this.creditGate.validateCredits({ companyId });
   }
 
   private async resolve(reply: FastifyReply, actionId: string, approved: boolean) {

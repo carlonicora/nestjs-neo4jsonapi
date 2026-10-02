@@ -5,10 +5,12 @@ import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.int
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
 import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
 import { ConfigOperatorInterface } from "./interfaces/config.operator.interface";
+import { ConfigAssistantInterface } from "./interfaces/config.assistant.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
 import { ConfigResponderInterface } from "./interfaces/config.responder.interface";
 import { ConfigSummariserInterface } from "./interfaces/config.summariser.interface";
 import { AiTierConfig, AudioTierConfig } from "./interfaces/config.ai.interface";
+import { OAuthScopeDefinition } from "../foundations/oauth/constants/oauth.scopes";
 
 /**
  * Reads an optional numeric env var, preserving the "unset" state.
@@ -235,6 +237,12 @@ export interface BaseConfigOptions {
   operator?: ConfigOperatorInterface;
 
   /**
+   * Assistant behaviour switches (inline entity links).
+   * Optional - every switch defaults to off.
+   */
+  assistant?: ConfigAssistantInterface;
+
+  /**
    * Additional queue IDs for chunk processing.
    * The library always registers its own CHUNK queue.
    * Use this to register additional queues that ChunkService needs to add jobs to.
@@ -252,6 +260,13 @@ export interface BaseConfigOptions {
    * Defines the job names that processors use to match incoming jobs.
    */
   jobNames?: ConfigJobNamesInterface;
+
+  /**
+   * App-specific OAuth scopes registered on top of the built-ins
+   * (read, write, profile, mcp, admin). Exposed as `oauth.additionalScopes`.
+   * @default []
+   */
+  oauthScopes?: OAuthScopeDefinition[];
 }
 
 /**
@@ -566,6 +581,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       refreshTokenLifetime: parseInt(process.env.OAUTH_REFRESH_TOKEN_LIFETIME || "604800"),
       requirePkceForPublicClients: process.env.OAUTH_REQUIRE_PKCE_FOR_PUBLIC_CLIENTS !== "false",
       rotateRefreshTokens: process.env.OAUTH_ROTATE_REFRESH_TOKENS !== "false",
+      additionalScopes: options?.oauthScopes ?? [],
     },
     mcp: {
       enabled: process.env.MCP_ENABLED === "true",
@@ -611,6 +627,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     responder: options?.responder ?? {},
     summariser: options?.summariser ?? {},
     operator: options?.operator ?? {},
+    assistant: options?.assistant ?? {},
     chunker: {
       strategy: (process.env.CHUNKER_STRATEGY as "markdown-structural" | "semantic") || "markdown-structural",
       ocrLanguage: process.env.OCR_LANGUAGE || "eng",

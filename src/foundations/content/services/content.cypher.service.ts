@@ -28,20 +28,60 @@ export class ContentCypherService {
   }
 
   default(params?: { searchField: string; blockCompanyAndUser?: boolean }): string {
-    return `
-      MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")} ${params ? ` {${params.searchField}: $searchValue}` : ``})
-      WHERE ${
-        this.extension?.requireTldr
-          ? `${contentMeta.nodeName}.tldr IS NOT NULL
-      AND ${contentMeta.nodeName}.tldr <> ""
-      AND `
-          : ``
-      }$companyId IS NULL
+    const companyCondition = `$companyId IS NULL
       OR EXISTS {
         MATCH (${contentMeta.nodeName})-[:BELONGS_TO]-(company)
-      }
+      }`;
+
+    // Each extra condition is a parenthesised conjunct, so the company OR can
+    // never swallow the tldr filter (AND binds tighter than OR). With no extra
+    // condition the clause is the historical one.
+    //
+    // The per-label `accessPredicates` are NOT applied here: every caller of
+    // default() (ContentRepository.find and .findByOwner) follows it with
+    // `userHasAccess()`, which carries them. Applying them here as well ran
+    // every EXISTS check twice.
+    const conjuncts: string[] = [];
+    if (this.extension?.requireTldr) {
+      conjuncts.push(`(${contentMeta.nodeName}.tldr IS NOT NULL AND ${contentMeta.nodeName}.tldr <> "")`);
+    }
+
+    const where =
+      conjuncts.length === 0
+        ? companyCondition
+        : [...conjuncts, `(${companyCondition})`].join(`
+      AND `);
+
+    return `
+      MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")} ${params ? ` {${params.searchField}: $searchValue}` : ``})
+      WHERE ${where}
       WITH ${contentMeta.nodeName}${params?.blockCompanyAndUser ? `` : `, company, currentUser`}
     `;
+  }
+
+  /**
+   * The per-label `accessPredicates` as `(NOT content:<Label> OR (<predicate>))`
+   * conjuncts: a row of that label survives only when its predicate holds, rows
+   * of every other label are untouched. Empty when no predicate is configured
+   * (the default) or when running as an automated job, mirroring
+   * `SecurityService.userHasAccess`, which skips access checks for those.
+   *
+   * Without a user in context `currentUser` is not bound, so a predicate over it
+   * would match ANY user inside its `EXISTS {}`; rows of a guarded label are then
+   * excluded outright (`NOT content:<Label>`).
+   */
+  private accessPredicateConjuncts(): string[] {
+    const predicates = this.extension?.accessPredicates;
+    if (!predicates) return [];
+    if (this.clsService.get("isAutomatedJob")) return [];
+
+    const hasUser = !!this.clsService.get("userId");
+
+    return Object.entries(predicates).map(([labelName, predicate]) =>
+      hasUser
+        ? `(NOT ${contentMeta.nodeName}:${labelName} OR (${predicate}))`
+        : `(NOT ${contentMeta.nodeName}:${labelName})`,
+    );
   }
 
   /**
@@ -75,12 +115,38 @@ export class ContentCypherService {
       : `MATCH (${contentMeta.nodeName})<-[:${relationshipTypes}]-(${params.target})`;
   }
 
+  /**
+   * The access check every Content read runs (via `SecurityService.userHasAccess`,
+   * which skips it for automated jobs): the list, by-owner and by-ids reads in
+   * `ContentRepository`, the related rows of the `/contents/:id/relevance` read
+   * in `RelevancyRepository`, which receives this service as its `cypherService`,
+   * and the SOURCE content check `RelevancyRepository` runs before every
+   * relevance read (`/contents/:id/relevance` and `/contents/:id/user-relevance`).
+   *
+   * Default (no `accessPredicates`): the bare re-projecting `WITH`, unchanged.
+   *
+   * With `accessPredicates`: the same `WITH`, a `WHERE` carrying the per-label
+   * conjuncts, then the same `WITH` again, so the fragment always ends on a
+   * plain projection and the caller's next clause (`ORDER BY … {CURSOR}`, a
+   * `MATCH`, a `WHERE`) attaches to it exactly as it did before.
+   */
   userHasAccess = (params?: { useTotalScore?: boolean }): string => {
     const companyId = this.clsService.get("companyId");
     const userId = this.clsService.get("userId");
 
+    const projection = `WITH ${contentMeta.nodeName}${companyId ? `, ${companyMeta.nodeName}` : ``}${userId ? `, currentUser` : ``}${params?.useTotalScore ? `, totalScore` : ``}`;
+
+    const accessConjuncts = this.accessPredicateConjuncts();
+    if (accessConjuncts.length === 0)
+      return `
+      ${projection}
+    `;
+
     return `
-      WITH ${contentMeta.nodeName}${companyId ? `, ${companyMeta.nodeName}` : ``}${userId ? `, currentUser` : ``}${params?.useTotalScore ? `, totalScore` : ``}
+      ${projection}
+      WHERE ${accessConjuncts.join(`
+      AND `)}
+      ${projection}
     `;
   };
 

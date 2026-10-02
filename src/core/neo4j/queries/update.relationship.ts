@@ -7,6 +7,14 @@ export const updateRelationshipQuery = (params: {
   values: string[];
   relationshipProperties?: { [key: string]: any }[] | ((id: string) => { [key: string]: any });
   queryParams?: any;
+  /**
+   * Opt-in: only link target nodes that BELONG_TO the company in `$companyId`
+   * (set by `Neo4jService.initQuery()`). For writes whose target ids come from
+   * request input, so an id of another firm's node never gets an edge. Pair it
+   * with `Neo4jService.validateExistingNodes()` (per-node `companyId`) to
+   * refuse the request instead of silently skipping the foreign id.
+   */
+  companyScoped?: boolean;
 }): string => {
   // COLLISION FIX: Use alias when node and param names collide
   const paramAlias = params.node.toLowerCase() === params.param.toLowerCase() ? `${params.param}_ids` : params.param;
@@ -72,7 +80,12 @@ export const updateRelationshipQuery = (params: {
         ? `
         WITH ${params.node}, $${paramAlias} AS ${paramAlias}
         UNWIND ${paramAlias} AS id
-        MATCH (new:${params.label} {id: id})
+        MATCH (new:${params.label} {id: id})${
+          params.companyScoped
+            ? `
+        WHERE EXISTS { (new)-[:BELONGS_TO]->(:Company {id: $companyId}) }`
+            : ``
+        }
         MERGE (${params.node})${params.relationshipToNode ? "-" : "<-"}[rel:${params.relationshipName}]${params.relationshipToNode ? "->" : "-"}(new)
         ${relationshipProps ? `SET ${relationshipProps}, rel.updatedAt = datetime()` : `SET rel.updatedAt = datetime()`}
         `

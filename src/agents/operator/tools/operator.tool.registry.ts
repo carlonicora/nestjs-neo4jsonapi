@@ -20,7 +20,8 @@ import { SearchDocumentsTool } from "./search-documents.tool";
 /**
  * Composes the operator's tool set for a single turn:
  * - the five graph tools (read-only, built per request with ctx + recorder)
- * - the two retrieval tools (search_documents, search_communities)
+ * - the retrieval tools: search_documents, plus search_communities unless the
+ *   host sets `operator.communitySearch: false` (no :Community nodes to search)
  * - the generic entity write tools, but only when a catalogued type the caller
  *   can reach declares `chat.writable` — otherwise none are built
  * - the test-only destructive tool (non-production environments only)
@@ -63,9 +64,14 @@ export class OperatorToolRegistry {
       { tool: this.readEntityTool.build(userCtx, recorder), destructive: false },
       { tool: this.traverseTool.build(userCtx, recorder), destructive: false },
       { tool: this.searchDocumentsTool.build(ctx, recorder), destructive: false },
-      // ctx carries the turn's cost attribution down into the DRIFT sub-agent.
-      { tool: this.searchCommunitiesTool.build(recorder, ctx), destructive: false },
     ];
+
+    // DRIFT costs an LLM call plus an embedding per call, so a host with no
+    // :Community nodes opts out rather than paying for a guaranteed empty answer.
+    if (baseConfig.operator?.communitySearch !== false) {
+      // ctx carries the turn's cost attribution down into the DRIFT sub-agent.
+      definitions.push({ tool: this.searchCommunitiesTool.build(recorder, ctx), destructive: false });
+    }
 
     // Generic write tools. buildDefinitions() returns [] unless a catalogued
     // type the caller can reach is chat.writable, so hosts that opt none in keep

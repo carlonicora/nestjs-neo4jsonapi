@@ -70,6 +70,12 @@ export interface CatalogScopeHop {
   targetLabel: string;
   /** JSON:API type of this hop's target, e.g. "campaigns". */
   targetType: string;
+  /**
+   * True for a hop compiled from an inline `ChatScopeHop` (not a descriptor
+   * relationship). `key` and `dtoKey` are then `""`: the hop is a scope path
+   * only, and cannot be written or traversed through a repository.
+   */
+  inline?: boolean;
 }
 
 export interface CatalogScope {
@@ -79,6 +85,12 @@ export interface CatalogScope {
   rootType: string;
   /** Neo4j label of the scope root, e.g. "Campaign". */
   rootLabel: string;
+  /**
+   * Compiled from `chat.scopeByService`: the scope edge does not exist in the app
+   * database, so `path` is empty and the type's service decides membership
+   * through `ExternalEntitySource.filterInScope`. No Cypher scope clause exists.
+   */
+  viaService?: boolean;
 }
 
 export interface CatalogEntity {
@@ -110,6 +122,11 @@ export interface CatalogEntity {
    * the write succeeds and the read-back after it throws `not found`.
    */
   owner?: { key: string; dtoKey: string; type: string };
+  /**
+   * Mirrors chat.scopeShared — reference data visible in every scoped run,
+   * whatever the root. Never set together with `scope`.
+   */
+  scopeShared?: boolean;
   /** Mirrors chat.writable — true for BOTH the legacy `true` and the object form. */
   writable?: boolean;
   /**

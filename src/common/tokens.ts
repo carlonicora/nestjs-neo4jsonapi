@@ -152,6 +152,20 @@ export interface TokenUsageRecorderInterface {
 export const CREDIT_VALIDATOR = Symbol("CREDIT_VALIDATOR");
 
 /**
+ * Gates interactive AI requests only (assistant, operator, MCP); falls back to
+ * CREDIT_VALIDATOR when unbound.
+ *
+ * Same `CreditValidatorInterface` contract as `CREDIT_VALIDATOR` above. It
+ * exists so an application can meter the interactive surfaces WITHOUT binding
+ * `CREDIT_VALIDATOR`, which also gates background ingestion (chunk and
+ * embedding processors park no-credit work as `PendingCredits`). Consumers
+ * resolve both tokens as `@Optional()` and pick with `pickInteractiveValidator`
+ * (`common/helpers/credit-gate.ts`): with this token unbound, behaviour is
+ * exactly the `CREDIT_VALIDATOR` behaviour documented above.
+ */
+export const INTERACTIVE_CREDIT_VALIDATOR = Symbol("INTERACTIVE_CREDIT_VALIDATOR");
+
+/**
  * Contract implemented by an application-provided credit validator.
  */
 export interface CreditValidatorInterface {

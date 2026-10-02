@@ -5,6 +5,7 @@ import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/int
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { NOTEBOOK_BUDGET_CHARS } from "../../../foundations/chunk/repositories/retrieval.constants";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { RESPONDER_INLINE_LINKS_INSTRUCTION, resolveRefLinks } from "../../common/inline-entity-links";
 import { buildScopeAttribution } from "../../common/usage-attribution";
 import { ResponderContext, ResponderContextState } from "../../responder/contexts/responder.context";
 import type { EntityReference } from "../interfaces/entity.reference.interface";
@@ -309,7 +310,9 @@ export class ResponderAnswerNodeService {
         branchesUsed,
       },
       outputSchema: this.outputSchema,
-      systemPrompts: [this.systemPrompt],
+      systemPrompts: state.inlineEntityLinks
+        ? [this.systemPrompt, RESPONDER_INLINE_LINKS_INSTRUCTION]
+        : [this.systemPrompt],
       temperature: this.temperature,
       metadata: {
         nodeName: "answer",
@@ -365,6 +368,10 @@ export class ResponderAnswerNodeService {
       })
       .filter((x): x is EntityReference => x !== null);
 
+    // Opt-in inline links: `[Name](ref:N)` → `[Name](mention://type/id)`; an
+    // unknown handle collapses to its plain text. Off = finalAnswer verbatim.
+    const answer = state.inlineEntityLinks ? resolveRefLinks(llmResponse.finalAnswer, byRef) : llmResponse.finalAnswer;
+
     const llmRefCount = (llmResponse.references ?? []).length;
     const droppedRefs = llmRefCount - references.length;
     this.logger.log(
@@ -400,7 +407,7 @@ export class ResponderAnswerNodeService {
     state.finalAnswer = {
       title: llmResponse.title,
       analysis: llmResponse.analyse,
-      answer: llmResponse.finalAnswer,
+      answer,
       questions: llmResponse.questions ?? [],
       hasAnswer: branchesUsed.length > 0 || seedSection.length > 0 || filteredSources.length + references.length > 0,
     };

@@ -4,6 +4,11 @@
  * Defines the available scopes for OAuth2 authorization.
  * Scopes control what actions an OAuth client can perform on behalf of a user.
  *
+ * These are the generic built-in scopes. Apps register their own scopes on top
+ * of these through `createBaseConfig({ oauthScopes: [...] })`
+ * (`oauth.additionalScopes`). The helpers in this file describe the built-ins
+ * only; runtime validation goes through `OAuthScopeService`, which knows both.
+ *
  * @see RFC 6749 Section 3.3 - Access Token Scope
  */
 export const OAuth2Scopes = {
@@ -12,18 +17,6 @@ export const OAuth2Scopes = {
 
   /** General write access to user data */
   WRITE: "write",
-
-  /** Read access to photographs */
-  PHOTOGRAPHS_READ: "photographs:read",
-
-  /** Create and modify photographs */
-  PHOTOGRAPHS_WRITE: "photographs:write",
-
-  /** Read access to rolls/albums */
-  ROLLS_READ: "rolls:read",
-
-  /** Create and modify rolls/albums */
-  ROLLS_WRITE: "rolls:write",
 
   /** Access to user profile information (name, email) */
   PROFILE: "profile",
@@ -35,10 +28,26 @@ export const OAuth2Scopes = {
   ADMIN: "admin",
 } as const;
 
-/** Type for valid OAuth scope values */
+/**
+ * A scope definition: the scope string plus its consent-screen label and description.
+ * Used for app-specific scopes registered through config (`oauth.additionalScopes`).
+ */
+export interface OAuthScopeDefinition {
+  /** The scope string, e.g. "documents:read" */
+  scope: string;
+  /** Short human-readable label for consent screens */
+  name: string;
+  /** Explanation of the access being granted, for consent screens */
+  description: string;
+}
+
+/** Type for built-in OAuth scope values */
 export type OAuthScopeType = (typeof OAuth2Scopes)[keyof typeof OAuth2Scopes];
 
-/** Array of all valid scope strings */
+/**
+ * Array of the built-in scope strings.
+ * Does not include app-specific scopes from config; use `OAuthScopeService.isValid()` at runtime.
+ */
 export const VALID_OAUTH_SCOPES: string[] = Object.values(OAuth2Scopes);
 
 /**
@@ -48,10 +57,6 @@ export const VALID_OAUTH_SCOPES: string[] = Object.values(OAuth2Scopes);
 export const OAuthScopeNames: Record<OAuthScopeType, string> = {
   [OAuth2Scopes.READ]: "Read Access",
   [OAuth2Scopes.WRITE]: "Write Access",
-  [OAuth2Scopes.PHOTOGRAPHS_READ]: "View Photographs",
-  [OAuth2Scopes.PHOTOGRAPHS_WRITE]: "Upload Photographs",
-  [OAuth2Scopes.ROLLS_READ]: "View Rolls",
-  [OAuth2Scopes.ROLLS_WRITE]: "Manage Rolls",
   [OAuth2Scopes.PROFILE]: "View Profile",
   [OAuth2Scopes.MCP]: "MCP Server Access",
   [OAuth2Scopes.ADMIN]: "Administrative Access",
@@ -64,17 +69,16 @@ export const OAuthScopeNames: Record<OAuthScopeType, string> = {
 export const OAuthScopeDescriptions: Record<OAuthScopeType, string> = {
   [OAuth2Scopes.READ]: "Read access to your data",
   [OAuth2Scopes.WRITE]: "Write access to your data",
-  [OAuth2Scopes.PHOTOGRAPHS_READ]: "View your photographs",
-  [OAuth2Scopes.PHOTOGRAPHS_WRITE]: "Upload and modify your photographs",
-  [OAuth2Scopes.ROLLS_READ]: "View your rolls and albums",
-  [OAuth2Scopes.ROLLS_WRITE]: "Create and modify rolls and albums",
   [OAuth2Scopes.PROFILE]: "View your profile information (name, email)",
   [OAuth2Scopes.MCP]: "Let an AI assistant read and act on your data through the MCP server",
   [OAuth2Scopes.ADMIN]: "Administrative access to the platform",
 };
 
 /**
- * Validates that all requested scopes are valid.
+ * Validates that all requested scopes are built-in scopes.
+ *
+ * Built-ins only: app-specific scopes from config are rejected here.
+ * Runtime validation goes through `OAuthScopeService.validate()`.
  * @param scopes - Space-separated scope string or array of scopes
  * @returns true if all scopes are valid
  */

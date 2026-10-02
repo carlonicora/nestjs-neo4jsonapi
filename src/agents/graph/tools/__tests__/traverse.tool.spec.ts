@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { TraverseTool } from "../traverse.tool";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
@@ -695,6 +696,25 @@ describe("TraverseTool — polymorphic related traversal", () => {
     expect(out.note).toBe(
       'Only the first 1 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
     );
+  });
+
+  it("polymorphic traverse from a type whose service implements findRelatedIds uses it instead of RelatedEdgesService", async () => {
+    const { tool, relatedEdges, services } = build({ pairs: [{ id: "b1", label: "Beta" }] });
+    services.things.findRelatedIds = vi.fn(async () => [
+      { type: "alphas", id: "a1" },
+      { type: "alphas", id: "a2" },
+    ]);
+    const out: any = await tool.invoke(
+      { fromType: "things", fromId: "id1", relationship: "related", limit: 1 },
+      ctx,
+      describedRecorder(),
+    );
+    expect(services.things.findRelatedIds).toHaveBeenCalledWith({ id: "id1", cypherLabel: "RELATES_TO", limit: 2 });
+    expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0]).toMatchObject({ id: "a1", type: "alphas" });
+    expect(out.hasMore).toBe(true);
+    expect(services.alphas.findRecordById).toHaveBeenCalledWith({ id: "a1" });
   });
 
   it("leaves typed relationships on the existing path (regression)", async () => {

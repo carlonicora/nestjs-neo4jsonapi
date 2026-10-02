@@ -57,6 +57,8 @@ describe("OAuthAuthorizeController", () => {
   beforeEach(async () => {
     const mockOAuthService = {
       initiateAuthorization: vi.fn(),
+      getConsentInfo: vi.fn(),
+      approveAuthorization: vi.fn(),
     };
 
     const mockClsService = {
@@ -287,6 +289,41 @@ describe("OAuthAuthorizeController", () => {
         // URL should be properly encoded
         expect(mockReply.redirect).toHaveBeenCalledWith(expect.any(String), 302);
       });
+    });
+  });
+
+  describe("getAuthorizationInfo", () => {
+    it("info passes the caller's userId", async () => {
+      clsService.get.mockReturnValue(MOCK_USER_ID);
+      oauthService.getConsentInfo.mockResolvedValue({ client: {}, scopes: [], companies: [] } as any);
+
+      await controller.getAuthorizationInfo({
+        client_id: MOCK_CLIENT_ID,
+        redirect_uri: MOCK_REDIRECT_URI,
+        scope: "read",
+      });
+
+      expect(clsService.get).toHaveBeenCalledWith("userId");
+      expect(oauthService.getConsentInfo).toHaveBeenCalledWith(expect.objectContaining({ userId: MOCK_USER_ID }));
+    });
+  });
+
+  describe("approveAuthorization", () => {
+    it("approve forwards company_id", async () => {
+      clsService.get.mockReturnValue(MOCK_USER_ID);
+      oauthService.approveAuthorization.mockResolvedValue({ redirectUrl: `${MOCK_REDIRECT_URI}?code=x` });
+
+      const result = await controller.approveAuthorization({
+        client_id: MOCK_CLIENT_ID,
+        redirect_uri: MOCK_REDIRECT_URI,
+        scope: "read",
+        company_id: "c2",
+      });
+
+      expect(oauthService.approveAuthorization).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: "c2", userId: MOCK_USER_ID }),
+      );
+      expect(result).toEqual({ meta: { redirectUrl: `${MOCK_REDIRECT_URI}?code=x` } });
     });
   });
 

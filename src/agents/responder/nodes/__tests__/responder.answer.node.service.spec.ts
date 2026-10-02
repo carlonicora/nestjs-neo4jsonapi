@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { ResponderAnswerNodeService } from "../responder.answer.node.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { modelRegistry } from "../../../../common/registries/registry";
+import { RESPONDER_INLINE_LINKS_INSTRUCTION } from "../../../common/inline-entity-links";
 
 interface LLMResponse {
   title: string;
@@ -505,5 +506,50 @@ describe("ResponderAnswerNodeService.execute", () => {
     expect(callArgs.inputParams.scopeSection).toContain("projects:abc-123");
     expect(callArgs.inputParams.scopeSection).toContain("CONVERSATION SCOPE");
     expect(callArgs.inputParams.branchesUsed).toEqual([]);
+  });
+  it("with inlineEntityLinks, ref links in finalAnswer become mention links", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse({ finalAnswer: "Vedi [Acme](ref:0)" }));
+
+    const state = buildState({
+      branchPlan: { runGraph: true, runContextualiser: false, runDrift: false, reasoning: "" },
+      graphContext: sampleGraphContext,
+      inlineEntityLinks: true,
+    });
+
+    await service.execute({ state });
+
+    expect(state.finalAnswer.answer).toBe("Vedi [Acme](mention://accounts/a-1)");
+  });
+
+  it("with inlineEntityLinks, the extra instruction is in systemPrompts", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({
+      state: buildState({
+        branchPlan: { runGraph: true, runContextualiser: false, runDrift: false, reasoning: "" },
+        graphContext: sampleGraphContext,
+        inlineEntityLinks: true,
+      }),
+    });
+
+    const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+    expect(callArgs.systemPrompts).toHaveLength(2);
+    expect(callArgs.systemPrompts[1]).toBe(RESPONDER_INLINE_LINKS_INSTRUCTION);
+  });
+
+  it("without the flag, finalAnswer is passed through verbatim and systemPrompts is unchanged", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse({ finalAnswer: "Vedi [Acme](ref:0)" }));
+
+    const state = buildState({
+      branchPlan: { runGraph: true, runContextualiser: false, runDrift: false, reasoning: "" },
+      graphContext: sampleGraphContext,
+    });
+
+    await service.execute({ state });
+
+    const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+    expect(callArgs.systemPrompts).toHaveLength(1);
+    expect(callArgs.systemPrompts).not.toContain(RESPONDER_INLINE_LINKS_INSTRUCTION);
+    expect(state.finalAnswer.answer).toBe("Vedi [Acme](ref:0)");
   });
 });

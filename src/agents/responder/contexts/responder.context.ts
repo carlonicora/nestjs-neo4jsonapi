@@ -30,6 +30,8 @@ export const ResponderContext = Annotation.Root({
   assistantId: Annotation<string | undefined>,
   /** App-provided context blocks guaranteed present this turn (seed-context providers). */
   seedContexts: Annotation<AssistantSeedContext[] | undefined>,
+  /** When true, the answer node asks for and resolves inline `[Name](ref:N)` entity links. Absent = off. */
+  inlineEntityLinks: Annotation<boolean | undefined>,
   dataLimits: Annotation<DataLimits>(),
   context: Annotation<typeof ContextualiserContext.State>({
     default: () => undefined,

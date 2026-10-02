@@ -94,6 +94,19 @@ export interface FieldDef {
 }
 
 /**
+ * An inline scope hop: a scope path that is NOT a descriptor relationship.
+ * Used only for the chat scope chain. It is never added to the catalog
+ * relationships, never read by repositories and never serialised.
+ */
+export interface ChatScopeHop {
+  /** Meta of the type one hop closer to the root. It must itself declare chat.scope. */
+  model: DataMeta;
+  direction: "in" | "out";
+  /** Neo4j relationship type(s); "A|B" allowed. */
+  relationship: string;
+}
+
+/**
  * Which parts of a `chat.writable` entity the operator's write tools may set.
  * Declared by the host app on the descriptor, surfaced to the model through
  * `describe_entity`, enforced by the write tools before any approval is asked.
@@ -189,6 +202,17 @@ export interface RelationshipDef {
   immutable?: boolean;
   /** If true, the relationship is never written by generic descriptor-driven paths (create/put/patch skip it; relationship handlers reject it). Serialisation-only. */
   readOnly?: boolean;
+  /**
+   * If true, the related records live outside this database (e.g. an external
+   * corpus): the local node is only a link target. Generic reads
+   * (`buildReturnStatement()`, so find/findById/findByIds/findByRelated/
+   * findByRelatedEdge) project the related node as its id and labels only —
+   * `{ labels, properties: { id } }` — and never return its stored properties.
+   * The owning service hydrates the fields from the external source.
+   * Not allowed together with `include` (an external node has no local
+   * relationships to expand). Default: false.
+   */
+  externalSource?: boolean;
   /** Human-readable description. Required for the relationship to be visible to the chatbot. */
   description?: string;
   /** Opts in reverse traversal from the target entity. Omit to keep one-way. */
@@ -294,10 +318,25 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     list?: string[];
     /**
      * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
-     * root) or the key of a relationship on THIS descriptor pointing one hop
-     * closer to the root. The catalog walks the chain at boot.
+     * root), the key of a relationship on THIS descriptor pointing one hop
+     * closer to the root, or an inline {@link ChatScopeHop} for a scope path
+     * that is not a descriptor relationship. The catalog walks the chain at boot.
      */
-    scope?: string;
+    scope?: string | ChatScopeHop;
+    /**
+     * Reference data: visible in every scoped run, whatever the root.
+     * Mutually exclusive with `scope`; not allowed on a `writable` type.
+     */
+    scopeShared?: boolean;
+    /**
+     * Scope decided by the type's own service rather than by a Cypher path:
+     * for records whose scope edge does not exist in the app database. The
+     * service must implement `ExternalEntitySource.filterInScope`; without it
+     * every record of this type is out of scope in a scoped run.
+     * `rootType` must be a catalogued type whose `chat.scope` is `"self"`.
+     * Mutually exclusive with `scope` and `scopeShared` (boot throws).
+     */
+    scopeByService?: { rootType: string };
     /**
      * Opts this type into the operator's generic write tools.
      * `true` keeps the legacy meaning (every described field, every forward
@@ -396,10 +435,25 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     list?: string[];
     /**
      * Campaign/tenant-style scoping. Either "self" (this entity IS the scope
-     * root) or the key of a relationship on THIS descriptor pointing one hop
-     * closer to the root. The catalog walks the chain at boot.
+     * root), the key of a relationship on THIS descriptor pointing one hop
+     * closer to the root, or an inline {@link ChatScopeHop} for a scope path
+     * that is not a descriptor relationship. The catalog walks the chain at boot.
      */
-    scope?: string;
+    scope?: string | ChatScopeHop;
+    /**
+     * Reference data: visible in every scoped run, whatever the root.
+     * Mutually exclusive with `scope`; not allowed on a `writable` type.
+     */
+    scopeShared?: boolean;
+    /**
+     * Scope decided by the type's own service rather than by a Cypher path:
+     * for records whose scope edge does not exist in the app database. The
+     * service must implement `ExternalEntitySource.filterInScope`; without it
+     * every record of this type is out of scope in a scoped run.
+     * `rootType` must be a catalogued type whose `chat.scope` is `"self"`.
+     * Mutually exclusive with `scope` and `scopeShared` (boot throws).
+     */
+    scopeByService?: { rootType: string };
     /**
      * Opts this type into the operator's generic write tools.
      * `true` keeps the legacy meaning (every described field, every forward

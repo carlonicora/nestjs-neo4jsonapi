@@ -38,6 +38,9 @@ export type OAuthAuthorizationCode = Entity & {
 
   /** User ID who authorized this code */
   userId: string;
+
+  /** Company chosen on the consent screen (null when none was chosen) */
+  companyId: string | null;
 };
 
 export const oauthAuthorizationCodeMeta: DataMeta = {

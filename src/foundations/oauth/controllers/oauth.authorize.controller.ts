@@ -93,10 +93,13 @@ export class OAuthAuthorizeController {
   @Get("authorize/info")
   @UseGuards(JwtAuthGuard)
   async getAuthorizationInfo(@Query() query: OAuthConsentInfoQueryDto): Promise<ConsentInfoResponse> {
+    const userId = this.cls.get("userId");
+
     return this.oauthService.getConsentInfo({
       clientId: query.client_id,
       redirectUri: query.redirect_uri,
       scope: query.scope,
+      userId,
     });
   }
 
@@ -125,6 +128,7 @@ export class OAuthAuthorizeController {
       codeChallenge: body.code_challenge,
       codeChallengeMethod: body.code_challenge_method,
       userId,
+      companyId: body.company_id,
     });
 
     return { meta: { redirectUrl: result.redirectUrl } };

@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
 import { ModelService } from "../../../core/llm/services/model.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { isExternalEntitySource } from "../../../common/interfaces/external.entity.source.interface";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "./graph.catalog.service";
 
@@ -12,6 +14,14 @@ export class GraphIndexManager implements OnApplicationBootstrap {
     private readonly neo4j: Neo4jService,
     private readonly catalog: GraphCatalogService,
     private readonly models: ModelService,
+    /**
+     * Identifies types whose records live outside the app database
+     * (`ExternalEntitySource`). GraphSearchService never runs the fulltext or
+     * semantic tier for those types, so no index is created for them. Optional
+     * in the TYPE signature only, last for positional compatibility; Nest
+     * resolves it (CoreModule exports it globally).
+     */
+    private readonly registry?: EntityServiceRegistry,
   ) {}
 
   // Fires in onApplicationBootstrap (after all onModuleInit). GraphCatalogService
@@ -25,6 +35,7 @@ export class GraphIndexManager implements OnApplicationBootstrap {
     const dims = this.models.getEmbedderDimensions();
 
     for (const e of entities) {
+      if (isExternalEntitySource(this.registry?.get(e.type))) continue;
       await this.ensureFulltext(e);
       await this.ensureVector(e, dims);
     }

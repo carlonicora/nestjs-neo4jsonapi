@@ -6,9 +6,12 @@ import { z } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
+import { modelRegistry } from "../../../common/registries/registry";
+import type { DataLimits } from "../../../common/types/data.limits";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
+import { sanitiseMentionLinks } from "../../common/inline-entity-links";
 import { buildScopeAttribution } from "../../common/usage-attribution";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
 import type { EntityReference } from "../../responder/interfaces/entity.reference.interface";
@@ -31,6 +34,14 @@ const finalAnswerSchema = z.object({
   answer: z.string(),
   questions: z.array(z.string()),
 });
+
+/**
+ * Appended to the finalise instructions when the caller opts into inline
+ * entity links. The answer is sanitised afterwards, so a link the model invents
+ * never survives.
+ */
+export const OPERATOR_INLINE_LINKS_INSTRUCTION =
+  "When the answer names a record that appears in a tool result above, write it as a markdown link [Name](mention://<type>/<id>) using that record's type and id from the tool result. Link only records from tool results. The link text must be that record's own name or title, and the record must be the thing the text refers to: a document about a company is a document, so never put the company's name on the document's link. When the thing named has no record of its own in the tool results, write its name as plain text with no link. The link target is not shown to the user, so this does not break the rule against showing ids.";
 
 /** Renders seed-context blocks into one system-prompt string; null when there is nothing to render. */
 export const renderSeedContexts = (seeds?: AssistantSeedContext[]): string | null => {
@@ -139,6 +150,10 @@ export class OperatorService {
     assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
+    /** Retrieval limits handed to the tools. Absent = no limits. */
+    dataLimits?: DataLimits;
+    /** Let the final answer link the records it names (`mention://type/id`). Default off. */
+    inlineEntityLinks?: boolean;
   }): Promise<OperatorRunResult> {
     const app = await this.compileGraph(
       {
@@ -147,7 +162,7 @@ export class OperatorService {
         userModuleIds: params.userModuleIds,
         contentId: params.contentId,
         contentType: params.contentType,
-        dataLimits: {},
+        dataLimits: params.dataLimits ?? {},
         messages: params.messages,
         scopeId: params.scopeId,
         scopeType: params.scopeType,
@@ -157,6 +172,7 @@ export class OperatorService {
         assistantId: params.assistantId,
       },
       params.seedContexts,
+      params.inlineEntityLinks,
     );
 
     const initialState: Partial<OperatorContextState> = {
@@ -170,6 +186,7 @@ export class OperatorService {
       scopeType: params.scopeType,
       scopeLabel: params.scopeLabel,
       assistantId: params.assistantId,
+      inlineEntityLinks: params.inlineEntityLinks,
       question: params.question,
     };
 
@@ -200,6 +217,10 @@ export class OperatorService {
     assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
+    /** Retrieval limits handed to the tools. Absent = no limits. */
+    dataLimits?: DataLimits;
+    /** Let the final answer link the records it names (`mention://type/id`). Default off. */
+    inlineEntityLinks?: boolean;
   }): Promise<OperatorRunResult> {
     // The resumed run rebuilds its tools from this context, so the scope must
     // be supplied again — the frozen checkpoint does not carry the closures.
@@ -215,7 +236,7 @@ export class OperatorService {
         userModuleIds: params.userModuleIds,
         contentId: params.contentId,
         contentType: params.contentType,
-        dataLimits: {},
+        dataLimits: params.dataLimits ?? {},
         messages: params.messages ?? [],
         scopeId: params.scopeId,
         scopeType: params.scopeType,
@@ -223,6 +244,7 @@ export class OperatorService {
         assistantId: params.assistantId,
       },
       params.seedContexts,
+      params.inlineEntityLinks,
     );
 
     const finalState = (await app.invoke(new Command({ resume: { approved: params.approved } }), {
@@ -233,7 +255,11 @@ export class OperatorService {
     return this.mapResult(finalState);
   }
 
-  private async compileGraph(ctx: OperatorRetrievalContext, seedContexts?: AssistantSeedContext[]) {
+  private async compileGraph(
+    ctx: OperatorRetrievalContext,
+    seedContexts?: AssistantSeedContext[],
+    inlineEntityLinks?: boolean,
+  ) {
     const saver: BaseCheckpointSaver = await this.checkpointer.getSaver();
 
     // Rendered once per compile and closed over by the agent node, like the
@@ -419,6 +445,10 @@ export class OperatorService {
           })
           .join("\n");
 
+        // The checkpointed channel wins; the compile-time flag covers a resume
+        // of a run checkpointed before the channel existed.
+        const linksOn = (state.inlineEntityLinks ?? inlineEntityLinks) === true;
+
         const result = await this.llm.call({
           inputParams: { question: state.question, conversation: transcript },
           outputSchema: finalAnswerSchema,
@@ -431,7 +461,8 @@ export class OperatorService {
             "This is the full conversation of the operator run that just finished (model turns, tool calls and tool results):\n\n{conversation}\n\n" +
             "Produce the final reply: `answer` is the message for the user (built only from facts in the conversation above), `questions` is up to three short follow-up questions the user might ask next. " +
             "If the conversation contains no tool results that answer the question, `answer` must say plainly that the information could not be found — do not guess and do not invent records. " +
-            "Never state that an action was performed (created, updated, deleted, executed) unless a tool result in the conversation confirms that exact action.",
+            "Never state that an action was performed (created, updated, deleted, executed) unless a tool result in the conversation confirms that exact action." +
+            (linksOn ? " " + OPERATOR_INLINE_LINKS_INSTRUCTION : ""),
           metadata: { agent: "operator", node: "finalise", companyId: state.companyId },
           ...buildScopeAttribution({
             tokenUsageType: TokenUsageType.Operator,
@@ -442,8 +473,22 @@ export class OperatorService {
           }),
         });
 
+        let answer = result.answer ?? "";
+        if (linksOn) {
+          // Tool results already passed ScopeGuard, so an id that appears in
+          // them is a record this run was allowed to read.
+          const toolResultText = state.messages
+            .filter((m) => m.getType() === "tool")
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+            .join("\n");
+          answer = sanitiseMentionLinks(
+            answer,
+            (type, id) => !!modelRegistry.getByType(type) && toolResultText.includes(id),
+          );
+        }
+
         return {
-          finalAnswer: { answer: result.answer ?? "", questions: result.questions ?? [] },
+          finalAnswer: { answer, questions: result.questions ?? [] },
           tokens: result.tokenUsage,
         };
       })

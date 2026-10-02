@@ -1,9 +1,15 @@
+import { NotFoundException } from "@nestjs/common";
 import { PATH_METADATA } from "@nestjs/common/constants";
+import { Test } from "@nestjs/testing";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { JwtAuthGuard } from "../../../../common/guards/jwt.auth.guard";
 import { modelRegistry } from "../../../../common/registries/registry";
+import { INTERACTIVE_CREDIT_VALIDATOR } from "../../../../common/tokens";
+import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { assistantActionMeta } from "../../../../foundations/assistant-action/entities/assistant-action.meta";
 import { assistantMessageMeta } from "../../../../foundations/assistant-message/entities/assistant-message.meta";
 import { assistantMeta } from "../../../../foundations/assistant/entities/assistant.meta";
+import { AssistantService } from "../../../../foundations/assistant/services/assistant.service";
 import { operatorMeta } from "../../entities/operator.meta";
 import { OperatorController } from "../operator.controller";
 
@@ -334,6 +340,32 @@ describe("OperatorController", () => {
       await ungated.create(postBody({ content: "hello" }), req);
 
       expect(assistants.createWithFirstMessageOperator).toHaveBeenCalled();
+    });
+  });
+
+  describe("AI gate (INTERACTIVE_CREDIT_VALIDATOR seam)", () => {
+    // a360ai binds only the interactive token: ingestion keeps reading
+    // CREDIT_VALIDATOR (unbound), the interactive routes read this one.
+    it("POST /operator throws NotFoundException when only the interactive validator is bound and AI is off", async () => {
+      const interactive = { validateCredits: vi.fn(), isAiEnabled: vi.fn(async () => false) };
+
+      const moduleRef = await Test.createTestingModule({
+        controllers: [OperatorController],
+        providers: [
+          { provide: AssistantService, useValue: assistants },
+          { provide: JsonApiService, useValue: jsonApi },
+          { provide: INTERACTIVE_CREDIT_VALIDATOR, useValue: interactive },
+        ],
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
+      const gated = moduleRef.get(OperatorController);
+
+      await expect(gated.create(postBody({ content: "hello" }), req)).rejects.toBeInstanceOf(NotFoundException);
+      expect(interactive.isAiEnabled).toHaveBeenCalledWith({ companyId: "c-1" });
+      expect(interactive.validateCredits).not.toHaveBeenCalled();
+      expect(assistants.createWithFirstMessageOperator).not.toHaveBeenCalled();
     });
   });
 });

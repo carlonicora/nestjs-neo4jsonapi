@@ -94,3 +94,54 @@ describe("defineEntity — include validation", () => {
     ).toThrow(/edge .*fields.* include|include.*edge/i);
   });
 });
+
+describe("defineEntity — externalSource", () => {
+  it("propagates externalSource onto RelationshipInfo (one and many)", () => {
+    const descriptor = defineEntity<{ id: string }>()({
+      type: "rounds",
+      endpoint: "rounds",
+      nodeName: "round",
+      labelName: "Round",
+      isCompanyScoped: false,
+      fields: {},
+      relationships: {
+        npc: { model: npcMeta, direction: "out", relationship: "PLAYED_BY", cardinality: "one", externalSource: true },
+        turns: { model: turnMeta, direction: "in", relationship: "PART_OF", cardinality: "many", externalSource: true },
+      },
+    });
+    expect(descriptor.model.singleChildrenRelationships!.find((r) => r.relationshipName === "npc")).toMatchObject({
+      externalSource: true,
+    });
+    expect(descriptor.model.childrenRelationships!.find((r) => r.relationshipName === "turns")).toMatchObject({
+      externalSource: true,
+    });
+  });
+
+  it("leaves externalSource undefined by default", () => {
+    const npc = buildTurn().model.singleChildrenRelationships!.find((r) => r.relationshipName === "npc");
+    expect(npc!.externalSource).toBeUndefined();
+  });
+
+  it("throws when externalSource is combined with include", () => {
+    expect(() =>
+      defineEntity<{ id: string }>()({
+        type: "rounds",
+        endpoint: "rounds",
+        nodeName: "round",
+        labelName: "Round",
+        isCompanyScoped: false,
+        fields: {},
+        relationships: {
+          turns: {
+            model: turnMeta,
+            direction: "in",
+            relationship: "PART_OF",
+            cardinality: "many",
+            include: ["npc"],
+            externalSource: true,
+          },
+        },
+      }),
+    ).toThrow(/externalSource/);
+  });
+});

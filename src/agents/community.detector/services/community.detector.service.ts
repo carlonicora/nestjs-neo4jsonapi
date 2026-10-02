@@ -294,6 +294,9 @@ export class CommunityDetectorService {
     const entity = this.catalog.getAllEntities().find((candidate) => candidate.labelName === label);
     const scope = entity?.scope;
     if (!entity || !scope) return undefined;
+    // A `chat.scopeByService` type has an empty path but is NOT a root: its
+    // scope edge is outside the app database, so no root can be walked to here.
+    if (scope.viaService) return undefined;
 
     if (scope.path.length === 0) {
       // The content IS a scope root.

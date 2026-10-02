@@ -228,6 +228,11 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       assistantMessageRepo,
       graphCatalog,
       entityServices,
+      undefined as any, // operator
+      undefined as any, // assistantActions
+      undefined as any, // assistantActionRepo
+      undefined as any, // webSocketService
+      { get: vi.fn() } as any, // configService: no app config, so inline entity links stay off
     );
   });
 
@@ -469,6 +474,11 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       assistantMessageRepo,
       graphCatalog,
       entityServices,
+      undefined as any, // operator
+      undefined as any, // assistantActions
+      undefined as any, // assistantActionRepo
+      undefined as any, // webSocketService
+      { get: vi.fn() } as any, // configService: no app config, so inline entity links stay off
     );
   });
 

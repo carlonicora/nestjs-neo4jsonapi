@@ -1,9 +1,9 @@
 import { HttpException, Injectable } from "@nestjs/common";
 import * as bcrypt from "bcrypt";
 import { OAuthErrorCodes, createOAuthError } from "../constants/oauth.errors";
-import { VALID_OAUTH_SCOPES } from "../constants/oauth.scopes";
 import { OAuthClient } from "../entities/oauth.client.entity";
 import { OAuthRepository } from "../repositories/oauth.repository";
+import { OAuthScopeService } from "./oauth.scope.service";
 
 export interface CreateClientParams {
   name: string;
@@ -37,7 +37,10 @@ export interface UpdateClientParams {
 export class OAuthClientService {
   private static readonly DEFAULT_GRANT_TYPES = ["authorization_code", "refresh_token"];
 
-  constructor(private readonly oauthRepository: OAuthRepository) {}
+  constructor(
+    private readonly oauthRepository: OAuthRepository,
+    private readonly scopeService: OAuthScopeService,
+  ) {}
 
   /**
    * Creates a new OAuth client.
@@ -63,7 +66,7 @@ export class OAuthClientService {
 
     // Validate scopes
     for (const scope of params.allowedScopes) {
-      if (!VALID_OAUTH_SCOPES.includes(scope)) {
+      if (!this.scopeService.isValid(scope)) {
         throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_SCOPE, `Invalid scope: ${scope}`), 400);
       }
     }
@@ -210,7 +213,7 @@ export class OAuthClientService {
     // Validate new scopes if provided
     if (params.allowedScopes) {
       for (const scope of params.allowedScopes) {
-        if (!VALID_OAUTH_SCOPES.includes(scope)) {
+        if (!this.scopeService.isValid(scope)) {
           throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_SCOPE, `Invalid scope: ${scope}`), 400);
         }
       }

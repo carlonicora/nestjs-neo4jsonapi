@@ -7,7 +7,8 @@ import type { McpToolResult } from "../interfaces/mcp.tool.interface";
  * client as a FLAT JSON payload `{ code, message, ...meta }` — mirroring the
  * flat-error convention used by the HTTP layer's HttpExceptionFilter.
  */
-export type McpErrorCode = "unknown_type" | "forbidden" | "validation_failed" | "not_found" | "internal";
+export type McpErrorCode =
+  "unknown_type" | "not_writable" | "forbidden" | "validation_failed" | "not_found" | "internal";
 
 /**
  * Maps an unknown thrown value to a flat MCP error result.

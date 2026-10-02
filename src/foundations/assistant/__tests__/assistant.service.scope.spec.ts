@@ -60,7 +60,13 @@ function makePersistedMessage(overrides: Partial<any> = {}) {
 }
 
 describe("AssistantService — campaign binding, mentions and pinned focus", () => {
-  const buildSut = () => {
+  const buildSut = (
+    options: {
+      dataLimitsProvider?: { forBoundContent: ReturnType<typeof vi.fn> };
+      bindGuard?: { canBind: ReturnType<typeof vi.fn> };
+      assistantConfig?: { inlineEntityLinks?: boolean };
+    } = {},
+  ) => {
     const responderResponse: any = {
       type: AgentMessageType.Assistant,
       graphContext: { entities: [], toolCalls: [], tokens: { input: 1, output: 2 }, status: "success" },
@@ -72,7 +78,16 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
       tokens: { input: 1, output: 2 },
     };
     const responder = { run: vi.fn(async () => responderResponse) } as any;
-    const operator = { run: vi.fn(), resume: vi.fn() } as any;
+    const operatorResult = {
+      kind: "completed",
+      answer: "Operator answer",
+      questions: [],
+      references: [],
+      citations: [],
+      toolCalls: [],
+      tokens: { input: 1, output: 2 },
+    };
+    const operator = { run: vi.fn(async () => operatorResult), resume: vi.fn(async () => operatorResult) } as any;
     const userModules = { findModuleIdsForUser: vi.fn(async () => ["m-1"]) } as any;
 
     const repo = {
@@ -146,7 +161,9 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     const assistantActions = { createPendingAction: vi.fn() } as any;
     const assistantActionRepo = { findById: vi.fn(), resolveStatus: vi.fn() } as any;
     const webSocketService = { sendMessageToUser: vi.fn(async () => undefined) } as any;
-    const configService = { get: vi.fn(() => undefined) } as any;
+    const configService = {
+      get: vi.fn((key: string) => (key === "assistant" ? options.assistantConfig : undefined)),
+    } as any;
 
     const mentions = {
       extract: vi.fn(() => [{ type: "npcs", id: "npc-1", alias: "One" }]),
@@ -183,11 +200,15 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
       mentions,
       blockNote,
       scopeGuard,
+      undefined,
+      options.dataLimitsProvider as any,
+      options.bindGuard as any,
     );
 
     return {
       service,
       responder,
+      operator,
       repo,
       assistantMessages,
       assistantMessageRepo,
@@ -318,5 +339,128 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     await expect(service.findByBoundContent({ boundType: "nonesuch", boundId: "x", query: {} })).rejects.toThrow(
       /Unknown resource type "nonesuch"/,
     );
+  });
+
+  describe("bound-content data limits, bind guard and inline entity links", () => {
+    it("merges the data limits provider result into a bound turn's responder dataLimits", async () => {
+      const dataLimitsProvider = {
+        forBoundContent: vi.fn(async () => ({ proceedingId: "p1", judgementIds: ["j1"] })),
+      };
+      const { service, responder } = buildSut({ dataLimitsProvider });
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessage({
+        companyId: "c",
+        userId: "u",
+        firstMessage: "hello",
+        boundContent: { type: "campaigns", id: "camp-1" },
+      });
+
+      expect(dataLimitsProvider.forBoundContent).toHaveBeenCalledWith({
+        type: "campaigns",
+        id: "camp-1",
+        userId: "u",
+        companyId: "c",
+      });
+      expect(responder.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataLimits: expect.objectContaining({ proceedingId: "p1", judgementIds: ["j1"] }),
+        }),
+      );
+    });
+
+    it("passes the same dataLimits to operator.run for a bound operator turn", async () => {
+      const dataLimitsProvider = {
+        forBoundContent: vi.fn(async () => ({ proceedingId: "p1", judgementIds: ["j1"] })),
+      };
+      const { service, operator } = buildSut({ dataLimitsProvider });
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessageOperator({
+        companyId: "c",
+        userId: "u",
+        firstMessage: "hello",
+        boundContent: { type: "campaigns", id: "camp-1" },
+      });
+
+      expect(operator.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dataLimits: expect.objectContaining({ proceedingId: "p1", judgementIds: ["j1"] }),
+        }),
+      );
+    });
+
+    it("does not call the provider for an unbound turn", async () => {
+      const dataLimitsProvider = {
+        forBoundContent: vi.fn(async () => ({ proceedingId: "p1", judgementIds: ["j1"] })),
+      };
+      const { service, responder } = buildSut({ dataLimitsProvider });
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessage({ companyId: "c", userId: "u", firstMessage: "hello" });
+
+      expect(dataLimitsProvider.forBoundContent).not.toHaveBeenCalled();
+      const dataLimits = responder.run.mock.calls[0][0].dataLimits;
+      expect(dataLimits).not.toHaveProperty("proceedingId");
+      expect(dataLimits).not.toHaveProperty("judgementIds");
+    });
+
+    it("attachBoundContent refuses when the bind guard says no", async () => {
+      const bindGuard = { canBind: vi.fn(async () => false) };
+      const { service, repo } = buildSut({ bindGuard });
+      const create = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      const error: any = await service
+        .createWithFirstMessage({
+          companyId: "c",
+          userId: "u",
+          firstMessage: "hello",
+          boundContent: { type: "campaigns", id: "camp-1" },
+        })
+        .then(
+          () => undefined,
+          (err) => err,
+        );
+
+      expect(error).toBeDefined();
+      expect(error.getStatus()).toBe(403);
+      expect(bindGuard.canBind).toHaveBeenCalledWith({ type: "campaigns", id: "camp-1", userId: "u", companyId: "c" });
+      expect(repo.bindContent).not.toHaveBeenCalled();
+      // A refused bind must not leave an unbound thread behind.
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("a refused bind creates no operator thread either", async () => {
+      const bindGuard = { canBind: vi.fn(async () => false) };
+      const { service, repo } = buildSut({ bindGuard });
+      const create = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      const error: any = await service
+        .createWithFirstMessageOperator({
+          companyId: "c",
+          userId: "u",
+          firstMessage: "hello",
+          boundContent: { type: "campaigns", id: "camp-1" },
+        })
+        .then(
+          () => undefined,
+          (err) => err,
+        );
+
+      expect(error?.getStatus()).toBe(403);
+      expect(create).not.toHaveBeenCalled();
+      expect(repo.bindContent).not.toHaveBeenCalled();
+    });
+
+    it("passes inlineEntityLinks from config to responder.run and operator.run", async () => {
+      const { service, responder, operator } = buildSut({ assistantConfig: { inlineEntityLinks: true } });
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+
+      await service.createWithFirstMessage({ companyId: "c", userId: "u", firstMessage: "hello" });
+      await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "hello" });
+
+      expect(responder.run).toHaveBeenCalledWith(expect.objectContaining({ inlineEntityLinks: true }));
+      expect(operator.run).toHaveBeenCalledWith(expect.objectContaining({ inlineEntityLinks: true }));
+    });
   });
 });

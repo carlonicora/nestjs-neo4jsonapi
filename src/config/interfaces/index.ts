@@ -6,6 +6,7 @@ export * from "./base.config.interface";
 export * from "./config.ai.interface";
 export * from "./config.api.interface";
 export * from "./config.app.interface";
+export * from "./config.assistant.interface";
 export * from "./config.auth.interface";
 export * from "./config.cache.interface";
 export * from "./config.chunker.interface";

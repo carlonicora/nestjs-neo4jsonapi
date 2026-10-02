@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HttpException } from "@nestjs/common";
 import { OAuthClientService } from "./oauth.client.service";
+import { ConfigService } from "@nestjs/config";
 import { OAuthRepository } from "../repositories/oauth.repository";
+import { OAuthScopeService } from "./oauth.scope.service";
 import { OAuthClient } from "../entities/oauth.client.entity";
 
 describe("OAuthClientService", () => {
@@ -36,7 +38,10 @@ describe("OAuthClientService", () => {
       deleteClient: vi.fn().mockResolvedValue(undefined),
     };
 
-    clientService = new OAuthClientService(mockRepository as OAuthRepository);
+    clientService = new OAuthClientService(
+      mockRepository as OAuthRepository,
+      new OAuthScopeService({ get: vi.fn().mockReturnValue(undefined) } as unknown as ConfigService),
+    );
   });
 
   describe("createClient", () => {

@@ -853,6 +853,41 @@ describe("Neo4jService", () => {
         expect.objectContaining({ id0: "123", id1: "456" }),
       );
     });
+
+    it("does not scope a node to a company by default", async () => {
+      mockTxRun.mockResolvedValue({ records: [{}] });
+
+      await service.validateExistingNodes({ nodes: [{ id: "123", label: "User" }] });
+
+      const [query, params] = mockTxRun.mock.calls[0];
+      expect(query).not.toContain("BELONGS_TO");
+      expect(params).not.toHaveProperty("companyId0");
+    });
+
+    it("requires a node carrying companyId to BELONG_TO that company", async () => {
+      mockTxRun.mockResolvedValue({ records: [{}] });
+
+      await service.validateExistingNodes({
+        nodes: [
+          { id: "u1", label: "User", companyId: "c1" },
+          { id: "x1", label: "Feature" },
+        ],
+      });
+
+      const [query, params] = mockTxRun.mock.calls[0];
+      expect(query).toContain("MATCH (n0:User {id: $id0})-[:BELONGS_TO]->(:Company {id: $companyId0})");
+      expect(query).toContain("MATCH (n1:Feature {id: $id1})\n");
+      expect(params).toEqual(expect.objectContaining({ id0: "u1", companyId0: "c1", id1: "x1" }));
+      expect(params).not.toHaveProperty("companyId1");
+    });
+
+    it("refuses a node of another company like a missing one", async () => {
+      mockTxRun.mockResolvedValue({ records: [] });
+
+      await expect(
+        service.validateExistingNodes({ nodes: [{ id: "foreign", label: "User", companyId: "c1" }] }),
+      ).rejects.toThrow("One or more related nodes do not exist.");
+    });
   });
 
   describe("getActiveConnections", () => {

@@ -12,8 +12,8 @@ export const OAUTH_SCOPES_KEY = "oauth_scopes";
  *
  * @example
  * @UseGuards(OAuthTokenGuard)
- * @OAuthScopes('photographs:read', 'photographs:write')
- * async updatePhotograph() { ... }
+ * @OAuthScopes('read', 'write')
+ * async updateDocument() { ... }
  *
  * @param scopes - Required OAuth scopes
  */

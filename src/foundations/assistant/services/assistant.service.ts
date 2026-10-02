@@ -1,4 +1,12 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
@@ -13,6 +21,16 @@ import { EntityReference } from "../../../agents/responder/interfaces/entity.ref
 import type { ToolCallRecord, UserContext } from "../../../agents/graph/tools/tool.factory";
 import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.trace.interface";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
+import {
+  ASSISTANT_BIND_GUARD,
+  ASSISTANT_DATA_LIMITS_PROVIDER,
+  AssistantBindGuard,
+  AssistantDataLimitsProvider,
+} from "../../../common/interfaces/assistant.scope.interface";
+import {
+  ASSISTANT_TITLE_GENERATOR,
+  AssistantTitleGenerator,
+} from "../../../common/interfaces/assistant.title.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import {
   ASSISTANT_SEED_CONTEXT_PROVIDERS,
@@ -21,7 +39,9 @@ import {
 } from "../../../common/interfaces/seed.context.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { AGENT_SCOPE_CLS_KEY, AgentScope } from "../../../common/types/agent.scope";
+import { DataLimits } from "../../../common/types/data.limits";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigAssistantInterface } from "../../../config/interfaces/config.assistant.interface";
 import { ConfigOperatorInterface } from "../../../config/interfaces/config.operator.interface";
 import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
@@ -106,6 +126,15 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     @Optional()
     @Inject(ASSISTANT_SEED_CONTEXT_PROVIDERS)
     private readonly seedContextProviders?: AssistantSeedContextProvider[],
+    @Optional()
+    @Inject(ASSISTANT_DATA_LIMITS_PROVIDER)
+    private readonly dataLimitsProvider?: AssistantDataLimitsProvider,
+    @Optional()
+    @Inject(ASSISTANT_BIND_GUARD)
+    private readonly bindGuard?: AssistantBindGuard,
+    @Optional()
+    @Inject(ASSISTANT_TITLE_GENERATOR)
+    private readonly titleGenerator?: AssistantTitleGenerator,
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
@@ -143,6 +172,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     const title = params.title?.trim() || this.autoTitle(plainText);
 
+    // Refuse an invalid or forbidden binding BEFORE anything is written, so a
+    // refused bind never leaves an unbound thread behind.
+    const boundLabel = await this.validateBoundContent(params.boundContent);
+
     const assistantId = randomUUID();
     const userMessageId = randomUUID();
 
@@ -156,7 +189,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         attributes: { title },
       },
     });
-    await this.attachBoundContent(assistantId, params.boundContent);
+    await this.attachBoundContent(assistantId, params.boundContent, boundLabel);
 
     // 2. Create the first user message at position 0.
     await this.assistantMessages.createFromDTO({
@@ -175,6 +208,16 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+
+    // Name the thread and announce it before the (slow) agent turn runs.
+    await this.announceNewThread({
+      assistantId,
+      userId: params.userId,
+      userMessageId,
+      question: plainText,
+      callerTitle: params.title,
+      boundLabel,
+    });
 
     // 3. Run the agent turn using the just-created user message as context.
     const turn = await this.runAgentTurn({
@@ -393,6 +436,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     const title = params.title?.trim() || this.autoTitle(plainText);
 
+    // Refuse an invalid or forbidden binding BEFORE anything is written, so a
+    // refused bind never leaves an unbound thread behind.
+    const boundLabel = await this.validateBoundContent(params.boundContent);
+
     const assistantId = randomUUID();
     const userMessageId = randomUUID();
 
@@ -408,7 +455,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         attributes: { title, engine: "operator" },
       },
     });
-    await this.attachBoundContent(assistantId, params.boundContent);
+    await this.attachBoundContent(assistantId, params.boundContent, boundLabel);
 
     await this.assistantMessages.createFromDTO({
       data: {
@@ -426,6 +473,16 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+
+    // Name the thread and announce it before the (slow) operator turn runs.
+    await this.announceNewThread({
+      assistantId,
+      userId: params.userId,
+      userMessageId,
+      question: plainText,
+      callerTitle: params.title,
+      boundLabel,
+    });
 
     const threadId = `${assistantId}:${userMessageId}`;
     const contentScope = this.toContentScope(params.boundContent);
@@ -636,6 +693,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         assistantId,
         seedContexts,
         messages,
+        dataLimits: await this.boundDataLimits(contentScope ?? {}, resumeCtx),
+        inlineEntityLinks: this.inlineEntityLinks(),
       });
     } catch (err) {
       // Expired or missing checkpoint (or any resume failure): the action can
@@ -850,6 +909,37 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * Retrieval limits the app derives from the content a thread is bound to
+   * (e.g. the records of a bound proceeding). Empty for an unbound turn or
+   * when no provider is registered. A provider that throws is logged and
+   * ignored — the same policy as `collectSeedContexts`: the turn must run.
+   */
+  private async boundDataLimits(
+    contentScope: { contentId?: string; contentType?: string },
+    ctx: UserContext,
+  ): Promise<Partial<DataLimits>> {
+    if (!contentScope.contentId || !contentScope.contentType || !this.dataLimitsProvider) return {};
+    try {
+      return await this.dataLimitsProvider.forBoundContent({
+        type: contentScope.contentType,
+        id: contentScope.contentId,
+        userId: ctx.userId,
+        companyId: ctx.companyId,
+      });
+    } catch (err) {
+      this.assistantLogger.warn(
+        `data limits provider failed — turn runs without bound limits: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return {};
+    }
+  }
+
+  /** Whether answers may carry inline `mention://type/id` links (app config, default off). */
+  private inlineEntityLinks(): boolean {
+    return this.configService.get<ConfigAssistantInterface>("assistant")?.inlineEntityLinks === true;
+  }
+
+  /**
    * Write the `BOUND_TO` edge that scopes a thread to a resource.
    *
    * Deliberately NOT part of the `createFromDTO` call above: `BOUND_TO` is
@@ -863,19 +953,50 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    * descriptor's own polymorphic discriminator uses on the read path — so an
    * unregistered type fails loudly here rather than writing a dangling edge.
    */
-  private async attachBoundContent(assistantId: string, boundContent?: { type: string; id: string }): Promise<void> {
-    if (!boundContent) return;
+  private async attachBoundContent(
+    assistantId: string,
+    boundContent: { type: string; id: string } | undefined,
+    targetLabel: string | undefined,
+  ): Promise<void> {
+    if (!boundContent || !targetLabel) return;
+
+    await (this.repository as AssistantRepository).bindContent({
+      assistantId,
+      targetLabel,
+      targetId: boundContent.id,
+    });
+  }
+
+  /**
+   * Validate a requested binding and return the target's Neo4j label. Called
+   * before the Assistant is created, so a refused bind writes nothing.
+   *
+   * The label is resolved from the model registry — the same registry the
+   * descriptor's own polymorphic discriminator uses on the read path — so an
+   * unregistered type fails loudly here rather than writing a dangling edge.
+   */
+  private async validateBoundContent(boundContent?: { type: string; id: string }): Promise<string | undefined> {
+    if (!boundContent) return undefined;
 
     const model = modelRegistry.getByType(boundContent.type);
     if (!model) {
       throw new BadRequestException(`Unknown resource type "${boundContent.type}" for the assistant's bound content.`);
     }
 
-    await (this.repository as AssistantRepository).bindContent({
-      assistantId,
-      targetLabel: model.labelName,
-      targetId: boundContent.id,
-    });
+    // App-provided access check: with no guard bound, every bind is accepted.
+    if (
+      this.bindGuard &&
+      !(await this.bindGuard.canBind({
+        type: boundContent.type,
+        id: boundContent.id,
+        userId: this.clsService.get("userId"),
+        companyId: this.clsService.get("companyId"),
+      }))
+    ) {
+      throw new ForbiddenException("You cannot bind an assistant to this resource.");
+    }
+
+    return model.labelName;
   }
 
   private toContentScope(boundContent?: { type: string; id: string }): {
@@ -1035,6 +1156,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       question: params.question,
       threadId: params.threadId,
       seedContexts,
+      dataLimits: await this.boundDataLimits(params.contentScope, params.ctx),
+      inlineEntityLinks: this.inlineEntityLinks(),
     });
   }
 
@@ -1222,10 +1345,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         limitToHowToId: params.limitToHowToId,
         handbookMode: params.handbookMode,
         limitToHandbookPageId: params.limitToHandbookPageId,
+        ...(await this.boundDataLimits(params.contentScope, params.ctx)),
       },
       messages,
       question: params.newUserMessage.content,
       seedContexts,
+      inlineEntityLinks: this.inlineEntityLinks(),
     });
 
     return {
@@ -1478,6 +1603,62 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       }
     }
     return out;
+  }
+
+  /**
+   * Runs once a new thread and its first user message are persisted, before
+   * the agent/operator turn:
+   *   1. when the caller supplied no title and an ASSISTANT_TITLE_GENERATOR is
+   *      bound, replaces the truncated-question title with the generated one;
+   *   2. pushes `assistant:created` over the websocket so the client can list
+   *      the thread and route to it while the turn is still running.
+   *
+   * Both steps are best-effort: a failure is logged and the request carries on
+   * with the title it already has. The user message must exist before the
+   * generator runs — token usage recording MATCHes it by id.
+   */
+  private async announceNewThread(params: {
+    assistantId: string;
+    userId: string;
+    userMessageId: string;
+    question: string;
+    callerTitle?: string;
+    boundLabel?: string;
+  }): Promise<void> {
+    if (!params.callerTitle?.trim() && this.titleGenerator) {
+      try {
+        const generated = (
+          await this.titleGenerator.generate({
+            question: params.question,
+            userMessageId: params.userMessageId,
+            boundLabel: params.boundLabel,
+          })
+        )?.trim();
+        if (generated) {
+          await this.patchFromDTO({
+            data: {
+              type: assistantMeta.type,
+              id: params.assistantId,
+              attributes: { title: generated },
+            },
+          });
+        }
+      } catch (err) {
+        this.assistantLogger.warn(
+          `announceNewThread: title generation failed for id=${params.assistantId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    try {
+      const assistant = await this.repository.findById({ id: params.assistantId });
+      const document = await this.jsonApiService.buildSingle(AssistantDescriptor.model, assistant);
+      await this.webSocketService.sendMessageToUser(params.userId, "assistant:created", { assistant: document });
+    } catch (err) {
+      this.assistantLogger.warn(
+        `announceNewThread: websocket push failed for id=${params.assistantId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /**

@@ -2,8 +2,6 @@ import { Module, OnModuleInit } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 
 import { modelRegistry } from "../../common/registries/registry";
-import { UserModule } from "../user/user.module";
-import { CompanyModule } from "../company/company.module";
 
 // Controllers
 import { OAuthAuthorizeController } from "./controllers/oauth.authorize.controller";
@@ -17,6 +15,7 @@ import { OAuthService } from "./services/oauth.service";
 import { OAuthClientService } from "./services/oauth.client.service";
 import { OAuthTokenService } from "./services/oauth.token.service";
 import { OAuthPkceService } from "./services/oauth.pkce.service";
+import { OAuthScopeService } from "./services/oauth.scope.service";
 
 // Repository
 import { OAuthRepository } from "./repositories/oauth.repository";
@@ -45,8 +44,8 @@ import { OAuthRefreshTokenModel } from "./entities/oauth.refresh.token.model";
  *
  * // Protect endpoints with OAuth
  * @UseGuards(OAuthTokenGuard)
- * @OAuthScopes('photographs:read')
- * async getPhotographs() { ... }
+ * @OAuthScopes('read')
+ * async getDocuments() { ... }
  */
 @Module({
   controllers: [
@@ -62,6 +61,7 @@ import { OAuthRefreshTokenModel } from "./entities/oauth.refresh.token.model";
     OAuthClientService,
     OAuthTokenService,
     OAuthPkceService,
+    OAuthScopeService,
 
     // Repository
     OAuthRepository,
@@ -76,12 +76,18 @@ import { OAuthRefreshTokenModel } from "./entities/oauth.refresh.token.model";
     OAuthClientService,
     OAuthTokenService,
     OAuthPkceService,
+    OAuthScopeService,
 
     // Export serializers
     OAuthClientSerialiser,
     OAuthTokenSerialiser,
   ],
-  imports: [UserModule, CompanyModule, JwtModule],
+  // No UserModule / CompanyModule import: OAuth uses no provider from either
+  // (only their entity types and metas), and importing them mounts the package
+  // UserController / CompanyController. An app that replaces those foundations
+  // with its own controllers (a360ai's Extended* modules) then crashes at boot
+  // with FST_ERR_DUPLICATED_ROUTE on GET /users.
+  imports: [JwtModule],
 })
 export class OAuthModule implements OnModuleInit {
   /**

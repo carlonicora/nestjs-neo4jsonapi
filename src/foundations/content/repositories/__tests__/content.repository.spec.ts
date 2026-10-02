@@ -444,7 +444,7 @@ describe("ContentRepository", () => {
       serialiseAuthor: false,
     };
 
-    const buildRepository = async (extension?: ContentExtensionConfig) => {
+    const buildRepository = async (extension?: ContentExtensionConfig, clsValues: Record<string, unknown> = {}) => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           ContentRepository,
@@ -452,7 +452,10 @@ describe("ContentRepository", () => {
           { provide: Neo4jService, useValue: neo4jService },
           { provide: ConfigService, useValue: configService },
           { provide: SecurityService, useValue: securityService },
-          { provide: ClsService, useValue: { get: vi.fn(), set: vi.fn(), run: vi.fn() } },
+          {
+            provide: ClsService,
+            useValue: { get: vi.fn((key: string) => clsValues[key]), set: vi.fn(), run: vi.fn() },
+          },
           ...(extension ? [{ provide: CONTENT_EXTENSION_CONFIG, useValue: extension }] : []),
         ],
       }).compile();
@@ -504,8 +507,7 @@ describe("ContentRepository", () => {
 
       await a360Repository.find({});
 
-      expect(mockQuery.query).toContain("WHERE content.tldr IS NOT NULL");
-      expect(mockQuery.query).toContain(`AND content.tldr <> ""`);
+      expect(mockQuery.query).toContain(`WHERE (content.tldr IS NOT NULL AND content.tldr <> "")`);
     });
 
     it("should match the owner on the undirected PUBLISHED|FROM edge when configured", async () => {
@@ -518,6 +520,84 @@ describe("ContentRepository", () => {
 
       expect(mockQuery.query).toContain("MATCH (content)-[:PUBLISHED|FROM]-(:User {id: $ownerId})");
       expect(mockQuery.query).not.toContain("content_author");
+    });
+
+    it("should keep findByIds byte-identical without accessPredicates", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const defaultRepository = await buildRepository(undefined, {
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+
+      await defaultRepository.findByIds({ contentIds: [TEST_IDS.contentId1] });
+
+      expect(mockQuery.query).toContain(`
+        MATCH (content:Article|Document)-[:BELONGS_TO]->(company)
+        WHERE content.id IN $ids
+        
+      WITH content, company, currentUser
+    
+        
+      MATCH (content)-[:BELONGS_TO]->(content_company:Company)`);
+      expect(mockQuery.query).not.toContain("NOT content:");
+    });
+
+    it("should apply the per-label access predicates in findByIds", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const a360Repository = await buildRepository(
+        { ...A360_CONFIG, accessPredicates: { Document: "<DOC>" } },
+        { companyId: TEST_IDS.companyId, userId: TEST_IDS.userId },
+      );
+
+      await a360Repository.findByIds({ contentIds: [TEST_IDS.contentId1] });
+
+      const query = mockQuery.query.replace(/\s+/g, " ");
+      expect(query).toContain(
+        `WHERE content.id IN $ids AND content.tldr IS NOT NULL AND content.tldr <> "" ` +
+          "WITH content, company, currentUser WHERE (NOT content:Document OR (<DOC>)) WITH content, company, currentUser MATCH",
+      );
+    });
+
+    it.each(["find", "findByOwner"] as const)(
+      "should apply the per-label access predicate exactly once in %s (userHasAccess, not default())",
+      async (method) => {
+        const mockQuery = createMockQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+        neo4jService.readMany.mockResolvedValue([]);
+        const a360Repository = await buildRepository(
+          { ...A360_CONFIG, accessPredicates: { Document: "<DOC>" } },
+          { companyId: TEST_IDS.companyId, userId: TEST_IDS.userId },
+        );
+
+        if (method === "find") await a360Repository.find({});
+        else await a360Repository.findByOwner({ ownerId: TEST_IDS.ownerId });
+
+        const query = mockQuery.query.replace(/\s+/g, " ");
+        expect(query.split("(NOT content:Document OR (<DOC>))")).toHaveLength(2);
+        expect(query).toContain(
+          `WHERE (content.tldr IS NOT NULL AND content.tldr <> "") AND ($companyId IS NULL OR EXISTS { MATCH (content)-[:BELONGS_TO]-(company) }) ` +
+            "WITH content, company, currentUser " +
+            "WITH content, company, currentUser WHERE (NOT content:Document OR (<DOC>)) WITH content, company, currentUser",
+        );
+      },
+    );
+
+    it("should skip the access predicates in findByIds for automated jobs", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const a360Repository = await buildRepository(
+        { ...A360_CONFIG, accessPredicates: { Document: "<DOC>" } },
+        { companyId: TEST_IDS.companyId, userId: TEST_IDS.userId, isAutomatedJob: true },
+      );
+
+      await a360Repository.findByIds({ contentIds: [TEST_IDS.contentId1] });
+
+      expect(mockQuery.query).not.toContain("<DOC>");
     });
   });
 });

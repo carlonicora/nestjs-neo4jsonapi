@@ -17,8 +17,8 @@ const UPDATE_SEMANTICS =
  * MCP write executors (C4): create/update entities and add/remove to-many
  * relationship items for any JSON:API type registered in EntityServiceRegistry.
  *
- * Every write is gated by the catalog (type visible to the user's modules) and
- * RBAC (`create`/`update` permission on the entity's module), dispatched through
+ * Every write is gated by the catalog (type visible to the user's modules and
+ * declared `chat.writable`) and RBAC (`create`/`update` permission on the entity's module), dispatched through
  * the framework's `AbstractService.*FromDTO` path (never hand-built JSON:API
  * beyond the `JsonApiDTOData` framework type). Audit is NOT performed here:
  * `AbstractService.create/put` audits internally when the concrete entity
@@ -270,8 +270,13 @@ export class McpEntityWriteService {
   }
 
   /**
-   * Shared gate: catalog visibility (unknown_type), RBAC (forbidden), and
-   * service registration (unknown_type).
+   * Shared gate: catalog visibility (unknown_type), write opt-in (not_writable),
+   * RBAC (forbidden), and service registration (unknown_type).
+   *
+   * Only types whose descriptor declares `chat.writable` are writable, exactly as
+   * for the operator write tools (`EntityWriteTools.resolveWritable`). A type
+   * without it is rejected before RBAC and before the service is resolved, so no
+   * service method is ever called for it.
    */
   private async gate(
     type: string,
@@ -288,6 +293,9 @@ export class McpEntityWriteService {
           `Unknown or inaccessible entity type: ${type}. Call describe_entity first.`,
         ),
       };
+    }
+    if (entity.writable !== true) {
+      return { error: mcpFlatError("not_writable", `Entity type ${type} is read-only.`) };
     }
     if (!(await this.rbac.can({ userId: ctx.userId, moduleId: entity.moduleId, action }))) {
       return { error: mcpFlatError("forbidden", `You lack ${action} permission on ${type}.`) };

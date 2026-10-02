@@ -227,6 +227,12 @@ export function defineEntity<T>() {
             `nested include on an edge-property relationship is not supported (v1).`,
         );
       }
+      if (rel.externalSource) {
+        throw new Error(
+          `defineEntity(${type}): relationship "${relName}" declares both "externalSource" and "include"; ` +
+            `an external-source node is projected as id + labels only and has no local relationships to expand.`,
+        );
+      }
       for (const path of rel.include) {
         if (path.split(".").length > MAX_INCLUDE_DEPTH) {
           throw new Error(
@@ -293,6 +299,7 @@ export function defineEntity<T>() {
           relationship: rel.relationship,
           cardinality: rel.cardinality,
           required: rel.required,
+          externalSource: rel.externalSource,
         });
       } else {
         childrenTokens.push(rel.model.nodeName);
@@ -305,6 +312,7 @@ export function defineEntity<T>() {
           relationship: rel.relationship,
           cardinality: rel.cardinality,
           required: rel.required,
+          externalSource: rel.externalSource,
         });
       }
     }

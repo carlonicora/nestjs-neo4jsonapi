@@ -843,4 +843,66 @@ describe("OperatorService", () => {
     expect(preTask.scopeLabel).toBeUndefined();
     expect(preTask.assistantId).toBeUndefined();
   });
+
+  describe("bound-content data limits and inline entity links", () => {
+    const finalise = (answer: string) =>
+      llmCall.mockResolvedValueOnce({
+        answer,
+        questions: [],
+        tokenUsage: { input: 5, output: 5 },
+        modelWeight: ModelWeight.Normal,
+      });
+
+    it("uses params.dataLimits in the tool retrieval context", async () => {
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
+      finalise("done");
+
+      await service.run({ ...baseParams, dataLimits: { proceedingId: "p1", judgementIds: ["j1"] } as any });
+
+      expect(registryBuild).toHaveBeenCalledWith(
+        expect.objectContaining({ dataLimits: { proceedingId: "p1", judgementIds: ["j1"] } }),
+        expect.any(Array),
+      );
+    });
+
+    it("finalise strips a mention link whose id is not in any tool result", async () => {
+      modelRegistry.register({ nodeName: "npc", labelName: "Npc", type: "npcs" } as any);
+      const readNpc = new DynamicStructuredTool({
+        name: "read_npc",
+        description: "Read-only tool returning one npc record.",
+        schema: z.object({}),
+        func: async () => JSON.stringify({ type: "npcs", id: "npc-1", name: "Aldo" }),
+      });
+      registryBuild.mockImplementationOnce(() => [{ tool: readNpc, destructive: false }]);
+
+      callStep
+        .mockResolvedValueOnce({ message: aiMessageWithToolCall("read_npc", {}), tokenUsage: { input: 1, output: 1 } })
+        .mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+      finalise("Ask [Aldo](mention://npcs/npc-1) or [Ghost](mention://npcs/npc-999).");
+
+      const result = await service.run({ ...baseParams, inlineEntityLinks: true });
+
+      expect(result.kind).toBe("completed");
+      if (result.kind === "completed") {
+        expect(result.answer).toBe("Ask [Aldo](mention://npcs/npc-1) or Ghost.");
+      }
+    });
+
+    it("finalise appends the inline-link instruction only when inlineEntityLinks is true", async () => {
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
+      finalise("done");
+      await service.run({ ...baseParams, threadId: "assistant-1:msg-off" });
+
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
+      finalise("done");
+      await service.run({ ...baseParams, threadId: "assistant-1:msg-on", inlineEntityLinks: true });
+
+      const offInstructions = llmCall.mock.calls[0][0].instructions as string;
+      const onInstructions = llmCall.mock.calls[1][0].instructions as string;
+      expect(offInstructions).not.toContain("mention://");
+      expect(onInstructions).toContain("[Name](mention://<type>/<id>)");
+      expect(onInstructions).toContain("Link only records from tool results.");
+      expect(onInstructions).toContain("The link text must be that record's own name or title");
+    });
+  });
 });

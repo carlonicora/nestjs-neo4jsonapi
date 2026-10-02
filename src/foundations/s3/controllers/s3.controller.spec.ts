@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -26,14 +26,25 @@ vi.mock("../services/s3.service", () => ({
   })),
 }));
 
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { S3Service } from "../services/s3.service";
 import { S3Controller } from "./s3.controller";
 
+const CLS_VALUES: Record<string, unknown> = {
+  userId: "user-1",
+  companyId: "company-1",
+  roles: ["role-1"],
+};
+
+const mockClsService = { get: vi.fn((key: string) => CLS_VALUES[key]) };
+
 describe("S3Controller", () => {
   let controller: S3Controller;
-  let s3Service: vi.Mocked<S3Service>;
+  let s3Service: Mocked<S3Service>;
 
   // Test data constants
   const MOCK_KEY = "uploads/user-123/image.png";
@@ -51,7 +62,7 @@ describe("S3Controller", () => {
         expiresAt: new Date().toISOString(),
       },
     },
-  };
+  } as unknown as Awaited<ReturnType<S3Service["generatePresignedUrl"]>>;
 
   const mockSignedResponse = {
     data: {
@@ -62,7 +73,7 @@ describe("S3Controller", () => {
         key: MOCK_KEY,
       },
     },
-  };
+  } as unknown as Awaited<ReturnType<S3Service["findSignedUrl"]>>;
 
   beforeEach(async () => {
     const mockS3Service = {
@@ -73,7 +84,10 @@ describe("S3Controller", () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [S3Controller],
-      providers: [{ provide: S3Service, useValue: mockS3Service }],
+      providers: [
+        { provide: S3Service, useValue: mockS3Service },
+        { provide: ClsService, useValue: mockClsService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
@@ -134,10 +148,9 @@ describe("S3Controller", () => {
       );
     });
 
-    it("should handle invalid key", async () => {
-      s3Service.generatePresignedUrl.mockRejectedValue(new Error("Invalid key"));
-
-      await expect(controller.getPresignedUrl("", MOCK_CONTENT_TYPE, true)).rejects.toThrow("Invalid key");
+    it("should reject an empty key before calling the service", async () => {
+      await expect(controller.getPresignedUrl("", MOCK_CONTENT_TYPE, true)).rejects.toThrow(BadRequestException);
+      expect(s3Service.generatePresignedUrl).not.toHaveBeenCalled();
     });
   });
 
@@ -210,6 +223,120 @@ describe("S3Controller", () => {
       expect(s3Service.deleteFileFromS3).toHaveBeenCalledWith({
         key: "uploads/company-456/documents/report.pdf",
       });
+    });
+  });
+
+  describe("malformed keys (always rejected, no policy bound)", () => {
+    const MALFORMED = ["", "   ", "/companies/c1/a.pdf", "companies/c1/../c2/a.pdf", "..", "companies/../x"];
+
+    it.each(MALFORMED)("getPresignedUrl rejects %j with 400", async (key) => {
+      await expect(controller.getPresignedUrl(key, MOCK_CONTENT_TYPE, false)).rejects.toThrow(BadRequestException);
+      expect(s3Service.generatePresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it.each(MALFORMED)("getSignedUrl rejects %j with 400", async (key) => {
+      await expect(controller.getSignedUrl(key, false)).rejects.toThrow(BadRequestException);
+      expect(s3Service.findSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it.each(MALFORMED)("deleteFile rejects %j with 400", async (key) => {
+      await expect(controller.deleteFile(key)).rejects.toThrow(BadRequestException);
+      expect(s3Service.deleteFileFromS3).not.toHaveBeenCalled();
+    });
+
+    it("rejects a missing key (undefined query param) with 400", async () => {
+      await expect(controller.getSignedUrl(undefined as unknown as string, false)).rejects.toThrow(BadRequestException);
+      expect(s3Service.findSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it("accepts a key whose segment merely contains dots", async () => {
+      s3Service.findSignedUrl.mockResolvedValue(mockSignedResponse);
+
+      await controller.getSignedUrl("companies/c1/report..v2.pdf", false);
+
+      expect(s3Service.findSignedUrl).toHaveBeenCalled();
+    });
+  });
+
+  describe("with a bound S3_KEY_ACCESS_POLICY", () => {
+    let policy: { canAccess: ReturnType<typeof vi.fn> };
+    let guarded: S3Controller;
+    let guardedService: Mocked<S3Service>;
+
+    beforeEach(async () => {
+      policy = { canAccess: vi.fn() };
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [S3Controller],
+        providers: [
+          {
+            provide: S3Service,
+            useValue: { generatePresignedUrl: vi.fn(), findSignedUrl: vi.fn(), deleteFileFromS3: vi.fn() },
+          },
+          { provide: ClsService, useValue: mockClsService },
+          { provide: S3_KEY_ACCESS_POLICY, useValue: policy as S3KeyAccessPolicy },
+        ],
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
+
+      guarded = module.get<S3Controller>(S3Controller);
+      guardedService = module.get(S3Service);
+    });
+
+    it("getPresignedUrl: policy refusal -> 403 and the service is not called", async () => {
+      policy.canAccess.mockResolvedValue(false);
+
+      await expect(guarded.getPresignedUrl(MOCK_KEY, MOCK_CONTENT_TYPE, true)).rejects.toThrow(ForbiddenException);
+      expect(guardedService.generatePresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it("getSignedUrl: policy refusal -> 403 and the service is not called", async () => {
+      policy.canAccess.mockReturnValue(false);
+
+      await expect(guarded.getSignedUrl(MOCK_KEY, false)).rejects.toThrow(ForbiddenException);
+      expect(guardedService.findSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it("deleteFile: policy refusal -> 403 and the service is not called", async () => {
+      policy.canAccess.mockResolvedValue(false);
+
+      await expect(guarded.deleteFile(MOCK_KEY)).rejects.toThrow(ForbiddenException);
+      expect(guardedService.deleteFileFromS3).not.toHaveBeenCalled();
+    });
+
+    it("hands the policy the key, the action and the CLS caller (upload)", async () => {
+      policy.canAccess.mockResolvedValue(true);
+      guardedService.generatePresignedUrl.mockResolvedValue(mockPresignedResponse);
+
+      await guarded.getPresignedUrl(MOCK_KEY, MOCK_CONTENT_TYPE, "true" as unknown as boolean);
+
+      expect(policy.canAccess).toHaveBeenCalledWith({
+        key: MOCK_KEY,
+        action: "upload",
+        isPublic: true,
+        userId: "user-1",
+        companyId: "company-1",
+        roles: ["role-1"],
+      });
+      expect(guardedService.generatePresignedUrl).toHaveBeenCalled();
+    });
+
+    it("asks for download on sign and delete on delete", async () => {
+      policy.canAccess.mockResolvedValue(true);
+
+      await guarded.getSignedUrl(MOCK_KEY, undefined as unknown as boolean);
+      await guarded.deleteFile(MOCK_KEY);
+
+      expect(policy.canAccess.mock.calls[0][0]).toMatchObject({ action: "download", isPublic: false });
+      expect(policy.canAccess.mock.calls[1][0]).toMatchObject({ action: "delete", isPublic: false });
+      expect(guardedService.findSignedUrl).toHaveBeenCalled();
+      expect(guardedService.deleteFileFromS3).toHaveBeenCalledWith({ key: MOCK_KEY });
+    });
+
+    it("rejects a malformed key with 400 without consulting the policy", async () => {
+      await expect(guarded.getSignedUrl("companies/c1/../c2/a.pdf", false)).rejects.toThrow(BadRequestException);
+      expect(policy.canAccess).not.toHaveBeenCalled();
     });
   });
 

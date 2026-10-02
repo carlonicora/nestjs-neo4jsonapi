@@ -64,7 +64,8 @@ describe("AssistantMessageModule.onApplicationBootstrap", () => {
       selfAssistantMessage,
     ]);
 
-    const mod = new AssistantMessageModule();
+    const moduleRef = { get: vi.fn().mockReturnValue({}) } as any;
+    const mod = new AssistantMessageModule(moduleRef);
     mod.onApplicationBootstrap();
 
     const candidates = AssistantMessageDescriptor.relationships.references.polymorphic!.candidates;
@@ -73,5 +74,35 @@ describe("AssistantMessageModule.onApplicationBootstrap", () => {
     expect(candidates).not.toContain(withoutSerialiser);
     expect(candidates).not.toContain(selfAssistant);
     expect(candidates).not.toContain(selfAssistantMessage);
+  });
+
+  it("excludes a model whose serialiser is not a registered provider", () => {
+    const provided = {
+      nodeName: "account",
+      labelName: "Account",
+      type: "accounts",
+      serialiser: class ProvidedSerialiser {} as any,
+      entity: {},
+      mapper: () => ({}),
+    } as any;
+    const unprovided = {
+      nodeName: "microsoftGraphSubscription",
+      labelName: "MicrosoftGraphSubscription",
+      type: "microsoft-graph-subscriptions",
+      serialiser: class UnprovidedSerialiser {} as any,
+      entity: {},
+      mapper: () => ({}),
+    } as any;
+    vi.spyOn(modelRegistry, "getAllModels").mockReturnValue([provided, unprovided]);
+    const moduleRef = {
+      get: vi.fn().mockImplementation((token: unknown) => {
+        if (token === unprovided.serialiser) throw new Error("Nest could not find UnprovidedSerialiser element");
+        return {};
+      }),
+    } as any;
+
+    new AssistantMessageModule(moduleRef).onApplicationBootstrap();
+
+    expect(AssistantMessageDescriptor.relationships.references.polymorphic!.candidates).toEqual([provided]);
   });
 });

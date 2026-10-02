@@ -92,6 +92,8 @@ export class ResponderService {
     assistantId?: string;
     /** App-provided context blocks guaranteed present this turn. */
     seedContexts?: AssistantSeedContext[];
+    /** Opt-in: the answer writes listed entities as inline mention links. Absent = off (default prompt unchanged). */
+    inlineEntityLinks?: boolean;
   }): Promise<ResponderResponseInterface> {
     const allowed = resolveAllowedBranches(
       this.configService.get<ConfigResponderInterface>("responder")?.branches,
@@ -117,6 +119,7 @@ export class ResponderService {
     initialState.rawQuestion = lastUserMessage;
     initialState.question = lastUserMessage;
     initialState.seedContexts = params.seedContexts;
+    initialState.inlineEntityLinks = params.inlineEntityLinks;
 
     const useHowToBranch = usesDocumentationBranch(params.dataLimits);
 

@@ -181,6 +181,83 @@ describe("ContentCypherService", () => {
       // Assert
       expect(result).not.toContain("totalScore");
     });
+
+    it("should emit the historical bare WITH, byte-identical, without accessPredicates", () => {
+      clsService.get.mockImplementation((key: string) => {
+        if (key === "companyId") return TEST_IDS.companyId;
+        if (key === "userId") return TEST_IDS.userId;
+        return undefined;
+      });
+
+      expect(service.userHasAccess()).toBe(`
+      WITH content, company, currentUser
+    `);
+      expect(service.userHasAccess({ useTotalScore: true })).toBe(`
+      WITH content, company, currentUser, totalScore
+    `);
+    });
+
+    describe("with accessPredicates", () => {
+      const withUser = (cls: MockedObject<ClsService>, extra: Record<string, unknown> = {}) =>
+        cls.get.mockImplementation((key: string) => {
+          if (key in extra) return extra[key];
+          if (key === "companyId") return TEST_IDS.companyId;
+          if (key === "userId") return TEST_IDS.userId;
+          return undefined;
+        });
+
+      const PREDICATES: ContentExtensionConfig = {
+        additionalRelationships: [],
+        accessPredicates: { Document: "<DOC>", Memo: "<MEMO>" },
+      };
+
+      it("filters each guarded label between two identical projections", async () => {
+        const { service: guarded, clsService: cls } = await createServiceWithExtension(PREDICATES);
+        withUser(cls);
+
+        const result = guarded.userHasAccess().replace(/\s+/g, " ").trim();
+
+        expect(result).toBe(
+          "WITH content, company, currentUser " +
+            "WHERE (NOT content:Document OR (<DOC>)) AND (NOT content:Memo OR (<MEMO>)) " +
+            "WITH content, company, currentUser",
+        );
+      });
+
+      it("keeps totalScore in both projections for the relevance read", async () => {
+        const { service: guarded, clsService: cls } = await createServiceWithExtension(PREDICATES);
+        withUser(cls);
+
+        const result = guarded.userHasAccess({ useTotalScore: true }).replace(/\s+/g, " ").trim();
+
+        expect(result).toBe(
+          "WITH content, company, currentUser, totalScore " +
+            "WHERE (NOT content:Document OR (<DOC>)) AND (NOT content:Memo OR (<MEMO>)) " +
+            "WITH content, company, currentUser, totalScore",
+        );
+      });
+
+      it("skips the predicates for automated jobs", async () => {
+        const { service: guarded, clsService: cls } = await createServiceWithExtension(PREDICATES);
+        withUser(cls, { isAutomatedJob: true });
+
+        expect(guarded.userHasAccess()).toBe(`
+      WITH content, company, currentUser
+    `);
+      });
+
+      it("excludes guarded labels outright when no user is in context", async () => {
+        const { service: guarded, clsService: cls } = await createServiceWithExtension(PREDICATES);
+        withUser(cls, { userId: undefined });
+
+        const result = guarded.userHasAccess().replace(/\s+/g, " ").trim();
+
+        expect(result).toBe(
+          "WITH content, company WHERE (NOT content:Document) AND (NOT content:Memo) WITH content, company",
+        );
+        expect(result).not.toContain("<DOC>");
+      });
+    });
   });
 
   describe("returnStatement", () => {
@@ -302,6 +379,13 @@ describe("ContentCypherService", () => {
       expect(service.default()).not.toContain("tldr");
     });
 
+    it("should keep the historical company WHERE and apply no access predicate", () => {
+      const result = service.default().replace(/\s+/g, " ");
+
+      expect(result).toContain("WHERE $companyId IS NULL OR EXISTS { MATCH (content)-[:BELONGS_TO]-(company) }");
+      expect(result).not.toContain("NOT content:");
+    });
+
     it("should emit no extra meta-field projection", () => {
       expect(service.returnStatement()).not.toContain(" AS ");
     });
@@ -336,9 +420,40 @@ describe("ContentCypherService", () => {
 
       const result = a360.default();
 
-      expect(result).toContain("WHERE content.tldr IS NOT NULL");
-      expect(result).toContain(`AND content.tldr <> ""`);
-      expect(result).toContain("AND $companyId IS NULL");
+      expect(result).toContain(`WHERE (content.tldr IS NOT NULL AND content.tldr <> "")`);
+      expect(result).toContain("AND ($companyId IS NULL");
+    });
+
+    it("default() parenthesises the tldr filter", async () => {
+      const { service: a360 } = await createServiceWithExtension(A360_CONFIG);
+
+      const result = a360.default().replace(/\s+/g, " ");
+
+      // AND binds tighter than OR: without these parentheses a company in
+      // context made `$companyId IS NULL OR EXISTS {…}` swallow the tldr filter.
+      expect(result).toContain(`(content.tldr IS NOT NULL AND content.tldr <> "")`);
+      expect(result).toContain(
+        `(content.tldr IS NOT NULL AND content.tldr <> "") AND ($companyId IS NULL OR EXISTS { MATCH (content)-[:BELONGS_TO]-(company) })`,
+      );
+    });
+
+    it("default() leaves the access predicates to userHasAccess() (no duplicate EXISTS checks)", async () => {
+      const { service: a360, clsService: cls } = await createServiceWithExtension({
+        ...A360_CONFIG,
+        accessPredicates: { Document: "<P>" },
+      });
+      cls.get.mockImplementation((key: string) => (key === "userId" ? TEST_IDS.userId : undefined));
+
+      const withPredicates = a360.default().replace(/\s+/g, " ");
+      const { service: a360NoPredicates } = await createServiceWithExtension(A360_CONFIG);
+
+      expect(withPredicates).not.toContain("<P>");
+      // The tldr and company conditions stay in default(), unchanged.
+      expect(a360.default()).toBe(a360NoPredicates.default());
+      expect(withPredicates).toContain(
+        `(content.tldr IS NOT NULL AND content.tldr <> "") AND ($companyId IS NULL OR EXISTS { MATCH (content)-[:BELONGS_TO]-(company) })`,
+      );
+      expect(a360.userHasAccess().replace(/\s+/g, " ")).toContain("(NOT content:Document OR (<P>))");
     });
 
     it("should expose the tldr filter as trailing AND predicates", async () => {

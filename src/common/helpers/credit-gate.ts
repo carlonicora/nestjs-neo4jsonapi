@@ -60,3 +60,17 @@ export async function isAiEnabledVia(
     return true;
   }
 }
+
+/**
+ * Chooses the validator that gates an INTERACTIVE AI request (assistant,
+ * operator, MCP tool calls): the `INTERACTIVE_CREDIT_VALIDATOR` binding when
+ * present, otherwise the `CREDIT_VALIDATOR` binding, otherwise `undefined`
+ * (ungated, today's behaviour). Background processors never call this; they
+ * read `CREDIT_VALIDATOR` only.
+ */
+export function pickInteractiveValidator(
+  interactive?: CreditValidatorInterface,
+  base?: CreditValidatorInterface,
+): CreditValidatorInterface | undefined {
+  return interactive ?? base;
+}

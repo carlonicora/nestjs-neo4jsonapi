@@ -134,4 +134,37 @@ describe("updateRelationshipQuery", () => {
       expect(queryParams.taxonomy_ids).toEqual([]);
     });
   });
+
+  describe("Scenario: companyScoped targets", () => {
+    const base = {
+      node: "account",
+      relationshipName: "HAS_ACCESS",
+      relationshipToNode: true,
+      label: "User",
+      param: "userIds",
+      values: ["u1"],
+    };
+
+    it("does not filter targets by company by default", () => {
+      const query = updateRelationshipQuery(base);
+
+      expect(query).toContain("MATCH (new:User {id: id})");
+      expect(query).not.toContain("BELONGS_TO");
+    });
+
+    it("links only targets that BELONG_TO $companyId when opted in", () => {
+      const query = updateRelationshipQuery({ ...base, companyScoped: true });
+
+      expect(query).toMatch(
+        /MATCH \(new:User \{id: id\}\)\s+WHERE EXISTS \{ \(new\)-\[:BELONGS_TO\]->\(:Company \{id: \$companyId\}\) \}\s+MERGE/,
+      );
+    });
+
+    it("keeps removing edges to ids no longer listed, whatever their company", () => {
+      const query = updateRelationshipQuery({ ...base, companyScoped: true });
+
+      expect(query).toContain("WHERE NOT existing.id IN $userIds");
+      expect(query).toContain("DELETE rel");
+    });
+  });
 });

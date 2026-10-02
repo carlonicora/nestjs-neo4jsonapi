@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { IsIn, IsNotEmpty, IsOptional, IsString, IsUUID } from "class-validator";
 
 /**
  * OAuth Authorization Query Parameters (RFC 6749 Section 4.1.1)
@@ -94,4 +94,8 @@ export class OAuthConsentDecisionDto {
   @IsOptional()
   @IsIn(["S256", "plain"])
   code_challenge_method?: string;
+
+  @IsUUID()
+  @IsOptional()
+  company_id?: string;
 }

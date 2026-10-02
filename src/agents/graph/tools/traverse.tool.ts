@@ -9,6 +9,7 @@ import { CatalogEntity, CatalogRelationship } from "../interfaces/graph.catalog.
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
 import { RelatedEdgesService } from "../services/related-edges.service";
+import type { ExternalEntitySource } from "../../../common/interfaces/external.entity.source.interface";
 
 const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
 
@@ -314,14 +315,28 @@ export class TraverseTool {
     if (!sourceRecord) return { error: `No ${source.type} with id ${input.fromId}.` };
 
     const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+    const typeByLabel = new Map(this.catalog.getAllEntities().map((e) => [e.labelName, e.type]));
     // Probe one extra row so truncation is visible to the model: without this,
     // a silently clipped list is reported as complete.
-    const pairs = await this.relatedEdges.findRelatedIds({
-      labelName: source.labelName,
-      id: input.fromId,
-      cypherLabel: rel.cypherLabel,
-      limit: limit + 1,
-    });
+    // A source whose edges do not live in the app database (an
+    // ExternalEntitySource implementing findRelatedIds) supplies its own
+    // related ids, already typed; every other source reads the edge here.
+    const externalFindRelatedIds = (sourceSvc as unknown as Partial<ExternalEntitySource>).findRelatedIds;
+    const pairs: Array<{ id: string; type: string | undefined }> =
+      typeof externalFindRelatedIds === "function"
+        ? await externalFindRelatedIds.call(sourceSvc, {
+            id: input.fromId,
+            cypherLabel: rel.cypherLabel,
+            limit: limit + 1,
+          })
+        : (
+            await this.relatedEdges.findRelatedIds({
+              labelName: source.labelName,
+              id: input.fromId,
+              cypherLabel: rel.cypherLabel,
+              limit: limit + 1,
+            })
+          ).map((pair) => ({ id: pair.id, type: typeByLabel.get(pair.label) }));
     const hasMore = pairs.length > limit;
     const kept = hasMore ? pairs.slice(0, limit) : pairs;
     const truncation = hasMore
@@ -331,7 +346,6 @@ export class TraverseTool {
         }
       : {};
 
-    const typeByLabel = new Map(this.catalog.getAllEntities().map((e) => [e.labelName, e.type]));
     const entityByType = new Map<string, CatalogEntity>();
     const idsByType = new Map<string, string[]>();
     const gatedTypes = new Set<string>();
@@ -341,7 +355,7 @@ export class TraverseTool {
       // both directions; this set keeps the guarantee local to the tool too.
       if (seenIds.has(pair.id)) continue;
       seenIds.add(pair.id);
-      const type = typeByLabel.get(pair.label);
+      const type = pair.type;
       if (!type || gatedTypes.has(type)) continue;
       if (!entityByType.has(type)) {
         const resolved = this.factory.resolveEntity(type, ctx);

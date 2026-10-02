@@ -12,8 +12,8 @@ import { OAUTH_SCOPES_KEY } from "../../../common/decorators/oauth.scopes.decora
  *
  * Usage:
  * @UseGuards(OAuthTokenGuard)
- * @OAuthScopes('photographs:read')
- * async getPhotographs() { ... }
+ * @OAuthScopes('read')
+ * async getDocuments() { ... }
  */
 @Injectable()
 export class OAuthTokenGuard implements CanActivate {

@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { ReadEntityTool } from "../read-entity.tool";
 
 describe("ReadEntityTool", () => {

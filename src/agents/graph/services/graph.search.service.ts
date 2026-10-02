@@ -7,6 +7,11 @@ import { GraphIndexManager } from "./graph.index.manager";
 import { GraphCatalogService } from "./graph.catalog.service";
 import { ScopeGuard } from "./scope.guard";
 import { escapeLuceneTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
+import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import {
+  ExternalEntitySource,
+  isExternalEntitySource,
+} from "../../../common/interfaces/external.entity.source.interface";
 
 export const GRAPH_EXACT_MAX_RESULTS = 10;
 export const GRAPH_FUZZY_MAX_RESULTS = 10;
@@ -119,6 +124,15 @@ export class GraphSearchService {
     // positional call sites keep working. It is only consulted for a scoped
     // run (scopeId + scopeType present).
     private readonly scopeGuard: ScopeGuard,
+    /**
+     * Supplies each type's service for two things: an `ExternalEntitySource`
+     * name lookup, and the record-level access check every app-database
+     * candidate must pass (`findRecordById`). Optional in the TYPE signature
+     * only, after ScopeGuard for the same positional reason; Nest resolves it
+     * (CoreModule exports it globally). Without it no external type is
+     * searched and every app-database candidate is dropped (fail closed).
+     */
+    private readonly registry?: EntityServiceRegistry,
   ) {}
 
   /**
@@ -165,8 +179,11 @@ export class GraphSearchService {
     // Fail closed: in a scoped run, a type that cannot be chained to the run's
     // scope root is unreachable, so it never fans out a tier query at all.
     // Leaving it in would surface candidates from other scope roots.
+    // A `scopeShared` type is reference data, visible in every scoped run.
     const entities =
-      params.scopeId && params.scopeType ? visible.filter((e) => e.scope?.rootType === params.scopeType) : visible;
+      params.scopeId && params.scopeType
+        ? visible.filter((e) => e.scope?.rootType === params.scopeType || e.scopeShared)
+        : visible;
 
     if (!entities.length) {
       return { matchMode: "none", items: [] };
@@ -178,18 +195,136 @@ export class GraphSearchService {
       ["semantic", "semantic"],
     ];
 
+    // A type whose records live outside the app database supplies its own name
+    // lookup. It replaces that type's app-DB tiers and runs with the first tier.
+    const externalByType = new Map<string, ExternalEntitySource>();
+    for (const entity of entities) {
+      const service = this.registry?.get(entity.type);
+      if (isExternalEntitySource(service)) externalByType.set(entity.type, service);
+    }
+    const entityByType = new Map(entities.map((entity) => [entity.type, entity]));
+
     for (const [tier, label] of tiers) {
-      const buckets = await Promise.all(entities.map((e) => this.runTierForEntitySafe(e, params, tier)));
+      const buckets = await Promise.all(
+        entities.map((e) => {
+          const external = externalByType.get(e.type);
+          if (!external) return this.runTierForEntitySafe(e, params, tier);
+          return tier === "substring" ? this.runExternalForEntitySafe(e, external, params) : Promise.resolve([]);
+        }),
+      );
       const merged: RankedCandidate[] = buckets.flat();
-      if (merged.length) {
-        merged.sort((a, b) => b.score - a.score);
-        const items = merged.slice(0, GRAPH_RESOLVE_MAX_RESULTS);
+      if (!merged.length) continue;
+      merged.sort((a, b) => b.score - a.score);
+      const items = await this.keepAccessible({ candidates: merged, params, externalByType, entityByType });
+      if (items.length) {
         const recommendation = buildResolveRecommendation(items, params.text, label);
         return recommendation ? { matchMode: label, items, recommendation } : { matchMode: label, items };
       }
     }
 
     return { matchMode: "none", items: [] };
+  }
+
+  /**
+   * Walks the score-ordered candidates and keeps those the user may see, until
+   * GRAPH_RESOLVE_MAX_RESULTS are kept:
+   *  - an app-database candidate is kept only when its type's service reads it
+   *    back (`findRecordById`), so the repository's record-level access rules
+   *    apply to the name lookup exactly as they apply to read_entity. A type
+   *    with no registered service is dropped;
+   *  - an external candidate is global reference data: no record-level check;
+   *  - in a scoped run, a candidate with no Cypher scope clause (an external
+   *    candidate, or any `viaService` type) is kept only when `ScopeGuard.filter`
+   *    keeps it.
+   * Candidates are checked in windows, in parallel within a window, so order is
+   * preserved without one sequential read per candidate.
+   */
+  private async keepAccessible(params: {
+    candidates: RankedCandidate[];
+    params: ResolveEntityParams;
+    externalByType: Map<string, ExternalEntitySource>;
+    entityByType: Map<string, CatalogEntity>;
+  }): Promise<RankedCandidate[]> {
+    const kept: RankedCandidate[] = [];
+    let cursor = 0;
+    while (kept.length < GRAPH_RESOLVE_MAX_RESULTS && cursor < params.candidates.length) {
+      const window = params.candidates.slice(cursor, cursor + (GRAPH_RESOLVE_MAX_RESULTS - kept.length));
+      cursor += window.length;
+      const verdicts = await Promise.all(
+        window.map((candidate) =>
+          this.isCandidateVisible({
+            candidate,
+            params: params.params,
+            external: params.externalByType.has(candidate.type),
+            entity: params.entityByType.get(candidate.type),
+          }),
+        ),
+      );
+      window.forEach((candidate, index) => {
+        if (verdicts[index] && kept.length < GRAPH_RESOLVE_MAX_RESULTS) kept.push(candidate);
+      });
+    }
+    return kept;
+  }
+
+  private async isCandidateVisible(params: {
+    candidate: RankedCandidate;
+    params: ResolveEntityParams;
+    external: boolean;
+    entity: CatalogEntity | undefined;
+  }): Promise<boolean> {
+    const { candidate } = params;
+    try {
+      if (!params.external) {
+        const service = this.registry?.get(candidate.type);
+        if (!service) return false;
+        const record = await service.findRecordById({ id: candidate.id });
+        if (!record) return false;
+      }
+
+      const scoped = !!params.params.scopeId && !!params.params.scopeType;
+      const needsScopeFilter = params.external || !!params.entity?.scope?.viaService;
+      if (!scoped || !needsScopeFilter) return true;
+      if (!this.scopeGuard) return false;
+      const inScope = await this.scopeGuard.filter({
+        type: candidate.type,
+        records: [{ id: candidate.id }],
+        ctx: {
+          companyId: params.params.companyId,
+          userId: "",
+          userModuleIds: params.params.userModuleIds,
+          scopeId: params.params.scopeId,
+          scopeType: params.params.scopeType,
+        },
+      });
+      return inScope.length === 1;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`resolveEntity: access check type=${candidate.type} id=${candidate.id} threw: ${message}`);
+      return false;
+    }
+  }
+
+  /** `ExternalEntitySource.resolveByText` for one type; errors drop the type, never the lookup. */
+  private async runExternalForEntitySafe(
+    entity: CatalogEntity,
+    source: ExternalEntitySource,
+    params: ResolveEntityParams,
+  ): Promise<RankedCandidate[]> {
+    try {
+      const candidates = await source.resolveByText({ text: params.text, limit: GRAPH_EXACT_MAX_RESULTS });
+      this.logger.debug(`resolve_entity external type=${entity.type} items=${candidates.length}`);
+      return candidates.map((candidate) => ({
+        type: entity.type,
+        id: candidate.id,
+        summary: candidate.name || candidate.id,
+        score: candidate.score,
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`resolveEntity: external type=${entity.type} threw: ${message}`);
+      return [];
+    }
   }
 
   private async runTierForEntitySafe(

@@ -85,6 +85,35 @@ describe("search_entities under scope", () => {
     expect(findRelatedRecords).not.toHaveBeenCalled();
     expect(findRecords).toHaveBeenCalled();
   });
+
+  it("takes the ScopeGuard.filter path for an inline one-hop scope", async () => {
+    const inlineNpc = {
+      ...npc,
+      scope: {
+        ...npc.scope,
+        path: [{ ...npc.scope.path[0], key: "", dtoKey: "", cypherLabel: "PART_OF|IN", inline: true }],
+      },
+    };
+    const findRelatedRecords = vi.fn();
+    const findRecords = vi.fn().mockResolvedValue([
+      { id: "n1", name: "A" },
+      { id: "n2", name: "B" },
+    ]);
+    const filter = vi.fn(async (p: any) => p.records.filter((r: any) => r.id === "n1"));
+    const factory = {
+      resolveEntity: () => inlineNpc,
+      resolveService: () => ({ findRelatedRecords, findRecords }),
+      capture: (_r: any, fn: any) => fn(),
+    };
+    const tool = new SearchEntitiesTool(factory as any, {} as any, {} as any, {} as any, { filter } as any, formatter);
+
+    const recorder = [{ tool: "describe_entity", input: { type: "npcs" }, durationMs: 0 }];
+    await tool.invoke({ type: "npcs", limit: 5 } as any, ctx as any, recorder as any);
+
+    expect(findRelatedRecords).not.toHaveBeenCalled();
+    expect(findRecords).toHaveBeenCalled();
+    expect(filter).toHaveBeenCalledWith(expect.objectContaining({ type: "npcs" }));
+  });
 });
 
 describe("read_entity under scope", () => {

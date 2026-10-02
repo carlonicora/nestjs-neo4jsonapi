@@ -13,13 +13,14 @@ export { OAuthService } from "./services/oauth.service";
 export { OAuthClientService } from "./services/oauth.client.service";
 export { OAuthTokenService } from "./services/oauth.token.service";
 export { OAuthPkceService } from "./services/oauth.pkce.service";
+export { OAuthScopeService } from "./services/oauth.scope.service";
 
 // Guards
 export { OAuthTokenGuard } from "./guards/oauth.token.guard";
 
 // Constants
 export { OAuth2Scopes, VALID_OAUTH_SCOPES } from "./constants/oauth.scopes";
-export type { OAuthScopeType } from "./constants/oauth.scopes";
+export type { OAuthScopeType, OAuthScopeDefinition } from "./constants/oauth.scopes";
 export { OAuthErrorCodes, createOAuthError } from "./constants/oauth.errors";
 export type { OAuthErrorCode } from "./constants/oauth.errors";
 

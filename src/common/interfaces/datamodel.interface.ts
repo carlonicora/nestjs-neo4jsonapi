@@ -37,6 +37,7 @@ export type RelationshipInfo = {
   relationship?: string; // Cypher relationship type (e.g. "PLAYED_BY")
   cardinality?: "one" | "many"; // Whether this hop returns one node or many
   required?: boolean; // Mirrors RelationshipDef.required (nested includes always emit OPTIONAL MATCH regardless)
+  externalSource?: boolean; // Mirrors RelationshipDef.externalSource — nested includes project the node as id + labels only
 };
 
 export type DataModelInterface<T> = DataMeta & {

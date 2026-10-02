@@ -217,7 +217,7 @@ export abstract class AbstractRepository<
           } else {
             query += `OPTIONAL MATCH (${relatedNodeName})<-[:${discRel}]-(${discTargetNodeName}:${rel.model.labelName})\n`;
           }
-          returnParts.push(discTargetNodeName);
+          returnParts.push(this.projectRelatedNode(discTargetNodeName, rel.externalSource));
         }
       }
 
@@ -225,7 +225,7 @@ export abstract class AbstractRepository<
       if (hasFields) {
         if (rel.cardinality === "one") {
           // SINGLE relationship: aliased columns for edge properties (existing behavior)
-          returnParts.push(relatedNodeName);
+          returnParts.push(this.projectRelatedNode(relatedNodeName, rel.externalSource));
           for (const field of rel.fields!) {
             returnParts.push(`${relAlias}.${field.name} AS ${nodeName}_${name}_relationship_${field.name}`);
           }
@@ -233,7 +233,8 @@ export abstract class AbstractRepository<
           // MANY relationship with fields: aggregate nodes and edge props together
           // Don't add to returnParts yet - will UNWIND after aggregation
           manyRelationshipsWithFields.push({ name, relatedNodeName });
-          collectParts.push(`COLLECT(DISTINCT ${relatedNodeName}) AS ${relatedNodeName}s`);
+          const collected = rel.externalSource ? this.idOnlyNodeExpression(relatedNodeName) : relatedNodeName;
+          collectParts.push(`COLLECT(DISTINCT ${collected}) AS ${relatedNodeName}s`);
           const edgePropsFields = rel.fields!.map((f) => `${f.name}: ${relAlias}.${f.name}`).join(", ");
           collectParts.push(
             `COLLECT(CASE WHEN ${relatedNodeName} IS NOT NULL THEN { nodeId: ${relatedNodeName}.id, edgeProps: {${edgePropsFields}} } END) AS ${nodeName}_${name}_edgePropsCollection`,
@@ -241,7 +242,7 @@ export abstract class AbstractRepository<
         }
       } else {
         // No fields - just include the related node directly
-        returnParts.push(relatedNodeName);
+        returnParts.push(this.projectRelatedNode(relatedNodeName, rel.externalSource));
       }
 
       // Nested include expansion — emits OPTIONAL MATCH clauses for each dot-path
@@ -250,7 +251,8 @@ export abstract class AbstractRepository<
         for (const path of rel.include) {
           let currentAlias = relatedNodeName; // e.g. "round_turns"
           let currentNodeName = rel.model.nodeName; // e.g. "turn"
-          for (const segment of path.split(".")) {
+          const segments = path.split(".");
+          for (const [segmentIndex, segment] of segments.entries()) {
             const targetModel = modelRegistry.get(currentNodeName);
             const candidates = [
               ...(targetModel?.singleChildrenRelationships ?? []),
@@ -281,7 +283,13 @@ export abstract class AbstractRepository<
                   ? `(${currentAlias})<-[:${nested.relationship}]-(${childAlias}:${nestedLabel})`
                   : `(${currentAlias})-[:${nested.relationship}]->(${childAlias}:${nestedLabel})`;
               query += `OPTIONAL MATCH ${pattern}\n`;
-              returnParts.push(childAlias);
+              returnParts.push(this.projectRelatedNode(childAlias, nested.externalSource));
+            }
+            if (nested.externalSource && segmentIndex < segments.length - 1) {
+              throw new Error(
+                `include "${path}": relationship "${segment}" on "${currentNodeName}" is an externalSource ` +
+                  `relationship; its node is projected as id + labels only and cannot be expanded further.`,
+              );
             }
             currentAlias = childAlias;
             currentNodeName = nested.nodeName;
@@ -318,6 +326,21 @@ export abstract class AbstractRepository<
     }
 
     return query;
+  }
+
+  /**
+   * Cypher map in the Neo4j node shape EntityFactory maps (`{ labels, properties }`),
+   * carrying only the node's id: used for `externalSource` relationships, whose
+   * records live outside this database, so no stored property is ever returned.
+   * Labels are kept because polymorphic discriminators resolve the target by label.
+   */
+  protected idOnlyNodeExpression(alias: string): string {
+    return `CASE WHEN ${alias} IS NULL THEN NULL ELSE { labels: labels(${alias}), properties: { id: ${alias}.id } } END`;
+  }
+
+  /** The RETURN part for a related node: the node itself, or its id-only projection for an externalSource relationship. */
+  protected projectRelatedNode(alias: string, externalSource?: boolean): string {
+    return externalSource ? `${this.idOnlyNodeExpression(alias)} AS ${alias}` : alias;
   }
 
   /**
@@ -373,6 +396,42 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * Fulltext branch shared by `find` and `findByRelated`.
+   *
+   * Every hit passes the SAME `buildDefaultMatch()` + `buildUserHasAccess()` as the
+   * non-term branch, so a term search can never return a node the plain list would
+   * hide (another company's node, or one the current user has no access to). The
+   * access block runs inside a `CALL {}` per hit, restricted to that node, so the
+   * fulltext `score` survives the `WITH` clauses that subclass overrides emit, and
+   * results stay ordered by `score DESC`.
+   *
+   * @param hitFilter - optional predicate over the raw `node` yielded by the index
+   * @param filterClause - optional structured-filter clause over the entity alias
+   */
+  protected buildFulltextAccessCheckedMatch(params: { hitFilter?: string; filterClause?: string }): string {
+    const { nodeName } = this.descriptor.model;
+    const companyId = this.clsService.get("companyId");
+    const currentUserId = this.clsService.get("userId");
+    const carried = `${nodeName}${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}`;
+
+    return `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
+      YIELD node, score
+      ${params.hitFilter ? `WHERE ${params.hitFilter}` : ``}
+      WITH node AS ${nodeName}, score${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}
+      CALL {
+        WITH ${carried}
+        ${this.buildDefaultMatch()}
+        ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+        RETURN true AS ${nodeName}_fulltextAccess
+        LIMIT 1
+      }
+      WITH ${carried}, score
+      ${params.filterClause ? `WHERE ${params.filterClause}` : ``}
+      ORDER BY score DESC
+    `;
+  }
+
+  /**
    * Find entities with optional search term, ordering, pagination, and structured filters.
    *
    * Backwards-compatible: callers that only pass { term, orderBy, cursor, fetchAll } continue to work.
@@ -414,18 +473,7 @@ export abstract class AbstractRepository<
         : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
 
     if (params.term && this.descriptor.fulltextIndexName) {
-      const fulltextWhere = this.descriptor.isCompanyScoped
-        ? `WHERE (node)-[:BELONGS_TO]->(company)${filterResult.clause ? ` AND ${filterResult.clause}` : ""}`
-        : filterResult.clause
-          ? `WHERE ${filterResult.clause}`
-          : ``;
-      query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
-      YIELD node, score
-      ${fulltextWhere}
-
-      WITH node as ${nodeName}, score
-      ORDER BY score DESC
-    `;
+      query.query += this.buildFulltextAccessCheckedMatch({ filterClause: filterResult.clause });
     } else {
       query.query += `
       ${this.buildDefaultMatch()}
@@ -560,26 +608,18 @@ export abstract class AbstractRepository<
         : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
 
     if (params.term && this.descriptor.fulltextIndexName) {
-      // Use fulltext search with relationship filter
-      query.query += `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
-      YIELD node, score
-      ${this.descriptor.isCompanyScoped ? `WHERE (node)-[:BELONGS_TO]->(company)` : `WHERE true`}
-      `;
+      // Fulltext search with relationship filter. Use EXISTS subquery — pattern
+      // expressions inside WHERE cannot introduce new variables, so we cannot
+      // inline `WHERE related.id IN $relatedIds` on the related node directly.
+      const relatedFilter =
+        rel.direction === "in"
+          ? `EXISTS { MATCH (node)<-[:${rel.relationship}]-(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }`
+          : `EXISTS { MATCH (node)-[:${rel.relationship}]->(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }`;
 
-      // Add relationship filter based on direction.
-      // Use EXISTS subquery — pattern expressions inside WHERE cannot
-      // introduce new variables, so we cannot inline `WHERE related.id IN $relatedIds`
-      // on the related node directly.
-      if (rel.direction === "in") {
-        query.query += `AND EXISTS { MATCH (node)<-[:${rel.relationship}]-(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }\n`;
-      } else {
-        query.query += `AND EXISTS { MATCH (node)-[:${rel.relationship}]->(related:${rel.model.labelName}) WHERE related.id IN $relatedIds }\n`;
-      }
-
-      query.query += `WITH node as ${nodeName}, score
-      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
-      ORDER BY score DESC
-    `;
+      query.query += this.buildFulltextAccessCheckedMatch({
+        hitFilter: relatedFilter,
+        filterClause: filterResult.clause,
+      });
     } else {
       // Use default query with relationship match
       query.query += `

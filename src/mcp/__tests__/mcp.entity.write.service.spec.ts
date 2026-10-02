@@ -15,6 +15,7 @@ const orderEntity = {
   description: "Sales orders",
   labelName: "Order",
   nodeName: "order",
+  writable: true,
   fields: [
     { name: "name", type: "string", description: "Order name", filterable: true, sortable: true },
     { name: "total", type: "float", description: "Order total", filterable: true, sortable: true },
@@ -166,6 +167,57 @@ describe("McpEntityWriteService", () => {
     const payload = JSON.parse(res.content[0].text);
     expect(payload.code).toBe("not_found");
     expect(payload.stack).toBeUndefined();
+  });
+
+  describe("not_writable gate", () => {
+    const readOnlyEntity = { ...orderEntity, writable: undefined };
+
+    const expectNotWritable = (res: { isError?: boolean; content: Array<{ text: string }> }) => {
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe("not_writable");
+      expect(entityService.createFromDTO).not.toHaveBeenCalled();
+      expect(entityService.patchFromDTO).not.toHaveBeenCalled();
+      expect(entityService.findRecordById).not.toHaveBeenCalled();
+      expect(entityService.addToRelationshipFromDTO).not.toHaveBeenCalled();
+      expect(entityService.removeFromRelationshipFromDTO).not.toHaveBeenCalled();
+    };
+
+    beforeEach(() => {
+      catalog.getEntityDetail.mockReturnValue(readOnlyEntity);
+    });
+
+    it("update_entity on a non-writable type returns not_writable and never calls the service", async () => {
+      const res = await svc.updateEntity({ type: "orders", id: "o1", attributes: { name: "X" } }, ctx);
+      expectNotWritable(res);
+    });
+
+    it("create_entity on a non-writable type returns not_writable and never calls the service", async () => {
+      const res = await svc.createEntity({ type: "orders", attributes: { name: "X" } }, ctx);
+      expectNotWritable(res);
+    });
+
+    it("add_relationship on a non-writable type returns not_writable and never calls the service", async () => {
+      const res = await svc.addRelationship(
+        { type: "orders", id: "o1", relationship: "account", relatedType: "accounts", relatedIds: ["a1"] },
+        ctx,
+      );
+      expectNotWritable(res);
+    });
+
+    it("remove_relationship on a non-writable type returns not_writable and never calls the service", async () => {
+      const res = await svc.removeRelationship(
+        { type: "orders", id: "o1", relationship: "account", relatedType: "accounts", relatedIds: ["a1"] },
+        ctx,
+      );
+      expectNotWritable(res);
+    });
+
+    it("a writable type still writes", async () => {
+      catalog.getEntityDetail.mockReturnValue(orderEntity);
+      const res = await svc.updateEntity({ type: "orders", id: "o1", attributes: { name: "New" } }, ctx);
+      expect(res.isError).toBeUndefined();
+      expect(entityService.patchFromDTO).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("buildTools", () => {

@@ -3,16 +3,11 @@ import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { OAuthErrorCodes, createOAuthError } from "../constants/oauth.errors";
-import {
-  OAuthScopeDescriptions,
-  OAuthScopeNames,
-  OAuthScopeType,
-  parseScopes,
-  validateScopes as validateScopesUtil,
-} from "../constants/oauth.scopes";
+import { parseScopes } from "../constants/oauth.scopes";
 import { OAuthRepository } from "../repositories/oauth.repository";
 import { OAuthClientService } from "./oauth.client.service";
 import { OAuthPkceService } from "./oauth.pkce.service";
+import { OAuthScopeService } from "./oauth.scope.service";
 import { OAuthTokenService } from "./oauth.token.service";
 
 export interface AuthorizeParams {
@@ -24,6 +19,8 @@ export interface AuthorizeParams {
   codeChallenge?: string;
   codeChallengeMethod?: string;
   userId: string;
+  /** Company the user chose on the consent screen; stored on the authorization code */
+  companyId?: string;
 }
 
 export interface TokenCodeParams {
@@ -76,6 +73,7 @@ export interface ConsentInfoParams {
   clientId: string;
   redirectUri: string;
   scope?: string;
+  userId: string;
 }
 
 export interface ConsentInfoResponse {
@@ -92,6 +90,8 @@ export interface ConsentInfoResponse {
     name: string;
     description: string;
   }>;
+  /** Companies the user BELONGS_TO, ordered by name, for the studio picker */
+  companies: Array<{ id: string; name: string }>;
 }
 
 export interface ConsentApproveParams {
@@ -102,6 +102,8 @@ export interface ConsentApproveParams {
   codeChallenge?: string;
   codeChallengeMethod?: string;
   userId: string;
+  /** Company chosen on the consent screen; must be one the user BELONGS_TO */
+  companyId?: string;
 }
 
 export interface ConsentDenyParams {
@@ -123,6 +125,7 @@ export class OAuthService {
     private readonly tokenService: OAuthTokenService,
     private readonly pkceService: OAuthPkceService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    private readonly scopeService: OAuthScopeService,
   ) {}
 
   /**
@@ -163,7 +166,7 @@ export class OAuthService {
 
     // Parse and validate scopes
     const requestedScopes = params.scope ? parseScopes(params.scope) : client.allowedScopes;
-    if (!validateScopesUtil(requestedScopes)) {
+    if (!this.scopeService.validate(requestedScopes)) {
       throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_SCOPE), 400);
     }
     if (!this.clientService.validateScopes(client, requestedScopes)) {
@@ -211,6 +214,7 @@ export class OAuthService {
       codeChallenge: params.codeChallenge,
       codeChallengeMethod,
       expiresAt,
+      companyId: params.companyId ?? null,
     });
 
     return { code, state: params.state };
@@ -281,8 +285,8 @@ export class OAuthService {
       throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_GRANT, "Authorization code already used"), 400);
     }
 
-    // Look up user's company for proper scoping
-    const companyId = await this.oauthRepository.findCompanyIdForUser(storedCode.userId);
+    // Use the company chosen at consent; fall back to the user's company for codes issued without one
+    const companyId = storedCode.companyId ?? (await this.oauthRepository.findCompanyIdForUser(storedCode.userId));
 
     // Generate tokens
     const {
@@ -546,7 +550,7 @@ export class OAuthService {
 
     // Parse and validate scopes
     const requestedScopes = params.scope ? parseScopes(params.scope) : client.allowedScopes;
-    if (!validateScopesUtil(requestedScopes)) {
+    if (!this.scopeService.validate(requestedScopes)) {
       throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_SCOPE), 400);
     }
     if (!this.clientService.validateScopes(client, requestedScopes)) {
@@ -559,8 +563,7 @@ export class OAuthService {
     // Build scope info for consent screen
     const scopeInfo = requestedScopes.map((scope) => ({
       scope,
-      name: OAuthScopeNames[scope as OAuthScopeType] || scope,
-      description: OAuthScopeDescriptions[scope as OAuthScopeType] || `Access to ${scope}`,
+      ...this.scopeService.describe(scope),
     }));
 
     return {
@@ -573,6 +576,7 @@ export class OAuthService {
         },
       },
       scopes: scopeInfo,
+      companies: await this.oauthRepository.findCompaniesForUser(params.userId),
     };
   }
 
@@ -583,6 +587,14 @@ export class OAuthService {
    * Returns a redirect URL with the authorization code.
    */
   async approveAuthorization(params: ConsentApproveParams): Promise<{ redirectUrl: string }> {
+    // A chosen company must be one the user belongs to
+    if (
+      params.companyId &&
+      !(await this.oauthRepository.userBelongsToCompany({ userId: params.userId, companyId: params.companyId }))
+    ) {
+      throw new HttpException(createOAuthError(OAuthErrorCodes.ACCESS_DENIED, "User does not belong to company"), 403);
+    }
+
     // Use existing initiateAuthorization logic
     const { code, state } = await this.initiateAuthorization({
       responseType: "code",
@@ -593,6 +605,7 @@ export class OAuthService {
       codeChallenge: params.codeChallenge,
       codeChallengeMethod: params.codeChallengeMethod,
       userId: params.userId,
+      companyId: params.companyId,
     });
 
     // Build redirect URL with code

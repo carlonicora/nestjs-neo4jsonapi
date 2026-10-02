@@ -1,4 +1,5 @@
-import { Body, Controller, HttpCode, HttpException, Post } from "@nestjs/common";
+import { Body, Controller, HttpCode, HttpException, Post, UseFilters } from "@nestjs/common";
+import { OAuthErrorFilter } from "../filters/oauth.error.filter";
 import { ConfigService } from "@nestjs/config";
 import { ConfigOAuthInterface } from "../../../config/interfaces/config.oauth.interface";
 import { OAuthRegisterDto } from "../dtos/oauth.register.dto";
@@ -15,6 +16,7 @@ import { OAuthClientService } from "../services/oauth.client.service";
  * (plain JSON, not JSON:API) — same convention as /oauth/token.
  */
 @Controller("oauth")
+@UseFilters(OAuthErrorFilter)
 export class OAuthRegistrationController {
   constructor(
     private readonly clientService: OAuthClientService,

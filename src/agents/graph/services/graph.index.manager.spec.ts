@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { GraphIndexManager } from "./graph.index.manager";
 
 describe("GraphIndexManager", () => {
@@ -47,5 +48,26 @@ describe("GraphIndexManager", () => {
     await mgr.onApplicationBootstrap();
 
     expect(neo4j.writeOne).not.toHaveBeenCalled();
+  });
+
+  it("creates no index for a type whose records live outside the app database", async () => {
+    const neo4j = makeNeo4j();
+    const catalog = {
+      getAllChatEnabledEntities: vi.fn().mockReturnValue([
+        { type: "judgements", labelName: "Judgement", textSearchFields: ["name"] },
+        { type: "accounts", labelName: "Account", textSearchFields: ["name"] },
+      ]),
+    };
+    const registry = {
+      get: vi.fn((type: string) => (type === "judgements" ? { resolveByText: vi.fn() } : {})),
+    };
+
+    const mgr = new GraphIndexManager(neo4j as any, catalog as any, makeModelService() as any, registry as any);
+    await mgr.onApplicationBootstrap();
+
+    const queries = neo4j.writeOne.mock.calls.map((c: any[]) => c[0].query as string);
+    expect(queries.some((q) => q.includes("judgement_chat"))).toBe(false);
+    expect(queries.some((q) => q.includes("CREATE FULLTEXT INDEX `account_chat_fulltext`"))).toBe(true);
+    expect(queries.some((q) => q.includes("CREATE VECTOR INDEX `account_chat_embedding`"))).toBe(true);
   });
 });

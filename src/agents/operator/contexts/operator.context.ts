@@ -26,6 +26,12 @@ export const OperatorContext = Annotation.Root({
    * bills. Checkpointed, so a resumed run keeps it without being told again.
    */
   assistantId: Annotation<string | undefined>({ reducer: (_, b) => b, default: () => undefined }),
+  /**
+   * Whether `finalise` may write `[Name](mention://<type>/<id>)` links for
+   * records read in this run. Opt-in per call (assistant config); checkpointed,
+   * so a resumed run keeps it.
+   */
+  inlineEntityLinks: Annotation<boolean | undefined>({ reducer: (_, b) => b, default: () => undefined }),
   question: Annotation<string>,
   toolCalls: Annotation<ToolCallRecord[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
   references: Annotation<EntityReference[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
@@ -64,9 +70,9 @@ type OperatorAttributionState = Pick<CallerAttributionState, "scopeLabel" | "ass
 /**
  * Every channel added after the published state shape froze, declared OPTIONAL
  * for the reason above: a consumer's existing state literal must keep compiling.
- * `actionError` joins the attribution pair here for exactly that reason.
+ * `actionError` and `inlineEntityLinks` join the attribution pair here for exactly that reason.
  */
-type OperatorLateState = OperatorAttributionState & { actionError?: string | null };
+type OperatorLateState = OperatorAttributionState & { actionError?: string | null; inlineEntityLinks?: boolean };
 
 /**
  * The un-widened shape LangGraph itself hands to a node callback — every

@@ -1,4 +1,14 @@
-const query = (params: { term?: string }): string => {
+/**
+ * The relevance scoring shared by every relevance read.
+ *
+ * By default the fragment ends with `ORDER BY totalScore DESC {CURSOR}`, so the
+ * page is cut here. A caller that filters the scored rows afterwards passes
+ * `deferCursor: true`: the fragment then ends on the scored projection and the
+ * caller appends `ORDER BY totalScore DESC {CURSOR}` after its own filters, so a
+ * page is filled from rows that survive them and the pagination total (the
+ * query up to `{CURSOR}`) counts the same rows.
+ */
+const query = (params: { term?: string; deferCursor?: boolean }): string => {
   return `
         OPTIONAL MATCH (chunk)-[:HAS_ATOMIC_FACT]->(:AtomicFact)-[:HAS_KEY_CONCEPT]->(startingKC:KeyConcept)
         OPTIONAL MATCH (chunk)<-[:OCCURS_IN]-(startingKCR:KeyConceptRelationship)-[:BELONGS_TO]->(company)
@@ -40,9 +50,13 @@ const query = (params: { term?: string }): string => {
           END AS totalScore
 
         ${params.term ? "WHERE toLower(content.name) CONTAINS toLower($term)" : ""}
-
+${
+  params.deferCursor
+    ? ``
+    : `
         ORDER BY totalScore DESC
-        {CURSOR}
+        {CURSOR}`
+}
     `;
 };
 
@@ -98,25 +112,51 @@ const queryForAuthor = (params: { term?: string }): string => {
     `;
 };
 
-export const contentQuery = (params: { term?: string }): string => {
+/**
+ * The `source` node of a content relevance read: constrained to the configured
+ * content labels (`:Article|Document|…`) so the `{id: $id}` lookup is an index
+ * seek per label instead of a scan of every node. Unlabelled (the historical
+ * pattern) when no content label is configured.
+ */
+const sourcePattern = (sourceLabels?: string[]): string =>
+  `source${sourceLabels?.length ? `:${sourceLabels.join("|")}` : ``} {id: $id}`;
+
+/**
+ * The scored contents related to the source content `$id`, WITHOUT the page cut:
+ * the fragment ends on the `content, totalScore` projection, and the caller
+ * filters the rows (source exclusion, score threshold, access check) and then
+ * appends `ORDER BY totalScore DESC {CURSOR}`.
+ */
+export const contentQuery = (params: { term?: string; sourceLabels?: string[] }): string => {
   return `
-    MATCH (source {id: $id})-[:BELONGS_TO]->(company)
+    MATCH (${sourcePattern(params.sourceLabels)})-[:BELONGS_TO]->(company)
     MATCH (source)-[:HAS_CHUNK]->(chunk:Chunk)
-    ${query({ term: params.term })}
+    ${query({ term: params.term, deferCursor: true })}
 `;
 };
 
-export const authorQuery = (params: { term?: string }): string => {
+/**
+ * The scored contents related to the author `$id`. By default the fragment cuts
+ * the page itself (`ORDER BY totalScore DESC {CURSOR}`); a caller that filters
+ * the scored rows afterwards passes `deferCursor: true` and appends the cut after
+ * its own filters (see `query`).
+ *
+ * The author must belong to the caller's company (`$companyId`), stated in the
+ * fragment itself rather than relying on the caller having bound `company`
+ * first: an author from another company, or a call with no company in context,
+ * matches nothing.
+ */
+export const authorQuery = (params: { term?: string; deferCursor?: boolean }): string => {
   return `
-    MATCH (author {id: $id})-[:BELONGS_TO]->(company)
+    MATCH (author {id: $id})-[:BELONGS_TO]->(company:Company {id: $companyId})
     OPTIONAL MATCH (author)<-[:AUTHORED_BY|EDITED_BY]->()-[:HAS_CHUNK]->(chunk:Chunk)
-    ${query({ term: params.term })}
+    ${query({ term: params.term, deferCursor: params.deferCursor })}
 `;
 };
 
-export const contentToAuthorQuery = (params: { term?: string }): string => {
+export const contentToAuthorQuery = (params: { term?: string; sourceLabels?: string[] }): string => {
   return `
-    MATCH (source {id: $id})-[:BELONGS_TO]->(company)
+    MATCH (${sourcePattern(params.sourceLabels)})-[:BELONGS_TO]->(company)
     MATCH (source)-[:HAS_CHUNK]->(chunk:Chunk)
     ${queryForAuthor({ term: params.term })}
 `;
@@ -124,7 +164,7 @@ export const contentToAuthorQuery = (params: { term?: string }): string => {
 
 export const authorToAuthorQuery = (params: { term?: string }): string => {
   return `
-    MATCH (author {id: $id})-[:BELONGS_TO]->(company)
+    MATCH (author {id: $id})-[:BELONGS_TO]->(company:Company {id: $companyId})
     OPTIONAL MATCH (author)<-[:AUTHORED_BY|EDITED_BY]->()-[:HAS_CHUNK]->(chunk:Chunk)
     ${queryForAuthor({ term: params.term })}
 `;

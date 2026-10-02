@@ -3,6 +3,8 @@ import * as bcrypt from "bcrypt";
 import * as crypto from "crypto";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { Company, CompanyDescriptor } from "../../company/entities/company";
+import { companyMeta } from "../../company/entities/company.meta";
 import { OAuthAccessToken } from "../entities/oauth.access.token.entity";
 import { OAuthAccessTokenModel } from "../entities/oauth.access.token.model";
 import { OAuthAuthorizationCode } from "../entities/oauth.authorization.code.entity";
@@ -263,6 +265,7 @@ export class OAuthRepository implements OnModuleInit {
     codeChallenge?: string;
     codeChallengeMethod?: "S256" | "plain";
     expiresAt: Date;
+    companyId?: string | null;
   }): Promise<void> {
     const id = randomUUID();
     const codeHash = crypto.createHash("sha256").update(params.code).digest("hex");
@@ -279,6 +282,7 @@ export class OAuthRepository implements OnModuleInit {
       codeChallenge: params.codeChallenge ?? null,
       codeChallengeMethod: params.codeChallengeMethod ?? null,
       expiresAt: params.expiresAt.toISOString(),
+      companyId: params.companyId ?? null,
     };
 
     query.query = `
@@ -295,6 +299,7 @@ export class OAuthRepository implements OnModuleInit {
         isUsed: false,
         clientId: $clientId,
         userId: $userId,
+        companyId: $companyId,
         expiresAt: datetime($expiresAt),
         createdAt: datetime()
       })
@@ -529,22 +534,62 @@ export class OAuthRepository implements OnModuleInit {
   /**
    * Looks up the company ID for a user.
    * Used to include companyId in OAuth tokens for proper scoping.
-   * Uses raw Neo4j query to avoid circular dependency with CompanyDescriptor.
+   * Reads the company through readOne with the Company serialiser (the same
+   * shape as findCompaniesForUser / userBelongsToCompany) and returns its id;
+   * with several companies the first row wins, as before.
    */
   async findCompanyIdForUser(userId: string): Promise<string | null> {
-    const query = `
-      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company:Company)
-      RETURN company.id AS companyId
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+    query.queryParams = { ...query.queryParams, userId };
+    query.query = `
+      MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(${companyMeta.nodeName}:${companyMeta.labelName})
+      RETURN ${companyMeta.nodeName}
     `;
     try {
-      const result = await this.neo4j.read(query, { userId });
-      if (result.records.length === 0) {
-        return null;
-      }
-      const companyId = result.records[0].get("companyId");
-      return companyId ?? null;
+      const company = await this.neo4j.readOne<Company>(query);
+      return company?.id ?? null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Lists the companies a user belongs to, ordered by name.
+   * Used by the consent screen's studio picker.
+   */
+  async findCompaniesForUser(userId: string): Promise<Array<{ id: string; name: string }>> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model, fetchAll: true });
+    query.queryParams = { ...query.queryParams, userId };
+    query.query = `
+      MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(${companyMeta.nodeName}:${companyMeta.labelName})
+      WITH DISTINCT ${companyMeta.nodeName}
+      ORDER BY ${companyMeta.nodeName}.name
+      RETURN ${companyMeta.nodeName}
+    `;
+    try {
+      const companies = await this.neo4j.readMany<Company>(query);
+      return companies.map((company) => ({ id: company.id, name: company.name }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Checks whether a user belongs to a company.
+   * Used to validate the company chosen on the consent screen.
+   */
+  async userBelongsToCompany(params: { userId: string; companyId: string }): Promise<boolean> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+    query.queryParams = { ...query.queryParams, userId: params.userId, chosenCompanyId: params.companyId };
+    query.query = `
+      MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(${companyMeta.nodeName}:${companyMeta.labelName} {id: $chosenCompanyId})
+      RETURN ${companyMeta.nodeName}
+    `;
+    try {
+      const company = await this.neo4j.readOne<Company>(query);
+      return company?.id === params.companyId;
+    } catch {
+      return false;
     }
   }
 }

@@ -20,6 +20,7 @@ export const mapOAuthAuthorizationCode = (params: {
     isUsed: params.data.isUsed ?? false,
     clientId: params.data.clientId,
     userId: params.data.userId,
+    companyId: params.data.companyId ?? null,
   };
 };
 

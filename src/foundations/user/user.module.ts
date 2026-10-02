@@ -2,7 +2,7 @@ import { Module, OnModuleInit } from "@nestjs/common";
 
 import { modelRegistry } from "../../common/registries/registry";
 import { CompanyModule } from "../company/company.module";
-import { RelevancyModule } from "../relevancy";
+import { RelevancyModule } from "../relevancy/relevancy.module";
 import { S3Module } from "../s3/s3.module";
 import { UserController } from "./controllers/user.controller";
 import { UserDescriptor, OwnerDescriptor, AssigneeDescriptor, AuthorDescriptor } from "./entities/user";

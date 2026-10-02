@@ -1,3 +1,5 @@
+import { OAuthScopeDefinition } from "../../foundations/oauth/constants/oauth.scopes";
+
 /**
  * OAuth2 Server Configuration Interface
  *
@@ -51,4 +53,12 @@ export interface ConfigOAuthInterface {
    * @default true
    */
   rotateRefreshTokens: boolean;
+
+  /**
+   * App-specific scopes registered on top of the built-ins
+   * (read, write, profile, mcp, admin).
+   * A scope string that duplicates a built-in or another entry is rejected at boot.
+   * @default []
+   */
+  additionalScopes: OAuthScopeDefinition[];
 }

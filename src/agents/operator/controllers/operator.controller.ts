@@ -12,9 +12,9 @@ import {
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { resolveBoundContent } from "../../../common/helpers/bound-content";
-import { isAiEnabledVia } from "../../../common/helpers/credit-gate";
+import { isAiEnabledVia, pickInteractiveValidator } from "../../../common/helpers/credit-gate";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
-import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
+import { CREDIT_VALIDATOR, CreditValidatorInterface, INTERACTIVE_CREDIT_VALIDATOR } from "../../../common/tokens";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AssistantActionDescriptor } from "../../../foundations/assistant-action/entities/assistant-action";
 import { AssistantMessageDescriptor } from "../../../foundations/assistant-message/entities/assistant-message";
@@ -51,7 +51,15 @@ export class OperatorController {
      * `assistant.engine`.
      */
     @Optional() @Inject(CREDIT_VALIDATOR) private readonly creditValidator?: CreditValidatorInterface,
+    @Optional()
+    @Inject(INTERACTIVE_CREDIT_VALIDATOR)
+    private readonly interactiveCreditValidator?: CreditValidatorInterface,
   ) {}
+
+  /** Interactive gate: `INTERACTIVE_CREDIT_VALIDATOR` when bound, else `CREDIT_VALIDATOR`. */
+  private get gate(): CreditValidatorInterface | undefined {
+    return pickInteractiveValidator(this.interactiveCreditValidator, this.creditValidator);
+  }
 
   /**
    * POST /operator — create a new assistant thread whose turns run on the
@@ -63,12 +71,11 @@ export class OperatorController {
    */
   @Post(operatorMeta.endpoint)
   async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
-    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
 
-    if (this.creditValidator && req.user?.companyId)
-      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+    if (this.gate && req.user?.companyId) await this.gate.validateCredits({ companyId: req.user.companyId });
 
     const { content, title, howToMode, limitToHowToId } = body.data.attributes;
     // Same resolution as `AssistantController.create` — the two engines share
@@ -127,12 +134,11 @@ export class OperatorController {
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<any> {
-    if (req.user?.companyId && !(await isAiEnabledVia(this.creditValidator, { companyId: req.user.companyId }))) {
+    if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
 
-    if (this.creditValidator && req.user?.companyId)
-      await this.creditValidator.validateCredits({ companyId: req.user.companyId });
+    if (this.gate && req.user?.companyId) await this.gate.validateCredits({ companyId: req.user.companyId });
 
     const { content, howToMode, limitToHowToId } = body.data.attributes;
     this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);

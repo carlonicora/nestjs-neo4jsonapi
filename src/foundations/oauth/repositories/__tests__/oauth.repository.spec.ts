@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { OAuthRepository } from "../oauth.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
+import { CompanyDescriptor } from "../../../company/entities/company";
 
 // Test IDs
 const TEST_IDS = {
@@ -426,18 +427,25 @@ describe("OAuthRepository", () => {
   });
 
   describe("findCompanyIdForUser", () => {
-    it("should find company ID for user", async () => {
-      neo4jService.read.mockResolvedValue({
-        records: [{ get: vi.fn().mockReturnValue(TEST_IDS.companyId) }],
-      });
+    it("reads the user's company through readOne with the Company serialiser and returns its id", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue({ id: TEST_IDS.companyId, name: "Studio" });
 
       const result = await repository.findCompanyIdForUser(TEST_IDS.userId);
 
       expect(result).toBe(TEST_IDS.companyId);
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: CompanyDescriptor.model });
+      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
+      expect(neo4jService.read).not.toHaveBeenCalled();
+      expect(mockQuery.queryParams).toEqual(expect.objectContaining({ userId: TEST_IDS.userId }));
+      expect(mockQuery.query).toContain("MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(company:Company)");
+      expect(mockQuery.query).toContain("RETURN company");
     });
 
     it("should return null when user has no company", async () => {
-      neo4jService.read.mockResolvedValue({ records: [] });
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readOne.mockResolvedValue(null);
 
       const result = await repository.findCompanyIdForUser(TEST_IDS.userId);
 
@@ -445,11 +453,83 @@ describe("OAuthRepository", () => {
     });
 
     it("should return null on error", async () => {
-      neo4jService.read.mockRejectedValue(new Error("Database error"));
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readOne.mockRejectedValue(new Error("Database error"));
 
       const result = await repository.findCompanyIdForUser(TEST_IDS.userId);
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe("findCompaniesForUser", () => {
+    it("reads the user's companies through readMany with the Company serialiser, ordered by name", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([
+        { id: "c1", name: "Alpha", ownerEmail: "x" },
+        { id: "c2", name: "Beta" },
+      ]);
+
+      const result = await repository.findCompaniesForUser(TEST_IDS.userId);
+
+      expect(result).toEqual([
+        { id: "c1", name: "Alpha" },
+        { id: "c2", name: "Beta" },
+      ]);
+      expect(neo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: expect.objectContaining({ nodeName: "company" }), fetchAll: true }),
+      );
+      expect(neo4jService.read).not.toHaveBeenCalled();
+      expect(mockQuery.query).toContain("MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(company:Company)");
+      expect(mockQuery.query).toContain("ORDER BY company.name");
+      expect(mockQuery.query).toMatch(/RETURN company\s*$/);
+      expect(mockQuery.queryParams).toEqual(expect.objectContaining({ userId: TEST_IDS.userId }));
+    });
+
+    it("returns [] when the read fails", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readMany.mockRejectedValue(new Error("db"));
+
+      expect(await repository.findCompaniesForUser(TEST_IDS.userId)).toEqual([]);
+    });
+  });
+
+  describe("userBelongsToCompany", () => {
+    it("reads the chosen company through readOne with the Company serialiser", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue({ id: TEST_IDS.companyId, name: "Alpha" });
+
+      const result = await repository.userBelongsToCompany({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId });
+
+      expect(result).toBe(true);
+      expect(neo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: expect.objectContaining({ nodeName: "company" }) }),
+      );
+      expect(neo4jService.read).not.toHaveBeenCalled();
+      expect(mockQuery.query).toContain(
+        "MATCH (oauthUser:User {id: $userId})-[:BELONGS_TO]->(company:Company {id: $chosenCompanyId})",
+      );
+      expect(mockQuery.queryParams).toEqual(
+        expect.objectContaining({ userId: TEST_IDS.userId, chosenCompanyId: TEST_IDS.companyId }),
+      );
+    });
+
+    it("refuses a company the user does not belong to", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readOne.mockResolvedValue(null);
+
+      expect(await repository.userBelongsToCompany({ userId: TEST_IDS.userId, companyId: "foreign" })).toBe(false);
+    });
+
+    it("refuses when the read fails", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readOne.mockRejectedValue(new Error("db"));
+
+      expect(await repository.userBelongsToCompany({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId })).toBe(
+        false,
+      );
     });
   });
 

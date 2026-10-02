@@ -6,7 +6,7 @@ import {
   CatalogScope,
   CatalogScopeHop,
 } from "../interfaces/graph.catalog.interface";
-import { ChatWritableConfig, FieldKind } from "../../../common/interfaces/entity.schema.interface";
+import { ChatScopeHop, ChatWritableConfig, FieldKind } from "../../../common/interfaces/entity.schema.interface";
 import { ownerMeta } from "../../../foundations/user/entities/user.meta";
 import { scopeKeyOf } from "./writable.rules";
 
@@ -58,7 +58,11 @@ export interface DescriptorSource {
       summary?: (d: any) => string;
       textSearchFields?: string[];
       list?: string[];
-      scope?: string;
+      scope?: string | ChatScopeHop;
+      /** Reference data: visible in every scoped run. Mutually exclusive with `scope`. */
+      scopeShared?: boolean;
+      /** Scope decided by the type's own service. Mutually exclusive with `scope` and `scopeShared`. */
+      scopeByService?: { rootType: string };
       writable?: boolean | ChatWritableConfig;
       /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
       related?: boolean;
@@ -70,7 +74,12 @@ export interface DescriptorSource {
 /** Per-type raw material the scope compiler walks. Built during catalog pass 1. */
 interface ScopeSource {
   entity: CatalogEntity;
-  scopeKey?: string;
+  /** A descriptor relationship key, "self", or an inline hop (not a relationship). */
+  scopeKey?: string | ChatScopeHop;
+  /** `chat.scopeByService`: the scope root whose membership the type's service decides. */
+  scopeByService?: { rootType: string };
+  /** `chat.scopeShared`, kept here so the scope compiler can reject it beside `scopeByService`. */
+  scopeShared?: boolean;
   relationships: Record<string, any>;
 }
 
@@ -187,6 +196,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           : {}),
         ...(d.bridge ? { bridge: { materialiseTo: [...d.bridge.materialiseTo] } } : {}),
         ...(d.chat?.writable ? { writable: true } : {}),
+        ...(d.chat?.scopeShared ? { scopeShared: true } : {}),
         ...(writableConfig
           ? {
               writableFields: [...writableConfig.fields],
@@ -200,13 +210,55 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       scopeSources.set(d.model.type, {
         entity,
         scopeKey: d.chat?.scope,
+        ...(d.chat?.scopeByService ? { scopeByService: { rootType: d.chat.scopeByService.rootType } } : {}),
+        ...(d.chat?.scopeShared ? { scopeShared: true } : {}),
         relationships: d.relationships ?? {},
+      });
+    }
+
+    // Pass 1a: drop every forward relationship whose target type is not itself
+    // catalogued. The assistant cannot read such a type, so telling it the edge
+    // exists would send it traversing into records no tool can return. Runs once
+    // every catalogued type is known; the descriptor itself is left untouched.
+    // Polymorphic traversals have no single target type and are kept.
+    // The dropped names are remembered so the bridge pass below can tell a
+    // `materialiseTo` entry pointing at an uncatalogued target (dropped softly)
+    // from one naming a relationship that never existed (a misconfiguration).
+    const droppedByType = new Map<string, Set<string>>();
+    for (const entity of this.entities.values()) {
+      entity.relationships = entity.relationships.filter((relationship) => {
+        if (relationship.polymorphic || this.entities.has(relationship.targetType)) return true;
+        this.logger.warn(
+          `Relationship "${entity.type}.${relationship.name}" dropped: target ${relationship.targetType} not catalogued.`,
+        );
+        const dropped = droppedByType.get(entity.type) ?? new Set<string>();
+        dropped.add(relationship.name);
+        droppedByType.set(entity.type, dropped);
+        return false;
       });
     }
 
     // Pass 1b: resolve every declared chat.scope into a Cypher-ready hop chain.
     for (const entity of this.entities.values()) {
       entity.scope = this.compileScope(entity.type, scopeSources);
+      if (entity.scopeShared && entity.scope) {
+        throw new Error(
+          `Entity "${entity.type}" declares both chat.scopeShared and chat.scope. ` +
+            `A shared type is reference data visible in every scoped run, so it cannot belong to one scope root.`,
+        );
+      }
+      if (entity.scopeShared && entity.writable) {
+        throw new Error(
+          `Entity "${entity.type}" is chat.writable but declares chat.scopeShared. ` +
+            `Shared reference data is read-only for the assistant.`,
+        );
+      }
+      if (entity.writable && entity.scope?.path[0]?.inline) {
+        throw new Error(
+          `Entity "${entity.type}" is chat.writable but its scope is an inline hop. ` +
+            `Generic write tools pin a new record to its scope root through a descriptor relationship, which an inline hop is not.`,
+        );
+      }
       if (entity.writable && (entity.scope?.path.length ?? 0) !== 1) {
         throw new Error(
           `Entity "${entity.type}" is chat.writable but is not exactly one hop from its scope root. ` +
@@ -275,6 +327,13 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       const reachable: string[] = [];
       for (const relName of e.bridge.materialiseTo) {
         const rel = e.relationships.find((r) => r.name === relName);
+        if (!rel && droppedByType.get(e.type)?.has(relName)) {
+          this.logger.warn(
+            `Bridge "${e.type}" materialises to "${relName}", but its target type is missing from the catalog ` +
+              `(likely a missing description on the target descriptor). Dropping "${relName}" from materialiseTo at runtime.`,
+          );
+          continue;
+        }
         if (!rel) {
           throw new Error(
             `Bridge "${e.type}" lists materialiseTo "${relName}", but no such relationship exists on it.`,
@@ -349,6 +408,11 @@ export class GraphCatalogService implements OnApplicationBootstrap {
    */
   private compileScope(type: string, byType: Map<string, ScopeSource>): CatalogScope | undefined {
     const start = byType.get(type);
+
+    if (start?.scopeByService) {
+      return this.compileServiceScope(type, start, byType);
+    }
+
     if (!start?.scopeKey) return undefined;
 
     if (start.scopeKey === "self") {
@@ -368,6 +432,29 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       }
       if (current.scopeKey === "self") {
         return { path, rootType: currentType, rootLabel: current.entity.labelName };
+      }
+
+      if (typeof current.scopeKey === "object") {
+        // Inline hop: a scope path only. Never added to `relationships`, never
+        // read by repositories, never serialised.
+        const hop = current.scopeKey;
+        const targetType: string = hop.model.type;
+        if (seen.has(targetType)) {
+          throw new Error(`Scope chain for "${type}" contains a cycle at "${targetType}".`);
+        }
+        seen.add(targetType);
+
+        path.push({
+          key: "",
+          dtoKey: "",
+          cypherLabel: hop.relationship,
+          cypherDirection: hop.direction,
+          targetLabel: hop.model.labelName,
+          targetType,
+          inline: true,
+        });
+        currentType = targetType;
+        continue;
       }
 
       const rel = current.relationships[current.scopeKey];
@@ -393,6 +480,36 @@ export class GraphCatalogService implements OnApplicationBootstrap {
       });
       currentType = targetType;
     }
+  }
+
+  /**
+   * `chat.scopeByService`: the type's scope edge does not exist in the app
+   * database, so membership of a scope root is decided by the type's own service
+   * (`ExternalEntitySource.filterInScope`). It compiles to an empty path flagged
+   * `viaService`; `ScopeGuard` delegates to the service for it.
+   */
+  private compileServiceScope(type: string, start: ScopeSource, byType: Map<string, ScopeSource>): CatalogScope {
+    const rootType = start.scopeByService!.rootType;
+    if (start.scopeKey) {
+      throw new Error(
+        `Entity "${type}" declares both chat.scopeByService and chat.scope. ` +
+          `A type's scope is decided either by a Cypher path or by its service, not both.`,
+      );
+    }
+    if (start.scopeShared) {
+      throw new Error(
+        `Entity "${type}" declares both chat.scopeByService and chat.scopeShared. ` +
+          `A shared type is reference data visible in every scoped run, so it cannot belong to one scope root.`,
+      );
+    }
+    const root = byType.get(rootType);
+    if (!root || root.scopeKey !== "self") {
+      throw new Error(
+        `Scope chain for "${type}" never reaches a scope root: chat.scopeByService names "${rootType}", ` +
+          `which is not a catalogued type declaring chat.scope "self".`,
+      );
+    }
+    return { path: [], rootType, rootLabel: root.entity.labelName, viaService: true };
   }
 
   private renderModule(moduleId: string, list: CatalogEntity[]): string {

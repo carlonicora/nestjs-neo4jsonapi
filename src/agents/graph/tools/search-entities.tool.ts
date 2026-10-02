@@ -110,7 +110,10 @@ export class SearchEntitiesTool {
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
 
-        const scopeRelKey = entity.scope?.path.length === 1 ? entity.scope.path[0].key : undefined;
+        // An inline hop is not a descriptor relationship, so it cannot be read
+        // through the repository: it takes the ScopeGuard.filter path below.
+        const scopeRelKey =
+          entity.scope?.path.length === 1 && !entity.scope.path[0].inline ? entity.scope.path[0].key : undefined;
         const useScopedRead = !!ctx.scopeId && entity.scope?.rootType === ctx.scopeType;
 
         // A 1-hop scope is expressible as a relationship read, which reuses the

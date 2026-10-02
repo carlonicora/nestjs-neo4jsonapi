@@ -1,4 +1,5 @@
-import { Entity, defineEntity } from "../../../common";
+import type { Entity } from "../../../common/abstracts/entity";
+import { defineEntity } from "../../../common/helpers/define-entity";
 import type { Feature } from "../../feature/entities/feature";
 import type { Module } from "../../module/entities/module.entity";
 import { featureMeta } from "../../feature/entities/feature.meta";

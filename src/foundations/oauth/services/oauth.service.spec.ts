@@ -6,6 +6,7 @@ import { OAuthRepository } from "../repositories/oauth.repository";
 import { OAuthClientService } from "./oauth.client.service";
 import { OAuthTokenService } from "./oauth.token.service";
 import { OAuthPkceService } from "./oauth.pkce.service";
+import { OAuthScopeService } from "./oauth.scope.service";
 import { OAuthClient } from "../entities/oauth.client.entity";
 
 describe("OAuthService", () => {
@@ -48,6 +49,8 @@ describe("OAuthService", () => {
       }),
       markAuthorizationCodeUsed: vi.fn().mockResolvedValue(true),
       findCompanyIdForUser: vi.fn().mockResolvedValue("company-id"),
+      findCompaniesForUser: vi.fn().mockResolvedValue([]),
+      userBelongsToCompany: vi.fn().mockResolvedValue(true),
     };
 
     mockClientService = {
@@ -108,6 +111,7 @@ describe("OAuthService", () => {
       mockTokenService as OAuthTokenService,
       mockPkceService as OAuthPkceService,
       mockConfigService as ConfigService,
+      new OAuthScopeService(mockConfigService as ConfigService),
     );
   });
 
@@ -399,6 +403,123 @@ describe("OAuthService", () => {
 
       expect(result.active).toBe(true);
       expect(mockTokenService.introspectToken).toHaveBeenCalled();
+    });
+  });
+
+  describe("studio choice at consent", () => {
+    const consentParams = {
+      clientId: "test-client-id",
+      redirectUri: "https://example.com/callback",
+      scope: "read",
+      userId: "user-id",
+    };
+
+    it("approveAuthorization stores the chosen company on the code", async () => {
+      mockRepository.userBelongsToCompany = vi.fn().mockResolvedValue(true);
+
+      await oauthService.approveAuthorization({ ...consentParams, companyId: "c2" });
+
+      expect(mockRepository.userBelongsToCompany).toHaveBeenCalledWith({ userId: "user-id", companyId: "c2" });
+      expect(mockRepository.createAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({ companyId: "c2" }));
+    });
+
+    it("approveAuthorization rejects a company the user does not belong to", async () => {
+      mockRepository.userBelongsToCompany = vi.fn().mockResolvedValue(false);
+
+      const error = await oauthService
+        .approveAuthorization({ ...consentParams, companyId: "foreign" })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(403);
+      expect(mockRepository.createAuthorizationCode).not.toHaveBeenCalled();
+    });
+
+    it("approveAuthorization without companyId stores null", async () => {
+      await oauthService.approveAuthorization(consentParams);
+
+      expect(mockRepository.userBelongsToCompany).not.toHaveBeenCalled();
+      expect(mockRepository.createAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({ companyId: null }));
+    });
+
+    it("exchangeAuthorizationCode uses the stored companyId", async () => {
+      mockRepository.findAuthorizationCodeByHash = vi.fn().mockResolvedValue({
+        codeHash: "hash",
+        clientId: "test-client-id",
+        userId: "user-id",
+        redirectUri: "https://example.com/callback",
+        scope: "read write",
+        expiresAt: new Date(Date.now() + 600000),
+        isUsed: false,
+        companyId: "c2",
+      });
+
+      await oauthService.exchangeAuthorizationCode({
+        grantType: "authorization_code",
+        code: "auth-code",
+        redirectUri: "https://example.com/callback",
+        clientId: "test-client-id",
+        clientSecret: "secret",
+      });
+
+      expect(mockTokenService.generateAccessToken).toHaveBeenCalledWith(expect.objectContaining({ companyId: "c2" }));
+      expect(mockRepository.findCompanyIdForUser).not.toHaveBeenCalled();
+    });
+
+    it("exchangeAuthorizationCode falls back to findCompanyIdForUser when the code has no company", async () => {
+      mockRepository.findAuthorizationCodeByHash = vi.fn().mockResolvedValue({
+        codeHash: "hash",
+        clientId: "test-client-id",
+        userId: "user-id",
+        redirectUri: "https://example.com/callback",
+        scope: "read write",
+        expiresAt: new Date(Date.now() + 600000),
+        isUsed: false,
+        companyId: null,
+      });
+
+      await oauthService.exchangeAuthorizationCode({
+        grantType: "authorization_code",
+        code: "auth-code",
+        redirectUri: "https://example.com/callback",
+        clientId: "test-client-id",
+        clientSecret: "secret",
+      });
+
+      expect(mockRepository.findCompanyIdForUser).toHaveBeenCalledWith("user-id");
+      expect(mockTokenService.generateAccessToken).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: "company-id" }),
+      );
+    });
+
+    it("refreshTokenGrant keeps the token's company", async () => {
+      await oauthService.refreshTokenGrant({
+        grantType: "refresh_token",
+        refreshToken: "refresh-token",
+        clientId: "test-client-id",
+      });
+
+      expect(mockTokenService.generateAccessToken).toHaveBeenCalledWith(
+        expect.objectContaining({ companyId: "company-id" }),
+      );
+      expect(mockRepository.findCompanyIdForUser).not.toHaveBeenCalled();
+    });
+
+    it("getConsentInfo returns the user's companies", async () => {
+      const companies = [
+        { id: "c1", name: "A" },
+        { id: "c2", name: "B" },
+      ];
+      mockRepository.findCompaniesForUser = vi.fn().mockResolvedValue(companies);
+
+      const result = await oauthService.getConsentInfo({
+        clientId: "test-client-id",
+        redirectUri: "https://example.com/callback",
+        userId: "user-id",
+      });
+
+      expect(mockRepository.findCompaniesForUser).toHaveBeenCalledWith("user-id");
+      expect(result.companies).toEqual(companies);
     });
   });
 });

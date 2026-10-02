@@ -305,15 +305,28 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async validateExistingNodes(params: { nodes: { id: string; label: string }[] }): Promise<void> {
+  /**
+   * Throws `BadRequestException` unless every node exists.
+   *
+   * A node carrying `companyId` must also BELONG_TO that company (opt-in): a
+   * relationship write whose targets come from request input passes the
+   * caller's company here so another firm's node is refused like a missing
+   * one, before anything is written. Nodes without `companyId` are checked
+   * for existence only (the default).
+   */
+  async validateExistingNodes(params: { nodes: { id: string; label: string; companyId?: string }[] }): Promise<void> {
     if (params.nodes.length === 0) return;
 
     const matchClauses = params.nodes
-      .map((node, index) => `MATCH (n${index}:${node.label} {id: $id${index}})`)
+      .map(
+        (node, index) =>
+          `MATCH (n${index}:${node.label} {id: $id${index}})${node.companyId ? `-[:BELONGS_TO]->(:Company {id: $companyId${index}})` : ``}`,
+      )
       .join("\n");
     const countClauses = params.nodes.map((_, index) => `n${index}`).join(", ");
     const countParams = params.nodes.reduce((acc, node, index) => {
       acc[`id${index}`] = node.id;
+      if (node.companyId) acc[`companyId${index}`] = node.companyId;
       return acc;
     }, {});
 

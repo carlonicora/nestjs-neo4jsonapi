@@ -6,7 +6,7 @@ import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.pagi
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { RelevanceServiceInterface } from "../../relevancy/interfaces/relevance.service.interface";
 import { RelevancyRepository } from "../../relevancy/repositories/relevancy.repository";
-import { UserDescriptor } from "../../user";
+import { UserDescriptor } from "../../user/entities/user";
 
 @Injectable()
 export class RelevancyService<T> implements RelevanceServiceInterface {

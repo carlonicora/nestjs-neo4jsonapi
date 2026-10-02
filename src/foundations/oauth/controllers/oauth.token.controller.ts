@@ -1,4 +1,5 @@
-import { Controller, Post, Body, HttpCode, Header } from "@nestjs/common";
+import { Controller, Post, Body, HttpCode, Header, UseFilters } from "@nestjs/common";
+import { OAuthErrorFilter } from "../filters/oauth.error.filter";
 import { OAuthService } from "../services/oauth.service";
 import { OAuthTokenRequestDto, OAuthTokenResponseDto } from "../dtos/oauth.token.dto";
 import { OAuthRevokeRequestDto } from "../dtos/oauth.revoke.dto";
@@ -11,6 +12,7 @@ import { OAuthIntrospectRequestDto, OAuthIntrospectResponseDto } from "../dtos/o
  * All endpoints accept application/x-www-form-urlencoded.
  */
 @Controller("oauth")
+@UseFilters(OAuthErrorFilter)
 export class OAuthTokenController {
   constructor(private readonly oauthService: OAuthService) {}
 

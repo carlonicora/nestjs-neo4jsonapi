@@ -175,6 +175,29 @@ export interface ContentExtensionConfig {
    * its wire contract pins relationships to `["owner"]`.
    */
   serialiseAuthor?: boolean;
+
+  /**
+   * Per-label record-level access rules, keyed by the underlying Neo4j label
+   * (e.g. `"Document"`). Each value is a Cypher predicate over the content node
+   * alias `content` and the bound `currentUser`, normally the label's own
+   * repository `buildUserHasAccess()` predicate re-aliased to `content`.
+   *
+   * `ContentCypherService.userHasAccess()` — the access check of EVERY Content
+   * read: the list, by-owner and by-ids reads and the related rows of the
+   * `/contents/:id/relevance` read — ANDs one `(NOT content:<Label> OR (<predicate>))`
+   * conjunct per entry, so a row of that label is returned only when its
+   * predicate holds. The SOURCE of `/contents/:id/relevance` and
+   * `/contents/:id/user-relevance` must pass the same check (403/404 otherwise),
+   * and the relevance page is cut after the filter. Skipped for automated jobs,
+   * like every `userHasAccess` check. With no user in context a guarded label
+   * is excluded outright (`currentUser` is unbound).
+   *
+   * Default (omitted): no access predicate. Every company record of the
+   * configured content types is returned, exactly as before.
+   *
+   * a360ai: the Document and Memo access rules.
+   */
+  accessPredicates?: Record<string, string>;
 }
 
 /**

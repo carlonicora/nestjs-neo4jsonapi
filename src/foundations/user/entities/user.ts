@@ -1,11 +1,12 @@
-import { Entity, defineEntity, defineEntityAlias } from "../../../common";
+import { Entity } from "../../../common/abstracts/entity";
+import { defineEntity, defineEntityAlias } from "../../../common/helpers/define-entity";
 import type { Company } from "../../company/entities/company";
 import { CompanyDescriptor } from "../../company/entities/company";
 import type { Module } from "../../module/entities/module.entity";
 import { moduleMeta } from "../../module/entities/module.meta";
 import { Role } from "../../role/entities/role";
 import { roleMeta } from "../../role/entities/role.meta";
-import { S3Service } from "../../s3";
+import { S3Service } from "../../s3/services/s3.service";
 import { assigneeMeta, authorMeta, ownerMeta, userMeta } from "./user.meta";
 
 /**

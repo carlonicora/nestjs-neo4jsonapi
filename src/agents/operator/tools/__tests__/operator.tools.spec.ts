@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord } from "../../../graph/tools/tool.factory";
@@ -17,12 +18,14 @@ import { OperatorToolRegistry } from "../operator.tool.registry";
 // be seen by the code under test. Re-derive it from the REAL builder on every
 // access, so these cases keep exercising the env -> config mapping they were
 // written for without weakening the assertions.
+// A test drives the `operator` options through `globalThis.__operatorOptions`,
+// so the same real builder maps them (undefined keeps the default config).
 vi.mock("../../../../config/base.config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../config/base.config")>();
   return {
     ...actual,
     get baseConfig() {
-      return actual.createBaseConfig();
+      return actual.createBaseConfig({ operator: (globalThis as any).__operatorOptions });
     },
   };
 });
@@ -371,6 +374,20 @@ describe("OperatorToolRegistry", () => {
       expect(definitions.map((d) => d.tool.name)).not.toContain("operator_test_action");
     } finally {
       process.env.NODE_ENV = previous;
+    }
+  });
+
+  it("omits search_communities when operator.communitySearch is false", () => {
+    const previous = (globalThis as any).__operatorOptions;
+    (globalThis as any).__operatorOptions = { communitySearch: false };
+    try {
+      const names = buildRegistry()
+        .build(ctx, [])
+        .map((d) => d.tool.name);
+      expect(names).not.toContain("search_communities");
+      expect(names).toContain("search_documents");
+    } finally {
+      (globalThis as any).__operatorOptions = previous;
     }
   });
 
