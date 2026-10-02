@@ -70,6 +70,9 @@ export {
   GRAPH_SEMANTIC_MIN_SCORE,
 } from "./graph/services/graph.search.service";
 export { GraphDescriptorRegistry } from "./graph/services/descriptor.source";
+// Builds the catalog from the registered descriptors; buildCatalog() throws on a
+// reverse-relationship name collision, so apps can assert their catalog boots.
+export { GraphCatalogService } from "./graph/services/graph.catalog.service";
 export { ScopeGuard } from "./graph/services/scope.guard";
 export { ScopePredicateService } from "./graph/services/scope.predicate.service";
 export { buildScopePattern } from "./graph/services/scope.pattern";
