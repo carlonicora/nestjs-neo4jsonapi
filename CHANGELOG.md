@@ -1,3 +1,9 @@
+## [4.13.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.12.0...v4.13.0) (2026-10-02)
+
+### 🚀 Features
+
+* **graph:** add GraphCatalogService to manage descriptor cataloging ([53014c5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/53014c5fdef4a0e4c5229eeeb81602e01b06aeff))
+
 ## [4.12.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.11.0...v4.12.0) (2026-10-02)
 
 ### 🚀 Features
