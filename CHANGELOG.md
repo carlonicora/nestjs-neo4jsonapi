@@ -1,3 +1,9 @@
+## [4.12.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.11.0...v4.12.0) (2026-10-02)
+
+### 🚀 Features
+
+* assistant scopes, OAuth app scopes, external entity sources ([447c517](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/447c5171b0d307af9b85a4f2f0dfa5df66dcad07))
+
 ## [4.11.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.10.0...v4.11.0) (2026-09-27)
 
 ### 🚀 Features
