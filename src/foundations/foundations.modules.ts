@@ -1,5 +1,7 @@
 import { DynamicModule, Module, Type } from "@nestjs/common";
 import { AiConnectionModule } from "./ai-connection/ai-connection.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
+import { AnalyticsModuleConfig } from "./analytics/interfaces/analytics.config.interface";
 import { AssistantModule } from "./assistant/assistant.module";
 import { AtomicFactModule } from "./atomicfact/atomicfact.module";
 import { AuditModule } from "./audit/audit.module";
@@ -57,6 +59,8 @@ export interface FoundationsModuleConfig {
   handbook?: HandbookModuleConfig;
   /** Optional configuration for the how-to feature module (opt-in public routes) */
   howTo?: HowToModuleConfig;
+  /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
+  analytics?: AnalyticsModuleConfig;
   /**
    * Foundation module classes to exclude from registration.
    * Default [] keeps all modules registered (neural-erp behavior unchanged).
@@ -69,7 +73,7 @@ export interface FoundationsModuleConfig {
 
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
- * UserActivityModule, ReferralModule, HandbookModule, HowToModule) are
+ * UserActivityModule, ReferralModule, HandbookModule, HowToModule, AnalyticsModule) are
  * assembled inside forRoot().
  *
  * HowToModule is dynamic solely so an app can reach
@@ -170,6 +174,7 @@ export class FoundationsModule {
       { classRef: ReferralModule, factory: () => ReferralModule.forRoot(config?.referral) },
       { classRef: HandbookModule, factory: () => HandbookModule.forRoot(config?.handbook) },
       { classRef: HowToModule, factory: () => HowToModule.forRoot(config?.howTo) },
+      { classRef: AnalyticsModule, factory: () => AnalyticsModule.forRoot(config?.analytics) },
     ].filter((entry) => !excluded.has(entry.classRef));
 
     return {

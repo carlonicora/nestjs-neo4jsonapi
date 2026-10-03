@@ -8,6 +8,7 @@ import { ReferralModuleConfig } from "../foundations/referral/interfaces/referra
 import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
 import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
+import { AnalyticsModuleConfig } from "../foundations/analytics/interfaces/analytics.config.interface";
 
 /**
  * i18n configuration options
@@ -133,6 +134,28 @@ export interface BootstrapOptions {
    * ```
    */
   howTo?: HowToModuleConfig;
+
+  /**
+   * Configuration for the first-party web analytics feature module.
+   * Forwarded to `FoundationsModule.forRoot({ analytics })`, exactly like
+   * `userActivity` / `howTo` above.
+   *
+   * The normal way to switch analytics on is the environment:
+   * `ANALYTICS_ENABLED=true`, with optional `ANALYTICS_RETENTION_MONTHS` and
+   * `ANALYTICS_SESSION_TIMEOUT_MINUTES`. This option is an override: keys set
+   * here win over the environment. With the variable unset and no override the
+   * module registers no controller, no queue, no processor and no retention
+   * cron. Keys set nowhere fall back to the module defaults (retention 13
+   * months, session timeout 30 minutes, queue "analytics", job
+   * "analytics:pageView").
+   *
+   * @example
+   * ```typescript
+   * // Force analytics off whatever ANALYTICS_ENABLED says
+   * analytics: { enabled: false }
+   * ```
+   */
+  analytics?: AnalyticsModuleConfig;
 
   /**
    * OpenAPI documentation configuration.

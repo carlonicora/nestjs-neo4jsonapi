@@ -39,5 +39,6 @@ export * from "./tokenusage";
 export * from "./two-factor";
 export * from "./user";
 export * from "./user-activity";
+export * from "./analytics";
 export * from "./waitlist";
 export * from "./rbac";
