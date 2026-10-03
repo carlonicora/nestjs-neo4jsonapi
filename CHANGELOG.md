@@ -1,3 +1,10 @@
+## [4.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.14.0...v4.15.0) (2026-10-03)
+
+### 🚀 Features
+
+* **analytics:** add the opt-in first-party analytics foundation ([dee4d7c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/dee4d7cab1857d59289c392621c0febaba60ca69))
+* **config:** read the analytics switch and limits from ANALYTICS_* environment variables ([2bcc9f3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2bcc9f3133673ff1f5140c9d5840d476c82bee7a))
+
 ## [4.14.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.13.0...v4.14.0) (2026-10-03)
 
 ### 🚀 Features
