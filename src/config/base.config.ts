@@ -553,6 +553,11 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       limit: parseInt(process.env.RATE_LIMIT_REQUESTS || "100"),
       ipLimit: parseInt(process.env.IP_RATE_LIMIT_REQUESTS || "20"),
     },
+    analytics: {
+      enabled: process.env.ANALYTICS_ENABLED === "true",
+      retentionMonths: parseInt(process.env.ANALYTICS_RETENTION_MONTHS || "13"),
+      sessionTimeoutMinutes: parseInt(process.env.ANALYTICS_SESSION_TIMEOUT_MINUTES || "30"),
+    },
     encryption: {
       key: process.env.ENCRYPTION_KEY || "",
     },

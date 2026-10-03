@@ -31,6 +31,7 @@ export * from "./config.oauth.interface";
 export * from "./config.operator.interface";
 export * from "./config.prompts.interface";
 export * from "./config.ratelimit.interface";
+export * from "./config.analytics.interface";
 export * from "./config.redis.interface";
 export * from "./config.responder.interface";
 export * from "./config.s3.interface";

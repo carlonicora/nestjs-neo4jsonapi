@@ -1,4 +1,5 @@
 import { ConfigAiInterface } from "./config.ai.interface";
+import { ConfigAnalyticsInterface } from "./config.analytics.interface";
 import { ConfigApiInterface } from "./config.api.interface";
 import { ConfigAppInterface } from "./config.app.interface";
 import { ConfigAuthInterface } from "./config.auth.interface";
@@ -52,6 +53,7 @@ export interface BaseConfigInterface {
   ai: ConfigAiInterface;
   credits: ConfigCreditsInterface;
   rateLimit: ConfigRateLimitInterface;
+  analytics: ConfigAnalyticsInterface;
   encryption: ConfigEncryptionInterface;
   stripe: ConfigStripeInterface;
   prompts: ConfigPromptsInterface;
