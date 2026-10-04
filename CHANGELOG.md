@@ -1,3 +1,9 @@
+## [4.16.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.16.0...v4.16.1) (2026-10-04)
+
+### 🐛 Bug Fixes
+
+* **audit:** never audit administrators and never let an audit write crash the process ([0425f40](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0425f408af3cea55f6246a8a0a9abdb0c933f1d7))
+
 ## [4.16.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.15.0...v4.16.0) (2026-10-04)
 
 ### 🚀 Features
