@@ -30,8 +30,6 @@ import { S3Model } from "../../s3/entities/s3.model";
 
 @Injectable()
 export class S3Service {
-  private static readonly SIGNING_WINDOW_SECONDS = 3600;
-
   private s3Client: S3Client;
   private blobServiceClient: BlobServiceClient;
   private containerClient: ContainerClient;
@@ -341,10 +339,12 @@ export class S3Service {
         // Sign against the start of the current window so the same key yields the same URL
         // for the whole window and browser/image caches can hit. The window is added to the
         // expiry so the URL stays valid for at least the requested ttl from now.
-        const windowMs = S3Service.SIGNING_WINDOW_SECONDS * 1000;
+        const configuredWindow = this.s3Config.signingWindowSeconds;
+        const windowSeconds = configuredWindow > 0 ? configuredWindow : 3600;
+        const windowMs = windowSeconds * 1000;
         const signedUrl = await getSignedUrl(this.s3Client, command, {
           signingDate: new Date(Math.floor(Date.now() / windowMs) * windowMs),
-          expiresIn: (params.ttl ?? 3600) + S3Service.SIGNING_WINDOW_SECONDS,
+          expiresIn: (params.ttl ?? 3600) + windowSeconds,
         });
 
         return signedUrl;

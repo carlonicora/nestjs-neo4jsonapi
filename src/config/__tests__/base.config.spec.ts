@@ -399,6 +399,37 @@ describe("createBaseConfig — chunker", () => {
   });
 });
 
+describe("createBaseConfig — s3 signing window", () => {
+  const KEYS = ["S3_SIGNING_WINDOW_SECONDS"];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("defaults signingWindowSeconds to 3600 when unset", () => {
+    expect(createBaseConfig().s3.signingWindowSeconds).toBe(3600);
+  });
+
+  it("reads S3_SIGNING_WINDOW_SECONDS", () => {
+    process.env.S3_SIGNING_WINDOW_SECONDS = "86400";
+    expect(createBaseConfig().s3.signingWindowSeconds).toBe(86400);
+  });
+
+  it.each(["abc", "0", "-5", ""])("falls back to 3600 for invalid value %j", (v) => {
+    process.env.S3_SIGNING_WINDOW_SECONDS = v;
+    expect(createBaseConfig().s3.signingWindowSeconds).toBe(3600);
+  });
+});
+
 /**
  * Coverage for the variables that moved into this file when the direct
  * `process.env` reads were removed from the services that used to own them.

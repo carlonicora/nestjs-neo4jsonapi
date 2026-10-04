@@ -412,6 +412,10 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       key: process.env.S3_ACCESS_KEY_ID || "",
       secret: process.env.S3_SECRET_ACCESS_KEY || "",
       region: process.env.S3_REGION || "us-east-1",
+      signingWindowSeconds: (() => {
+        const parsed = parseInt(process.env.S3_SIGNING_WINDOW_SECONDS || "", 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 3600;
+      })(),
     },
     ai: {
       // Fail-closed MOCK_AI safety gate. ModelService.onModuleInit throws if this

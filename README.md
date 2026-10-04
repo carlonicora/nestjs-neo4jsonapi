@@ -323,6 +323,8 @@ S3_BUCKET=
 S3_ACCESS_KEY_ID=
 S3_SECRET_ACCESS_KEY=
 S3_REGION=eu-west-1
+# Signed read links stay identical for this many seconds so image caches can hit; keep it at most 604800 minus the longest ttl
+S3_SIGNING_WINDOW_SECONDS=3600
 
 # Email (supports: sendgrid, smtp, brevo)
 EMAIL_PROVIDER=sendgrid

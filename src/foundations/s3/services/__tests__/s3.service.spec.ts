@@ -326,10 +326,97 @@ describe("S3Service", () => {
         vi.setSystemTime(new Date("2026-10-03T12:30:00.000Z"));
 
         // Act
-        await service.generatePresignedUrl({ key: "upload.pdf", contentType: "application/pdf" });
+        await service.generatePresignedUrl({ key: "upload.pdf", contentType: "application/pdf", isPublic: false });
 
         // Assert
         expect(vi.mocked(getSignedUrl).mock.calls[0][2]).toEqual({ expiresIn: 3600 });
+      });
+
+      describe("with a 24-hour window", () => {
+        beforeEach(async () => {
+          // Held in a variable: the shared mock helper is typed on MOCK_S3_CONFIG, which has no window field
+          const dayWindowConfig = { ...MOCK_S3_CONFIG, signingWindowSeconds: 86400 };
+          const module: TestingModule = await Test.createTestingModule({
+            providers: [
+              S3Service,
+              { provide: JsonApiService, useValue: createMockJsonApiService() },
+              { provide: ClsService, useValue: createMockClsService() },
+              {
+                provide: ConfigService,
+                useValue: createMockConfigService(dayWindowConfig),
+              },
+              { provide: AppLoggingService, useValue: createMockAppLoggingService() },
+            ],
+          }).compile();
+
+          service = module.get<S3Service>(S3Service);
+        });
+
+        it("should floor signingDate to the start of the UTC day", async () => {
+          // Arrange
+          vi.setSystemTime(new Date("2026-10-03T23:59:58.123Z"));
+
+          // Act
+          await service.generateSignedUrl({ key: "photo.jpg" });
+
+          // Assert
+          expect(getSignedUrl).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.objectContaining({
+              signingDate: new Date("2026-10-03T00:00:00.000Z"),
+              expiresIn: 3600 + 86400,
+            }),
+          );
+        });
+
+        it("should return the identical URL for the same key within the same day", async () => {
+          // Act
+          vi.setSystemTime(new Date("2026-10-03T00:00:00.000Z"));
+          const first = await service.generateSignedUrl({ key: "photo.jpg" });
+          vi.setSystemTime(new Date("2026-10-03T23:59:59.999Z"));
+          const second = await service.generateSignedUrl({ key: "photo.jpg" });
+
+          // Assert
+          expect(second).toBe(first);
+        });
+
+        it("should return a different URL once the day rolls over", async () => {
+          // Act
+          vi.setSystemTime(new Date("2026-10-03T23:59:59.999Z"));
+          const first = await service.generateSignedUrl({ key: "photo.jpg" });
+          vi.setSystemTime(new Date("2026-10-04T00:00:00.000Z"));
+          const second = await service.generateSignedUrl({ key: "photo.jpg" });
+
+          // Assert
+          expect(second).not.toBe(first);
+        });
+
+        it("should add the 24-hour window to a short ttl", async () => {
+          // Arrange
+          vi.setSystemTime(new Date("2026-10-03T12:00:00.000Z"));
+
+          // Act
+          await service.generateSignedUrl({ key: "photo.jpg", ttl: 300 });
+
+          // Assert
+          expect(getSignedUrl).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            expect.objectContaining({ expiresIn: 300 + 86400 }),
+          );
+        });
+
+        it("should not sign uploads against the 24-hour window", async () => {
+          // Arrange
+          vi.setSystemTime(new Date("2026-10-03T12:30:00.000Z"));
+
+          // Act
+          await service.generatePresignedUrl({ key: "upload.pdf", contentType: "application/pdf", isPublic: false });
+
+          // Assert
+          expect(vi.mocked(getSignedUrl).mock.calls[0][2]).toEqual({ expiresIn: 3600 });
+        });
       });
     });
   });
