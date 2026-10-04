@@ -25,7 +25,7 @@ export class AuditRepository implements OnModuleInit {
 
   async createEntry(params: {
     userId: string;
-    companyId: string;
+    companyId: string | null;
     ipAddress: string;
     action: string;
     entityType: string;
@@ -39,7 +39,8 @@ export class AuditRepository implements OnModuleInit {
       ...query.queryParams,
       id: randomUUID(),
       userId: params.userId,
-      companyId: params.companyId,
+      // Neo4j drops undefined params (ParameterMissing); users without a company (system admins) send null.
+      companyId: params.companyId ?? null,
       ipAddress: params.ipAddress,
       action: params.action,
       entityType: params.entityType,
@@ -80,7 +81,7 @@ export class AuditRepository implements OnModuleInit {
   async findByEntity(params: {
     entityType: string;
     entityId: string;
-    companyId: string;
+    companyId: string | null;
     cursor?: JsonApiCursorInterface;
   }): Promise<AuditLog[]> {
     const query = this.neo4jService.initQuery({ serialiser: auditLogModel, cursor: params.cursor });
@@ -89,7 +90,7 @@ export class AuditRepository implements OnModuleInit {
       ...query.queryParams,
       entityType: params.entityType,
       entityId: params.entityId,
-      companyId: params.companyId,
+      companyId: params.companyId ?? null,
     };
 
     query.query = `

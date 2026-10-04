@@ -79,6 +79,26 @@ describe("AuditRepository", () => {
   });
 
   describe("createEntry", () => {
+    it("should send companyId as null (not undefined) when the user has no company", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.createEntry({
+        userId: TEST_IDS.userId,
+        companyId: undefined as unknown as null,
+        ipAddress: "",
+        action: "read",
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        fieldName: null,
+        oldValue: null,
+        newValue: null,
+      });
+
+      expect(mockQuery.queryParams).toHaveProperty("companyId", null);
+    });
+
     it("should create AuditLog node with all fields", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
@@ -187,6 +207,20 @@ describe("AuditRepository", () => {
   });
 
   describe("findByEntity", () => {
+    it("should send companyId as null (not undefined) when absent", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findByEntity({
+        entityType: "Quote",
+        entityId: TEST_IDS.entityId,
+        companyId: undefined as unknown as null,
+      });
+
+      expect(mockQuery.queryParams).toHaveProperty("companyId", null);
+    });
+
     it("should query by entity_type, entity_id, and company_id", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);

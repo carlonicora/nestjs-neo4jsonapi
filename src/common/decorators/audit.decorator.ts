@@ -1,4 +1,7 @@
+import { Logger } from "@nestjs/common";
 import { DataMeta } from "../interfaces/datamodel.interface";
+
+const logger = new Logger("Audit");
 
 /**
  * Decorator that automatically logs a read audit entry after the method executes.
@@ -16,10 +19,22 @@ export function Audit(meta: DataMeta, id: string) {
       const paramId = req?.params?.[id];
 
       if (paramId && this.auditService) {
-        this.auditService.logRead({
-          entityType: meta.labelName,
-          entityId: paramId as string,
-        });
+        // Fire-and-forget, but never unhandled: a rejected audit write must not crash the
+        // process (unhandled rejection) nor fail the request that already succeeded.
+        const auditService = this.auditService;
+        Promise.resolve()
+          .then(() =>
+            auditService.logRead({
+              entityType: meta.labelName,
+              entityId: paramId as string,
+            }),
+          )
+          .catch((error: unknown) =>
+            logger.error(
+              `Audit read failed for ${meta.labelName} ${paramId}`,
+              error instanceof Error ? error.stack : String(error),
+            ),
+          );
       }
 
       return result;

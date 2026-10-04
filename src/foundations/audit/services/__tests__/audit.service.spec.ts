@@ -5,6 +5,9 @@ import { AuditService } from "../audit.service";
 import { AuditRepository } from "../../repositories/audit.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { EntityDescriptor, RelationshipDef } from "../../../../common/interfaces/entity.schema.interface";
+import { SystemRoles } from "../../../../common/constants/system.roles";
+import { SYSTEM_ROLES } from "../../../../common/tokens";
+import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 
 describe("AuditService", () => {
   let service: AuditService;
@@ -19,6 +22,10 @@ describe("AuditService", () => {
   };
 
   const TEST_IP = "192.168.1.1";
+  const OTHER_ROLE = "aaaaaaaa-0000-0000-0000-000000000000";
+
+  let clsValues: Record<string, unknown>;
+  let logger: { error: ReturnType<typeof vi.fn> };
 
   const createMockAuditRepository = () => ({
     createEntry: vi.fn(),
@@ -33,14 +40,7 @@ describe("AuditService", () => {
   });
 
   const createMockClsService = () => ({
-    get: vi.fn((key: string) => {
-      const map: Record<string, string> = {
-        userId: TEST_IDS.userId,
-        companyId: TEST_IDS.companyId,
-        ipAddress: TEST_IP,
-      };
-      return map[key];
-    }),
+    get: vi.fn((key: string) => clsValues[key] as any),
     set: vi.fn(),
     run: vi.fn(),
   });
@@ -55,12 +55,20 @@ describe("AuditService", () => {
     }) as unknown as EntityDescriptor<any, any>;
 
   beforeEach(async () => {
+    clsValues = {
+      userId: TEST_IDS.userId,
+      companyId: TEST_IDS.companyId,
+      ipAddress: TEST_IP,
+      roles: [OTHER_ROLE],
+    };
+    logger = { error: vi.fn() };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuditService,
         { provide: AuditRepository, useValue: createMockAuditRepository() },
         { provide: JsonApiService, useValue: createMockJsonApiService() },
         { provide: ClsService, useValue: createMockClsService() },
+        { provide: AppLoggingService, useValue: logger },
       ],
     }).compile();
 
@@ -320,6 +328,117 @@ describe("AuditService", () => {
         cursor: expect.anything(),
       });
       expect(result).toEqual({ data: [] });
+    });
+  });
+  describe("system administrators are never audited", () => {
+    const descriptor = createMockDescriptor(["name"]);
+    const calls: Array<[string, (s: AuditService) => Promise<void>]> = [
+      ["logCreate", (s) => s.logCreate({ entityType: "Quote", entityId: TEST_IDS.entityId })],
+      ["logRead", (s) => s.logRead({ entityType: "Quote", entityId: TEST_IDS.entityId })],
+      [
+        "logUpdate",
+        (s) =>
+          s.logUpdate({
+            entityType: "Quote",
+            entityId: TEST_IDS.entityId,
+            before: { name: "a" },
+            after: { name: "b" },
+            descriptor,
+          }),
+      ],
+      [
+        "logDelete",
+        (s) => s.logDelete({ entityType: "Quote", entityId: TEST_IDS.entityId, snapshot: { name: "a" }, descriptor }),
+      ],
+    ];
+
+    it.each(calls)("%s does nothing for an Administrator", async (_name, call) => {
+      clsValues.roles = [SystemRoles.Administrator];
+      clsValues.companyId = undefined;
+
+      await call(service);
+
+      expect(auditRepository.createEntry).not.toHaveBeenCalled();
+    });
+
+    it.each(calls)("%s still audits a non-admin user", async (_name, call) => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      clsValues.roles = [SystemRoles.CompanyAdministrator, OTHER_ROLE];
+
+      await call(service);
+
+      expect(auditRepository.createEntry).toHaveBeenCalledTimes(1);
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(expect.objectContaining({ userId: TEST_IDS.userId }));
+    });
+
+    it.each(calls)("%s still audits when no roles are in context", async (_name, call) => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      clsValues.roles = undefined;
+
+      await call(service);
+
+      expect(auditRepository.createEntry).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses the SYSTEM_ROLES provider when the application binds one", async () => {
+      const customAdmin = "custom-admin-role";
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AuditService,
+          { provide: AuditRepository, useValue: createMockAuditRepository() },
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
+          { provide: ClsService, useValue: createMockClsService() },
+          { provide: SYSTEM_ROLES, useValue: { Administrator: customAdmin } },
+        ],
+      }).compile();
+      const customService = module.get<AuditService>(AuditService);
+      const repo = module.get(AuditRepository) as MockedObject<AuditRepository>;
+      clsValues.roles = [customAdmin];
+
+      await customService.logRead({ entityType: "Quote", entityId: TEST_IDS.entityId });
+
+      expect(repo.createEntry).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("failure handling", () => {
+    const descriptor = createMockDescriptor(["name"]);
+    const calls: Array<[string, (s: AuditService) => Promise<void>]> = [
+      ["logCreate", (s) => s.logCreate({ entityType: "Quote", entityId: TEST_IDS.entityId })],
+      ["logRead", (s) => s.logRead({ entityType: "Quote", entityId: TEST_IDS.entityId })],
+      [
+        "logUpdate",
+        (s) =>
+          s.logUpdate({
+            entityType: "Quote",
+            entityId: TEST_IDS.entityId,
+            before: { name: "a" },
+            after: { name: "b" },
+            descriptor,
+          }),
+      ],
+      [
+        "logDelete",
+        (s) => s.logDelete({ entityType: "Quote", entityId: TEST_IDS.entityId, snapshot: { name: "a" }, descriptor }),
+      ],
+    ];
+
+    it.each(calls)("%s resolves and logs when the write fails", async (_name, call) => {
+      const error = new Error("Expected parameter(s): companyId");
+      auditRepository.createEntry.mockRejectedValue(error);
+
+      await expect(call(service)).resolves.toBeUndefined();
+
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("Audit"), error, "AuditService");
+    });
+
+    it("passes companyId as null when the user has no company", async () => {
+      auditRepository.createEntry.mockResolvedValue(undefined);
+      clsValues.companyId = undefined;
+
+      await service.logRead({ entityType: "Quote", entityId: TEST_IDS.entityId });
+
+      expect(auditRepository.createEntry).toHaveBeenCalledWith(expect.objectContaining({ companyId: null }));
     });
   });
 });

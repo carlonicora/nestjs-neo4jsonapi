@@ -1,5 +1,8 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
+import { SystemRoles } from "../../../common/constants/system.roles";
+import { SYSTEM_ROLES, SystemRolesInterface } from "../../../common/tokens";
+import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { EntityDescriptor } from "../../../common/interfaces/entity.schema.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -19,15 +22,54 @@ export class AuditService {
     private readonly builder: JsonApiService,
     private readonly auditRepository: AuditRepository,
     private readonly clsService: ClsService,
+    @Optional()
+    @Inject(SYSTEM_ROLES)
+    private readonly systemRoles?: SystemRolesInterface,
+    @Optional()
+    private readonly logger?: AppLoggingService,
   ) {}
 
-  async logCreate(params: { entityType: string; entityId: string }): Promise<void> {
+  /**
+   * System Administrators must never produce audit entries. Roles are read from CLS,
+   * where JwtAuthGuard / AdminJwtAuthGuard / OptionalJwtAuthGuard store them.
+   */
+  private isAdministrator(): boolean {
+    const roles = this.clsService.get<string[]>("roles");
+    if (!Array.isArray(roles)) return false;
+    const administratorRoleId = this.systemRoles?.Administrator ?? SystemRoles.Administrator;
+    return roles.includes(administratorRoleId);
+  }
+
+  /**
+   * Returns the current user id when the request must be audited, null otherwise.
+   */
+  private auditableUserId(): string | null {
     const userId = this.clsService.get("userId");
+    if (!userId) return null;
+    if (this.isAdministrator()) return null;
+    return userId;
+  }
+
+  /**
+   * An audit failure must never fail the request or crash the process: log it and move on.
+   */
+  private async safeCreateEntry(params: Parameters<AuditRepository["createEntry"]>[0]): Promise<void> {
+    try {
+      await this.auditRepository.createEntry(params);
+    } catch (error) {
+      const message = `Audit ${params.action} failed for ${params.entityType} ${params.entityId}`;
+      if (this.logger) this.logger.error(message, error as Error, AuditService.name);
+      else new Logger(AuditService.name).error(message, (error as Error)?.stack);
+    }
+  }
+
+  async logCreate(params: { entityType: string; entityId: string }): Promise<void> {
+    const userId = this.auditableUserId();
     if (!userId) return;
 
-    await this.auditRepository.createEntry({
+    await this.safeCreateEntry({
       userId,
-      companyId: this.clsService.get("companyId"),
+      companyId: this.clsService.get("companyId") ?? null,
       ipAddress: this.clsService.get("ipAddress") ?? "",
       action: "create",
       entityType: params.entityType,
@@ -39,12 +81,12 @@ export class AuditService {
   }
 
   async logRead(params: { entityType: string; entityId: string }): Promise<void> {
-    const userId = this.clsService.get("userId");
+    const userId = this.auditableUserId();
     if (!userId) return;
 
-    await this.auditRepository.createEntry({
+    await this.safeCreateEntry({
       userId,
-      companyId: this.clsService.get("companyId"),
+      companyId: this.clsService.get("companyId") ?? null,
       ipAddress: this.clsService.get("ipAddress") ?? "",
       action: "read",
       entityType: params.entityType,
@@ -62,17 +104,17 @@ export class AuditService {
     after: Record<string, any>;
     descriptor: EntityDescriptor<any, any>;
   }): Promise<void> {
-    const userId = this.clsService.get("userId");
+    const userId = this.auditableUserId();
     if (!userId) return;
 
     const changes = this.diffChanges(params.before, params.after, params.descriptor);
     if (changes.length === 0) return;
 
-    const companyId = this.clsService.get("companyId");
+    const companyId = this.clsService.get("companyId") ?? null;
     const ipAddress = this.clsService.get("ipAddress") ?? "";
 
     for (const change of changes) {
-      await this.auditRepository.createEntry({
+      await this.safeCreateEntry({
         userId,
         companyId,
         ipAddress,
@@ -92,14 +134,14 @@ export class AuditService {
     snapshot: any;
     descriptor: EntityDescriptor<any, any>;
   }): Promise<void> {
-    const userId = this.clsService.get("userId");
+    const userId = this.auditableUserId();
     if (!userId) return;
 
     const snapshotStr = this.snapshotEntity(params.snapshot, params.descriptor);
 
-    await this.auditRepository.createEntry({
+    await this.safeCreateEntry({
       userId,
-      companyId: this.clsService.get("companyId"),
+      companyId: this.clsService.get("companyId") ?? null,
       ipAddress: this.clsService.get("ipAddress") ?? "",
       action: "delete",
       entityType: params.entityType,
@@ -118,7 +160,7 @@ export class AuditService {
       await this.auditRepository.findByEntity({
         entityType: params.entityType,
         entityId: params.entityId,
-        companyId: this.clsService.get("companyId"),
+        companyId: this.clsService.get("companyId") ?? null,
         cursor: paginator.generateCursor(),
       }),
       paginator,
