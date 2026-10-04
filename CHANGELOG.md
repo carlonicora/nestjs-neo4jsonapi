@@ -1,3 +1,9 @@
+## [4.16.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.15.0...v4.16.0) (2026-10-04)
+
+### 🚀 Features
+
+* **s3:** make the signed URL signing window configurable ([5add74a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5add74a175b49d7efdcba2bce5c3c1dc836d7f47))
+
 ## [4.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.14.0...v4.15.0) (2026-10-03)
 
 ### 🚀 Features
