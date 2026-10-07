@@ -1,3 +1,9 @@
+## [4.17.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.16.1...v4.17.0) (2026-10-07)
+
+### 🚀 Features
+
+* **agents:** add detail-only fields an entity's service fills on read_entity ([803e9d7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/803e9d701cb49eeb73eead596cd97beb0fd18573))
+
 ## [4.16.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.16.0...v4.16.1) (2026-10-04)
 
 ### 🐛 Bug Fixes
