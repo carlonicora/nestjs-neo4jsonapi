@@ -1,5 +1,6 @@
 import { Type } from "@nestjs/common";
 import { DataMeta, DataModelInterface } from "./datamodel.interface";
+import type { DetailFieldDef } from "./detail.fields.source.interface";
 
 /**
  * Neo4j/Cypher base data types for field definitions (scalar)
@@ -347,6 +348,8 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     writable?: boolean | ChatWritableConfig;
     /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
     related?: boolean;
+    /** Fields present only on read_entity, filled by the service's DetailFieldsSource. Never filterable, sortable, searchable or listed. */
+    detailFields?: Record<string, DetailFieldDef>;
   };
 
   /**
@@ -464,6 +467,8 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     writable?: boolean | ChatWritableConfig;
     /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
     related?: boolean;
+    /** Fields present only on read_entity, filled by the service's DetailFieldsSource. Never filterable, sortable, searchable or listed. */
+    detailFields?: Record<string, DetailFieldDef>;
   };
 
   /** See EntitySchemaInput.bridge. */

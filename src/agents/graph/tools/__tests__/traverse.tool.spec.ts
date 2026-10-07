@@ -118,6 +118,34 @@ describe("TraverseTool", () => {
     expect("note" in out).toBe(false);
   });
 
+  it("never calls readDetailFields", async () => {
+    const detailFields = [{ name: "body", type: "string", description: "b", filterable: false, sortable: false }];
+    const detailOrders = { ...orders, detailFields };
+    const detailAccounts = { ...accounts, detailFields };
+    const detailTargetSvc = {
+      findRelatedRecordsByEdge: vi.fn(async () => [{ id: "o1", total: 100, createdAt: "2026-04-01" }]),
+      readDetailFields: vi.fn(async () => ({ body: "x" })),
+    };
+    const detailSourceSvc = {
+      findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+      readDetailFields: vi.fn(async () => ({ body: "x" })),
+    };
+    const detailFactory: any = {
+      ...factory,
+      resolveEntity: (t: string) =>
+        t === "accounts" ? detailAccounts : t === "orders" ? detailOrders : { error: "nope" },
+      resolveService: (t: string) => (t === "orders" ? detailTargetSvc : detailSourceSvc),
+    };
+    const tool = new TraverseTool(detailFactory, {} as any, {} as any, {} as any, formatter, {} as any);
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0].fields?.body).toBeUndefined();
+    expect(detailTargetSvc.readDetailFields).not.toHaveBeenCalled();
+    expect(detailSourceSvc.readDetailFields).not.toHaveBeenCalled();
+  });
+
   it("rejects unknown relationship", async () => {
     const tool = new TraverseTool(factory, {} as any, {} as any, {} as any, formatter, {} as any);
     const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "ghost" }, ctx, [

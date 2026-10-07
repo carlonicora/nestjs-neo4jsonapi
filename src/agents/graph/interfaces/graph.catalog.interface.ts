@@ -143,4 +143,9 @@ export interface CatalogEntity {
   writableRelationships?: string[];
   /** Mirrors chat.list — stage-1 field names for list-returning tools. */
   list?: string[];
+  /**
+   * Compiled from chat.detailFields — fields present only on read_entity, filled by
+   * the type's DetailFieldsSource. Never filterable or sortable. Absent when none are declared.
+   */
+  detailFields?: CatalogField[];
 }

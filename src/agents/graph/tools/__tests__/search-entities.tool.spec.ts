@@ -87,6 +87,30 @@ describe("SearchEntitiesTool", () => {
     expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 51 }));
   });
 
+  it("never calls readDetailFields", async () => {
+    const svc = {
+      findRecords: vi.fn(async () => [{ id: "a1", name: "Acme", status: "open" }]),
+      readDetailFields: vi.fn(async () => ({ body: "x" })),
+    };
+    registryGet.mockReturnValue(svc);
+    const detailFactory: any = {
+      ...factory,
+      resolveEntity: (t: string) =>
+        t === "accounts"
+          ? {
+              ...catalog.getEntityDetail("accounts"),
+              detailFields: [{ name: "body", type: "string", description: "b", filterable: false, sortable: false }],
+            }
+          : { error: "nope" },
+    };
+    const tool = new SearchEntitiesTool(detailFactory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items).toHaveLength(1);
+    expect(svc.readDetailFields).not.toHaveBeenCalled();
+  });
+
   it("fetches limit+1, slices to limit, and flags hasMore + note when more records exist", async () => {
     const svc = {
       findRecords: vi.fn(async () => [

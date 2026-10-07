@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
@@ -7,6 +7,7 @@ import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
+import { isDetailFieldsSource } from "../../../common/interfaces/detail.fields.source.interface";
 
 const inputSchema = z.object({
   type: z.string(),
@@ -18,6 +19,8 @@ export { inputSchema as readEntityInputSchema };
 
 @Injectable()
 export class ReadEntityTool {
+  private readonly logger = new Logger(ReadEntityTool.name);
+
   constructor(
     private readonly factory: ToolFactory,
     private readonly catalog: GraphCatalogService,
@@ -131,6 +134,24 @@ export class ReadEntityTool {
         }
 
         const { fields: baseFields } = this.formatter.build({ entity, record, stage: "detail" });
+
+        // Detail fields (chat.detailFields): values the type's service supplies on a
+        // single-record read only. Assigned onto baseFields so the bridge path and the
+        // plain path both carry them. A failing hook never fails the read.
+        if (entity.detailFields?.length && isDetailFieldsSource(svc)) {
+          try {
+            const values = await svc.readDetailFields({ record });
+            for (const f of entity.detailFields) {
+              const value = values?.[f.name];
+              if (value === undefined || value === null || value === "") continue;
+              baseFields[f.name] = value;
+            }
+          } catch (e) {
+            this.logger.warn(
+              `read_entity detail fields failed for ${entity.type} ${input.id}: ${(e as Error).message}`,
+            );
+          }
+        }
 
         // Bridge fanout: if this entity is a bridge, replace the bare payload with
         // the materialised one. The existing `include` block (if any) stacks on top

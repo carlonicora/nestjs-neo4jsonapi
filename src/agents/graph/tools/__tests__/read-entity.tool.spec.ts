@@ -235,4 +235,187 @@ describe("ReadEntityTool", () => {
     expect(out.fields.description).toBe("**Bold** markdown");
     expect(out.availableOnRead).toBeUndefined();
   });
+
+  describe("detail fields (chat.detailFields)", () => {
+    const detailFields = [{ name: "body", type: "string", description: "b", filterable: false, sortable: false }];
+    const describedRecorder = () => [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }] as any[];
+    const buildFactory = (entity: any, service: any): any => ({
+      resolveEntity: (t: string) => (t === "accounts" ? entity : { error: "nope" }),
+      resolveService: () => service,
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    });
+    const withDetail = { ...accounts, detailFields };
+
+    it("adds declared detail fields to a single read", async () => {
+      const service = {
+        findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+        readDetailFields: vi.fn(async () => ({ body: "Hello" })),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory(withDetail, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect(out.fields).toEqual({ name: "Acme", body: "Hello" });
+      expect(service.readDetailFields).toHaveBeenCalledTimes(1);
+      expect(service.readDetailFields).toHaveBeenCalledWith({ record: { id: "a1", name: "Acme" } });
+    });
+
+    it("drops undeclared keys", async () => {
+      const service = {
+        findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+        readDetailFields: vi.fn(async () => ({ body: "x", bodyS3Key: "k" })),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory(withDetail, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect(out.fields.body).toBe("x");
+      expect(out.fields.bodyS3Key).toBeUndefined();
+    });
+
+    it("drops empty detail values", async () => {
+      const service = {
+        findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+        readDetailFields: vi.fn(async () => ({ body: "" })),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory(withDetail, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect("body" in out.fields).toBe(false);
+    });
+
+    it("a throwing hook still returns the record", async () => {
+      const service = {
+        findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+        readDetailFields: vi.fn(async () => {
+          throw new Error("s3");
+        }),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory(withDetail, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect(out).toMatchObject({ id: "a1", fields: { name: "Acme" } });
+      expect(out.fields).toEqual({ name: "Acme" });
+      expect(out.error).toBeUndefined();
+    });
+
+    it("does not call the hook when the entity declares no detail fields", async () => {
+      const service = {
+        findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })),
+        readDetailFields: vi.fn(async () => ({ body: "Hello" })),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory(accounts, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect(service.readDetailFields).not.toHaveBeenCalled();
+      expect(out.fields).toEqual({ name: "Acme" });
+    });
+
+    it("does not call anything on a service without the hook", async () => {
+      const service = { findRecordById: vi.fn(async () => ({ id: "a1", name: "Acme" })) };
+      const tool = new ReadEntityTool(
+        buildFactory(withDetail, service),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, describedRecorder());
+      expect(out.fields).toEqual({ name: "Acme" });
+    });
+
+    it("adds detail fields on a bridge read", async () => {
+      const moduleId = "11111111-1111-1111-1111-111111111111";
+      const items = {
+        type: "items",
+        moduleId,
+        description: "An item.",
+        fields: [{ name: "name", type: "string", description: "n", filterable: true, sortable: true }],
+        relationships: [],
+        nodeName: "item",
+        labelName: "Item",
+      };
+      const bomEntries = {
+        type: "bom-entries",
+        moduleId,
+        description: "Junction record.",
+        fields: [{ name: "position", type: "number", description: "row", filterable: true, sortable: true }],
+        relationships: [
+          {
+            name: "item",
+            sourceType: "bom-entries",
+            targetType: "items",
+            cardinality: "one",
+            description: "x",
+            cypherDirection: "out",
+            cypherLabel: "FOR_ITEM",
+            isReverse: false,
+          },
+        ],
+        nodeName: "bomEntry",
+        labelName: "BomEntry",
+        bridge: { materialiseTo: ["item"] },
+        summary: (d: any) => `row #${d.position ?? "?"}`,
+        detailFields,
+      };
+      const bridgeSvc = {
+        findRecordById: vi.fn(async () => ({ id: "be-1", position: 1 })),
+        readDetailFields: vi.fn(async () => ({ body: "Bridge body" })),
+      };
+      const bridgeFactory: any = {
+        resolveEntity: (t: string) => (t === "bom-entries" ? bomEntries : { error: "nope" }),
+        resolveService: () => bridgeSvc,
+        capture: async (_r: any, fn: any, rec: any[]) => {
+          const v = await fn();
+          rec.push({});
+          return v;
+        },
+      };
+      const bridgeCatalog: any = {
+        getEntityDetail: (t: string, _m: string[]) => (t === "items" ? items : null),
+      };
+      const bridgeRegistry: any = {
+        get: (t: string) =>
+          t === "items"
+            ? { findRelatedRecordsByEdge: vi.fn(async () => [{ id: "it-1", name: "InstallationTypeA" }]) }
+            : undefined,
+      };
+
+      const tool = new ReadEntityTool(bridgeFactory, bridgeCatalog, bridgeRegistry, undefined as any, formatter);
+      const out: any = await tool.invoke({ type: "bom-entries", id: "be-1" }, { ...ctx, userModuleIds: [moduleId] }, [
+        { tool: "describe_entity", input: { type: "bom-entries" }, durationMs: 0 },
+      ]);
+
+      expect(out.fields.body).toBe("Bridge body");
+      expect(out.fields.position).toBe(1);
+      expect(out.__materialised).toEqual(["item"]);
+    });
+  });
 });

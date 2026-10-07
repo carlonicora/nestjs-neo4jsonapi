@@ -3,6 +3,7 @@ export * from "./assistant.title.interface";
 export * from "./authenticated.request.interface";
 export * from "./datamodel.interface";
 export * from "./entity.descriptor.interface";
+export * from "./detail.fields.source.interface";
 export * from "./entity.schema.interface";
 export * from "./external.entity.source.interface";
 export * from "./message.interface";

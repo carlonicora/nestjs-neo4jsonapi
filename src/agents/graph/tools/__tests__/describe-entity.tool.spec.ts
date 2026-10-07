@@ -314,6 +314,31 @@ describe("DescribeEntityTool", () => {
     expect((out as any).bridge).toEqual({ materialiseTo: ["item"] });
     expect((out as any).type).toBe("bom-entries");
   });
+
+  it("lists detail fields marked as read_entity only", async () => {
+    const detailFactory: any = {
+      resolveEntity: (t: string, c: any) => {
+        const base = catalog.getEntityDetail(t, c.userModuleIds);
+        return base
+          ? {
+              ...base,
+              detailFields: [{ name: "body", type: "string", description: "b", filterable: false, sortable: false }],
+            }
+          : { error: "nope" };
+      },
+      capture: factory.capture,
+    };
+    const t = new DescribeEntityTool(detailFactory);
+    const out: any = await t.invoke(
+      { type: "accounts" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+    expect(out.detailFields).toEqual([{ name: "body", type: "string", description: "b", availableOn: "read_entity" }]);
+    expect(out.fields).toEqual([
+      { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
+    ]);
+  });
 });
 
 /**

@@ -61,6 +61,18 @@ export class DescribeEntityTool {
             description: r.description,
             ...(writable ? { writable: isRelationshipWritable(entity, r) } : {}),
           })),
+          // Detail fields are filled by the type's service on read_entity only: they
+          // cannot be filtered, sorted, searched or listed, so they stay out of `fields`.
+          ...(entity.detailFields?.length
+            ? {
+                detailFields: entity.detailFields.map((f) => ({
+                  name: f.name,
+                  type: f.type,
+                  description: f.description,
+                  availableOn: "read_entity",
+                })),
+              }
+            : {}),
           ...(entity.bridge ? { bridge: { materialiseTo: [...entity.bridge.materialiseTo] } } : {}),
         };
       },

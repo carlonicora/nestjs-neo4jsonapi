@@ -80,6 +80,42 @@ describe("GraphCatalogService", () => {
     expect(accountDetail?.fields.map((f) => f.name)).toEqual(["name"]);
   });
 
+  it("compiles chat.detailFields into CatalogEntity.detailFields", () => {
+    const mail = descriptor({
+      type: "mails",
+      moduleId: "11111111-1111-1111-1111-111111111111",
+      description: "A mail.",
+      fields: { subject: { type: "string", description: "Subject." } },
+      chat: { detailFields: { body: { type: "string", description: "b" } } },
+    });
+    const svc = new GraphCatalogService({ loadAll: () => [mail] } as any);
+    svc.buildCatalog();
+    const entity = svc.getEntityDetail("mails", ["11111111-1111-1111-1111-111111111111"]);
+    expect(entity?.detailFields).toEqual([
+      { name: "body", type: "string", description: "b", filterable: false, sortable: false },
+    ]);
+    expect(entity?.fields.map((f) => f.name)).toEqual(["subject"]);
+  });
+
+  it("omits detailFields when none are declared", () => {
+    const svc = new GraphCatalogService({ loadAll } as any);
+    svc.buildCatalog();
+    const entity = svc.getEntityDetail("accounts", ["11111111-1111-1111-1111-111111111111"]);
+    expect(entity?.detailFields).toBeUndefined();
+  });
+
+  it("throws when a detail field collides with a field", () => {
+    const mail = descriptor({
+      type: "mails",
+      moduleId: "11111111-1111-1111-1111-111111111111",
+      description: "A mail.",
+      fields: { body: { type: "string", description: "Body." } },
+      chat: { detailFields: { body: { type: "string", description: "b" } } },
+    });
+    const svc = new GraphCatalogService({ loadAll: () => [mail] } as any);
+    expect(() => svc.buildCatalog()).toThrow(/detail field "body"/);
+  });
+
   it("getMapFor only includes entities in the user's modules", () => {
     const svc = new GraphCatalogService({ loadAll } as any);
     svc.buildCatalog();

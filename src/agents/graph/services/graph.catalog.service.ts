@@ -7,6 +7,7 @@ import {
   CatalogScopeHop,
 } from "../interfaces/graph.catalog.interface";
 import { ChatScopeHop, ChatWritableConfig, FieldKind } from "../../../common/interfaces/entity.schema.interface";
+import type { DetailFieldDef } from "../../../common/interfaces/detail.fields.source.interface";
 import { ownerMeta } from "../../../foundations/user/entities/user.meta";
 import { scopeKeyOf } from "./writable.rules";
 
@@ -66,6 +67,8 @@ export interface DescriptorSource {
       writable?: boolean | ChatWritableConfig;
       /** Compile a polymorphic chat-only "related" traversal (RELATES_TO, both directions). */
       related?: boolean;
+      /** Fields present only on read_entity, filled by the service's DetailFieldsSource. */
+      detailFields?: Record<string, DetailFieldDef>;
     };
     bridge?: { materialiseTo: string[] };
   }>;
@@ -127,6 +130,16 @@ export class GraphCatalogService implements OnApplicationBootstrap {
             );
           }
         }
+      }
+
+      const detailFields: CatalogField[] = [];
+      for (const [name, def] of Object.entries(d.chat?.detailFields ?? {})) {
+        if (Object.prototype.hasOwnProperty.call(d.fields, name)) {
+          throw new Error(
+            `Entity "${d.model.type}" declares detail field "${name}", which collides with a field of the same name.`,
+          );
+        }
+        detailFields.push({ name, type: def.type, description: def.description, filterable: false, sortable: false });
       }
 
       const relationships: CatalogRelationship[] = [];
@@ -204,6 +217,7 @@ export class GraphCatalogService implements OnApplicationBootstrap {
             }
           : {}),
         ...(d.chat?.list ? { list: [...d.chat.list] } : {}),
+        ...(detailFields.length ? { detailFields } : {}),
       };
 
       this.entities.set(d.model.type, entity);
