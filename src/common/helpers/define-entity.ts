@@ -68,9 +68,21 @@ function convertNeo4jDate(value: any): string | null {
  * reconstructing from {year.low, month.low, ...} discards
  * `timeZoneOffsetSeconds` and silently shifts every datetime by the API
  * server's local-UTC offset.
+ *
+ * A DateTime stored with a named zone (e.g. written by `datetime({ ..., timezone: 'UTC' })`)
+ * prints as "2026-05-11T20:00:00Z[UTC]", which `new Date()` cannot parse: the
+ * result is an Invalid Date and the attribute reaches the client as null. The
+ * driver's own `toStandardDate()` applies the offset the server sent with the
+ * value and returns the correct instant for both shapes, so it is preferred
+ * whenever the value is a driver temporal. A driver DateTime with a zone name
+ * but no offset cannot be converted without guessing; it keeps the previous
+ * behaviour rather than silently reading the time in the server's own zone.
  */
 function convertNeo4jDateTime(value: any): Date | null {
   if (!value) return null;
+  if (typeof value.toStandardDate === "function" && value.timeZoneOffsetSeconds !== undefined) {
+    return value.toStandardDate();
+  }
   return new Date(value);
 }
 
