@@ -1,3 +1,9 @@
+## [4.17.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.0...v4.17.1) (2026-10-08)
+
+### 🐛 Bug Fixes
+
+* **entities:** convert datetimes stored with a named zone ([d8e5572](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d8e55726fb5516c51ba1b1a481130d132d463d47))
+
 ## [4.17.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.16.1...v4.17.0) (2026-10-07)
 
 ### 🚀 Features
