@@ -1,3 +1,13 @@
+## [4.17.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.1...v4.17.2) (2026-10-09)
+
+### 🚨 Tests
+
+* **assistant:** assert mock calls in the test that makes them ([6eedae2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6eedae2a5a6c0b63129a7389aab215e298049242))
+
+### ♻️ Chores
+
+* **deps:** fleet dependency sweep 2026-10-09 ([237ebd8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/237ebd827f80dd55896ccfff82cd3692041e6f72))
+
 ## [4.17.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.0...v4.17.1) (2026-10-08)
 
 ### 🐛 Bug Fixes
