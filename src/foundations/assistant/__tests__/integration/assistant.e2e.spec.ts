@@ -253,9 +253,10 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(storedMessages).toHaveLength(2);
     expect(storedMessages.find((m: any) => m.role === "user")?.position).toBe(0);
     expect(storedMessages.find((m: any) => m.role === "assistant")?.position).toBe(1);
-  });
 
-  it("persists per-turn citations and the unified trace via the new repo methods", async () => {
+    // Per-turn citations and the unified trace go through the new repo methods.
+    // Asserted here, in the test that makes the calls: Vitest 5 clears mock
+    // history between tests (clearMocks defaults to true).
     expect(assistantMessageRepo.linkCitations).toHaveBeenCalled();
     const lastCitationCall = (assistantMessageRepo.linkCitations as any).mock.calls.at(-1)![0];
     expect(lastCitationCall.citations).toEqual([{ chunkId: "chunk-1", relevance: 80, reason: "" }]);
@@ -296,12 +297,10 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
     expect(result.toolCalls).toEqual([{ tool: "traverse", input: {}, durationMs: 5 }]);
     expect(result.userMessage.content).toBe("And its latest order?");
     expect(result.assistantMessage.content).toContain("ord-1");
-  });
 
-  it("turn 2 with empty sources still calls setTrace but skips linkCitations", async () => {
     // Turn 2's responder mock returned sources: [] — linkCitations should NOT have
-    // been called for that assistant message id, but setTrace was.
-    const [firstAssistantId] = Array.from(assistantStorage.keys());
+    // been called for that assistant message id, but setTrace was. Asserted here,
+    // in the test that makes the calls: Vitest 5 clears mock history between tests.
     const turn2AssistantMsg = Array.from(messageStorage.values())
       .filter((m: any) => m.assistantId === firstAssistantId && m.role === "assistant")
       .sort((a: any, b: any) => a.position - b.position)
