@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { OnEvent } from "@nestjs/event-emitter";
 import { ClsService } from "nestjs-cls";
@@ -107,7 +107,7 @@ export function toCandidate(connection: AiConnection, decrypt: (value: string) =
  * on the `resolve()` hot path throws.
  */
 @Injectable()
-export class AiConnectionResolverService implements OnModuleInit {
+export class AiConnectionResolverService implements OnModuleInit, OnModuleDestroy {
   /** `${connectionType}|${companyId ?? "global"}` → ordered candidates. */
   private snapshot = new Map<string, ResolvedAiCandidate[]>();
 
@@ -138,6 +138,16 @@ export class AiConnectionResolverService implements OnModuleInit {
     }, SNAPSHOT_REFRESH_INTERVAL_MS);
     // Never hold the process open for a cache refresh.
     this.refreshTimer.unref?.();
+  }
+
+  /**
+   * Stops the periodic refresh. `unref()` alone does not stop it: a process
+   * still draining work after the Neo4j driver closed kept firing it every
+   * minute, each tick failing with "Pool is closed".
+   */
+  onModuleDestroy(): void {
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
   }
 
   /**

@@ -466,3 +466,22 @@ describe("AiConnectionResolverService.onModuleInit", () => {
     expect(resolver.resolve("ai").map((c) => c.connectionId)).toEqual(["env:ai"]);
   });
 });
+
+describe("AiConnectionResolverService.onModuleDestroy", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops the periodic refresh, so no tick runs against a closed driver", async () => {
+    vi.useFakeTimers();
+    const { resolver, repository } = makeHarness({ connections: [] });
+
+    resolver.onModuleInit();
+    await vi.waitFor(() => expect(repository.findAllForResolver).toHaveBeenCalledTimes(1));
+
+    resolver.onModuleDestroy();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    expect(repository.findAllForResolver).toHaveBeenCalledTimes(1);
+  });
+});
