@@ -37,3 +37,33 @@ export async function setupRawBodyCapture(app: NestFastifyApplication): Promise<
     return Readable.from(rawBody);
   });
 }
+
+/**
+ * Path prefix of the token-authorised object upload route (`PUT /s3/objects/:token`).
+ */
+export const S3_OBJECT_UPLOAD_PATH_PREFIX = "/s3/objects/";
+
+/**
+ * Hand the raw request stream of `PUT /s3/objects/:token` to the route handler as `req.body`,
+ * whatever content type the browser sent. Fastify picks the parser from `content-type` before
+ * `preParsing` runs, so the header is rewritten in `onRequest`. Any other route sending
+ * `application/octet-stream` gets 415. This must be called BEFORE routes are registered.
+ *
+ * @param app - The NestFastify application instance
+ */
+export function setupS3ObjectUploadStreaming(app: NestFastifyApplication): void {
+  const fastifyInstance = app.getHttpAdapter().getInstance();
+
+  fastifyInstance.addHook("onRequest", (request, _reply, done) => {
+    if (request.method === "PUT" && request.url.startsWith(S3_OBJECT_UPLOAD_PATH_PREFIX)) {
+      request.headers["content-type"] = "application/octet-stream";
+    }
+    done();
+  });
+
+  fastifyInstance.addContentTypeParser("application/octet-stream", (request, payload, done) =>
+    request.url.startsWith(S3_OBJECT_UPLOAD_PATH_PREFIX)
+      ? done(null, payload)
+      : done(Object.assign(new Error("Unsupported Media Type"), { statusCode: 415 }), undefined),
+  );
+}

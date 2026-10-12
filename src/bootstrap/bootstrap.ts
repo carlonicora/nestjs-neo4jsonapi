@@ -21,7 +21,8 @@ import { tracingSetup } from "../core/tracing/tracing.setup";
 import { createAppModule } from "./app.module.factory";
 import { BootstrapOptions } from "./bootstrap.options";
 import { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeConfig } from "./defaults";
-import { setupRawBodyCapture } from "./raw-body.config";
+import { setupGracefulShutdown } from "./graceful-shutdown";
+import { setupRawBodyCapture, setupS3ObjectUploadStreaming } from "./raw-body.config";
 
 /**
  * Bootstrap the application with minimal configuration.
@@ -89,6 +90,9 @@ async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: 
 
   // Setup raw body capture for webhook routes (MUST be before route registration)
   await setupRawBodyCapture(app);
+
+  // Stream the raw body of PUT /s3/objects/:token to the route (MUST be before route registration)
+  setupS3ObjectUploadStreaming(app);
 
   // Register security headers via @fastify/helmet (opt-in; default off — neural-erp unchanged)
   if (options.security?.helmet) {
@@ -326,28 +330,4 @@ async function setupOpenApiDocs(
       loggingService.warn("Failed to setup Redoc. Make sure nestjs-redoc is installed.");
     }
   }
-}
-
-/**
- * Setup graceful shutdown handlers for SIGTERM and SIGINT.
- *
- * @param app - NestJS application or application context
- * @param healthServer - Optional Node.js http.Server to close on shutdown (worker health check)
- */
-function setupGracefulShutdown(app: any, healthServer?: any): void {
-  const shutdown = async (signal: string) => {
-    try {
-      if (healthServer) {
-        await new Promise<void>((resolve) => healthServer.close(() => resolve()));
-      }
-      await app.close();
-      process.exit(0);
-    } catch (error) {
-      console.error(`Error during ${signal} shutdown:`, error);
-      process.exit(1);
-    }
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
 }

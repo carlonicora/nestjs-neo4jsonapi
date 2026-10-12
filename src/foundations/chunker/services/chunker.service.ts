@@ -7,6 +7,7 @@ import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import * as path from "path";
 import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigAiInterface } from "../../../config/interfaces/config.ai.interface";
@@ -104,16 +105,31 @@ export class ChunkerService {
     );
   }
 
-  private async _downloadFileAsBuffer(params: { url: string; extension: string }): Promise<Buffer> {
-    const response = await fetch(params.url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch the file: ${response.statusText}`);
+  /**
+   * Reads the bytes behind a `filePath`:
+   * - an absolute http(s) URL (external or legacy source) is fetched;
+   * - an absolute local path (the chunker's own /tmp files) is read from disk;
+   * - anything else is a storage key, read through `S3Service` (which decrypts
+   *   flagged objects) — no URL is signed and no HTTP round trip is made.
+   */
+  private async _readSource(params: { filePath: string }): Promise<Buffer> {
+    if (/^https?:\/\//i.test(params.filePath)) {
+      const response = await fetch(params.filePath);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch the file: ${response.statusText}`);
+      }
+      return Buffer.from(await response.arrayBuffer());
     }
-    return Buffer.from(await response.arrayBuffer());
+
+    if (path.isAbsolute(params.filePath)) {
+      return fs.readFile(params.filePath);
+    }
+
+    return (await this.s3Service.downloadFileBuffer({ key: params.filePath })).buffer;
   }
 
-  private async _downloadFile(params: { url: string; extension: string }): Promise<string> {
-    const buffer = await this._downloadFileAsBuffer(params);
+  private async _downloadFile(params: { filePath: string; extension: string }): Promise<string> {
+    const buffer = await this._readSource({ filePath: params.filePath });
     const tempFilePath = `/tmp/temp-file.${randomUUID()}.${params.extension}`;
     await fs.writeFile(tempFilePath, buffer);
     return tempFilePath;
@@ -200,13 +216,14 @@ export class ChunkerService {
 
   async generateContentStructureFromFile(params: {
     fileType: string;
+    /** Storage key, or an absolute http(s) URL for external/legacy sources. */
     filePath: string;
     attribution?: ChunkerAttribution;
     /**
      * Human-readable name of the document, used as the markdown title. Pass it whenever
-     * the caller knows it: `filePath` is often a PRESIGNED URL, and deriving a title from
-     * it put the signature and credential into the chunk text (and into every prompt and
-     * embedding built from it). Falls back to the file name when omitted.
+     * the caller knows it: a legacy `filePath` can be a PRESIGNED URL, and deriving a title
+     * from it put the signature and credential into the chunk text (and into every prompt
+     * and embedding built from it). Falls back to the file name when omitted.
      */
     title?: string;
   }): Promise<Document[]> {
@@ -229,7 +246,7 @@ export class ChunkerService {
     }
 
     const localFilePath = await this._downloadFile({
-      url: params.filePath,
+      filePath: params.filePath,
       extension: params.fileType,
     });
 
@@ -524,14 +541,7 @@ export class ChunkerService {
     attribution?: ChunkerAttribution;
   }): Promise<Document[]> {
     try {
-      const imageUrl = params.filePath.toLowerCase().startsWith("http")
-        ? params.filePath
-        : await this.s3Service.generateSignedUrl({ key: params.filePath });
-
-      const imageBuffer = await this._downloadFileAsBuffer({
-        url: imageUrl,
-        extension: params.fileType,
-      });
+      const imageBuffer = await this._readSource({ filePath: params.filePath });
 
       /*
        * NO USAGE IS RECORDED FOR THIS CALL, DELIBERATELY.

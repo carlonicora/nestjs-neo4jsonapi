@@ -49,6 +49,9 @@ export function getAppModeConfig(mode: AppMode): AppModeConfig {
 export const defaultFastifyOptions = {
   routerOptions: {
     ignoreTrailingSlash: true,
+    // Signed object tokens (`/s3/objects/:token`) carry key, content type and filename;
+    // Fastify's 100-char default answers 414 for them.
+    maxParamLength: 4096,
   },
   bodyLimit: 100 * 1024 * 1024, // 100MB
 };

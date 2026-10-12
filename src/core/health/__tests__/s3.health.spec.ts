@@ -1,6 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
+import { HealthCheckError } from "@nestjs/terminus";
 import { S3HealthIndicator } from "../indicators/s3.health";
 
 // Mock AWS SDK
@@ -84,6 +85,7 @@ describe("S3HealthIndicator", () => {
           status: "up",
           message: "aws storage connection healthy",
           storageType: "aws",
+          encryption: "off",
         },
       });
     });
@@ -104,6 +106,7 @@ describe("S3HealthIndicator", () => {
           status: "up",
           message: "s3 storage connection healthy",
           storageType: "s3",
+          encryption: "off",
         },
       });
     });
@@ -125,6 +128,7 @@ describe("S3HealthIndicator", () => {
           status: "up",
           message: "digitalocean storage connection healthy",
           storageType: "digitalocean",
+          encryption: "off",
         },
       });
     });
@@ -145,8 +149,44 @@ describe("S3HealthIndicator", () => {
           status: "up",
           message: "minio storage connection healthy",
           storageType: "minio",
+          encryption: "off",
         },
       });
+    });
+
+    const encryptedConfig = (encryption: { enabled: boolean; key: string }) => ({
+      type: "minio",
+      bucket: "test-bucket",
+      endpoint: "http://localhost:9000",
+      key: "minio-key",
+      secret: "minio-secret",
+      encryption: { ...encryption, retiredKeys: "", plaintextPrefixes: "" },
+      uploadMaxBytes: 104857600,
+    });
+
+    it('reports encryption "off"', async () => {
+      configService.get.mockReturnValue(encryptedConfig({ enabled: false, key: "" }));
+
+      const result = await indicator.isHealthy("storage");
+
+      expect(result.storage.encryption).toBe("off");
+    });
+
+    it('reports encryption "on"', async () => {
+      configService.get.mockReturnValue(
+        encryptedConfig({ enabled: true, key: `k1:${Buffer.alloc(32, 7).toString("base64")}` }),
+      );
+
+      const result = await indicator.isHealthy("storage");
+
+      expect(result.storage.status).toBe("up");
+      expect(result.storage.encryption).toBe("on");
+    });
+
+    it("fails when enabled with a malformed key", async () => {
+      configService.get.mockReturnValue(encryptedConfig({ enabled: true, key: "k1:not-32-bytes" }));
+
+      await expect(indicator.isHealthy("storage")).rejects.toThrow(HealthCheckError);
     });
   });
 });

@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
+import { S3CipherService } from "./services/s3-cipher.service";
 import { S3Service } from "./services/s3.service";
 
 /**
  * S3 Service Module
  *
- * Provides S3Service and NOTHING else — no controller, no serialiser.
+ * Provides S3Service (and the S3CipherService it depends on) and NOTHING else — no controller, no serialiser.
  *
  * WHY THIS EXISTS: S3Service used to be registered TWICE — once by S3Module,
  * and once directly in MigratorModule's `providers` (so the migrator could
@@ -29,7 +30,7 @@ import { S3Service } from "./services/s3.service";
  * import S3Module when the controller is wanted too.
  */
 @Module({
-  providers: [S3Service],
-  exports: [S3Service],
+  providers: [S3Service, S3CipherService],
+  exports: [S3Service, S3CipherService],
 })
 export class S3ServiceModule {}

@@ -8,10 +8,19 @@ import {
   HttpStatus,
   Inject,
   Optional,
+  Param,
+  PayloadTooLargeException,
+  Put,
   Query,
+  Req,
+  Res,
+  UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { FastifyReply, FastifyRequest } from "fastify";
 import { ClsService } from "nestjs-cls";
+import { Readable, Transform } from "stream";
 
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import {
@@ -20,7 +29,11 @@ import {
   S3KeyAccessPolicy,
   S3KeyAction,
 } from "../../../common/interfaces/s3.key-access.policy.interface";
-import { s3Meta } from "../../s3/entities/s3.meta";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
+import { S3ObjectTokenError, S3ObjectTokenOp, S3ObjectTokenPayload } from "../../s3/cipher/s3-cipher.core";
+import { S3_OBJECTS_SEGMENT, s3Meta } from "../../s3/entities/s3.meta";
+import { S3CipherService } from "../../s3/services/s3-cipher.service";
 import { S3Service } from "../../s3/services/s3.service";
 
 @Controller(s3Meta.endpoint)
@@ -28,6 +41,8 @@ export class S3Controller {
   constructor(
     private readonly service: S3Service,
     private readonly clsService: ClsService,
+    private readonly cipher: S3CipherService,
+    private readonly configService: ConfigService<BaseConfigInterface>,
     @Optional()
     @Inject(S3_KEY_ACCESS_POLICY)
     private readonly keyPolicy?: S3KeyAccessPolicy,
@@ -98,5 +113,104 @@ export class S3Controller {
     });
 
     if (!allowed) throw new ForbiddenException("You cannot access this file.");
+  }
+
+  /**
+   * Token-authorised upload. The raw body arrives as a stream (see setupS3ObjectUploadStreaming);
+   * it is counted against the upload cap and streamed to storage, where S3Service encrypts it.
+   */
+  @Put(`${S3_OBJECTS_SEGMENT}/:token`)
+  async putObject(
+    @Req() req: FastifyRequest,
+    @Res() reply: FastifyReply,
+    @Param("token") token: string,
+  ): Promise<void> {
+    const payload = this._verifyToken(token, "put");
+
+    const maxBytes = this.cipher.uploadMaxBytes;
+    let received = 0;
+    let tooLarge = false;
+    const counter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length;
+        if (received > maxBytes) {
+          tooLarge = true;
+          callback(new PayloadTooLargeException(`Upload exceeds ${maxBytes} bytes`));
+          return;
+        }
+        callback(null, chunk);
+      },
+    });
+
+    const body = req.body as Readable;
+    body.on("error", (error) => counter.destroy(error));
+    counter.on("error", () => {
+      body.unpipe(counter);
+      body.resume();
+    });
+    body.pipe(counter);
+
+    try {
+      await this.service.uploadStream({
+        key: payload.k,
+        contentType: payload.c ?? "application/octet-stream",
+        stream: counter,
+      });
+    } catch (error) {
+      if (tooLarge) throw new PayloadTooLargeException(`Upload exceeds ${maxBytes} bytes`);
+      throw error;
+    }
+
+    reply.status(204).send();
+  }
+
+  /**
+   * Token-authorised download. Streams the (decrypted) object; never serves ciphertext.
+   */
+  @Get(`${S3_OBJECTS_SEGMENT}/:token`)
+  async getObject(@Res() reply: FastifyReply, @Param("token") token: string): Promise<void> {
+    const payload = this._verifyToken(token, "get");
+
+    const object = await this.service.downloadObject({ key: payload.k });
+    if (!object) {
+      reply.status(404).send({ errors: [{ status: "404", title: "Not Found" }] });
+      return;
+    }
+
+    reply.header("Content-Type", object.contentType ?? "application/octet-stream");
+    if (payload.f) reply.header("Content-Disposition", this.service.contentDispositionAttachment(payload.f));
+    reply.header("Cache-Control", "private, max-age=0");
+    reply.header("Accept-Ranges", "none");
+
+    // The web app embeds downloaded PDFs in an iframe, but a host that registers helmet (the corpus)
+    // denies framing by default. Let the app origin, and only it, frame this response.
+    const appOrigin = this._appOrigin();
+    if (appOrigin) {
+      reply.header("Content-Security-Policy", `frame-ancestors ${appOrigin}`);
+      reply.removeHeader("X-Frame-Options");
+    }
+
+    reply.send(object.stream);
+  }
+
+  private _appOrigin(): string | undefined {
+    const url = this.configService.get<ConfigAppInterface>("app")?.url;
+    if (!url) return undefined;
+
+    try {
+      const origin = new URL(url).origin;
+      return origin === "null" ? undefined : origin;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private _verifyToken(token: string, op: S3ObjectTokenOp): S3ObjectTokenPayload {
+    try {
+      return this.cipher.verifyObjectToken(token, op);
+    } catch (error) {
+      if (error instanceof S3ObjectTokenError) throw new UnauthorizedException(error.message);
+      throw error;
+    }
   }
 }

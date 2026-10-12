@@ -15,6 +15,7 @@ vi.mock("../entities/s3.meta", () => ({
     nodeName: "s3",
     labelName: "S3",
   },
+  S3_OBJECTS_SEGMENT: "objects",
 }));
 
 // Mock S3 service
@@ -23,12 +24,29 @@ vi.mock("../services/s3.service", () => ({
     generatePresignedUrl: vi.fn(),
     findSignedUrl: vi.fn(),
     deleteFileFromS3: vi.fn(),
+    uploadStream: vi.fn(),
+    downloadObject: vi.fn(),
+    contentDispositionAttachment: vi.fn(),
   })),
 }));
 
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+// Mock S3 cipher service
+vi.mock("../services/s3-cipher.service", () => ({
+  S3CipherService: class MockS3CipherService {},
+}));
+
+import {
+  BadRequestException,
+  ForbiddenException,
+  PayloadTooLargeException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
+import { Readable } from "stream";
+import { S3ObjectTokenError } from "../cipher/s3-cipher.core";
+import { S3CipherService } from "../services/s3-cipher.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { S3Service } from "../services/s3.service";
@@ -42,9 +60,13 @@ const CLS_VALUES: Record<string, unknown> = {
 
 const mockClsService = { get: vi.fn((key: string) => CLS_VALUES[key]) };
 
+let appUrl = "";
+const mockConfigService = { get: vi.fn((key: string) => (key === "app" ? { url: appUrl } : undefined)) };
+
 describe("S3Controller", () => {
   let controller: S3Controller;
   let s3Service: Mocked<S3Service>;
+  let cipher: { uploadMaxBytes: number; verifyObjectToken: ReturnType<typeof vi.fn> };
 
   // Test data constants
   const MOCK_KEY = "uploads/user-123/image.png";
@@ -80,13 +102,19 @@ describe("S3Controller", () => {
       generatePresignedUrl: vi.fn(),
       findSignedUrl: vi.fn(),
       deleteFileFromS3: vi.fn(),
+      uploadStream: vi.fn(),
+      downloadObject: vi.fn(),
+      contentDispositionAttachment: vi.fn(),
     };
+    cipher = { uploadMaxBytes: 1024, verifyObjectToken: vi.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [S3Controller],
       providers: [
         { provide: S3Service, useValue: mockS3Service },
         { provide: ClsService, useValue: mockClsService },
+        { provide: S3CipherService, useValue: cipher },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -99,6 +127,7 @@ describe("S3Controller", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    appUrl = "";
   });
 
   describe("getPresignedUrl", () => {
@@ -273,6 +302,8 @@ describe("S3Controller", () => {
             useValue: { generatePresignedUrl: vi.fn(), findSignedUrl: vi.fn(), deleteFileFromS3: vi.fn() },
           },
           { provide: ClsService, useValue: mockClsService },
+          { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken: vi.fn() } },
+          { provide: ConfigService, useValue: mockConfigService },
           { provide: S3_KEY_ACCESS_POLICY, useValue: policy as S3KeyAccessPolicy },
         ],
       })
@@ -337,6 +368,157 @@ describe("S3Controller", () => {
     it("rejects a malformed key with 400 without consulting the policy", async () => {
       await expect(guarded.getSignedUrl("companies/c1/../c2/a.pdf", false)).rejects.toThrow(BadRequestException);
       expect(policy.canAccess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("object token routes", () => {
+    const makeReply = () => ({
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
+      removeHeader: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+    });
+    const makeRequest = (bytes: number) => ({ body: Readable.from([Buffer.alloc(bytes, 1)]) }) as any;
+    const consume = async ({ stream }: { stream: Readable }) => {
+      for await (const _chunk of stream) {
+        // drain
+      }
+    };
+
+    it("PUT /s3/objects/:token verifies a put token and uploads the body stream with the token's content type", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "put", k: "k", c: "application/pdf" });
+      s3Service.uploadStream.mockImplementation(consume);
+      const reply = makeReply();
+
+      await controller.putObject(makeRequest(5), reply as any, "token");
+
+      expect(cipher.verifyObjectToken).toHaveBeenCalledWith("token", "put");
+      expect(s3Service.uploadStream).toHaveBeenCalledWith(
+        expect.objectContaining({ key: "k", contentType: "application/pdf" }),
+      );
+      expect(reply.status).toHaveBeenCalledWith(204);
+      expect(reply.send).toHaveBeenCalled();
+    });
+
+    it("PUT /s3/objects/:token answers 401 for a bad token", async () => {
+      cipher.verifyObjectToken.mockImplementation(() => {
+        throw new S3ObjectTokenError("signature", "Invalid signature");
+      });
+      const reply = makeReply();
+
+      await expect(controller.putObject(makeRequest(5), reply as any, "token")).rejects.toThrow(UnauthorizedException);
+      expect(s3Service.uploadStream).not.toHaveBeenCalled();
+      expect(reply.send).not.toHaveBeenCalled();
+    });
+
+    it("PUT /s3/objects rejects a body over the cap with 413", async () => {
+      cipher.uploadMaxBytes = 10;
+      cipher.verifyObjectToken.mockReturnValue({ o: "put", k: "k", c: "application/pdf" });
+      let streamErrored = false;
+      s3Service.uploadStream.mockImplementation(async ({ stream }: { stream: Readable }) => {
+        stream.on("error", () => {
+          streamErrored = true;
+        });
+        await consume({ stream });
+      });
+      const reply = makeReply();
+
+      await expect(controller.putObject(makeRequest(11), reply as any, "token")).rejects.toThrow(
+        PayloadTooLargeException,
+      );
+      expect(streamErrored).toBe(true);
+      expect(reply.status).not.toHaveBeenCalledWith(204);
+    });
+
+    it("GET /s3/objects/:token streams the object with its content type and Cache-Control private", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      const stream = Readable.from(["data"]);
+      s3Service.downloadObject.mockResolvedValue({ stream, contentType: "application/pdf" });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(cipher.verifyObjectToken).toHaveBeenCalledWith("token", "get");
+      expect(s3Service.downloadObject).toHaveBeenCalledWith({ key: "k" });
+      expect(reply.header).toHaveBeenCalledWith("Content-Type", "application/pdf");
+      expect(reply.header).toHaveBeenCalledWith("Cache-Control", "private, max-age=0");
+      expect(reply.header).toHaveBeenCalledWith("Accept-Ranges", "none");
+      expect(reply.header).not.toHaveBeenCalledWith("Content-Disposition", expect.anything());
+      expect(reply.send).toHaveBeenCalledWith(stream);
+    });
+
+    it("GET /s3/objects falls back to application/octet-stream", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: undefined });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(reply.header).toHaveBeenCalledWith("Content-Type", "application/octet-stream");
+    });
+
+    it("GET /s3/objects sets an RFC 6266 attachment disposition", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k", f: "preventivo è.pdf" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      s3Service.contentDispositionAttachment.mockReturnValue(
+        `attachment; filename="preventivo _.pdf"; filename*=UTF-8''preventivo%20%C3%A8.pdf`,
+      );
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(s3Service.contentDispositionAttachment).toHaveBeenCalledWith("preventivo è.pdf");
+      expect(reply.header).toHaveBeenCalledWith(
+        "Content-Disposition",
+        `attachment; filename="preventivo _.pdf"; filename*=UTF-8''preventivo%20%C3%A8.pdf`,
+      );
+    });
+
+    it("lets the web app frame a downloaded object", async () => {
+      appUrl = "http://app.test/";
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(reply.header).toHaveBeenCalledWith("Content-Security-Policy", "frame-ancestors http://app.test");
+      expect(reply.removeHeader).toHaveBeenCalledWith("X-Frame-Options");
+    });
+
+    it("leaves framing headers alone without an app url", async () => {
+      appUrl = "";
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(reply.header).not.toHaveBeenCalledWith("Content-Security-Policy", expect.anything());
+      expect(reply.removeHeader).not.toHaveBeenCalled();
+      expect(reply.send).toHaveBeenCalled();
+    });
+
+    it("GET /s3/objects answers 404 when downloadObject returns null", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      s3Service.downloadObject.mockResolvedValue(null);
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(reply.status).toHaveBeenCalledWith(404);
+      expect(reply.send).toHaveBeenCalledWith({ errors: [{ status: "404", title: "Not Found" }] });
+    });
+
+    it("GET /s3/objects answers 401 for an expired token", async () => {
+      cipher.verifyObjectToken.mockImplementation(() => {
+        throw new S3ObjectTokenError("expired", "Token expired");
+      });
+      const reply = makeReply();
+
+      await expect(controller.getObject(reply as any, "token")).rejects.toThrow(UnauthorizedException);
+      expect(s3Service.downloadObject).not.toHaveBeenCalled();
+      expect(reply.send).not.toHaveBeenCalled();
     });
   });
 

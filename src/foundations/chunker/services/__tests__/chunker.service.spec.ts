@@ -1,4 +1,8 @@
 import { Document } from "@langchain/core/documents";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as fs from "fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChunkerService } from "../chunker.service";
 
@@ -74,7 +78,10 @@ describe("ChunkerService page count", () => {
       makeFullConfig({ mock: true }),
     );
 
-    const docs = await service.generateContentStructureFromFile({ fileType: "pdf", filePath: "s3://bucket/file.pdf" });
+    const docs = await service.generateContentStructureFromFile({
+      fileType: "pdf",
+      filePath: "https://storage.test/bucket/file.pdf",
+    });
 
     expect(docs).toHaveLength(1);
     expect(docs[0].metadata.totalPages).toBe(1);
@@ -111,7 +118,10 @@ describe("ChunkerService page count", () => {
       makeFullConfig(),
     );
 
-    const docs = await service.generateContentStructureFromFile({ fileType: "pdf", filePath: "s3://bucket/file.pdf" });
+    const docs = await service.generateContentStructureFromFile({
+      fileType: "pdf",
+      filePath: "https://storage.test/bucket/file.pdf",
+    });
 
     expect(docs).toHaveLength(2);
     expect(docs.every((doc) => doc.metadata.totalPages === 7)).toBe(true);
@@ -167,7 +177,10 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
     );
     const warn = vi.spyOn((service as any).logger, "warn").mockImplementation(() => undefined);
 
-    const docs = await service.generateContentStructureFromFile({ fileType: "pdf", filePath: "s3://bucket/file.pdf" });
+    const docs = await service.generateContentStructureFromFile({
+      fileType: "pdf",
+      filePath: "https://storage.test/bucket/file.pdf",
+    });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 48)).toBe(true);
     expect(warned(warn, "implausible")).toBe(true);
@@ -197,7 +210,10 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
       makeFullConfig(),
     );
 
-    const docs = await service.generateContentStructureFromFile({ fileType: "pdf", filePath: "s3://bucket/file.pdf" });
+    const docs = await service.generateContentStructureFromFile({
+      fileType: "pdf",
+      filePath: "https://storage.test/bucket/file.pdf",
+    });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 50)).toBe(true);
     expect(docs.every((doc) => doc.metadata.ocrTruncated === undefined)).toBe(true);
@@ -229,7 +245,10 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
     );
     const warn = vi.spyOn((service as any).logger, "warn").mockImplementation(() => undefined);
 
-    const docs = await service.generateContentStructureFromFile({ fileType: "pdf", filePath: "s3://bucket/scan.pdf" });
+    const docs = await service.generateContentStructureFromFile({
+      fileType: "pdf",
+      filePath: "https://storage.test/bucket/scan.pdf",
+    });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 50)).toBe(true);
     expect(docs.every((doc) => doc.metadata.ocrTruncated === true)).toBe(true);
@@ -265,7 +284,7 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "docx",
-      filePath: "s3://bucket/file.docx",
+      filePath: "https://storage.test/bucket/file.docx",
     });
 
     expect(docs.length).toBeGreaterThanOrEqual(3);
@@ -388,5 +407,110 @@ describe("ChunkerService markdown title", () => {
     expect(title).not.toContain("X-Amz-Signature");
     expect(title).not.toContain("X-Amz-Credential");
     expect(title).not.toContain("?");
+  });
+});
+
+describe("ChunkerService source reading", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const KEY = "companies/c1/d.txt";
+
+  const makeS3 = () => ({
+    downloadFileBuffer: vi.fn().mockResolvedValue({ buffer: Buffer.from("stored bytes"), contentType: "text/plain" }),
+    generateSignedUrl: vi.fn().mockResolvedValue("http://signed.test/should-not-be-used"),
+  });
+
+  const makeService = (s3: ReturnType<typeof makeS3>, modelService: any = stub) => {
+    const splitter = { splitMarkdownToChunks: vi.fn().mockResolvedValue([]) } as any;
+    return new ChunkerService(
+      splitter,
+      splitter,
+      stub,
+      stub,
+      stub,
+      stub,
+      modelService,
+      s3 as any,
+      stub,
+      makeFullConfig(),
+    );
+  };
+
+  it("reads a key through S3Service.downloadFileBuffer", async () => {
+    const s3 = makeS3();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    await makeService(s3).generateContentStructureFromFile({ fileType: "md", filePath: KEY });
+
+    expect(s3.downloadFileBuffer).toHaveBeenCalledWith({ key: KEY });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(s3.generateSignedUrl).not.toHaveBeenCalled();
+    // The bytes read from storage are what lands in the chunker's temp file.
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/tmp\/temp-file\./),
+      Buffer.from("stored bytes"),
+    );
+  });
+
+  it("still fetches an http(s) filePath", async () => {
+    const s3 = makeS3();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      statusText: "OK",
+      arrayBuffer: async () => new TextEncoder().encode("remote bytes").buffer,
+    } as any);
+
+    await makeService(s3).generateContentStructureFromFile({
+      fileType: "md",
+      filePath: "https://external.test/legacy/d.md",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith("https://external.test/legacy/d.md");
+    expect(s3.downloadFileBuffer).not.toHaveBeenCalled();
+    expect(s3.generateSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("reads an absolute local path from disk", async () => {
+    const s3 = makeS3();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const dir = mkdtempSync(join(tmpdir(), "chunker-spec-"));
+    const localPath = join(dir, "local.txt");
+    writeFileSync(localPath, "local bytes");
+    // fs/promises is stubbed for the chunker's temp files; this one read goes to disk.
+    const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises");
+    vi.mocked(fs.readFile).mockImplementationOnce(actual.readFile as any);
+
+    try {
+      const buffer: Buffer = await (makeService(s3) as any)._readSource({ filePath: localPath });
+
+      expect(buffer.toString("utf-8")).toBe("local bytes");
+      expect(fs.readFile).toHaveBeenCalledWith(localPath);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(s3.downloadFileBuffer).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("_createChunksFromImage reads a key without signing a URL", async () => {
+    const s3 = makeS3();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const invoke = vi.fn().mockResolvedValue({ content: "an image description" });
+    const modelService = { getLLM: vi.fn().mockReturnValue({ invoke }) } as any;
+
+    const docs = await makeService(s3, modelService).generateContentStructureFromFile({
+      fileType: "png",
+      filePath: "companies/c1/scan.png",
+    });
+
+    expect(s3.downloadFileBuffer).toHaveBeenCalledWith({ key: "companies/c1/scan.png" });
+    expect(s3.generateSignedUrl).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalled();
+    expect(docs.map((d) => d.pageContent).join(" ")).toContain("an image description");
   });
 });

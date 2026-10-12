@@ -7,26 +7,28 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import type { GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { Readable } from "stream";
-import {
-  BlobSASPermissions,
-  BlobServiceClient,
-  ContainerClient,
-  SASProtocol,
-  StorageSharedKeyCredential,
-  generateBlobSASQueryParameters,
-} from "@azure/storage-blob";
+import { Readable, pipeline } from "stream";
+import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from "@azure/storage-blob";
+import type { BlobDownloadResponseParsed } from "@azure/storage-blob";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { BaseConfigInterface, ConfigS3Interface } from "../../../config/interfaces";
+import { BaseConfigInterface, ConfigApiInterface, ConfigS3Interface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { S3Model } from "../../s3/entities/s3.model";
+import { S3_OBJECTS_SEGMENT, s3Meta } from "../../s3/entities/s3.meta";
+import {
+  S3_ENCRYPTION_METADATA_KEY,
+  S3_ENCRYPTION_METADATA_VALUE,
+  S3_OBJECT_TOKEN_TTL_SECONDS,
+  isEncryptedObjectMetadata,
+} from "../cipher/s3-cipher.core";
+import { S3CipherService } from "./s3-cipher.service";
 
 @Injectable()
 export class S3Service {
@@ -42,10 +44,67 @@ export class S3Service {
     private readonly clsService: ClsService,
     private readonly configService: ConfigService<BaseConfigInterface>,
     private readonly logger: AppLoggingService,
+    private readonly cipher: S3CipherService,
   ) {}
 
   private get s3Config(): ConfigS3Interface {
     return this.configService.get<ConfigS3Interface>("s3");
+  }
+
+  /** Token-verified api URL served by S3Controller: `${api.url}s3/objects/<token>`. */
+  private _apiObjectUrl(token: string): string {
+    return `${this.configService.get<ConfigApiInterface>("api").url}${s3Meta.endpoint}/${S3_OBJECTS_SEGMENT}/${token}`;
+  }
+
+  /** Object metadata flag for an encrypted write, or undefined when the key is stored as plaintext. */
+  private _metadataFor(key: string): Record<string, string> | undefined {
+    return this.cipher.shouldEncrypt(key) ? { [S3_ENCRYPTION_METADATA_KEY]: S3_ENCRYPTION_METADATA_VALUE } : undefined;
+  }
+
+  /** Body and metadata to write for `key`: ciphertext plus the flag when encrypting, the buffer untouched otherwise. */
+  private async _prepareBody(
+    key: string,
+    buffer: Buffer,
+  ): Promise<{ body: Buffer; metadata: Record<string, string> | undefined }> {
+    const metadata = this._metadataFor(key);
+    if (!metadata) return { body: buffer, metadata: undefined };
+
+    return { body: await this.cipher.encrypt(buffer), metadata };
+  }
+
+  /** Throws when a flagged object cannot be opened: ciphertext is never returned to a caller. */
+  private _assertCanDecrypt(key: string): void {
+    if (!this.cipher.canDecrypt) {
+      throw new Error(`S3 object ${key} is encrypted but no matching S3_ENCRYPTION_KEY/RETIRED key is configured`);
+    }
+  }
+
+  /** Decrypts the stored bytes when the object metadata (S3 `Metadata` / Azure `metadata`) carries the flag. */
+  private async _readBody(key: string, metadata: Record<string, string> | undefined, bytes: Buffer): Promise<Buffer> {
+    if (!isEncryptedObjectMetadata(metadata)) return bytes;
+
+    this._assertCanDecrypt(key);
+    return await this.cipher.decrypt(bytes);
+  }
+
+  /** Streaming counterpart of `_readBody`: a flagged object is piped through the cipher's decrypt stream. */
+  private _readStream(key: string, metadata: Record<string, string> | undefined, stream: Readable): Readable {
+    if (!isEncryptedObjectMetadata(metadata)) return stream;
+
+    this._assertCanDecrypt(key);
+    const decrypting = this.cipher.decryptStream();
+    pipeline(stream, decrypting, (error) => {
+      if (error) this.logger.error(`Failed to decrypt object stream ${key}`, error);
+    });
+    return decrypting;
+  }
+
+  private async _streamToBuffer(stream: AsyncIterable<Uint8Array | string>): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   private async _loadConfiguration(): Promise<void> {
@@ -124,59 +183,6 @@ export class S3Service {
     }
   }
 
-  private async _prepareUrl(params: { key: string; contentType: string; isPublic?: boolean }): Promise<string> {
-    if (this._storageType === "azure") return await this._prepareAzureUrl(params);
-
-    const isPublic = params.isPublic ?? false;
-
-    const command = isPublic
-      ? new PutObjectCommand({
-          Bucket: this._bucket,
-          Key: params.key,
-          ContentType: params.contentType,
-          ACL: "public-read",
-        })
-      : new PutObjectCommand({
-          Bucket: this._bucket,
-          ContentType: params.contentType,
-          Key: params.key,
-        });
-
-    const signedUrl = await getSignedUrl(this.s3Client, command, {
-      expiresIn: 3600,
-    });
-
-    return signedUrl;
-  }
-
-  private async _prepareAzureUrl(params: { key: string; contentType: string; isPublic?: boolean }): Promise<string> {
-    const blobClient = this.containerClient.getBlockBlobClient(params.key);
-
-    // For Azure, we need to check if we have shared key credentials to generate SAS
-    const credential = this.blobServiceClient.credential;
-
-    if (credential instanceof StorageSharedKeyCredential) {
-      const sasToken = generateBlobSASQueryParameters(
-        {
-          containerName: this._bucket,
-          blobName: params.key,
-          permissions: BlobSASPermissions.parse("racw"), // Read, Add, Create, Write permissions
-          startsOn: new Date(new Date().valueOf() - 15 * 60 * 1000), // Start 15 minutes ago to account for clock skew
-          expiresOn: new Date(new Date().valueOf() + 3600 * 1000), // 1 hour from now
-          protocol: SASProtocol.Https,
-          contentType: params.contentType, // This helps Azure validate the content type
-        },
-        credential,
-      );
-
-      return `${blobClient.url}?${sasToken}`;
-    } else {
-      // If we don't have shared key credentials, we can't generate SAS tokens
-      // This would happen if using connection string with SAS or other auth methods
-      throw new Error("Cannot generate SAS token: Shared key credentials required for presigned URLs");
-    }
-  }
-
   async generatePresignedUrl(params: {
     key: string;
     contentType: string;
@@ -186,15 +192,23 @@ export class S3Service {
     await this._loadConfiguration();
 
     if (!this._endpoint) return null;
-    const signedUrl = await this._prepareUrl(params);
+
+    // Uploads always go through the api: S3Controller writes the bytes, encrypting them when
+    // `shouldEncrypt`, passing them through otherwise. Put tokens are not windowed.
+    const token = this.cipher.signObjectToken({
+      op: "put",
+      key: params.key,
+      contentType: params.contentType,
+      expiresInSeconds: S3_OBJECT_TOKEN_TTL_SECONDS,
+    });
 
     const data = {
       id: randomUUID(),
-      url: signedUrl,
-      storageType: this._storageType,
+      url: this._apiObjectUrl(token),
+      storageType: "api",
       contentType: params.contentType,
-      blobType: this._storageType === "azure" ? "BlockBlob" : undefined,
-      acl: this._storageType !== "azure" && params.isPublic ? "public-read" : undefined,
+      blobType: undefined,
+      acl: undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -291,7 +305,7 @@ export class S3Service {
    * characters that would break the header (quotes, path separators, control chars) while
    * `filename*` carries the original UTF-8 name for browsers that support it.
    */
-  private _contentDispositionAttachment(filename: string): string {
+  contentDispositionAttachment(filename: string): string {
     const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\/\r\n]/g, "_");
 
     return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
@@ -320,78 +334,28 @@ export class S3Service {
     await this._loadConfiguration();
     if (!this._endpoint) return null;
 
-    if (this._storageType === "azure") return await this._generateAzureSignedUrl(params);
+    // Downloads always go through the api, for every key; the api decrypts flagged objects and
+    // passes the rest through. The expiry is anchored to the start of the current signing window
+    // so the same key yields the same URL for the whole window and browser/image caches can hit;
+    // the window is added so the URL stays valid for at least the requested ttl from now.
+    // Public assets get no expiry.
+    const token = this.cipher.signObjectToken({
+      op: "get",
+      key: params.key,
+      filename: params.filename,
+      expiresAt: params.isPublic ? undefined : this._windowedExpiry(params.ttl ?? S3_OBJECT_TOKEN_TTL_SECONDS),
+    });
 
-    try {
-      if (params.isPublic) {
-        return `${this._endpoint}${params.key}`;
-      } else {
-        const command = new GetObjectCommand({
-          Bucket: this._bucket,
-          Key: params.key,
-          // When a filename is supplied the browser must save the file instead of
-          // rendering it inline (docx/pdf otherwise open in the browser viewer).
-          ...(params.filename
-            ? { ResponseContentDisposition: this._contentDispositionAttachment(params.filename) }
-            : {}),
-        });
-
-        // Sign against the start of the current window so the same key yields the same URL
-        // for the whole window and browser/image caches can hit. The window is added to the
-        // expiry so the URL stays valid for at least the requested ttl from now.
-        const configuredWindow = this.s3Config.signingWindowSeconds;
-        const windowSeconds = configuredWindow > 0 ? configuredWindow : 3600;
-        const windowMs = windowSeconds * 1000;
-        const signedUrl = await getSignedUrl(this.s3Client, command, {
-          signingDate: new Date(Math.floor(Date.now() / windowMs) * windowMs),
-          expiresIn: (params.ttl ?? 3600) + windowSeconds,
-        });
-
-        return signedUrl;
-      }
-    } catch (error) {
-      throw new Error(`Failed to generate URL: ${error.message}`);
-    }
+    return this._apiObjectUrl(token);
   }
 
-  private async _generateAzureSignedUrl(params: {
-    key: string;
-    ttl?: number;
-    isPublic?: boolean;
-    filename?: string;
-  }): Promise<string> {
-    try {
-      const blobClient = this.containerClient.getBlobClient(params.key);
+  /** Unix seconds: start of the current signing window + ttl + window (`s3.signingWindowSeconds`, default 3600). */
+  private _windowedExpiry(ttl: number): number {
+    const configuredWindow = this.s3Config.signingWindowSeconds;
+    const windowSeconds = configuredWindow > 0 ? configuredWindow : 3600;
+    const windowStart = Math.floor(Math.floor(Date.now() / 1000) / windowSeconds) * windowSeconds;
 
-      if (params.isPublic) {
-        return blobClient.url;
-      } else {
-        // Check if we have shared key credentials to generate SAS
-        const credential = this.blobServiceClient.credential;
-
-        if (credential instanceof StorageSharedKeyCredential) {
-          const sasToken = generateBlobSASQueryParameters(
-            {
-              containerName: this._bucket,
-              blobName: params.key,
-              permissions: BlobSASPermissions.parse("r"), // Read permission
-              startsOn: new Date(new Date().valueOf() - 15 * 60 * 1000), // Start 15 minutes ago to account for clock skew
-              expiresOn: new Date(new Date().valueOf() + (params.ttl ?? 3600) * 1000),
-              protocol: SASProtocol.Https,
-              ...(params.filename ? { contentDisposition: this._contentDispositionAttachment(params.filename) } : {}),
-            },
-            credential,
-          );
-
-          return `${blobClient.url}?${sasToken}`;
-        } else {
-          // If no shared key credentials, return the blob URL (works if container is public)
-          return blobClient.url;
-        }
-      }
-    } catch (error) {
-      throw new Error(`Failed to generate Azure URL: ${error.message}`);
-    }
+    return windowStart + ttl + windowSeconds;
   }
 
   async uploadFile(params: {
@@ -426,19 +390,17 @@ export class S3Service {
 
     const finalKey = `${params.key}.${extension}`;
 
-    const presignedUrl = await this._prepareUrl({
-      key: finalKey,
-      contentType: fileContentType,
-    });
-
     try {
-      await fetch(presignedUrl, {
-        method: "PUT",
-        body: new Uint8Array(params.buffer),
-        headers: {
-          "Content-Type": fileContentType,
-        },
-      });
+      const { body, metadata } = await this._prepareBody(finalKey, params.buffer);
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this._bucket,
+          Key: finalKey,
+          Body: body,
+          ContentType: fileContentType,
+          Metadata: metadata,
+        }),
+      );
     } catch (error) {
       this.logger.error("File upload error", error);
       throw error;
@@ -476,11 +438,13 @@ export class S3Service {
     const finalKey = `${params.key}.${extension}`;
 
     try {
+      const { body, metadata } = await this._prepareBody(finalKey, params.buffer);
       const blobClient = this.containerClient.getBlockBlobClient(finalKey);
-      await blobClient.upload(params.buffer, params.buffer.length, {
+      await blobClient.upload(body, body.length, {
         blobHTTPHeaders: {
           blobContentType: fileContentType,
         },
+        metadata,
       });
 
       const fileUrl = await this.generateSignedUrl({ key: finalKey });
@@ -504,19 +468,17 @@ export class S3Service {
 
     const finalKey = `${params.key}.${contentType.split("/")[1]}`;
 
-    const presignedUrl = await this._prepareUrl({
-      key: finalKey,
-      contentType: contentType,
-    });
-
     try {
-      await fetch(presignedUrl, {
-        method: "PUT",
-        body: new Uint8Array(params.buffer),
-        headers: {
-          "Content-Type": contentType,
-        },
-      });
+      const { body, metadata } = await this._prepareBody(finalKey, params.buffer);
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this._bucket,
+          Key: finalKey,
+          Body: body,
+          ContentType: contentType,
+          Metadata: metadata,
+        }),
+      );
     } catch (error) {
       this.logger.error("Image upload error", error);
     }
@@ -537,11 +499,13 @@ export class S3Service {
     const finalKey = `${params.key}.${contentType.split("/")[1]}`;
 
     try {
+      const { body, metadata } = await this._prepareBody(finalKey, params.buffer);
       const blobClient = this.containerClient.getBlockBlobClient(finalKey);
-      await blobClient.upload(params.buffer, params.buffer.length, {
+      await blobClient.upload(body, body.length, {
         blobHTTPHeaders: {
           blobContentType: contentType,
         },
+        metadata,
       });
 
       const publicUrl = await this.generateSignedUrl({ key: finalKey });
@@ -589,11 +553,13 @@ export class S3Service {
     const finalKey = params.key;
 
     try {
+      const { body, metadata } = await this._prepareBody(finalKey, params.buffer);
       const blobClient = this.containerClient.getBlockBlobClient(finalKey);
-      await blobClient.upload(params.buffer, params.buffer.length, {
+      await blobClient.upload(body, body.length, {
         blobHTTPHeaders: {
           blobContentType: params.contentType,
         },
+        metadata,
       });
 
       const fileUrl = await this.generateSignedUrl({ key: finalKey });
@@ -608,10 +574,13 @@ export class S3Service {
     await this._loadConfiguration();
     if (!this._endpoint) return;
 
+    const { body, metadata } = await this._prepareBody(params.key, params.buffer);
+
     if (this._storageType === "azure") {
       const blobClient = this.containerClient.getBlockBlobClient(params.key);
-      await blobClient.upload(params.buffer, params.buffer.length, {
+      await blobClient.upload(body, body.length, {
         blobHTTPHeaders: { blobContentType: params.contentType },
+        metadata,
       });
       return;
     }
@@ -619,9 +588,10 @@ export class S3Service {
     const command = new PutObjectCommand({
       Bucket: this._bucket,
       Key: params.key,
-      Body: params.buffer,
+      Body: body,
       ContentType: params.contentType,
       ACL: params.isPublic ? "public-read" : undefined,
+      Metadata: metadata,
     });
 
     await this.s3Client.send(command);
@@ -642,12 +612,8 @@ export class S3Service {
 
     try {
       const response = await this.s3Client.send(command);
-      const stream = response.Body as NodeJS.ReadableStream;
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      return Buffer.concat(chunks).toString("utf-8");
+      const bytes = await this._streamToBuffer(response.Body as AsyncIterable<Uint8Array>);
+      return (await this._readBody(params.key, response.Metadata, bytes)).toString("utf-8");
     } catch (error) {
       console.error(`Failed to get object content for key ${params.key}:`, error);
       throw error;
@@ -658,12 +624,8 @@ export class S3Service {
     try {
       const blobClient = this.containerClient.getBlobClient(params.key);
       const downloadResponse = await blobClient.download();
-      const stream = downloadResponse.readableStreamBody as NodeJS.ReadableStream;
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      return Buffer.concat(chunks).toString("utf-8");
+      const bytes = await this._streamToBuffer(downloadResponse.readableStreamBody as AsyncIterable<Buffer>);
+      return (await this._readBody(params.key, downloadResponse.metadata, bytes)).toString("utf-8");
     } catch (error) {
       console.error(`Failed to get Azure object content for key ${params.key}:`, error);
       throw error;
@@ -721,12 +683,9 @@ export class S3Service {
       if (!downloadResponse.readableStreamBody) {
         throw new Error(`Azure blob not found: ${params.key}`);
       }
-      const chunks: Buffer[] = [];
-      for await (const chunk of downloadResponse.readableStreamBody) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
+      const bytes = await this._streamToBuffer(downloadResponse.readableStreamBody);
       return {
-        buffer: Buffer.concat(chunks),
+        buffer: await this._readBody(params.key, downloadResponse.metadata, bytes),
         contentType: downloadResponse.contentType ?? undefined,
       };
     }
@@ -739,12 +698,9 @@ export class S3Service {
     if (!response.Body) {
       throw new Error(`S3 object not found: ${params.key}`);
     }
-    const chunks: Buffer[] = [];
-    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
-      chunks.push(Buffer.from(chunk));
-    }
+    const bytes = await this._streamToBuffer(response.Body as AsyncIterable<Uint8Array>);
     return {
-      buffer: Buffer.concat(chunks),
+      buffer: await this._readBody(params.key, response.Metadata, bytes),
       contentType: response.ContentType,
     };
   }
@@ -757,10 +713,21 @@ export class S3Service {
     await this._loadConfiguration();
     if (!this._endpoint) return;
 
+    const metadata = this._metadataFor(params.key);
+    let body: Readable = params.stream;
+    if (metadata) {
+      const encrypting = this.cipher.encryptStream();
+      pipeline(params.stream, encrypting, (error) => {
+        if (error) this.logger.error(`Failed to encrypt object stream ${params.key}`, error);
+      });
+      body = encrypting;
+    }
+
     if (this._storageType === "azure") {
       const blobClient = this.containerClient.getBlockBlobClient(params.key);
-      await blobClient.uploadStream(params.stream, 8 * 1024 * 1024, 4, {
+      await blobClient.uploadStream(body, 8 * 1024 * 1024, 4, {
         blobHTTPHeaders: { blobContentType: params.contentType },
+        metadata,
       });
       return;
     }
@@ -771,8 +738,9 @@ export class S3Service {
       params: {
         Bucket: this._bucket,
         Key: params.key,
-        Body: params.stream,
+        Body: body,
         ContentType: params.contentType,
+        Metadata: metadata,
       },
       partSize: 10 * 1024 * 1024,
       queueSize: 4,
@@ -869,34 +837,33 @@ export class S3Service {
       return await this._downloadAzureFileAsString(params);
     }
 
+    let response: GetObjectCommandOutput;
     try {
-      const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
-      if (response.Body) {
-        return await response.Body.transformToString();
-      }
-      return null;
+      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
     } catch (error) {
       this.logger.error(`Failed to download file ${params.key}`, error);
       return null;
     }
+    if (!response.Body) return null;
+    if (!isEncryptedObjectMetadata(response.Metadata)) return await response.Body.transformToString();
+
+    const bytes = Buffer.from(await response.Body.transformToByteArray());
+    return (await this._readBody(params.key, response.Metadata, bytes)).toString("utf-8");
   }
 
   private async _downloadAzureFileAsString(params: { key: string }): Promise<string | null> {
+    let downloadResponse: BlobDownloadResponseParsed;
+    let bytes: Buffer;
     try {
       const blobClient = this.containerClient.getBlobClient(params.key);
-      const downloadResponse = await blobClient.download();
-      if (downloadResponse.readableStreamBody) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadResponse.readableStreamBody) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        return Buffer.concat(chunks).toString("utf-8");
-      }
-      return null;
+      downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) return null;
+      bytes = await this._streamToBuffer(downloadResponse.readableStreamBody);
     } catch (error) {
       this.logger.error(`Failed to download Azure file ${params.key}`, error);
       return null;
     }
+    return (await this._readBody(params.key, downloadResponse.metadata, bytes)).toString("utf-8");
   }
 
   /**
@@ -911,35 +878,32 @@ export class S3Service {
       return await this._downloadAzureFileAsBuffer(params);
     }
 
+    let response: GetObjectCommandOutput;
+    let bytes: Buffer;
     try {
-      const response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
-      if (response.Body) {
-        const byteArray = await response.Body.transformToByteArray();
-        return Buffer.from(byteArray);
-      }
-      return null;
+      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+      if (!response.Body) return null;
+      bytes = Buffer.from(await response.Body.transformToByteArray());
     } catch (error) {
       this.logger.error(`Failed to download file as buffer ${params.key}`, error);
       return null;
     }
+    return await this._readBody(params.key, response.Metadata, bytes);
   }
 
   private async _downloadAzureFileAsBuffer(params: { key: string }): Promise<Buffer | null> {
+    let downloadResponse: BlobDownloadResponseParsed;
+    let bytes: Buffer;
     try {
       const blobClient = this.containerClient.getBlobClient(params.key);
-      const downloadResponse = await blobClient.download();
-      if (downloadResponse.readableStreamBody) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of downloadResponse.readableStreamBody) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        return Buffer.concat(chunks);
-      }
-      return null;
+      downloadResponse = await blobClient.download();
+      if (!downloadResponse.readableStreamBody) return null;
+      bytes = await this._streamToBuffer(downloadResponse.readableStreamBody);
     } catch (error) {
       this.logger.error(`Failed to download Azure file as buffer ${params.key}`, error);
       return null;
     }
+    return await this._readBody(params.key, downloadResponse.metadata, bytes);
   }
 
   /**
@@ -954,36 +918,80 @@ export class S3Service {
       return await this._downloadAzureFileAsStream(params);
     }
 
+    let response: GetObjectCommandOutput;
     try {
       const command = new GetObjectCommand({
         Bucket: this._bucket,
         Key: params.key,
       });
 
-      const response = await this.s3Client.send(command);
-      if (response.Body) {
-        // AWS SDK v3 Body is SdkStream which extends Readable
-        return response.Body as Readable;
-      }
-      return null;
+      response = await this.s3Client.send(command);
     } catch (error) {
       this.logger.error(`Failed to download file as stream ${params.key}`, error);
       return null;
     }
+    if (!response.Body) return null;
+
+    // AWS SDK v3 Body is SdkStream which extends Readable
+    return this._readStream(params.key, response.Metadata, response.Body as Readable);
+  }
+
+  /**
+   * Stream an object for the token-verified api route. Returns null when the object does not exist;
+   * a flagged object comes back decrypted, and throws when no configured key can open it.
+   */
+  async downloadObject(params: { key: string }): Promise<{ stream: Readable; contentType?: string } | null> {
+    await this._loadConfiguration();
+    if (!this._endpoint) return null;
+
+    if (this._storageType === "azure") {
+      let downloadResponse: BlobDownloadResponseParsed;
+      try {
+        downloadResponse = await this.containerClient.getBlobClient(params.key).download();
+      } catch (error) {
+        if (error?.statusCode === 404) return null;
+        throw error;
+      }
+      if (!downloadResponse.readableStreamBody) return null;
+
+      return {
+        stream: this._readStream(
+          params.key,
+          downloadResponse.metadata,
+          downloadResponse.readableStreamBody as Readable,
+        ),
+        contentType: downloadResponse.contentType ?? undefined,
+      };
+    }
+
+    let response: GetObjectCommandOutput;
+    try {
+      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+    } catch (error) {
+      if (error?.name === "NoSuchKey" || error?.name === "NotFound" || error?.$metadata?.httpStatusCode === 404)
+        return null;
+      throw error;
+    }
+    if (!response.Body) return null;
+
+    return {
+      stream: this._readStream(params.key, response.Metadata, response.Body as Readable),
+      contentType: response.ContentType,
+    };
   }
 
   private async _downloadAzureFileAsStream(params: { key: string }): Promise<Readable | null> {
+    let downloadResponse: BlobDownloadResponseParsed;
     try {
       const blobClient = this.containerClient.getBlobClient(params.key);
-      const downloadResponse = await blobClient.download();
-      if (downloadResponse.readableStreamBody) {
-        return downloadResponse.readableStreamBody as Readable;
-      }
-      return null;
+      downloadResponse = await blobClient.download();
     } catch (error) {
       this.logger.error(`Failed to download Azure file as stream ${params.key}`, error);
       return null;
     }
+    if (!downloadResponse.readableStreamBody) return null;
+
+    return this._readStream(params.key, downloadResponse.metadata, downloadResponse.readableStreamBody as Readable);
   }
 
   /**
@@ -995,10 +1003,13 @@ export class S3Service {
     await this._loadConfiguration();
     if (!this._endpoint) return;
 
+    const { body, metadata } = await this._prepareBody(params.key, params.buffer);
+
     if (this._storageType === "azure") {
       const blobClient = this.containerClient.getBlockBlobClient(params.key);
-      await blobClient.upload(params.buffer, params.buffer.length, {
+      await blobClient.upload(body, body.length, {
         blobHTTPHeaders: { blobContentType: params.contentType },
+        metadata,
       });
       return;
     }
@@ -1007,8 +1018,9 @@ export class S3Service {
       new PutObjectCommand({
         Bucket: this._bucket,
         Key: params.key,
-        Body: params.buffer,
+        Body: body,
         ContentType: params.contentType,
+        Metadata: metadata,
       }),
     );
   }

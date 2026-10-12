@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from "@nestjs/terminus";
-import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { BaseConfigInterface, ConfigS3Interface } from "../../../config/interfaces";
+import { parseS3CipherOptions } from "../../../foundations/s3/cipher/s3-cipher.core";
+import { createS3Client } from "../../../foundations/s3/storage-client";
 
 @Injectable()
 export class S3HealthIndicator extends HealthIndicator {
@@ -25,6 +27,10 @@ export class S3HealthIndicator extends HealthIndicator {
 
       const storageType = s3Config.type;
 
+      // Fails the check when encryption is enabled with an unparseable key configuration
+      const encryption = s3Config.encryption?.enabled ? "on" : "off";
+      if (s3Config.encryption?.enabled) parseS3CipherOptions(s3Config.encryption);
+
       // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error("Health check timeout")), this.TIMEOUT_MS);
@@ -43,6 +49,7 @@ export class S3HealthIndicator extends HealthIndicator {
       return this.getStatus(key, true, {
         message: `${storageType} storage connection healthy`,
         storageType,
+        encryption,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -56,46 +63,7 @@ export class S3HealthIndicator extends HealthIndicator {
   }
 
   private async checkS3Compatible(s3Config: ConfigS3Interface): Promise<void> {
-    const type = s3Config.type;
-
-    let s3Client: S3Client;
-
-    switch (type) {
-      case "s3":
-      case "aws":
-        s3Client = new S3Client({
-          region: s3Config.region,
-          credentials: {
-            accessKeyId: s3Config.key,
-            secretAccessKey: s3Config.secret,
-          },
-        });
-        break;
-      case "digitalocean":
-      case "hetzner":
-        s3Client = new S3Client({
-          region: s3Config.region,
-          endpoint: s3Config.endpoint,
-          credentials: {
-            accessKeyId: s3Config.key,
-            secretAccessKey: s3Config.secret,
-          },
-        });
-        break;
-      case "minio":
-        s3Client = new S3Client({
-          endpoint: s3Config.endpoint,
-          region: "local",
-          credentials: {
-            accessKeyId: s3Config.key,
-            secretAccessKey: s3Config.secret,
-          },
-          forcePathStyle: true,
-        });
-        break;
-      default:
-        throw new Error(`Unsupported storage type: ${type}`);
-    }
+    const s3Client = createS3Client(s3Config);
 
     // HeadBucket is a lightweight operation to check bucket access
     const command = new HeadBucketCommand({ Bucket: s3Config.bucket });

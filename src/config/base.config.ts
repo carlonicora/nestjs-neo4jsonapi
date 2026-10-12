@@ -416,6 +416,13 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
         const parsed = parseInt(process.env.S3_SIGNING_WINDOW_SECONDS || "", 10);
         return Number.isFinite(parsed) && parsed > 0 ? parsed : 3600;
       })(),
+      encryption: {
+        enabled: process.env.S3_ENCRYPTION_ENABLED === "true",
+        key: process.env.S3_ENCRYPTION_KEY || "",
+        retiredKeys: process.env.S3_ENCRYPTION_RETIRED_KEYS || "",
+        plaintextPrefixes: process.env.S3_ENCRYPTION_PLAINTEXT_PREFIXES || "",
+      },
+      uploadMaxBytes: parseInt(process.env.S3_UPLOAD_MAX_BYTES || "104857600"),
     },
     ai: {
       // Fail-closed MOCK_AI safety gate. ModelService.onModuleInit throws if this
