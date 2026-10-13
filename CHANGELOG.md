@@ -1,3 +1,9 @@
+## [4.17.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.2...v4.17.3) (2026-10-13)
+
+### 🐛 Bug Fixes
+
+* **llm:** keep openrouter on chat completions ([a636fdd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a636fdd8a3d7df1949d56ce84fc265d7be60939f))
+
 ## [4.17.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.1...v4.17.2) (2026-10-09)
 
 ### 🚨 Tests
