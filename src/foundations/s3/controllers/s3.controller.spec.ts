@@ -38,6 +38,7 @@ vi.mock("../services/s3-cipher.service", () => ({
 import {
   BadRequestException,
   ForbiddenException,
+  InternalServerErrorException,
   PayloadTooLargeException,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -45,7 +46,7 @@ import { ConfigService } from "@nestjs/config";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { Readable } from "stream";
-import { S3ObjectTokenError } from "../cipher/s3-cipher.core";
+import { S3CipherKeyMissingError, S3ObjectTokenError } from "../cipher/s3-cipher.core";
 import { S3CipherService } from "../services/s3-cipher.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
@@ -430,7 +431,7 @@ describe("S3Controller", () => {
       expect(reply.status).not.toHaveBeenCalledWith(204);
     });
 
-    it("GET /s3/objects/:token streams the object with its content type and Cache-Control private", async () => {
+    it("GET /s3/objects/:token streams the object, keeping a permanent link's file for one hour", async () => {
       cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
       const stream = Readable.from(["data"]);
       s3Service.downloadObject.mockResolvedValue({ stream, contentType: "application/pdf" });
@@ -441,10 +442,52 @@ describe("S3Controller", () => {
       expect(cipher.verifyObjectToken).toHaveBeenCalledWith("token", "get");
       expect(s3Service.downloadObject).toHaveBeenCalledWith({ key: "k" });
       expect(reply.header).toHaveBeenCalledWith("Content-Type", "application/pdf");
-      expect(reply.header).toHaveBeenCalledWith("Cache-Control", "private, max-age=0");
+      expect(reply.header).toHaveBeenCalledWith("Cache-Control", "private, max-age=3600");
       expect(reply.header).toHaveBeenCalledWith("Accept-Ranges", "none");
       expect(reply.header).not.toHaveBeenCalledWith("Content-Disposition", expect.anything());
       expect(reply.send).toHaveBeenCalledWith(stream);
+    });
+
+    it("GET /s3/objects lets the browser keep an expiring link's file until the link expires", async () => {
+      vi.useFakeTimers({ now: new Date("2026-10-13T10:00:00Z") });
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k", e: now + 5400 });
+        s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "image/png" });
+        const reply = makeReply();
+
+        await controller.getObject(reply as any, "token");
+
+        expect(reply.header).toHaveBeenCalledWith("Cache-Control", "private, max-age=5400");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(["get", "put"] as const)("%s /s3/objects answers 400 for a signed key containing ..", async (op) => {
+      cipher.verifyObjectToken.mockReturnValue({ o: op, k: "companies/../b", c: "image/png" });
+      const reply = makeReply();
+
+      const call =
+        op === "get"
+          ? controller.getObject(reply as any, "token")
+          : controller.putObject(makeRequest(5), reply as any, "token");
+
+      await expect(call).rejects.toThrow(BadRequestException);
+      expect(s3Service.downloadObject).not.toHaveBeenCalled();
+      expect(s3Service.uploadStream).not.toHaveBeenCalled();
+    });
+
+    it("GET /s3/objects answers 500 naming the key when the object's key is not configured", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "docs/a.pdf" });
+      s3Service.downloadObject.mockRejectedValue(new S3CipherKeyMissingError(["k1"], "docs/a.pdf"));
+      const reply = makeReply();
+
+      const error = await controller.getObject(reply as any, "token").catch((e) => e);
+
+      expect(error).toBeInstanceOf(InternalServerErrorException);
+      expect(error.message).toContain("encrypted with key k1");
+      expect(reply.send).not.toHaveBeenCalled();
     });
 
     it("GET /s3/objects falls back to application/octet-stream", async () => {

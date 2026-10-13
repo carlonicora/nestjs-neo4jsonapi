@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  InternalServerErrorException,
   Optional,
   Param,
   PayloadTooLargeException,
@@ -31,10 +32,18 @@ import {
 } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
-import { S3ObjectTokenError, S3ObjectTokenOp, S3ObjectTokenPayload } from "../../s3/cipher/s3-cipher.core";
+import {
+  S3CipherKeyMissingError,
+  S3ObjectTokenError,
+  S3ObjectTokenOp,
+  S3ObjectTokenPayload,
+} from "../../s3/cipher/s3-cipher.core";
 import { S3_OBJECTS_SEGMENT, s3Meta } from "../../s3/entities/s3.meta";
 import { S3CipherService } from "../../s3/services/s3-cipher.service";
 import { S3Service } from "../../s3/services/s3.service";
+
+/** How long the browser keeps a file reached through a permanent (non-expiring) link. */
+const PERMANENT_LINK_CACHE_SECONDS = 3600;
 
 @Controller(s3Meta.endpoint)
 export class S3Controller {
@@ -171,7 +180,13 @@ export class S3Controller {
   async getObject(@Res() reply: FastifyReply, @Param("token") token: string): Promise<void> {
     const payload = this._verifyToken(token, "get");
 
-    const object = await this.service.downloadObject({ key: payload.k });
+    let object: Awaited<ReturnType<S3Service["downloadObject"]>>;
+    try {
+      object = await this.service.downloadObject({ key: payload.k });
+    } catch (error) {
+      if (error instanceof S3CipherKeyMissingError) throw new InternalServerErrorException(error.message);
+      throw error;
+    }
     if (!object) {
       reply.status(404).send({ errors: [{ status: "404", title: "Not Found" }] });
       return;
@@ -179,7 +194,7 @@ export class S3Controller {
 
     reply.header("Content-Type", object.contentType ?? "application/octet-stream");
     if (payload.f) reply.header("Content-Disposition", this.service.contentDispositionAttachment(payload.f));
-    reply.header("Cache-Control", "private, max-age=0");
+    reply.header("Cache-Control", this._cacheControl(payload));
     reply.header("Accept-Ranges", "none");
 
     // The web app embeds downloaded PDFs in an iframe, but a host that registers helmet (the corpus)
@@ -191,6 +206,18 @@ export class S3Controller {
     }
 
     reply.send(object.stream);
+  }
+
+  /**
+   * The browser may keep the file for as long as the link stays valid: the same link always
+   * names the same key, and an expiring link is re-minted with a new URL once it lapses.
+   * A permanent link (no expiry) is kept for one hour only: its key can be overwritten in place
+   * (the how-to seed rewrites `howtos/<slug>/<file>`), so a replaced file shows at most an hour late.
+   */
+  private _cacheControl(payload: S3ObjectTokenPayload): string {
+    if (payload.e === undefined) return `private, max-age=${PERMANENT_LINK_CACHE_SECONDS}`;
+    const remaining = Math.max(0, payload.e - Math.floor(Date.now() / 1000));
+    return `private, max-age=${remaining}`;
   }
 
   private _appOrigin(): string | undefined {
@@ -206,11 +233,15 @@ export class S3Controller {
   }
 
   private _verifyToken(token: string, op: S3ObjectTokenOp): S3ObjectTokenPayload {
+    let payload: S3ObjectTokenPayload;
     try {
-      return this.cipher.verifyObjectToken(token, op);
+      payload = this.cipher.verifyObjectToken(token, op);
     } catch (error) {
       if (error instanceof S3ObjectTokenError) throw new UnauthorizedException(error.message);
       throw error;
     }
+    // Only the server signs tokens, but a signed key must still be one the logged-in routes accept.
+    if (!isWellFormedS3Key(payload.k)) throw new BadRequestException("Invalid S3 key");
+    return payload;
   }
 }

@@ -26,6 +26,7 @@ import {
   S3_ENCRYPTION_METADATA_KEY,
   S3_ENCRYPTION_METADATA_VALUE,
   S3_OBJECT_TOKEN_TTL_SECONDS,
+  S3CipherKeyMissingError,
   isEncryptedObjectMetadata,
 } from "../cipher/s3-cipher.core";
 import { S3CipherService } from "./s3-cipher.service";
@@ -74,9 +75,15 @@ export class S3Service {
 
   /** Throws when a flagged object cannot be opened: ciphertext is never returned to a caller. */
   private _assertCanDecrypt(key: string): void {
-    if (!this.cipher.canDecrypt) {
-      throw new Error(`S3 object ${key} is encrypted but no matching S3_ENCRYPTION_KEY/RETIRED key is configured`);
+    if (!this.cipher.canDecrypt) throw new S3CipherKeyMissingError([], key);
+  }
+
+  /** The cipher does not know the storage key; name it in a missing-key error. */
+  private _withObjectKey(error: unknown, key: string): unknown {
+    if (error instanceof S3CipherKeyMissingError && !error.objectKey) {
+      return new S3CipherKeyMissingError(error.keyIds, key);
     }
+    return error;
   }
 
   /** Decrypts the stored bytes when the object metadata (S3 `Metadata` / Azure `metadata`) carries the flag. */
@@ -84,7 +91,11 @@ export class S3Service {
     if (!isEncryptedObjectMetadata(metadata)) return bytes;
 
     this._assertCanDecrypt(key);
-    return await this.cipher.decrypt(bytes);
+    try {
+      return await this.cipher.decrypt(bytes);
+    } catch (error) {
+      throw this._withObjectKey(error, key);
+    }
   }
 
   /** Streaming counterpart of `_readBody`: a flagged object is piped through the cipher's decrypt stream. */
@@ -94,9 +105,52 @@ export class S3Service {
     this._assertCanDecrypt(key);
     const decrypting = this.cipher.decryptStream();
     pipeline(stream, decrypting, (error) => {
-      if (error) this.logger.error(`Failed to decrypt object stream ${key}`, error);
+      if (error) this.logger.error(`Failed to decrypt object stream ${key}`, this._withObjectKey(error, key) as Error);
     });
     return decrypting;
+  }
+
+  /**
+   * `_readStream`, but for a flagged object it waits for the first decrypted chunk (or the end), so a
+   * failure before any byte (a key that is not configured) rejects here, before a response starts,
+   * instead of breaking a response that is already under way.
+   */
+  private async _readStreamReady(
+    key: string,
+    metadata: Record<string, string> | undefined,
+    body: Readable,
+  ): Promise<Readable> {
+    const stream = this._readStream(key, metadata, body);
+    if (stream === body) return stream;
+
+    try {
+      return await new Promise<Readable>((resolve, reject) => {
+        const cleanup = () => {
+          stream.off("data", onData);
+          stream.off("end", onEnd);
+          stream.off("error", onError);
+        };
+        const onData = (chunk: Buffer) => {
+          cleanup();
+          stream.pause();
+          stream.unshift(chunk);
+          resolve(stream);
+        };
+        const onEnd = () => {
+          cleanup();
+          resolve(Readable.from([]));
+        };
+        const onError = (error: Error) => {
+          cleanup();
+          reject(error);
+        };
+        stream.on("data", onData);
+        stream.on("end", onEnd);
+        stream.on("error", onError);
+      });
+    } catch (error) {
+      throw this._withObjectKey(error, key);
+    }
   }
 
   private async _streamToBuffer(stream: AsyncIterable<Uint8Array | string>): Promise<Buffer> {
@@ -955,7 +1009,7 @@ export class S3Service {
       if (!downloadResponse.readableStreamBody) return null;
 
       return {
-        stream: this._readStream(
+        stream: await this._readStreamReady(
           params.key,
           downloadResponse.metadata,
           downloadResponse.readableStreamBody as Readable,
@@ -975,7 +1029,7 @@ export class S3Service {
     if (!response.Body) return null;
 
     return {
-      stream: this._readStream(params.key, response.Metadata, response.Body as Readable),
+      stream: await this._readStreamReady(params.key, response.Metadata, response.Body as Readable),
       contentType: response.ContentType,
     };
   }

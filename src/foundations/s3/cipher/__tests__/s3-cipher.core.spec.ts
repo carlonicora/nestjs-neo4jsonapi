@@ -5,6 +5,7 @@ import {
   parseS3CipherKey,
   parseS3CipherOptions,
   S3Cipher,
+  S3CipherKeyMissingError,
   S3CipherOptions,
   S3ObjectTokenError,
   s3KeyFromObjectUrl,
@@ -172,6 +173,45 @@ describe("S3 cipher core", () => {
     const keyless = new S3Cipher(options({ enabled: false, key: "" }));
     expect(keyless.canDecrypt).toBe(false);
     await expect(keyless.decrypt(ciphertext)).rejects.toThrow();
+  });
+
+  it("names the key a ciphertext was encrypted with when no configured key opens it", async () => {
+    const ciphertext = await new S3Cipher(options()).encrypt(Buffer.from("hello"));
+    const other = new S3Cipher(options({ key: KEY_B }));
+
+    const error = await other.decrypt(ciphertext).catch((e) => e);
+
+    expect(error).toBeInstanceOf(S3CipherKeyMissingError);
+    expect(error.keyIds).toEqual(["a"]);
+    expect(error.message).toBe(
+      "S3 object is encrypted with key a, which is not configured in S3_ENCRYPTION_KEY or S3_ENCRYPTION_RETIRED_KEYS",
+    );
+  });
+
+  it("fails the decrypt stream with the missing key before any byte", async () => {
+    const ciphertext = await new S3Cipher(options()).encrypt(Buffer.alloc(200_000, 7));
+    const decrypting = new S3Cipher(options({ key: KEY_B })).decryptStream();
+    let bytes = 0;
+    decrypting.on("data", (chunk: Buffer) => (bytes += chunk.length));
+
+    const error = await new Promise<Error>((resolve) => {
+      decrypting.on("error", resolve);
+      Readable.from([ciphertext]).pipe(decrypting);
+    });
+
+    expect(error).toBeInstanceOf(S3CipherKeyMissingError);
+    expect((error as S3CipherKeyMissingError).keyIds).toEqual(["a"]);
+    expect(bytes).toBe(0);
+  });
+
+  it("keeps the SDK error for a tampered ciphertext the configured key opens", async () => {
+    const c = new S3Cipher(options());
+    const ciphertext = await c.encrypt(Buffer.from("x".repeat(200)));
+    ciphertext[ciphertext.length - 40] ^= 0xff;
+
+    const error = await c.decrypt(ciphertext).catch((e) => e);
+
+    expect(error).not.toBeInstanceOf(S3CipherKeyMissingError);
   });
 
   it("signObjectToken/verifyObjectToken round-trip a get token with filename and expiry", () => {

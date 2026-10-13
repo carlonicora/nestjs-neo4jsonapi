@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
-import { PassThrough, Readable } from "stream";
+import { PassThrough, Readable, Transform } from "stream";
 
 // Mock AWS SDK
 const mockS3Send = vi.fn().mockResolvedValue({ Contents: [] });
@@ -82,6 +82,7 @@ import { AppLoggingService } from "../../../../core/logging/services/logging.ser
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { S3CipherService } from "../s3-cipher.service";
+import { S3CipherKeyMissingError } from "../../cipher/s3-cipher.core";
 
 describe("S3Service", () => {
   let service: S3Service;
@@ -640,6 +641,40 @@ describe("S3Service", () => {
         const result = await service.downloadObject({ key: "docs/a.pdf" });
 
         expect(result).toEqual({ stream: decrypting, contentType: "application/pdf" });
+      });
+
+      // Stands in for the decrypt stream: swallows the stored bytes, emits only what the test pushes.
+      const fakeDecryptor = (failWith?: Error) =>
+        new Transform({
+          transform(_chunk, _encoding, callback) {
+            callback(failWith);
+          },
+        });
+
+      it("downloadObject waits for the first decrypted chunk and keeps it in the stream", async () => {
+        const decrypting = fakeDecryptor();
+        cipher.decryptStream.mockReturnValue(decrypting);
+        mockS3Send.mockResolvedValue({ Body: s3Body(CIPHERTEXT), Metadata: FLAG, ContentType: "application/pdf" });
+        decrypting.push("first ");
+        decrypting.push("second");
+
+        const result = await service.downloadObject({ key: "docs/a.pdf" });
+
+        const chunks: Buffer[] = [];
+        for await (const chunk of result!.stream) chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks).toString()).toBe("first second");
+      });
+
+      it("downloadObject rejects, naming the object, when its key is not configured", async () => {
+        cipher.decryptStream.mockReturnValue(fakeDecryptor(new S3CipherKeyMissingError(["k1"])));
+        mockS3Send.mockResolvedValue({ Body: s3Body(CIPHERTEXT), Metadata: FLAG, ContentType: "application/pdf" });
+
+        const error = await service.downloadObject({ key: "docs/a.pdf" }).catch((e) => e);
+
+        expect(error).toBeInstanceOf(S3CipherKeyMissingError);
+        expect(error.message).toBe(
+          "S3 object docs/a.pdf is encrypted with key k1, which is not configured in S3_ENCRYPTION_KEY or S3_ENCRYPTION_RETIRED_KEYS",
+        );
       });
 
       it("downloadObject passes through an unflagged object", async () => {

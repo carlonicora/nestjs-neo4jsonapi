@@ -2,8 +2,11 @@ import {
   AlgorithmSuiteIdentifier,
   buildClient,
   CommitmentPolicy,
+  EncryptedDataKey,
   KeyringNode,
   MultiKeyringNode,
+  NodeDecryptionMaterial,
+  NodeEncryptionMaterial,
   RawAesKeyringNode,
   RawAesWrappingSuiteIdentifier,
 } from "@aws-crypto/client-node";
@@ -29,6 +32,8 @@ const FRAME_LENGTH = 65536;
 const SUITE_ID = AlgorithmSuiteIdentifier.ALG_AES256_GCM_IV12_TAG16_HKDF_SHA512_COMMIT_KEY;
 const SIGNING_KEY_INFO = "a360ai/s3-url-signing";
 const FALLBACK_SIGNING_KEY_INFO = "a360ai/s3-url-signing/jwt";
+/** A raw AES keyring's provider info is the key name followed by tag length (4), IV length (4) and IV (12). */
+const RAW_AES_PROVIDER_INFO_SUFFIX_BYTES = 20;
 
 export type S3CipherKey = { keyId: string; material: Buffer };
 export type S3CipherOptions = {
@@ -49,6 +54,25 @@ export class S3ObjectTokenError extends Error {
   ) {
     super(message);
     this.name = "S3ObjectTokenError";
+  }
+}
+
+/**
+ * An encrypted object that no configured key opens. `keyIds` names the key(s) the object was
+ * encrypted with, when known; `objectKey` the storage key, when the caller knows it.
+ */
+export class S3CipherKeyMissingError extends Error {
+  constructor(
+    public readonly keyIds: string[],
+    public readonly objectKey?: string,
+  ) {
+    const object = objectKey ? `S3 object ${objectKey}` : "S3 object";
+    super(
+      keyIds.length
+        ? `${object} is encrypted with key ${keyIds.join(", ")}, which is not configured in S3_ENCRYPTION_KEY or S3_ENCRYPTION_RETIRED_KEYS`
+        : `${object} is encrypted but no matching S3_ENCRYPTION_KEY/RETIRED key is configured`,
+    );
+    this.name = "S3CipherKeyMissingError";
   }
 }
 
@@ -116,6 +140,45 @@ function buildKeyring(key: S3CipherKey): RawAesKeyringNode {
   });
 }
 
+/**
+ * Delegates to the real decrypt keyring and records the key ids the message was encrypted with,
+ * so a message no configured key opens can be reported by key id instead of the SDK's
+ * "unencryptedDataKey has not been set". One instance per decryption.
+ */
+class KeyIdRecordingKeyring extends KeyringNode {
+  readonly storedKeyIds: string[] = [];
+  private asked = false;
+  private unwrapped = false;
+
+  constructor(private readonly inner: KeyringNode) {
+    super();
+  }
+
+  async _onEncrypt(material: NodeEncryptionMaterial): Promise<NodeEncryptionMaterial> {
+    return this.inner.onEncrypt(material);
+  }
+
+  async _onDecrypt(
+    material: NodeDecryptionMaterial,
+    encryptedDataKeys: EncryptedDataKey[],
+  ): Promise<NodeDecryptionMaterial> {
+    this.asked = true;
+    for (const edk of encryptedDataKeys) {
+      if (edk.providerId !== KEY_NAMESPACE || !edk.rawInfo) continue;
+      const name = Buffer.from(edk.rawInfo.subarray(0, -RAW_AES_PROVIDER_INFO_SUFFIX_BYTES)).toString("utf8");
+      if (name) this.storedKeyIds.push(name);
+    }
+    const result = await this.inner.onDecrypt(material, encryptedDataKeys);
+    this.unwrapped = result.hasUnencryptedDataKey;
+    return result;
+  }
+
+  /** A S3CipherKeyMissingError when the keyring was asked and no configured key unwrapped the data key; otherwise the SDK error. */
+  translate(error: Error): Error {
+    return this.asked && !this.unwrapped ? new S3CipherKeyMissingError(this.storedKeyIds) : error;
+  }
+}
+
 function deriveSigningKey(key: S3CipherKey): Buffer {
   return Buffer.from(hkdfSync("sha256", key.material, "", SIGNING_KEY_INFO, 32));
 }
@@ -152,7 +215,11 @@ export function s3KeyFromObjectUrl(url: string): string | undefined {
  *   side is destroyed, the SDK stream is ended and drained, and its output discarded.
  * - Any SDK error destroys the native side, so the consumer sees it.
  */
-function toNativeDuplex(sdkStream: Duplex, onSdkStream?: (fail: (error: Error) => void) => void): Duplex {
+function toNativeDuplex(
+  sdkStream: Duplex,
+  onSdkStream?: (fail: (error: Error) => void) => void,
+  mapError: (error: Error) => Error = (error) => error,
+): Duplex {
   let sdkEnded = false;
   const endSdk = () => {
     if (sdkEnded) return;
@@ -187,7 +254,7 @@ function toNativeDuplex(sdkStream: Duplex, onSdkStream?: (fail: (error: Error) =
   sdkStream.on("end", () => {
     if (!native.destroyed) native.push(null);
   });
-  sdkStream.on("error", (error: Error) => native.destroy(error));
+  sdkStream.on("error", (error: Error) => native.destroy(mapError(error)));
   onSdkStream?.((error) => native.destroy(error));
 
   return native;
@@ -253,9 +320,15 @@ export class S3Cipher {
   }
 
   async decrypt(ciphertext: Buffer): Promise<Buffer> {
-    const { plaintext, messageHeader } = await this.client.decrypt(this.requireDecryptKeyring(), ciphertext);
-    assertEncryptionContext(messageHeader.encryptionContext);
-    return Buffer.from(plaintext);
+    const keyring = new KeyIdRecordingKeyring(this.requireDecryptKeyring());
+    let result: Awaited<ReturnType<typeof this.client.decrypt>>;
+    try {
+      result = await this.client.decrypt(keyring, ciphertext);
+    } catch (error) {
+      throw keyring.translate(error as Error);
+    }
+    assertEncryptionContext(result.messageHeader.encryptionContext);
+    return Buffer.from(result.plaintext);
   }
 
   encryptStream(): Duplex {
@@ -269,16 +342,21 @@ export class S3Cipher {
   }
 
   decryptStream(): Duplex {
-    const stream = this.client.decryptUnsignedMessageStream(this.requireDecryptKeyring()) as unknown as Duplex;
-    return toNativeDuplex(stream, (fail) =>
-      stream.once("MessageHeader", (header: { encryptionContext?: Record<string, string> }) => {
-        try {
-          assertEncryptionContext(header?.encryptionContext);
-        } catch (error) {
-          fail(error as Error);
-        }
-      }),
+    const keyring = new KeyIdRecordingKeyring(this.requireDecryptKeyring());
+    const stream = this.client.decryptUnsignedMessageStream(keyring) as unknown as Duplex;
+    const native = toNativeDuplex(
+      stream,
+      (fail) =>
+        stream.once("MessageHeader", (header: { encryptionContext?: Record<string, string> }) => {
+          try {
+            assertEncryptionContext(header?.encryptionContext);
+          } catch (error) {
+            fail(error as Error);
+          }
+        }),
+      (error) => keyring.translate(error),
     );
+    return native;
   }
 
   signObjectToken(input: {
