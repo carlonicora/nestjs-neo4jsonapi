@@ -2,7 +2,13 @@ import { Embeddings, EmbeddingsInterface } from "@langchain/core/embeddings";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { FakeListChatModel } from "@langchain/core/utils/testing";
 import { ChatVertexAI, VertexAIEmbeddings } from "@langchain/google-vertexai";
-import { AzureOpenAIEmbeddings, ChatOpenAI, ChatOpenAIResponses, OpenAIEmbeddings } from "@langchain/openai";
+import {
+  AzureOpenAIEmbeddings,
+  ChatOpenAI,
+  ChatOpenAICompletions,
+  ChatOpenAIResponses,
+  OpenAIEmbeddings,
+} from "@langchain/openai";
 import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
@@ -1014,7 +1020,12 @@ export class ModelService implements OnModuleInit {
         break;
     }
 
-    return new ChatOpenAI({
+    // OpenRouter is driven over chat completions: reasoning_effort travels in
+    // modelKwargs, which is a chat-completions parameter. @langchain/openai 1.6
+    // sends any "gpt-5.6" model through the Responses API on a plain ChatOpenAI
+    // (useResponsesApi: false does not override it), where OpenRouter rejects
+    // reasoning_effort with a 400. ChatOpenAICompletions never switches.
+    const chatFields = {
       ...llmConfig,
       configuration: {
         ...llmConfig.configuration,
@@ -1033,7 +1044,8 @@ export class ModelService implements OnModuleInit {
       // memory extractor emitting `{op:"ADD",...}` endlessly). Maps to OpenAI's
       // `frequency_penalty`, honoured by the Ollama/llamacpp OpenAI-compatible APIs.
       ...(typeof frequencyPenalty === "number" ? { frequencyPenalty } : {}),
-    });
+    };
+    return cfg.provider === "openrouter" ? new ChatOpenAICompletions(chatFields) : new ChatOpenAI(chatFields);
   }
 
   /**

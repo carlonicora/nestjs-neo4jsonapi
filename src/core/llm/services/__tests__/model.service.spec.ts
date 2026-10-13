@@ -37,7 +37,7 @@ import {
   writeGcpCredentials,
 } from "../model.service";
 import { ModelWeight } from "../../enums/model.weight";
-import { ChatOpenAIResponses } from "@langchain/openai";
+import { ChatOpenAICompletions, ChatOpenAIResponses } from "@langchain/openai";
 
 // `baseConfig` is a module-level constant captured when the config module is
 // first imported, so a test that mutates `process.env` afterwards would never
@@ -133,6 +133,23 @@ describe("ModelService.getLLM tier selection", () => {
     });
     const llm = svc.getLLM({ modelWeight: ModelWeight.Lite }) as any;
     expect(llm.model ?? llm.modelName).toBe("lite");
+  });
+});
+
+describe("ModelService.getLLM openrouter speaks chat completions", () => {
+  // @langchain/openai 1.6 routes any "gpt-5.6" model through the Responses API
+  // on a plain ChatOpenAI, ignoring useResponsesApi: false. OpenRouter then
+  // forwards reasoning_effort (a chat-completions parameter carried in
+  // modelKwargs) to a Responses endpoint, which rejects it with a 400.
+  it("builds a chat-completions-only client for a gpt-5.6 model", () => {
+    const svc = makeService({
+      ai: tier({ provider: "openrouter", model: "openai/gpt-5.6-luna", reasoningEffort: "medium" }),
+      aiLite: tier(),
+      aiLarge: tier(),
+    });
+    const llm = svc.getLLM() as any;
+    expect(llm).toBeInstanceOf(ChatOpenAICompletions);
+    expect(llm.modelKwargs?.reasoning_effort).toBe("medium");
   });
 });
 
