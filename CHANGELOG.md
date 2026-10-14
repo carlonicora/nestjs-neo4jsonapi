@@ -1,3 +1,14 @@
+## [4.18.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.3...v4.18.0) (2026-10-14)
+
+### 🚀 Features
+
+* **s3:** optional at-rest encryption with api-served signed object links ([c6bb642](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c6bb6423bd533b869a0256e8984a1eccfe3d0f6f))
+
+### 🐛 Bug Fixes
+
+* **bootstrap:** drain job intake before closing connections on shutdown ([d371bed](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d371bed62ebf3b1a501c05784a6eb6277dbb9590))
+* **s3:** cache object links, reject bad token keys, name missing keys ([1adc8dc](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1adc8dcd45c36ba63136b660ed3ef5f7515472c1))
+
 ## [4.17.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.2...v4.17.3) (2026-10-13)
 
 ### 🐛 Bug Fixes
