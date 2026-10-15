@@ -452,7 +452,9 @@ describe("S3Controller", () => {
     it("GET /s3/objects names an inline object after its key, so saving it keeps the file name", async () => {
       cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/documents/d/1/atto è.pdf" });
       s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
-      s3Service.contentDispositionInline.mockReturnValue(`inline; filename="atto _.pdf"; filename*=UTF-8''atto%20%C3%A8.pdf`);
+      s3Service.contentDispositionInline.mockReturnValue(
+        `inline; filename="atto _.pdf"; filename*=UTF-8''atto%20%C3%A8.pdf`,
+      );
       const reply = makeReply();
 
       await controller.getObject(reply as any, "token");
