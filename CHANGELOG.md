@@ -1,3 +1,9 @@
+## [5.0.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.1...v5.0.2) (2026-10-15)
+
+### 🐛 Bug Fixes
+
+* **s3:** format contentDispositionInline for better readability ([d3c7449](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d3c7449c3146477da143dad2ab2f340d629567dd))
+
 ## [5.0.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.0...v5.0.1) (2026-10-15)
 
 ### 🐛 Bug Fixes
