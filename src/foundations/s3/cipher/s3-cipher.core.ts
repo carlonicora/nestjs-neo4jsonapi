@@ -45,7 +45,17 @@ export type S3CipherOptions = {
   fallbackSigningSecret?: string;
 };
 export type S3ObjectTokenOp = "get" | "put";
-export type S3ObjectTokenPayload = { o: S3ObjectTokenOp; k: string; c?: string; f?: string; e?: number };
+export type S3ObjectTokenPayload = {
+  o: S3ObjectTokenOp;
+  k: string;
+  c?: string;
+  f?: string;
+  e?: number;
+  /** Serve inline under `f` instead of as an attachment. */
+  i?: 1;
+  /** Max upload bytes (put tokens only). */
+  m?: number;
+};
 
 export class S3ObjectTokenError extends Error {
   constructor(
@@ -364,6 +374,10 @@ export class S3Cipher {
     key: string;
     contentType?: string;
     filename?: string;
+    /** Serve inline under `filename`; ignored without a filename. */
+    inline?: boolean;
+    /** Max upload bytes enforced on a put token, on top of the global cap. */
+    maxBytes?: number;
     expiresInSeconds?: number;
     /** Absolute expiry (unix seconds); takes precedence over `expiresInSeconds`. */
     expiresAt?: number;
@@ -376,6 +390,8 @@ export class S3Cipher {
     const payload: S3ObjectTokenPayload = { o: input.op, k: input.key };
     if (input.contentType !== undefined) payload.c = input.contentType;
     if (input.filename !== undefined) payload.f = input.filename;
+    if (input.inline === true && input.filename !== undefined) payload.i = 1;
+    if (input.maxBytes !== undefined) payload.m = input.maxBytes;
     if (input.expiresAt !== undefined) {
       payload.e = input.expiresAt;
     } else if (input.expiresInSeconds !== undefined) {

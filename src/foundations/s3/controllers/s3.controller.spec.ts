@@ -28,6 +28,7 @@ vi.mock("../services/s3.service", () => ({
     downloadObject: vi.fn(),
     contentDispositionAttachment: vi.fn(),
     contentDispositionInline: vi.fn(),
+    contentDispositionInlineFilename: vi.fn(),
   })),
 }));
 
@@ -108,6 +109,7 @@ describe("S3Controller", () => {
       downloadObject: vi.fn(),
       contentDispositionAttachment: vi.fn(),
       contentDispositionInline: vi.fn(),
+      contentDispositionInlineFilename: vi.fn(),
     };
     cipher = { uploadMaxBytes: 1024, verifyObjectToken: vi.fn() };
 
@@ -389,6 +391,7 @@ describe("S3Controller", () => {
         downloadObject: vi.fn().mockResolvedValue({ stream: Readable.from(["data"]), contentType: "image/jpeg" }),
         contentDispositionAttachment: vi.fn(),
         contentDispositionInline: vi.fn(),
+        contentDispositionInlineFilename: vi.fn(),
       };
       const module: TestingModule = await Test.createTestingModule({
         controllers: [S3Controller],
@@ -524,6 +527,26 @@ describe("S3Controller", () => {
       expect(reply.status).not.toHaveBeenCalledWith(204);
     });
 
+    it("PUT /s3/objects enforces the token's own limit when it is below the global cap", async () => {
+      cipher.uploadMaxBytes = 1024;
+      cipher.verifyObjectToken.mockReturnValue({ o: "put", k: "k", c: "image/png", m: 4 });
+      let streamErrored = false;
+      s3Service.uploadStream.mockImplementation(async ({ stream }: { stream: Readable }) => {
+        stream.on("error", () => {
+          streamErrored = true;
+        });
+        await consume({ stream });
+      });
+      const reply = makeReply();
+
+      const error = await controller.putObject(makeRequest(5), reply as any, "token").catch((e) => e);
+
+      expect(error).toBeInstanceOf(PayloadTooLargeException);
+      expect(error.message).toBe("Upload exceeds 4 bytes");
+      expect(streamErrored).toBe(true);
+      expect(reply.status).not.toHaveBeenCalledWith(204);
+    });
+
     it("GET /s3/objects/:token streams the object, keeping a permanent link's file for one hour", async () => {
       cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
       const stream = Readable.from(["data"]);
@@ -621,9 +644,29 @@ describe("S3Controller", () => {
       await controller.getObject(reply as any, "token");
 
       expect(s3Service.contentDispositionAttachment).toHaveBeenCalledWith("preventivo è.pdf");
+      expect(s3Service.contentDispositionInlineFilename).not.toHaveBeenCalled();
       expect(reply.header).toHaveBeenCalledWith(
         "Content-Disposition",
         `attachment; filename="preventivo _.pdf"; filename*=UTF-8''preventivo%20%C3%A8.pdf`,
+      );
+    });
+
+    it("GET /s3/objects serves inline under the token's file name when the token says inline", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/documents/d/1.pdf", f: "Doc.pdf", i: 1 });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      s3Service.contentDispositionInlineFilename.mockReturnValue(
+        `inline; filename="Doc.pdf"; filename*=UTF-8''Doc.pdf`,
+      );
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(s3Service.contentDispositionInlineFilename).toHaveBeenCalledWith("Doc.pdf");
+      expect(s3Service.contentDispositionAttachment).not.toHaveBeenCalled();
+      expect(s3Service.contentDispositionInline).not.toHaveBeenCalled();
+      expect(reply.header).toHaveBeenCalledWith(
+        "Content-Disposition",
+        `inline; filename="Doc.pdf"; filename*=UTF-8''Doc.pdf`,
       );
     });
 

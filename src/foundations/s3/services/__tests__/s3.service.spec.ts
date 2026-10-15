@@ -417,6 +417,16 @@ describe("S3Service", () => {
     });
   });
 
+  describe("contentDispositionInlineFilename", () => {
+    it("serves inline under the given name, with the same filename* part as the attachment variant", () => {
+      const value = service.contentDispositionInlineFilename("Atto è.pdf");
+      const attachment = service.contentDispositionAttachment("Atto è.pdf");
+
+      expect(value.startsWith(`inline; filename="Atto _.pdf"`)).toBe(true);
+      expect(value.split("; ").pop()).toBe(attachment.split("; ").pop());
+    });
+  });
+
   describe("with different storage backends", () => {
     it("should configure MinIO correctly", async () => {
       // Arrange
@@ -791,6 +801,23 @@ describe("S3Service", () => {
         await apiService.generateSignedUrl({ key: "docs/a.pdf", filename: "Atto.pdf" });
 
         expect(signInput()).toMatchObject({ op: "get", key: "docs/a.pdf", filename: "Atto.pdf" });
+      });
+
+      it("generateSignedUrl signs with inline when asked", async () => {
+        await apiService.generateSignedUrl({ key: "docs/a.pdf", filename: "x.pdf", inline: true });
+
+        expect(signInput()).toMatchObject({ op: "get", key: "docs/a.pdf", filename: "x.pdf", inline: true });
+      });
+
+      it("generatePresignedUrl signs the put token with maxBytes", async () => {
+        await apiService.generatePresignedUrl({
+          key: "docs/a.png",
+          contentType: "image/png",
+          isPublic: true,
+          maxBytes: 5,
+        });
+
+        expect(signInput()).toMatchObject({ op: "put", key: "docs/a.png", maxBytes: 5 });
       });
 
       it("generatePresignedUrl returns storageType 'api' with the switch off", async () => {

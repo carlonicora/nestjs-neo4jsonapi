@@ -246,6 +246,8 @@ export class S3Service {
     contentType: string;
     ttl?: 3600;
     isPublic: boolean;
+    /** Per-token upload limit; the object route enforces the smaller of it and the global cap. */
+    maxBytes?: number;
   }): Promise<string> {
     await this._loadConfiguration();
 
@@ -257,6 +259,7 @@ export class S3Service {
       op: "put",
       key: params.key,
       contentType: params.contentType,
+      maxBytes: params.maxBytes,
       expiresInSeconds: S3_OBJECT_TOKEN_TTL_SECONDS,
     });
 
@@ -383,6 +386,14 @@ export class S3Service {
     return this._contentDisposition("inline", filename);
   }
 
+  /**
+   * Inline disposition under a given file name: the browser still renders the file in place, but
+   * saving it uses that name. Same encoding as `contentDispositionAttachment`.
+   */
+  contentDispositionInlineFilename(filename: string): string {
+    return this._contentDisposition("inline", filename);
+  }
+
   private _contentDisposition(type: "attachment" | "inline", filename: string): string {
     const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\/\r\n]/g, "_");
 
@@ -408,6 +419,8 @@ export class S3Service {
     ttl?: number;
     isPublic?: boolean;
     filename?: string;
+    /** Serve inline under `filename` instead of as an attachment; ignored without a filename. */
+    inline?: boolean;
   }): Promise<string> {
     await this._loadConfiguration();
     if (!this._endpoint) return null;
@@ -423,6 +436,7 @@ export class S3Service {
       op: "get",
       key: params.key,
       filename: params.filename,
+      inline: params.inline,
       expiresAt: permanent ? undefined : this._windowedExpiry(params.ttl ?? S3_OBJECT_TOKEN_TTL_SECONDS),
     });
 

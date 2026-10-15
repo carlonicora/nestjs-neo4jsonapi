@@ -136,7 +136,7 @@ export class S3Controller {
   ): Promise<void> {
     const payload = this._verifyToken(token, "put");
 
-    const maxBytes = this.cipher.uploadMaxBytes;
+    const maxBytes = Math.min(this.cipher.uploadMaxBytes, payload.m ?? Infinity);
     let received = 0;
     let tooLarge = false;
     const counter = new Transform({
@@ -195,9 +195,11 @@ export class S3Controller {
     reply.header("Content-Type", object.contentType ?? "application/octet-stream");
     reply.header(
       "Content-Disposition",
-      payload.f
-        ? this.service.contentDispositionAttachment(payload.f)
-        : this.service.contentDispositionInline(payload.k),
+      payload.f && payload.i
+        ? this.service.contentDispositionInlineFilename(payload.f)
+        : payload.f
+          ? this.service.contentDispositionAttachment(payload.f)
+          : this.service.contentDispositionInline(payload.k),
     );
     reply.header("Cache-Control", this._cacheControl(payload));
     reply.header("Accept-Ranges", "none");

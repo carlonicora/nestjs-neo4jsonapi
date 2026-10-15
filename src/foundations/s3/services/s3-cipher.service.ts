@@ -61,6 +61,8 @@ export class S3CipherService {
     key: string;
     contentType?: string;
     filename?: string;
+    inline?: boolean;
+    maxBytes?: number;
     expiresInSeconds?: number;
     expiresAt?: number;
   }): string {

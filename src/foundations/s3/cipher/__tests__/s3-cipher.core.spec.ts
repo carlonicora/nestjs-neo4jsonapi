@@ -228,6 +228,31 @@ describe("S3 cipher core", () => {
     expect(payload.e).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
+  it("signObjectToken writes i:1 when inline is set with a filename", () => {
+    const c = new S3Cipher(options());
+    const token = c.signObjectToken({ op: "get", key: "documents/x.pdf", filename: "Atto.pdf", inline: true });
+    expect(c.verifyObjectToken(token, "get")).toMatchObject({ f: "Atto.pdf", i: 1 });
+  });
+
+  it("signObjectToken ignores inline without a filename", () => {
+    const c = new S3Cipher(options());
+    const payload = c.verifyObjectToken(c.signObjectToken({ op: "get", key: "documents/x.pdf", inline: true }), "get");
+    expect(payload).not.toHaveProperty("i");
+  });
+
+  it("signObjectToken writes m for a put token with maxBytes", () => {
+    const c = new S3Cipher(options());
+    const token = c.signObjectToken({ op: "put", key: "documents/x.png", maxBytes: 10485760 });
+    expect(c.verifyObjectToken(token, "put")).toMatchObject({ m: 10485760 });
+  });
+
+  it("a token signed without inline or maxBytes verifies with neither i nor m", () => {
+    const c = new S3Cipher(options());
+    const payload = c.verifyObjectToken(c.signObjectToken({ op: "get", key: "k", filename: "a.pdf" }), "get");
+    expect(payload).not.toHaveProperty("i");
+    expect(payload).not.toHaveProperty("m");
+  });
+
   it("verifyObjectToken rejects a wrong op with reason 'op'", () => {
     const c = new S3Cipher(options());
     const token = c.signObjectToken({ op: "get", key: "k", expiresInSeconds: 3600 });
