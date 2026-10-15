@@ -1,3 +1,9 @@
+## [5.0.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.0...v5.0.1) (2026-10-15)
+
+### 🐛 Bug Fixes
+
+* **s3:** name object downloads after their key ([9a069ba](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9a069ba5c39c0a737be1c2b6278ed80ebb14b61d))
+
 ## [5.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.18.0...v5.0.0) (2026-10-15)
 
 ### ⚠ BREAKING CHANGES
