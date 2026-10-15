@@ -1,3 +1,9 @@
+## [5.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.1.0...v5.2.0) (2026-10-15)
+
+### 🚀 Features
+
+* **s3:** inline-under-name object links and per-token upload limit ([0dc3cfe](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0dc3cfefdd41d66c6141ea72013f69d3220df5e8))
+
 ## [5.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.2...v5.1.0) (2026-10-15)
 
 ### 🚀 Features
