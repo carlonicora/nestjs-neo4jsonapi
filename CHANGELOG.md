@@ -1,3 +1,9 @@
+## [5.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.2...v5.1.0) (2026-10-15)
+
+### 🚀 Features
+
+* **s3:** let the app decide which keys may get permanent links ([a15b18e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a15b18e960a1a5c926e96d62e9da68f2472f58b3))
+
 ## [5.0.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.0.1...v5.0.2) (2026-10-15)
 
 ### 🐛 Bug Fixes
