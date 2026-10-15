@@ -42,6 +42,7 @@ export const AuthDescriptor = defineEntity<Auth>()({
   // before any companyId exists in CLS. Mirrors the pre-migration Cypher,
   // which never joined Auth to Company.
   isCompanyScoped: false,
+  tenancy: "internal",
 
   description:
     "An authentication session (sessione di autenticazione): the signed JWT access token issued to a user on login, paired with an opaque refresh-token id used to exchange for a new access token.",

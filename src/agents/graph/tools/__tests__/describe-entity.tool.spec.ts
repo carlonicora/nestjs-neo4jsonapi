@@ -30,6 +30,7 @@ describe("DescribeEntityTool", () => {
   const factory: any = {
     resolveEntity: (t: string, c: any) =>
       catalog.getEntityDetail(t, c.userModuleIds) ?? { error: `Entity type "${t}" is not available.` },
+    resolveService: () => undefined,
     capture: async (_r: any, fn: any, rec: any[]) => {
       const v = await fn();
       rec.push({});
@@ -47,8 +48,71 @@ describe("DescribeEntityTool", () => {
     expect(out).toEqual({
       type: "accounts",
       description: "A customer or supplier.",
-      fields: [{ name: "name", type: "string", description: "Display name.", filterable: true, sortable: true }],
+      fields: [
+        {
+          name: "name",
+          type: "string",
+          description: "Display name.",
+          filterable: true,
+          sortable: true,
+          operators: ["eq", "ne", "in", "like", "isNull", "isNotNull"],
+        },
+      ],
       relationships: [{ name: "orders", targetType: "orders", cardinality: "many", description: "Orders placed." }],
+    });
+  });
+
+  describe("filter operators", () => {
+    const fields = [
+      { name: "name", type: "string", description: "Name.", filterable: true, sortable: true },
+      { name: "decisionDate", type: "date", description: "Decision date.", filterable: true, sortable: true },
+      { name: "notes", type: "string", description: "Notes.", filterable: false, sortable: false },
+    ];
+    const describeWith = async (svc: unknown) => {
+      const opsFactory: any = {
+        resolveEntity: () => ({
+          type: "judgements",
+          moduleId: "m",
+          description: "A judgement.",
+          fields,
+          relationships: [],
+          nodeName: "judgement",
+          labelName: "Judgement",
+        }),
+        resolveService: () => svc,
+        capture: factory.capture,
+      };
+      const out: any = await new DescribeEntityTool(opsFactory).invoke(
+        { type: "judgements" },
+        { companyId: "c", userId: "u", userModuleIds: ["m"] },
+        [],
+      );
+      return Object.fromEntries(out.fields.map((f: any) => [f.name, f.operators]));
+    };
+
+    it("lists operators per field type", async () => {
+      const ops = await describeWith(undefined);
+      expect(ops.name).toEqual(["eq", "ne", "in", "like", "isNull", "isNotNull"]);
+      expect(ops.decisionDate).toEqual(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
+      expect(ops.notes).toEqual([]);
+    });
+
+    it("uses the service's filterCapabilities when present", async () => {
+      const ops = await describeWith({
+        filterCapabilities: () => [
+          { field: "name", operators: ["eq", "like"] },
+          { field: "decisionDate", operators: ["gte", "lte"] },
+        ],
+      });
+      expect(ops.name).toEqual(["eq", "like"]);
+      expect(ops.decisionDate).toEqual(["gte", "lte"]);
+      expect(ops.notes).toEqual([]);
+    });
+
+    it("lists no operator for a filterable field the service does not support", async () => {
+      const ops = await describeWith({ filterCapabilities: () => [{ field: "name", operators: ["eq"] }] });
+      expect(ops.name).toEqual(["eq"]);
+      expect(ops.decisionDate).toEqual([]);
     });
   });
 
@@ -112,6 +176,7 @@ describe("DescribeEntityTool", () => {
     const listFactory: any = {
       resolveEntity: (t: string, c: any) =>
         listCatalog.getEntityDetail(t, c.userModuleIds) ?? { error: `Entity type "${t}" is not available.` },
+      resolveService: () => undefined,
       capture: async (_r: any, fn: any, rec: any[]) => {
         const v = await fn();
         rec.push({});
@@ -222,6 +287,7 @@ describe("DescribeEntityTool", () => {
     const describeNpc = async (writableOverrides: Record<string, unknown>) => {
       const writableFactory: any = {
         resolveEntity: () => npc(writableOverrides),
+        resolveService: () => undefined,
         capture: async (_r: any, fn: any, rec: any[]) => {
           const v = await fn();
           rec.push({});
@@ -297,6 +363,7 @@ describe("DescribeEntityTool", () => {
     const bridgeFactory: any = {
       resolveEntity: (t: string, c: any) =>
         bridgeCatalog.getEntityDetail(t, c.userModuleIds) ?? { error: `Entity type "${t}" is not available.` },
+      resolveService: () => undefined,
       capture: async (_r: any, fn: any, rec: any[]) => {
         const v = await fn();
         rec.push({});
@@ -327,6 +394,7 @@ describe("DescribeEntityTool", () => {
           : { error: "nope" };
       },
       capture: factory.capture,
+      resolveService: () => undefined,
     };
     const t = new DescribeEntityTool(detailFactory);
     const out: any = await t.invoke(
@@ -336,7 +404,14 @@ describe("DescribeEntityTool", () => {
     );
     expect(out.detailFields).toEqual([{ name: "body", type: "string", description: "b", availableOn: "read_entity" }]);
     expect(out.fields).toEqual([
-      { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
+      {
+        name: "name",
+        type: "string",
+        description: "Display name.",
+        filterable: true,
+        sortable: true,
+        operators: ["eq", "ne", "in", "like", "isNull", "isNotNull"],
+      },
     ]);
   });
 });
@@ -379,6 +454,7 @@ describe("DescribeEntityTool — richtext fields", () => {
 
   const factory: any = {
     resolveEntity: (t: string, c: any) => richtextCatalog.getEntityDetail(t, c.userModuleIds),
+    resolveService: () => undefined,
     capture: async (_r: any, fn: any, rec: any[]) => {
       const v = await fn();
       rec.push({});
@@ -400,6 +476,7 @@ describe("DescribeEntityTool — richtext fields", () => {
       description: "Notes.",
       filterable: false,
       sortable: false,
+      operators: [],
       kind: { type: "richtext" },
       format: "markdown",
     });

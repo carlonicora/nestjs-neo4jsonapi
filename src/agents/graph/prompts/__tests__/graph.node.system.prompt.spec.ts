@@ -42,9 +42,18 @@ describe("renderGraphNodeSystemPrompt", () => {
   it("describes the matchMode values returned by resolve_entity", () => {
     const out = renderGraphNodeSystemPrompt("any");
     const resolveBlock = out.substring(out.indexOf("resolve_entity"));
-    for (const mode of ["exact", "fuzzy", "semantic", "none"]) {
+    for (const mode of ["exact", "substring", "fuzzy", "semantic", "none"]) {
       expect(resolveBlock).toContain(mode);
     }
+  });
+
+  it("forbids picking items[0] when resolve_entity returns a disambiguation", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    const resolveBlock = out.substring(out.indexOf("resolve_entity"));
+    expect(resolveBlock).toContain("disambiguation");
+    expect(resolveBlock).toMatch(/disambiguation field[^\n]*Do NOT pick items\[0\]/);
+    expect(resolveBlock).toMatch(/overrides the literal-match rule/);
+    expect(resolveBlock).toMatch(/court, sezione or type, or call search_entities with those filters/);
   });
 
   it("instructs recovery on tool error instead of apology", () => {

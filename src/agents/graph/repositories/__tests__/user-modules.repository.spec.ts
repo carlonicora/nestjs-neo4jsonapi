@@ -38,7 +38,7 @@ describe("UserModulesRepository", () => {
       { id: "33333333-3333-3333-3333-333333333333", permissions: READ_ONLY },
     ]);
     const repo = new UserModulesRepository(neo4j);
-    expect(await repo.findModuleIdsForUser("user-1")).toEqual([
+    expect(await repo.findModuleIdsForUser("user-1", "company-1")).toEqual([
       "11111111-1111-1111-1111-111111111111",
       "22222222-2222-2222-2222-222222222222",
       "33333333-3333-3333-3333-333333333333",
@@ -53,7 +53,7 @@ describe("UserModulesRepository", () => {
       { id: "33333333-3333-3333-3333-333333333333", permissions: JSON.stringify([]) },
     ]);
     const repo = new UserModulesRepository(neo4j);
-    expect(await repo.findModuleIdsForUser("user-1")).toEqual(["11111111-1111-1111-1111-111111111111"]);
+    expect(await repo.findModuleIdsForUser("user-1", "company-1")).toEqual(["11111111-1111-1111-1111-111111111111"]);
   });
 
   it("drops rows with null module, missing id, missing permissions, or malformed JSON", async () => {
@@ -65,6 +65,15 @@ describe("UserModulesRepository", () => {
       { id: "44444444-4444-4444-4444-444444444444", permissions: READ_TRUE },
     ]);
     const repo = new UserModulesRepository(neo4j);
-    expect(await repo.findModuleIdsForUser("user-1")).toEqual(["44444444-4444-4444-4444-444444444444"]);
+    expect(await repo.findModuleIdsForUser("user-1", "company-1")).toEqual(["44444444-4444-4444-4444-444444444444"]);
+  });
+
+  it("queries only the given company", async () => {
+    const neo4j = makeNeo4j([]);
+    const repo = new UserModulesRepository(neo4j);
+    await repo.findModuleIdsForUser("u1", "c1");
+    const [cypher, params] = neo4j.read.mock.calls[0];
+    expect(cypher).toContain("(user:User {id: $userId})-[:BELONGS_TO]->(company:Company {id: $companyId})");
+    expect(params).toEqual({ userId: "u1", companyId: "c1" });
   });
 });

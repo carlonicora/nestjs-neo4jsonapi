@@ -101,10 +101,45 @@ export abstract class AbstractRepository<
    */
   protected buildDefaultMatch(options?: { searchField?: string; blockCompanyAndUser?: boolean }): string {
     const { nodeName, labelName } = this.descriptor.model;
-    const { isCompanyScoped } = this.descriptor;
+    const { isCompanyScoped, tenancy } = this.descriptor;
 
     const companyId = this.clsService.get("companyId");
     const currentUserId = this.clsService.get("userId");
+
+    // Unscoped entities whose rows still belong to one company: the company predicate is
+    // derived from the descriptor's `tenancy` rule. `$companyId IS NULL` keeps automated jobs
+    // (no CLS company) working exactly like the company-scoped branch below.
+    if (!isCompanyScoped && (tenancy === "self" || (tenancy && typeof tenancy === "object"))) {
+      let predicate: string;
+      if (tenancy === "self") {
+        predicate = `${nodeName}.id = $companyId`;
+      } else {
+        const rel = this.descriptor.relationships[tenancy.via];
+        if (!rel) {
+          throw new Error(
+            `${this.descriptor.model.type}: tenancy.via "${tenancy.via}" is not a relationship on this descriptor.`,
+          );
+        }
+        // A hop that ends at the Company node itself (the `tenancy: "self"` type) is matched
+        // directly against the `company` alias bound by initQuery: a Company has no BELONGS_TO.
+        const targetsCompany = rel.model.labelName === "Company";
+        const target = targetsCompany ? "(company)" : `(:${rel.model.labelName})`;
+        const hop =
+          rel.direction === "out" ? `-[:${rel.relationship}]->${target}` : `<-[:${rel.relationship}]-${target}`;
+        predicate = `EXISTS {
+          MATCH (${nodeName})${hop}${targetsCompany ? "" : "-[:BELONGS_TO]->(company)"}
+        }`;
+      }
+      const carried = options?.blockCompanyAndUser
+        ? [nodeName]
+        : [nodeName, ...(companyId ? ["company"] : []), ...(currentUserId ? ["currentUser"] : [])];
+      return `
+        MATCH (${nodeName}:${labelName}${options?.searchField ? ` {${options.searchField}: $searchValue}` : ``})
+        WHERE $companyId IS NULL
+        OR ${predicate}
+        WITH ${Array.from(new Set(carried)).join(", ")}
+      `;
+    }
 
     // Generic entities - no company filtering
     if (!isCompanyScoped) {

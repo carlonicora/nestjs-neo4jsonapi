@@ -73,6 +73,7 @@ export const CompanyDescriptor = defineEntity<Company>()({
   // builders inject a meaningless `(company)-[:BELONGS_TO]->(company)` synthetic
   // self-relationship into every read/write.
   isCompanyScoped: false,
+  tenancy: "self",
 
   // Field definitions
   fields: {

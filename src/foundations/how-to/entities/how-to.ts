@@ -33,6 +33,7 @@ export const HowToDescriptor = defineEntity<HowTo>()({
   ...howToMeta,
 
   isCompanyScoped: false,
+  tenancy: "global",
 
   description:
     "An in-app how-to/help guide (guida): a piece of onboarding/help documentation shown to users of the platform. Global content, visible to every company, optionally scoped to specific app pages via `pages`.",

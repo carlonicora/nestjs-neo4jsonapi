@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { TraverseTool } from "../traverse.tool";
+import { TraverseTool, traverseInputSchema } from "../traverse.tool";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 
@@ -152,6 +152,28 @@ describe("TraverseTool", () => {
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
     expect(out.error).toMatch(/ghost/);
+  });
+
+  it("rejects an unknown sort direction instead of sorting ascending", async () => {
+    targetSvc.findRelatedRecordsByEdge.mockClear();
+    const tool = new TraverseTool(factory, {} as any, {} as any, {} as any, formatter, {} as any);
+    const out: any = await tool.invoke(
+      { fromType: "accounts", fromId: "a1", relationship: "orders", sort: "createdAt descending" },
+      ctx,
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
+    );
+    expect(out.error).toContain("asc | desc");
+    expect(targetSvc.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown input key", () => {
+    const parsed = traverseInputSchema.safeParse({
+      fromType: "accounts",
+      fromId: "a1",
+      relationship: "orders",
+      filter: [{ field: "total", op: "gte", value: 50 }],
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("rejects filter on target field not described on target", async () => {

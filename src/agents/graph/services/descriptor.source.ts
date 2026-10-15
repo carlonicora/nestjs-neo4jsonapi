@@ -29,6 +29,8 @@ export class GraphDescriptorRegistry implements DescriptorSource {
       model: e.descriptor.model,
       description: e.descriptor.description,
       moduleId: e.moduleId,
+      isCompanyScoped: e.descriptor.isCompanyScoped !== false,
+      tenancy: e.descriptor.tenancy,
       fields: e.descriptor.fields ?? {},
       relationships: e.descriptor.relationships ?? {},
       chat: e.descriptor.chat,

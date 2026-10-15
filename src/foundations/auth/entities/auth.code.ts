@@ -29,6 +29,7 @@ export const AuthCodeDescriptor = defineEntity<AuthCode>()({
   ...authCodeMeta,
 
   isCompanyScoped: false,
+  tenancy: "internal",
 
   description:
     "A one-time authentication code (codice monouso) exchanged for an Auth session via login-by-link, activation, or password reset.",

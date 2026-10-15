@@ -30,6 +30,7 @@ export const FeatureDescriptor = defineEntity<Feature>()({
   // make the inherited buildDefaultMatch()/create()/put() require a BELONGS_TO edge
   // that never exists, silently returning zero rows / failing writes.
   isCompanyScoped: false,
+  tenancy: "global",
 
   // Catalog metadata: consumed by GraphDescriptorRegistry/GraphCatalogService when a
   // host app graph-registers this descriptor. Inert for apps that never register it,

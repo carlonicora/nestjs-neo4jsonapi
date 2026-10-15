@@ -155,7 +155,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     assistantMessage: AssistantMessage;
     toolCalls: ToolCallRecord[];
   }> {
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
     const ctx = this.buildTurnContext({
       companyId: params.companyId,
       userId: params.userId,
@@ -296,7 +296,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }> {
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
 
     // An append inherits the thread's binding — never a client-supplied one.
     const contentScope = await this.resolveContentScope(params.assistantId);
@@ -419,7 +419,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     toolCalls: ToolCallRecord[];
     action?: AssistantAction;
   }> {
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
     const ctx = this.buildTurnContext({
       companyId: params.companyId,
       userId: params.userId,
@@ -534,7 +534,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }> {
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
-    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId);
+    const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
 
     const contentScope = await this.resolveContentScope(params.assistantId);
     const ctx = this.buildTurnContext({

@@ -3,6 +3,7 @@ import {
   GraphSearchService,
   GRAPH_RESOLVE_MAX_RESULTS,
   buildResolveRecommendation,
+  buildResolveDisambiguation,
   RankedCandidate,
 } from "../graph.search.service";
 import { modelRegistry } from "../../../../common/registries/registry";
@@ -122,7 +123,8 @@ describe("GraphSearchService.resolveEntity", () => {
     });
 
     expect(out.matchMode).toBe("exact");
-    expect(out.items).toEqual([{ type: "accounts", id: "a1", summary: "Faby and Carlo", score: 9.2 }]);
+    // Scores are normalised per type: the type's best candidate scores 1.
+    expect(out.items).toEqual([{ type: "accounts", id: "a1", summary: "Faby and Carlo", score: 1 }]);
     // 1 SHOW INDEXES (cached) + 2 substring tier queries (one per entity type) = 3.
     expect(neo4j.read).toHaveBeenCalledTimes(3);
     expect(embedder.vectoriseText).not.toHaveBeenCalled();
@@ -167,10 +169,13 @@ describe("GraphSearchService.resolveEntity", () => {
       userModuleIds: ["11111111-1111-1111-1111-111111111111"],
     });
 
-    expect(out.matchMode).toBe("exact");
-    expect(out.items.map((i) => i.id)).toEqual(["p1", "a1"]);
-    expect(out.items[0]).toEqual({ type: "persons", id: "p1", summary: "Carlo Nicora", score: 8.8 });
-    expect(out.items[1]).toEqual({ type: "accounts", id: "a1", summary: "Carlo Inc", score: 7.5 });
+    // "Carlo" is a substring of both summaries, equal to neither.
+    expect(out.matchMode).toBe("substring");
+    // Each type's best candidate normalises to 1: raw Lucene scores across
+    // types are not comparable, so the tie keeps catalog order.
+    expect(out.items.map((i) => i.id)).toEqual(["a1", "p1"]);
+    expect(out.items[0]).toEqual({ type: "accounts", id: "a1", summary: "Carlo Inc", score: 1 });
+    expect(out.items[1]).toEqual({ type: "persons", id: "p1", summary: "Carlo Nicora", score: 1 });
   });
 
   it("falls through to fuzzy when no exact hits anywhere, and stops there", async () => {
@@ -241,7 +246,7 @@ describe("GraphSearchService.resolveEntity", () => {
     });
 
     expect(out.matchMode).toBe("semantic");
-    expect(out.items).toEqual([{ type: "accounts", id: "a3", summary: "ACME", score: 0.82 }]);
+    expect(out.items).toEqual([{ type: "accounts", id: "a3", summary: "ACME", score: 1 }]);
     expect(embedder.vectoriseText).toHaveBeenCalled();
   });
 
@@ -312,8 +317,8 @@ describe("GraphSearchService.resolveEntity", () => {
       userModuleIds: ["11111111-1111-1111-1111-111111111111"],
     });
 
-    expect(out.matchMode).toBe("exact");
-    expect(out.items).toEqual([{ type: "persons", id: "p1", summary: "A B", score: 2.0 }]);
+    expect(out.matchMode).toBe("substring");
+    expect(out.items).toEqual([{ type: "persons", id: "p1", summary: "A B", score: 1 }]);
   });
 
   it("falls back to name/id when an entity has no summary function", async () => {
@@ -398,7 +403,7 @@ describe("GraphSearchService.resolveEntity", () => {
       scopeType: "proceedings",
     });
 
-    expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 9 }]);
+    expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 1 }]);
     expect(queried).toContain("law_chat_fulltext");
     expect(queried).toContain("proceeding_chat_fulltext");
     expect(queried).not.toContain("article_chat_fulltext");
@@ -633,7 +638,7 @@ describe("GraphSearchService.resolveEntity — external sources and access", () 
     expect(lawService.resolveByText).toHaveBeenCalledTimes(1);
     expect(lawService.resolveByText).toHaveBeenCalledWith({ text: "Codice civile", limit: 10 });
     expect(out.matchMode).toBe("exact");
-    expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 5 }]);
+    expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 1 }]);
     expect(queried).toContain("account_chat_fulltext");
     expect(queried.some((name) => name.startsWith("law_"))).toBe(false);
   });
@@ -681,7 +686,9 @@ describe("GraphSearchService.resolveEntity — external sources and access", () 
     const out = await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: [MODULE] });
 
     expect(out.items).toHaveLength(GRAPH_RESOLVE_MAX_RESULTS);
-    expect(out.items.map((i) => i.id)).toEqual(["a5", "a6", "a7", "a8", "a9", "p0", "p1", "p2", "p3", "p4"]);
+    // Normalised per type: accounts are score/100 (a5 = 0.95), persons are
+    // score/50 (p0 = 1, p1 = 0.98), so the two types interleave.
+    expect(out.items.map((i) => i.id)).toEqual(["p0", "p1", "p2", "a5", "a6", "p3", "a7", "a8", "p4", "a9"]);
   });
 
   it("a scoped run passes external candidates through ScopeGuard.filter", async () => {
@@ -736,5 +743,196 @@ describe("GraphSearchService.resolveEntity — external sources and access", () 
 
     expect(out.items.map((i) => i.id)).toEqual(["l1", "l2"]);
     expect(lawService.findRecordById).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Ranking, labels and ties (spec R3/F3): Lucene scores and external rank
+ * scores are normalised per type before merging; the substring tier reports
+ * "substring" unless the top summary equals the text; a summary tie never
+ * yields a recommendation.
+ */
+describe("GraphSearchService.resolveEntity — ranking, labels and ties", () => {
+  const MODULE = "11111111-1111-1111-1111-111111111111";
+  const email = makeEntity("emails", "Email", MODULE, (d) => d.name);
+  const judgement = makeEntity("judgements", "Judgement", MODULE, (d) => d.name);
+
+  const row = (id: string, name: string, score: number) => ({
+    get: (k: string) => (({ id, properties: { name }, score }) as any)[k],
+  });
+
+  const build = (
+    rows: Record<string, any[]>,
+    judgements: Array<{ id: string; name: string; score: number; exact?: boolean; key?: string }>,
+  ) => {
+    const neo4j: any = {
+      read: vi.fn().mockImplementation(async (_cypher: string, params: any) => {
+        if (params?.indexName && String(params.term).startsWith("*")) return { records: rows[params.indexName] ?? [] };
+        return { records: [] };
+      }),
+    };
+    const judgementService = { resolveByText: vi.fn(async () => judgements), findRecordById: vi.fn() };
+    const registry = {
+      get: vi.fn((type: string) =>
+        type === "judgements" ? judgementService : { findRecordById: async ({ id }: { id: string }) => ({ id }) },
+      ),
+    };
+    return new GraphSearchService(
+      neo4j,
+      { vectoriseText: vi.fn() } as any,
+      indexNames as any,
+      { getAllChatEnabledEntities: vi.fn(() => [email, judgement]) } as any,
+      undefined as any,
+      registry as any,
+    );
+  };
+
+  it("normalises scores per type before merging", async () => {
+    const svc = build(
+      { email_chat_fulltext: [row("e1", "Mail about 14345", 12.5), row("e2", "Other mail 14345", 6.6)] },
+      [
+        { id: "j1", name: "14345/2024", score: 1.0 },
+        { id: "j2", name: "14345/2023", score: 0.67 },
+      ],
+    );
+
+    const out = await svc.resolveEntity({ text: "14345", companyId: "co1", userModuleIds: [MODULE] });
+
+    const ids = out.items.map((i) => i.id);
+    const top = out.items[0];
+    const j1 = out.items.find((i) => i.id === "j1")!;
+    expect(j1.score).toBeCloseTo(top.score);
+    expect(ids.indexOf("j2")).toBeLessThan(ids.indexOf("e2"));
+    expect(out.items.find((i) => i.id === "e2")!.score).toBeCloseTo(6.6 / 12.5);
+  });
+
+  it("labels the substring tier substring and the literal match exact", async () => {
+    const literal = build({ email_chat_fulltext: [row("e1", "Faby and Carlo", 5)] }, []);
+    const literalOut = await literal.resolveEntity({
+      text: "faby and carlo",
+      companyId: "co1",
+      userModuleIds: [MODULE],
+    });
+    expect(literalOut.matchMode).toBe("exact");
+
+    const partial = build({ email_chat_fulltext: [row("e1", "Faby and Carlo", 5)] }, []);
+    const partialOut = await partial.resolveEntity({ text: "Faby", companyId: "co1", userModuleIds: [MODULE] });
+    expect(partialOut.matchMode).toBe("substring");
+  });
+
+  it("withholds the recommendation on a summary tie", async () => {
+    const svc = build({}, [
+      { id: "j-civ", name: "14345/2024", score: 1.0 },
+      { id: "j-pen", name: "14345/2024", score: 1.0 },
+    ]);
+
+    const out = await svc.resolveEntity({ text: "14345/2024", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out.matchMode).toBe("exact");
+    expect(out.recommendation).toBeUndefined();
+    expect(out.disambiguation).toMatch(/court/);
+    expect(out.disambiguation).toMatch(/sezione/);
+    expect(out.disambiguation).toContain("14345/2024");
+  });
+
+  it("recommends on a literal match with no tie", async () => {
+    const svc = build({}, [
+      { id: "j1", name: "14345/2024", score: 1.0 },
+      { id: "j2", name: "14345/2023", score: 0.5 },
+    ]);
+
+    const out = await svc.resolveEntity({ text: "14345/2024", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out.matchMode).toBe("exact");
+    expect(out.recommendation).toMatch(/literal phrase/);
+    expect(out.disambiguation).toBeUndefined();
+  });
+
+  it("ties two external candidates sharing a key even when their labels differ", async () => {
+    const svc = build({}, [
+      {
+        id: "j-pen",
+        name: "14345/2024 — Cass. pen. Sez. 5, sent. 08/04/2024",
+        score: 1.0,
+        exact: true,
+        key: "14345/2024",
+      },
+      {
+        id: "j-civ",
+        name: "14345/2024 — Cass. civ. Sez. 3, ord. 22/05/2024",
+        score: 1.0,
+        exact: true,
+        key: "14345/2024",
+      },
+    ]);
+
+    const out = await svc.resolveEntity({ text: "14345/2024", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out.matchMode).toBe("exact");
+    expect(out.recommendation).toBeUndefined();
+    expect(out.disambiguation).toMatch(/court/);
+    expect(out.disambiguation).toMatch(/sezione/);
+    expect(out.disambiguation).toContain("14345/2024");
+    expect(out.items.map((i) => i.key)).toEqual(["14345/2024", "14345/2024"]);
+  });
+
+  it("reports exact and recommends a single exact external hit with a labelled summary", async () => {
+    const svc = build({}, [
+      {
+        id: "j-pen",
+        name: "14345/2024 — Cass. pen. Sez. 5, sent. 08/04/2024",
+        score: 1.0,
+        exact: true,
+        key: "14345/2024",
+      },
+    ]);
+
+    const out = await svc.resolveEntity({ text: "14345/2024", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out.matchMode).toBe("exact");
+    expect(out.items[0]).toMatchObject({ id: "j-pen", exact: true, key: "14345/2024" });
+    expect(out.recommendation).toMatch(/id=j-pen/);
+    expect(out.disambiguation).toBeUndefined();
+  });
+
+  it("keeps the substring label for a non-exact external hit whose label differs from the text", async () => {
+    const svc = build({}, [{ id: "j1", name: "14345/2024 — Cass. pen. Sez. 5", score: 0.4 }]);
+
+    const out = await svc.resolveEntity({ text: "omicidio stradale", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out.matchMode).toBe("substring");
+  });
+});
+
+describe("buildResolveDisambiguation", () => {
+  const rows = (summaries: string[]): RankedCandidate[] =>
+    summaries.map((summary, i) => ({ type: "judgements", id: `id-${i}`, summary, score: 1 }));
+
+  it("returns undefined when no other candidate shares the top summary", () => {
+    expect(buildResolveDisambiguation(rows(["A", "B"]))).toBeUndefined();
+    expect(buildResolveDisambiguation([])).toBeUndefined();
+  });
+
+  it("detects a case-insensitive tie anywhere in the list", () => {
+    expect(buildResolveDisambiguation(rows(["Acme", "Other", "ACME"]))).toMatch(/share the summary "Acme"/);
+  });
+
+  it("ties on key when present, not on the labelled summary", () => {
+    const keyed: RankedCandidate[] = [
+      { type: "judgements", id: "a", summary: "1/2024 — Cass. pen.", key: "1/2024", score: 1 },
+      { type: "judgements", id: "b", summary: "1/2024 — Cass. civ.", key: "1/2024", score: 1 },
+    ];
+    expect(buildResolveDisambiguation(keyed)).toContain('"1/2024"');
+    expect(buildResolveRecommendation(keyed, "1/2024", "exact")).toBeUndefined();
+  });
+});
+
+describe("buildResolveRecommendation — summary ties", () => {
+  it("never recommends when another candidate has the same summary", () => {
+    const tied: RankedCandidate[] = [
+      { type: "judgements", id: "a", summary: "14345/2024", score: 1 },
+      { type: "judgements", id: "b", summary: "14345/2024", score: 0.5 },
+    ];
+    expect(buildResolveRecommendation(tied, "14345/2024", "exact")).toBeUndefined();
   });
 });

@@ -5,10 +5,17 @@ import { ReadEntityTool, readEntityInputSchema } from "../../agents/graph/tools/
 import { ResolveEntityTool, resolveEntityInputSchema } from "../../agents/graph/tools/resolve-entity.tool";
 import { SearchEntitiesTool, searchEntitiesInputSchema } from "../../agents/graph/tools/search-entities.tool";
 import { ToolCallRecord } from "../../agents/graph/tools/tool.factory";
-import { TraverseTool, traverseInputSchema } from "../../agents/graph/tools/traverse.tool";
+import {
+  coerceFilters,
+  coerceSort,
+  filtersJsonSchema,
+  sortJsonSchema,
+  TraverseTool,
+  traverseInputSchema,
+} from "../../agents/graph/tools/traverse.tool";
 import { SearchDocumentsTool, searchDocumentsInputSchema } from "../../agents/operator/tools/search-documents.tool";
 import { McpToolDefinition, McpToolResult, McpUserContext } from "../interfaces/mcp.tool.interface";
-import { mcpError } from "./mcp.errors";
+import { mcpError, mcpFlatError } from "./mcp.errors";
 import { McpEntityWriteService } from "./mcp.entity.write.service";
 
 // Descriptions copied verbatim from each tool's build() (single source is the
@@ -24,6 +31,16 @@ const TRAVERSE_DESCRIPTION =
   "Walks a relationship from a known record to related records, optionally filtered and sorted.";
 const SEARCH_DOCS_DESCRIPTION =
   "Search the company's documents (GraphRAG) for information relevant to a question. Returns the retrieved passages, each prefixed by its chunkId.";
+
+/**
+ * The JSON Schema of a list tool's input with the explicit `filters` and
+ * `sort` shapes. The Zod schemas type both as `z.any()` (the coercion owns the
+ * contract), which converts to `{}` and tells the client nothing.
+ */
+function withFilterSchemas(schema: z.ZodType): Record<string, unknown> {
+  const json = z.toJSONSchema(schema) as Record<string, unknown> & { properties?: Record<string, unknown> };
+  return { ...json, properties: { ...json.properties, filters: filtersJsonSchema, sort: sortJsonSchema } };
+}
 
 /**
  * Builds the generic MCP tool set for one authenticated request:
@@ -63,14 +80,29 @@ export class McpGenericToolsService {
       schema: z.ZodType,
       invoke: (input: any) => Promise<unknown>,
       seedType?: (parsed: any) => unknown,
+      filtered?: boolean,
     ): McpToolDefinition => ({
       name,
       description,
-      inputSchema: z.toJSONSchema(schema) as Record<string, unknown>,
+      inputSchema: filtered ? withFilterSchemas(schema) : (z.toJSONSchema(schema) as Record<string, unknown>),
       readOnly: true,
       execute: async (input): Promise<McpToolResult> => {
         try {
           const parsed = schema.parse(input);
+          // A filter or sort the tool cannot apply is a client error, not a
+          // result: the MCP client must see isError, never an unfiltered or
+          // differently ordered list. An unknown key fails schema.parse (both
+          // list schemas are strict) and maps to validation_failed.
+          if (filtered) {
+            const coerced = coerceFilters((parsed as { filters?: unknown }).filters);
+            if ("error" in coerced) {
+              return mcpFlatError("validation_failed", coerced.error, { filters: filtersJsonSchema });
+            }
+            const coercedSort = coerceSort((parsed as { sort?: unknown }).sort);
+            if ("error" in coercedSort) {
+              return mcpFlatError("validation_failed", coercedSort.error, { sort: sortJsonSchema });
+            }
+          }
           if (seedType) seedDescribe(seedType(parsed));
           const result = await invoke(parsed);
           return {
@@ -94,6 +126,7 @@ export class McpGenericToolsService {
         searchEntitiesInputSchema,
         (i) => this.searchEntitiesTool.invoke(i, ctx, recorder),
         (parsed) => parsed.type,
+        true,
       ),
       read(
         "read_entity",
@@ -108,6 +141,7 @@ export class McpGenericToolsService {
         traverseInputSchema,
         (i) => this.traverseTool.invoke(i, ctx, recorder),
         (parsed) => parsed.fromType,
+        true,
       ),
       read("search_documents", SEARCH_DOCS_DESCRIPTION, searchDocumentsInputSchema, (i) =>
         // SearchDocumentsTool needs an OperatorRetrievalContext; MCP has no

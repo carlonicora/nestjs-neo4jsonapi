@@ -46,6 +46,7 @@ export const PendingAuthDescriptor = defineEntity<PendingAuth>()({
   // Not persisted, never joined to a Company; the 2FA challenge is issued
   // before any company scope exists in CLS.
   isCompanyScoped: false,
+  tenancy: "internal",
 
   description:
     "A pending two-factor authentication challenge (sfida a due fattori): issued when the password check succeeds but 2FA verification is still required.",

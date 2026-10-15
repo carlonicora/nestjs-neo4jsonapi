@@ -8,7 +8,7 @@ import type { McpToolResult } from "../interfaces/mcp.tool.interface";
  * flat-error convention used by the HTTP layer's HttpExceptionFilter.
  */
 export type McpErrorCode =
-  "unknown_type" | "not_writable" | "forbidden" | "validation_failed" | "not_found" | "internal";
+  "unknown_type" | "not_writable" | "forbidden" | "validation_failed" | "not_found" | "internal" | "timeout";
 
 /**
  * Maps an unknown thrown value to a flat MCP error result.
@@ -16,6 +16,8 @@ export type McpErrorCode =
  * - `HttpException` → status-derived code (404 → not_found, 403 → forbidden,
  *   400/422 → validation_failed, anything else → internal)
  * - `ZodError` → validation_failed with per-issue `issues` meta
+ * - an error named `TimeoutError` (the `DOMException` an `AbortSignal.timeout`
+ *   fetch rejects with) → timeout with `retryable: true`
  * - other `Error` → internal with the error message
  *
  * Never includes stack traces.
@@ -39,10 +41,18 @@ export function mcpError(e: unknown): McpToolResult {
     code = "validation_failed";
     message = "Input validation failed";
     meta = { issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })) };
+  } else if (isTimeoutError(e)) {
+    code = "timeout";
+    message = e.message;
+    meta = { retryable: true };
   } else if (e instanceof Error) {
     message = e.message;
   }
   return mcpFlatError(code, message, meta);
+}
+
+function isTimeoutError(e: unknown): e is { name: string; message: string } {
+  return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "TimeoutError";
 }
 
 /**

@@ -9,7 +9,7 @@ import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
-import { coerceFilters, coerceSort } from "./traverse.tool";
+import { coerceFilters, coerceSort, MAX_LIST_LIMIT, truncationNote, TYPE_TO_OP_ALLOWED } from "./traverse.tool";
 
 const inputSchema = z
   .object({
@@ -21,14 +21,6 @@ const inputSchema = z
   .strict();
 
 export { inputSchema as searchEntitiesInputSchema };
-
-const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
-  string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
-  number: new Set(["eq", "ne", "in", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  boolean: new Set(["eq", "ne", "isNull", "isNotNull"]),
-  date: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  datetime: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-};
 
 @Injectable()
 export class SearchEntitiesTool {
@@ -56,13 +48,24 @@ export class SearchEntitiesTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
-    const filters = coerceFilters(input.filters);
-    const sort = coerceSort(input.sort);
+    const coerced = coerceFilters(input.filters);
+    const filters = "error" in coerced ? [] : coerced.filters;
+    const coercedSort = coerceSort(input.sort);
+    const sort = "error" in coercedSort ? [] : coercedSort.sort;
     const localMaterialised: Array<{ relName: string; count: number }> = [];
 
     const result = await this.factory.capture(
-      { tool: "search_entities", input: { ...input, filters, sort } },
+      {
+        tool: "search_entities",
+        input: {
+          ...input,
+          filters: "error" in coerced ? input.filters : filters,
+          sort: "error" in coercedSort ? input.sort : sort,
+        },
+      },
       async () => {
+        if ("error" in coerced) return { error: coerced.error };
+        if ("error" in coercedSort) return { error: coercedSort.error };
         const described = recorder.some(
           (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
         );
@@ -108,7 +111,7 @@ export class SearchEntitiesTool {
         const svc = this.factory.resolveService(entity.type);
         if (!svc) return { error: `Service not available for "${entity.type}".` };
 
-        const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+        const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
 
         // An inline hop is not a descriptor relationship, so it cannot be read
         // through the repository: it takes the ScopeGuard.filter path below.
@@ -147,7 +150,7 @@ export class SearchEntitiesTool {
           ? {
               ...output,
               hasMore: true,
-              note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+              note: truncationNote(limit),
             }
           : output;
       },

@@ -6,7 +6,12 @@ import {
   CatalogScope,
   CatalogScopeHop,
 } from "../interfaces/graph.catalog.interface";
-import { ChatScopeHop, ChatWritableConfig, FieldKind } from "../../../common/interfaces/entity.schema.interface";
+import {
+  ChatScopeHop,
+  ChatWritableConfig,
+  EntityTenancy,
+  FieldKind,
+} from "../../../common/interfaces/entity.schema.interface";
 import type { DetailFieldDef } from "../../../common/interfaces/detail.fields.source.interface";
 import { ownerMeta } from "../../../foundations/user/entities/user.meta";
 import { scopeKeyOf } from "./writable.rules";
@@ -39,6 +44,10 @@ export interface DescriptorSource {
     model: { type: string; nodeName: string; labelName: string };
     description?: string;
     moduleId: string;
+    /** `false` for a descriptor declared `isCompanyScoped: false`. */
+    isCompanyScoped: boolean;
+    /** Tenant rule of an unscoped descriptor (see EntitySchemaInput.tenancy). */
+    tenancy?: EntityTenancy;
     fields: Record<string, { type: string; description?: string; kind?: FieldKind }>;
     relationships: Record<
       string,
@@ -103,7 +112,37 @@ export class GraphCatalogService implements OnApplicationBootstrap {
     this.entities.clear();
     this.renderedByModuleId.clear();
 
-    const descriptors = this.source.loadAll().filter((d) => typeof d.description === "string" && d.description.length);
+    const all = this.source.loadAll();
+    const byType = new Map(all.map((d) => [d.model.type, d]));
+    const descriptors = all.filter(
+      (d) => typeof d.description === "string" && d.description.length && d.tenancy !== "internal",
+    );
+
+    // Tenancy gate: no unscoped type reaches the catalog without an explicit tenant rule,
+    // and a `via` rule must land on a company-scoped type (its rows carry BELONGS_TO).
+    for (const d of descriptors) {
+      if (d.isCompanyScoped !== false) continue;
+      if (!d.tenancy) {
+        throw new Error(
+          `Entity "${d.model.type}" is not company-scoped and has a description, so it must declare "tenancy" ("global" | "self" | "internal" | { via: "<relationship key>" }).`,
+        );
+      }
+      if (typeof d.tenancy === "object") {
+        const via = d.tenancy.via;
+        const rel = d.relationships[via];
+        if (!rel) {
+          throw new Error(`tenancy.via "${via}" on ${d.model.type} is not a relationship on this descriptor.`);
+        }
+        const target = byType.get(rel.model.type);
+        // Accepted targets: a company-scoped type (rows carry BELONGS_TO) or the company
+        // itself (`tenancy: "self"`, matched directly by the repository predicate).
+        if (!target || (target.isCompanyScoped === false && target.tenancy !== "self")) {
+          throw new Error(
+            `tenancy.via "${via}" on ${d.model.type} points at ${rel.model.type}, which is not company-scoped${target ? "" : " (not registered)"}.`,
+          );
+        }
+      }
+    }
 
     /** Raw scope material, keyed by JSON:API type. Consumed by pass 1b. */
     const scopeSources = new Map<string, ScopeSource>();

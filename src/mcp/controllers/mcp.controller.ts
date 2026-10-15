@@ -59,7 +59,7 @@ export class McpController {
     const ctx: McpUserContext = {
       userId,
       companyId,
-      userModuleIds: await this.userModules.findModuleIdsForUser(userId),
+      userModuleIds: await this.userModules.findModuleIdsForUser(userId, companyId),
     };
 
     const server = this.factory.create(ctx);

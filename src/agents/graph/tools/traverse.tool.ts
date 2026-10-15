@@ -11,20 +11,122 @@ import { ScopeGuard } from "../services/scope.guard";
 import { RelatedEdgesService } from "../services/related-edges.service";
 import type { ExternalEntitySource } from "../../../common/interfaces/external.entity.source.interface";
 
-const FilterOpEnum = z.enum(["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]);
+/** Every filter operator the graph tools accept, in the order they are advertised. */
+export const FILTER_OPERATORS = ["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"] as const;
+export type FilterOperator = (typeof FILTER_OPERATORS)[number];
+
+const FilterOpEnum = z.enum(FILTER_OPERATORS);
+
+/** Operators valid for each catalog field type. A type missing here accepts no operator. */
+export const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
+  string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
+  number: new Set(["eq", "ne", "in", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
+  boolean: new Set(["eq", "ne", "isNull", "isNotNull"]),
+  date: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
+  datetime: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
+};
+
+const FILTER_VALUE_JSON_SCHEMA = {
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "array", items: { type: "string" } },
+    { type: "array", items: { type: "number" } },
+  ],
+};
+
+/**
+ * JSON Schema of `filters` on the MCP wire. The Zod input schemas accept `any`
+ * (coerceFilters owns the contract), so without this the client sees `{}` and
+ * cannot know the shape.
+ */
+export const filtersJsonSchema: Record<string, unknown> = {
+  description:
+    'Filters. Either an array of { field, op, value } or the map form { "<field>": <value> }, where a scalar value means "eq" and an array value means "in". Use "like" for a substring match.',
+  oneOf: [
+    {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          field: { type: "string", description: "Field name from describe_entity." },
+          op: { type: "string", enum: [...FILTER_OPERATORS] },
+          value: {
+            ...FILTER_VALUE_JSON_SCHEMA,
+            description: 'Omitted for "isNull" and "isNotNull"; an array for "in".',
+          },
+        },
+        required: ["field", "op"],
+        additionalProperties: false,
+      },
+    },
+    {
+      type: "object",
+      description: 'Map form: { "<field>": <value> }. A scalar means "eq", an array means "in".',
+      additionalProperties: FILTER_VALUE_JSON_SCHEMA,
+    },
+  ],
+};
+
+/** The sort directions, matched case-insensitively ("DESC" is "desc"). */
+export const SORT_DIRECTIONS = ["asc", "desc"] as const;
+
+const SORT_ITEM_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    field: { type: "string", description: "Sortable field name from describe_entity." },
+    direction: { type: "string", enum: [...SORT_DIRECTIONS], description: 'Default "asc".' },
+  },
+  required: ["field"],
+  additionalProperties: false,
+};
+
+const SORT_STRING_JSON_SCHEMA = {
+  type: "string",
+  description: '"field", "field asc" or "field desc".',
+  pattern: "^\\s*\\S+(\\s+([aA][sS][cC]|[dD][eE][sS][cC]))?\\s*$",
+};
+
+const SORT_MAP_JSON_SCHEMA = {
+  type: "object",
+  description: 'Map form: { "<field>": "asc" | "desc" }.',
+  additionalProperties: { type: "string", enum: [...SORT_DIRECTIONS] },
+  minProperties: 1,
+};
+
+/**
+ * JSON Schema of `sort` on the MCP wire: exactly the shapes coerceSort accepts
+ * ({ field, direction } items, "field desc" strings or the map form), as an
+ * array or a single item.
+ */
+export const sortJsonSchema: Record<string, unknown> = {
+  description:
+    'Sort. An array of { field, direction } (direction "asc" | "desc"), of "field desc" strings or of map-form objects { "<field>": "asc" | "desc" }; a single item is accepted too.',
+  oneOf: [
+    { type: "array", items: { anyOf: [SORT_ITEM_JSON_SCHEMA, SORT_STRING_JSON_SCHEMA, SORT_MAP_JSON_SCHEMA] } },
+    SORT_ITEM_JSON_SCHEMA,
+    SORT_STRING_JSON_SCHEMA,
+    SORT_MAP_JSON_SCHEMA,
+  ],
+};
 
 // Schemas accept `any` at the input boundary because small models emit many
 // non-canonical shapes for filters and sort — single-object-instead-of-array,
 // map-style `{field: "asc"}`, nested arrays. We coerce everything to the
 // canonical array of `{field, direction}` / `{field, op, value}` in code.
-const inputSchema = z.object({
-  fromType: z.string(),
-  fromId: z.string(),
-  relationship: z.string().describe("Traversal name from the graph map."),
-  filters: z.any().optional(),
-  sort: z.any().optional(),
-  limit: z.number().int().optional(),
-});
+// `.strict()` like searchEntitiesInputSchema: an unknown key (`filter` for
+// `filters`) is a validation error, never a silently ignored parameter.
+const inputSchema = z
+  .object({
+    fromType: z.string(),
+    fromId: z.string(),
+    relationship: z.string().describe("Traversal name from the graph map."),
+    filters: z.any().optional(),
+    sort: z.any().optional(),
+    limit: z.number().int().optional(),
+  })
+  .strict();
 
 export { inputSchema as traverseInputSchema };
 
@@ -49,6 +151,26 @@ function coerceFilterValue(v: unknown): NormalisedFilterValue | undefined {
   return undefined;
 }
 
+export type SortCoercionResult = { sort: NormalisedSort[] } | { error: string };
+
+const CANONICAL_SORT_SHAPE =
+  'Use an array of { field, direction } with direction asc | desc (for example [{ "field": "decisionDate", "direction": "desc" }]), "field desc" strings, or the map form { "<field>": "asc" | "desc" }.';
+
+function invalidSortShape(item: unknown): { error: string } {
+  return { error: `Sort ${JSON.stringify(item)} is not valid. ${CANONICAL_SORT_SHAPE}` };
+}
+
+function invalidSortDirection(direction: unknown): { error: string } {
+  return { error: `Sort direction ${JSON.stringify(direction)} is not valid. Allowed: asc | desc.` };
+}
+
+/** "asc" / "desc" in any case; anything else is not a direction. */
+function sortDirection(raw: unknown): NormalisedSort["direction"] | undefined {
+  if (typeof raw !== "string") return undefined;
+  const lower = raw.trim().toLowerCase();
+  return lower === "asc" || lower === "desc" ? lower : undefined;
+}
+
 /**
  * Coerce any LLM-emitted sort shape into an array of {field, direction}.
  * Accepts:
@@ -59,62 +181,114 @@ function coerceFilterValue(v: unknown): NormalisedFilterValue | undefined {
  *   "date"                                 — bare field (asc default)
  *   "date desc"                            — bare field with direction
  *   ["date", "name desc"]                  — array of strings
+ * The direction is matched case-insensitively. Anything else (an unknown
+ * direction such as "descending", an item of another shape) is an error,
+ * never dropped or defaulted to "asc": a silently changed sort returns the
+ * wrong first page.
  */
-export function coerceSort(raw: unknown): NormalisedSort[] {
-  if (raw == null) return [];
+export function coerceSort(raw: unknown): SortCoercionResult {
+  if (raw == null) return { sort: [] };
   const items = Array.isArray(raw) ? raw : [raw];
   const out: NormalisedSort[] = [];
   for (const item of items) {
     if (typeof item === "string") {
-      const [field, dir] = item.trim().split(/\s+/);
-      if (field) out.push({ field, direction: dir === "desc" ? "desc" : "asc" });
+      const parts = item.trim().split(/\s+/).filter(Boolean);
+      if (parts.length < 1 || parts.length > 2) return invalidSortShape(item);
+      const direction = parts.length === 2 ? sortDirection(parts[1]) : "asc";
+      if (!direction) return invalidSortDirection(parts[1]);
+      out.push({ field: parts[0], direction });
       continue;
     }
-    if (item && typeof item === "object") {
-      const rec = item as Record<string, unknown>;
-      if (typeof rec.field === "string") {
-        const direction = rec.direction === "desc" ? "desc" : "asc";
-        out.push({ field: rec.field, direction });
-        continue;
-      }
-      // Map form: { date: "desc" } — one or more entries.
-      for (const [k, v] of Object.entries(rec)) {
-        out.push({ field: k, direction: v === "desc" ? "desc" : "asc" });
-      }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidSortShape(item);
+    const rec = item as Record<string, unknown>;
+
+    if ("field" in rec || "direction" in rec) {
+      const extraKeys = Object.keys(rec).filter((key) => key !== "field" && key !== "direction");
+      if (typeof rec.field !== "string" || !rec.field || extraKeys.length) return invalidSortShape(item);
+      const direction = rec.direction === undefined ? "asc" : sortDirection(rec.direction);
+      if (!direction) return invalidSortDirection(rec.direction);
+      out.push({ field: rec.field, direction });
+      continue;
+    }
+
+    // Map form: { date: "desc" } — one or more entries.
+    const entries = Object.entries(rec);
+    if (!entries.length) return invalidSortShape(item);
+    for (const [field, v] of entries) {
+      const direction = sortDirection(v);
+      if (!direction) return invalidSortDirection(v);
+      out.push({ field, direction });
     }
   }
-  return out;
+  return { sort: out };
+}
+
+/** Hard cap on the `limit` of the list tools (search_entities, traverse). */
+export const MAX_LIST_LIMIT = 50;
+
+/**
+ * The `hasMore` note. Below the cap the caller can raise `limit`; at the cap
+ * raising it is impossible, so the only way forward is narrower filters.
+ */
+export function truncationNote(limit: number): string {
+  return limit >= MAX_LIST_LIMIT
+    ? `Only the first ${limit} matches are shown. Narrow the filters; the limit cannot exceed ${MAX_LIST_LIMIT}.`
+    : `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max ${MAX_LIST_LIMIT}) to fetch the rest.`;
+}
+
+export type FilterCoercionResult = { filters: NormalisedFilter[] } | { error: string };
+
+const CANONICAL_FILTER_SHAPE =
+  'Use an array of { field, op, value } (for example [{ "field": "number", "op": "eq", "value": "14345" }]) or the map form { "<field>": <value> }, where a scalar value means "eq" and an array value means "in".';
+
+function invalidFilterShape(item: unknown): { error: string } {
+  return { error: `Filter ${JSON.stringify(item)} is not valid. ${CANONICAL_FILTER_SHAPE}` };
 }
 
 /**
  * Coerce any LLM-emitted filters shape into an array of {field, op, value}.
- * Accepts the canonical shape or a single object.
+ * Accepts:
+ *   [{field:"number", op:"eq", value:"1"}]  — canonical
+ *   {field:"number", op:"eq", value:"1"}    — single object
+ *   {number:"1", year:["2023","2024"]}      — map form: scalar → eq, array → in
+ *   [{number:"1"}]                          — array of maps
+ * Anything else — an unknown operator, an item mixing the two shapes, a value
+ * that is neither a scalar nor a homogeneous array — is an error, never
+ * dropped: a silently discarded filter runs the search unfiltered.
  */
-export function coerceFilters(raw: unknown): NormalisedFilter[] {
-  if (raw == null) return [];
+export function coerceFilters(raw: unknown): FilterCoercionResult {
+  if (raw == null) return { filters: [] };
   const items = Array.isArray(raw) ? raw : [raw];
   const out: NormalisedFilter[] = [];
   for (const item of items) {
-    if (item && typeof item === "object" && !Array.isArray(item)) {
-      const rec = item as Record<string, unknown>;
-      if (typeof rec.field === "string" && typeof rec.op === "string") {
-        const opResult = FilterOpEnum.safeParse(rec.op);
-        if (opResult.success) {
-          out.push({ field: rec.field, op: opResult.data, value: coerceFilterValue(rec.value) });
-        }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return invalidFilterShape(item);
+    const rec = item as Record<string, unknown>;
+
+    if ("field" in rec || "op" in rec) {
+      if (typeof rec.field !== "string" || typeof rec.op !== "string") return invalidFilterShape(item);
+      const opResult = FilterOpEnum.safeParse(rec.op);
+      if (!opResult.success) {
+        return {
+          error: `Operator "${rec.op}" is not valid. Allowed: [${FILTER_OPERATORS.join(", ")}]; use "like" for a substring.`,
+        };
       }
+      const value = coerceFilterValue(rec.value);
+      if (rec.value != null && value === undefined) return invalidFilterShape(item);
+      out.push({ field: rec.field, op: opResult.data, value });
+      continue;
+    }
+
+    // Map form: { number: "14345", year: ["2023", "2024"] } — one or more entries.
+    const entries = Object.entries(rec);
+    if (!entries.length) return invalidFilterShape(item);
+    for (const [field, v] of entries) {
+      const value = coerceFilterValue(v);
+      if (value === undefined) return invalidFilterShape(item);
+      out.push({ field, op: Array.isArray(value) ? "in" : "eq", value });
     }
   }
-  return out;
+  return { filters: out };
 }
-
-const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
-  string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
-  number: new Set(["eq", "ne", "in", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  boolean: new Set(["eq", "ne", "isNull", "isNotNull"]),
-  date: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  datetime: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-};
 
 @Injectable()
 export class TraverseTool {
@@ -139,13 +313,24 @@ export class TraverseTool {
   }
 
   async invoke(input: z.infer<typeof inputSchema>, ctx: UserContext, recorder: ToolCallRecord[]): Promise<unknown> {
-    const filters = coerceFilters(input.filters);
-    const sort = coerceSort(input.sort);
+    const coerced = coerceFilters(input.filters);
+    const filters = "error" in coerced ? [] : coerced.filters;
+    const coercedSort = coerceSort(input.sort);
+    const sort = "error" in coercedSort ? [] : coercedSort.sort;
     const localMaterialised: Array<{ relName: string; count: number }> = [];
 
     const result = await this.factory.capture(
-      { tool: "traverse", input: { ...input, filters, sort } },
+      {
+        tool: "traverse",
+        input: {
+          ...input,
+          filters: "error" in coerced ? input.filters : filters,
+          sort: "error" in coercedSort ? input.sort : sort,
+        },
+      },
       async () => {
+        if ("error" in coerced) return { error: coerced.error };
+        if ("error" in coercedSort) return { error: coercedSort.error };
         const sourceDescribed = recorder.some(
           (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.fromType,
         );
@@ -205,7 +390,7 @@ export class TraverseTool {
         const targetSvc = this.factory.resolveService(target.type);
         if (!targetSvc) return { error: `Service not available for "${target.type}".` };
 
-        const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+        const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
         // Walk via the catalog's raw edge spec so the traversal works even
         // when the target's own descriptor does not declare the relationship
         // (e.g. a reverse-only materialisation). Direction is inverted
@@ -233,7 +418,7 @@ export class TraverseTool {
         const truncation = hasMore
           ? {
               hasMore: true,
-              note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+              note: truncationNote(limit),
             }
           : {};
 
@@ -314,7 +499,7 @@ export class TraverseTool {
     const sourceRecord = await sourceSvc.findRecordById({ id: input.fromId });
     if (!sourceRecord) return { error: `No ${source.type} with id ${input.fromId}.` };
 
-    const limit = Math.min(Math.max(input.limit ?? 10, 1), 50);
+    const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
     const typeByLabel = new Map(this.catalog.getAllEntities().map((e) => [e.labelName, e.type]));
     // Probe one extra row so truncation is visible to the model: without this,
     // a silently clipped list is reported as complete.
@@ -342,7 +527,7 @@ export class TraverseTool {
     const truncation = hasMore
       ? {
           hasMore: true,
-          note: `Only the first ${limit} matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.`,
+          note: truncationNote(limit),
         }
       : {};
 

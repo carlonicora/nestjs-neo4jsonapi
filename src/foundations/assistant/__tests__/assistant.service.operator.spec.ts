@@ -205,6 +205,7 @@ describe("AssistantService — operator turns", () => {
     return {
       service,
       operator,
+      userModules,
       repo,
       jsonApi,
       assistantMessages,
@@ -302,6 +303,21 @@ describe("AssistantService — operator turns", () => {
           threadId: `${assistantId}:${userMessageId}`,
         }),
       );
+    });
+  });
+
+  describe("operator module visibility is bound to the request company", () => {
+    it("createWithFirstMessageOperator resolves modules for the user within params.companyId", async () => {
+      const { service, userModules } = buildSut();
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
+      expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
+    });
+
+    it("appendMessageOperator resolves modules for the user within params.companyId", async () => {
+      const { service, userModules } = buildSut();
+      await service.appendMessageOperator({ assistantId: "asst-1", companyId: "c", userId: "u", newMessage: "next" });
+      expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
     });
   });
 

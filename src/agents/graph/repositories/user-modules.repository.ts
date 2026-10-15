@@ -32,14 +32,18 @@ export class UserModulesRepository {
    * effective permissions are returned on a virtual module node as a JSON
    * string on `properties.permissions`; we parse it and keep the modules
    * where `read.value === true`.
+   *
+   * The match is bound to `companyId` (the request's company, from the token):
+   * a user who belongs to several companies sees only the modules of the
+   * company the request runs in, never the union across all of them.
    */
-  async findModuleIdsForUser(userId: string): Promise<string[]> {
+  async findModuleIdsForUser(userId: string, companyId: string): Promise<string[]> {
     const result = await this.neo4j.read(
       `
-      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company:Company)
+      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company:Company {id: $companyId})
       ${featureModuleQuery}
       `,
-      { userId },
+      { userId, companyId },
     );
 
     const moduleIds: string[] = [];
@@ -58,7 +62,9 @@ export class UserModulesRepository {
         this.logger.warn(`findModuleIdsForUser: malformed permissions JSON on module ${id}`);
       }
     }
-    this.logger.log(`findModuleIdsForUser: userId=${userId} readableModuleIds=${JSON.stringify(moduleIds)}`);
+    this.logger.log(
+      `findModuleIdsForUser: userId=${userId} companyId=${companyId} readableModuleIds=${JSON.stringify(moduleIds)}`,
+    );
     return moduleIds;
   }
 }

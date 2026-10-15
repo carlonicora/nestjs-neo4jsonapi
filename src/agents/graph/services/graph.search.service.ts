@@ -20,7 +20,12 @@ export const GRAPH_RESOLVE_MAX_RESULTS = 10;
 export const GRAPH_SEMANTIC_MIN_SCORE = 0.6;
 const GRAPH_VECTOR_OVERFETCH = 50;
 
-export type MatchMode = "exact" | "fuzzy" | "semantic" | "none";
+/**
+ * `exact`: the top candidate's summary (or id) equals the text, or an external
+ * source matched the text as an identifier (`RankedCandidate.exact`). `substring`,
+ * `fuzzy`, `semantic`: the tier that produced the candidates. `none`: nothing.
+ */
+export type MatchMode = "exact" | "substring" | "fuzzy" | "semantic" | "none";
 
 export interface RunSearchParams {
   entity: CatalogEntity;
@@ -38,6 +43,10 @@ export interface RankedCandidate {
   id: string;
   summary: string;
   score: number;
+  /** Set by an external source that matched the text as an identifier. */
+  exact?: boolean;
+  /** Identity ties are judged on, when the summary is a richer label. */
+  key?: string;
 }
 
 export interface ResolveEntityParams {
@@ -61,6 +70,44 @@ export interface ResolveEntityResult {
    * reliably than rules they have to re-derive from the system prompt.
    */
   recommendation?: string;
+  /**
+   * Present when another candidate shares items[0]'s summary (e.g. a civil and
+   * a criminal judgement both named 14345/2024). No recommendation is given
+   * then; this hint tells the caller which fields tell them apart.
+   */
+  disambiguation?: string;
+}
+
+const normaliseSummary = (value: string): string => value.trim().toLowerCase();
+
+/** The identity a tie is judged on: the candidate's `key` when set, its summary otherwise (case-insensitive). */
+const tieIdentity = (item: RankedCandidate): string => normaliseSummary(item.key ?? item.summary);
+
+/** True when a candidate other than items[0] has the same identity (`key ?? summary`, case-insensitive). */
+function hasSummaryTie(items: RankedCandidate[]): boolean {
+  if (items.length < 2) return false;
+  const top = tieIdentity(items[0]);
+  return items.slice(1).some((item) => tieIdentity(item) === top);
+}
+
+/**
+ * When two or more candidates share items[0]'s identity (`key ?? summary`),
+ * returns the hint that names the distinguishing fields; `undefined` otherwise.
+ */
+export function buildResolveDisambiguation(items: RankedCandidate[]): string | undefined {
+  if (!hasSummaryTie(items)) return undefined;
+  return `Two or more candidates share the summary "${items[0].key ?? items[0].summary}". Ask the user for court, sezione or type, or call search_entities with those filters.`;
+}
+
+/**
+ * Divides every score in a bucket by the bucket's best score, so Lucene scores
+ * (unbounded) and external rank scores ((0, 1]) compete on equal terms once
+ * merged. An empty bucket, or one whose best score is not positive, is left as is.
+ */
+function normaliseBucket(bucket: RankedCandidate[]): RankedCandidate[] {
+  const max = bucket.reduce((best, candidate) => Math.max(best, candidate.score), 0);
+  if (!(max > 0)) return bucket;
+  return bucket.map((candidate) => ({ ...candidate, score: candidate.score / max }));
 }
 
 /**
@@ -68,10 +115,14 @@ export interface ResolveEntityResult {
  * disambiguation rule worth surfacing to the LLM. Returns the recommendation
  * text or `undefined` when the candidates are genuinely ambiguous.
  *
+ * Never recommends when another candidate shares items[0]'s identity
+ * (`key ?? summary`, see `buildResolveDisambiguation`).
+ *
  * Two rules, in priority order:
  *   1. Literal-summary match: items[0].summary equals the user's literal
  *      phrase (case-insensitive). Holds even with a smaller margin because
- *      the name match is unambiguous on its own.
+ *      the name match is unambiguous on its own. An external candidate that
+ *      matched the text as an identifier (`exact`) counts the same way.
  *   2. Score-margin dominance: items[0] beats items[1] by ≥ 0.15 on
  *      exact/fuzzy tiers, ≥ 0.08 on semantic.
  */
@@ -81,6 +132,7 @@ export function buildResolveRecommendation(
   matchMode: MatchMode,
 ): string | undefined {
   if (items.length === 0) return undefined;
+  if (hasSummaryTie(items)) return undefined;
   const top = items[0];
   const next = items[1];
   const margin = next ? top.score - next.score : Number.POSITIVE_INFINITY;
@@ -89,6 +141,9 @@ export function buildResolveRecommendation(
 
   if (literalMatch && (items.length === 1 || dominantMargin)) {
     return `Use items[0] (id=${top.id}, type=${top.type}): its summary equals the user's literal phrase and dominates by score margin. Do not ask the user to disambiguate.`;
+  }
+  if (top.exact && (items.length === 1 || dominantMargin)) {
+    return `Use items[0] (id=${top.id}, type=${top.type}): it matches the user's text as an identifier and no other candidate shares it. Do not ask the user to disambiguate.`;
   }
   if (dominantMargin) {
     return `Use items[0] (id=${top.id}, type=${top.type}): it dominates the next candidate by the documented score margin (${margin.toFixed(2)}).`;
@@ -190,7 +245,7 @@ export class GraphSearchService {
     }
 
     const tiers: Array<["substring" | "fuzzy" | "semantic", MatchMode]> = [
-      ["substring", "exact"],
+      ["substring", "substring"],
       ["fuzzy", "fuzzy"],
       ["semantic", "semantic"],
     ];
@@ -212,13 +267,27 @@ export class GraphSearchService {
           return tier === "substring" ? this.runExternalForEntitySafe(e, external, params) : Promise.resolve([]);
         }),
       );
-      const merged: RankedCandidate[] = buckets.flat();
+      // One bucket per type: normalise within the type, then merge. Sort is
+      // stable, so equal normalised scores keep catalog order.
+      const merged: RankedCandidate[] = buckets.map(normaliseBucket).flat();
       if (!merged.length) continue;
       merged.sort((a, b) => b.score - a.score);
       const items = await this.keepAccessible({ candidates: merged, params, externalByType, entityByType });
       if (items.length) {
-        const recommendation = buildResolveRecommendation(items, params.text, label);
-        return recommendation ? { matchMode: label, items, recommendation } : { matchMode: label, items };
+        const text = normaliseSummary(params.text);
+        const literal =
+          items[0].exact === true ||
+          normaliseSummary(items[0].summary) === text ||
+          items[0].id.trim().toLowerCase() === text;
+        const matchMode: MatchMode = literal ? "exact" : label;
+        const recommendation = buildResolveRecommendation(items, params.text, matchMode);
+        const disambiguation = buildResolveDisambiguation(items);
+        return {
+          matchMode,
+          items,
+          ...(recommendation ? { recommendation } : {}),
+          ...(disambiguation ? { disambiguation } : {}),
+        };
       }
     }
 
@@ -319,6 +388,8 @@ export class GraphSearchService {
         id: candidate.id,
         summary: candidate.name || candidate.id,
         score: candidate.score,
+        ...(candidate.exact ? { exact: true } : {}),
+        ...(candidate.key ? { key: candidate.key } : {}),
       }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -406,7 +477,7 @@ export class GraphSearchService {
     const indexName = this.indexNames.fulltextIndexName(params.entity.labelName);
     const existing = await this.getExistingIndexes();
     if (existing.size > 0 && !existing.has(indexName)) {
-      return { matchMode: mode === "substring" ? "exact" : "fuzzy", items: [] };
+      return { matchMode: mode, items: [] };
     }
     const escaped = escapeLuceneTerm(params.text).toLowerCase();
     const term = mode === "substring" ? `*${escaped}*` : `${escaped}~`;
@@ -440,7 +511,7 @@ export class GraphSearchService {
       score: r.get("score"),
       properties: r.get("properties") ?? {},
     }));
-    return { matchMode: mode === "substring" ? "exact" : "fuzzy", items };
+    return { matchMode: mode, items };
   }
 
   private async tierSemantic(params: RunSearchParams): Promise<{ matchMode: MatchMode; items: InternalTierItem[] }> {

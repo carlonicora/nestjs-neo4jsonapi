@@ -307,6 +307,21 @@ describe("AssistantService", () => {
     });
   });
 
+  describe("module visibility is bound to the request company", () => {
+    it("createWithFirstMessage resolves modules for the user within params.companyId", async () => {
+      const { service, userModules } = buildSut();
+      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      await service.createWithFirstMessage({ companyId: "c", userId: "u", firstMessage: "hi" });
+      expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
+    });
+
+    it("appendMessage resolves modules for the user within params.companyId", async () => {
+      const { service, userModules } = buildSut();
+      await service.appendMessage({ assistantId: "asst-1", companyId: "c", userId: "u", newMessage: "next" });
+      expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
+    });
+  });
+
   describe("appendMessage", () => {
     it("emits a reference-memory system message on the second turn when priors have refs", async () => {
       const priorMessages = [

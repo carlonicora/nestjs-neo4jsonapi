@@ -210,7 +210,23 @@ export function defineEntity<T>() {
       description,
       chat,
       bridge,
+      tenancy,
     } = schema;
+
+    if (isCompanyScoped && tenancy) {
+      throw new Error(`defineEntity(${type}): "tenancy" is only valid with isCompanyScoped: false.`);
+    }
+    if (!isCompanyScoped && description && !tenancy) {
+      throw new Error(
+        `defineEntity(${type}): an unscoped described entity must declare "tenancy" ("global" | "self" | "internal" | { via: "<relationship key>" }).`,
+      );
+    }
+    if (tenancy && typeof tenancy === "object") {
+      const via = tenancy.via;
+      if (!Object.prototype.hasOwnProperty.call(relationships ?? {}, via)) {
+        throw new Error(`defineEntity(${type}): tenancy.via "${via}" is not a relationship on this descriptor.`);
+      }
+    }
 
     if (bridge) {
       if (!Array.isArray(bridge.materialiseTo) || bridge.materialiseTo.length === 0) {
@@ -390,6 +406,7 @@ export function defineEntity<T>() {
     const descriptor: EntityDescriptor<T, R> = {
       model: undefined as unknown as DataModelInterface<T>, // Will be set below
       isCompanyScoped,
+      tenancy,
       relationships,
       relationshipKeys,
 

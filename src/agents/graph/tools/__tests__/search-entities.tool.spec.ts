@@ -59,6 +59,15 @@ describe("SearchEntitiesTool", () => {
     expect(out.error).toMatch(/ghost/);
   });
 
+  it("rejects an unknown sort direction instead of sorting ascending", async () => {
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "name", direction: "descending" }] }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.error).toContain("asc | desc");
+    expect(registryGet).not.toHaveBeenCalled();
+  });
+
   it("rejects `like` on number field", async () => {
     const factoryNum: any = {
       ...factory,
@@ -131,6 +140,48 @@ describe("SearchEntitiesTool", () => {
     expect(out.note).toBe(
       'Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
     );
+  });
+
+  it("returns validation error for map form with unknown op", async () => {
+    const svc = { findRecords: vi.fn(async () => []) };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke(
+      { type: "accounts", filters: [{ field: "name", op: "contains", value: "acme" }] },
+      ctx,
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
+    );
+    expect(out.error).toContain('Operator "contains" is not valid');
+    expect(out.error).toContain('use "like" for a substring');
+    expect(svc.findRecords).not.toHaveBeenCalled();
+  });
+
+  it("runs a map form filter as eq instead of dropping it", async () => {
+    const svc = { findRecords: vi.fn(async () => []) };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    await tool.invoke({ type: "accounts", filters: { name: "Acme" } }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(svc.findRecords).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: [{ field: "name", op: "eq", value: "Acme" }] }),
+    );
+  });
+
+  it("tells the caller to narrow filters when limit is 50 and hasMore", async () => {
+    const svc = {
+      findRecords: vi.fn(async () =>
+        Array.from({ length: 51 }, (_, i) => ({ id: `a${i}`, name: `n${i}`, status: "active" })),
+      ),
+    };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts", limit: 50 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items).toHaveLength(50);
+    expect(out.hasMore).toBe(true);
+    expect(out.note).toBe("Only the first 50 matches are shown. Narrow the filters; the limit cannot exceed 50.");
   });
 
   it("omits hasMore and note when the result fits within the limit", async () => {

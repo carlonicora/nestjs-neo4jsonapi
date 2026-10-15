@@ -18,6 +18,12 @@ export type CypherArrayType = "string[]" | "number[]" | "boolean[]" | "date[]" |
 export type CypherType = CypherBaseType | CypherArrayType;
 
 /**
+ * Tenant rule of an entity that is not company-scoped (`isCompanyScoped: false`).
+ * Independent of `chat.scope*`, which describes the proceeding scope of a chat run.
+ */
+export type EntityTenancy = "global" | "self" | "internal" | { via: string };
+
+/**
  * Transformer function for field serialisation
  * Receives the entity data and any injected services
  */
@@ -287,6 +293,16 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
 
   /** Whether this entity belongs to a company (default: true). Set to false for generic/global entities. */
   isCompanyScoped?: boolean;
+  /**
+   * Tenant rule for an unscoped entity (`isCompanyScoped: false`). Mandatory when the entity has a
+   * `description`; forbidden on a company-scoped entity.
+   * - `"global"`: reference data shared by every company.
+   * - `"self"`: the entity is the company itself (rows filtered to `id = $companyId`).
+   * - `"internal"`: never exposed to the catalog (assistant/MCP).
+   * - `{ via }`: the relationship key whose target is a company-scoped type; rows are filtered
+   *   through it to the caller's company.
+   */
+  tenancy?: EntityTenancy;
   /** Field definitions - keys must be valid entity properties */
   fields: { [K in keyof Partial<T>]?: FieldDef };
   /** Relationship definitions with named keys for autocomplete */
@@ -378,6 +394,9 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
 
   /** Whether this entity belongs to a company. False for generic/global entities. */
   isCompanyScoped: boolean;
+
+  /** Tenant rule for an unscoped entity. See EntitySchemaInput.tenancy. */
+  tenancy?: EntityTenancy;
 
   /** Named relationships with autocomplete support (e.g., descriptor.relationships.author) */
   relationships: R;

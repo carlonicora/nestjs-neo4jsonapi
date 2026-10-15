@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServerFactory } from "../services/mcp.server.factory";
+import { McpController } from "../controllers/mcp.controller";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
 
@@ -56,5 +57,24 @@ describe("MCP server (in-memory transport)", () => {
     const res = await client.callTool({ name: "describe_entity", arguments: { type: "orders" } });
     expect(registry.call).toHaveBeenCalledWith("describe_entity", { type: "orders" }, ctx);
     expect((res.content as any)[0].text).toBe('{"ok":true}');
+  });
+});
+
+describe("McpController module visibility", () => {
+  it("resolves the user's modules within the token's company only", async () => {
+    const stop = new Error("stop after ctx");
+    const factory = {
+      create: vi.fn(() => {
+        throw stop;
+      }),
+    };
+    const cls = { get: vi.fn((key: string) => (key === "userId" ? "u1" : key === "companyId" ? "c1" : undefined)) };
+    const userModules = { findModuleIdsForUser: vi.fn(async () => ["mod-orders"]) };
+    const configService = { get: vi.fn().mockReturnValue({ enabled: true }) };
+    const controller = new McpController(factory as any, cls as any, userModules as any, configService as any);
+
+    await expect(controller.handle({} as any, {} as any)).rejects.toBe(stop);
+    expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u1", "c1");
+    expect(factory.create).toHaveBeenCalledWith(ctx);
   });
 });
