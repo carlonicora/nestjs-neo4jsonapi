@@ -27,6 +27,7 @@ vi.mock("../services/s3.service", () => ({
     uploadStream: vi.fn(),
     downloadObject: vi.fn(),
     contentDispositionAttachment: vi.fn(),
+    contentDispositionInline: vi.fn(),
   })),
 }));
 
@@ -106,6 +107,7 @@ describe("S3Controller", () => {
       uploadStream: vi.fn(),
       downloadObject: vi.fn(),
       contentDispositionAttachment: vi.fn(),
+      contentDispositionInline: vi.fn(),
     };
     cipher = { uploadMaxBytes: 1024, verifyObjectToken: vi.fn() };
 
@@ -444,8 +446,23 @@ describe("S3Controller", () => {
       expect(reply.header).toHaveBeenCalledWith("Content-Type", "application/pdf");
       expect(reply.header).toHaveBeenCalledWith("Cache-Control", "private, max-age=3600");
       expect(reply.header).toHaveBeenCalledWith("Accept-Ranges", "none");
-      expect(reply.header).not.toHaveBeenCalledWith("Content-Disposition", expect.anything());
       expect(reply.send).toHaveBeenCalledWith(stream);
+    });
+
+    it("GET /s3/objects names an inline object after its key, so saving it keeps the file name", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/documents/d/1/atto è.pdf" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      s3Service.contentDispositionInline.mockReturnValue(`inline; filename="atto _.pdf"; filename*=UTF-8''atto%20%C3%A8.pdf`);
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(s3Service.contentDispositionInline).toHaveBeenCalledWith("companies/c/documents/d/1/atto è.pdf");
+      expect(s3Service.contentDispositionAttachment).not.toHaveBeenCalled();
+      expect(reply.header).toHaveBeenCalledWith(
+        "Content-Disposition",
+        `inline; filename="atto _.pdf"; filename*=UTF-8''atto%20%C3%A8.pdf`,
+      );
     });
 
     it("GET /s3/objects lets the browser keep an expiring link's file until the link expires", async () => {

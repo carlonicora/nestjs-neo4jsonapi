@@ -193,7 +193,12 @@ export class S3Controller {
     }
 
     reply.header("Content-Type", object.contentType ?? "application/octet-stream");
-    if (payload.f) reply.header("Content-Disposition", this.service.contentDispositionAttachment(payload.f));
+    reply.header(
+      "Content-Disposition",
+      payload.f
+        ? this.service.contentDispositionAttachment(payload.f)
+        : this.service.contentDispositionInline(payload.k),
+    );
     reply.header("Cache-Control", this._cacheControl(payload));
     reply.header("Accept-Ranges", "none");
 

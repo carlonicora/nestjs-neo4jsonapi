@@ -360,9 +360,29 @@ export class S3Service {
    * `filename*` carries the original UTF-8 name for browsers that support it.
    */
   contentDispositionAttachment(filename: string): string {
+    return this._contentDisposition("attachment", filename);
+  }
+
+  /**
+   * Inline disposition named after the last segment of the key: the browser still renders the file
+   * in place (PDF previews), but saving it uses the real file name instead of the token in the URL.
+   */
+  contentDispositionInline(key: string): string {
+    const segment = key.split("/").pop() || key;
+    let filename = segment;
+    try {
+      filename = decodeURIComponent(segment);
+    } catch {
+      // Not URI-encoded: keep the raw segment.
+    }
+
+    return this._contentDisposition("inline", filename);
+  }
+
+  private _contentDisposition(type: "attachment" | "inline", filename: string): string {
     const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\/\r\n]/g, "_");
 
-    return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+    return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
   }
 
   async findSignedUrl(params: { key: string; isPublic?: boolean; filename?: string }): Promise<JsonApiDataInterface> {

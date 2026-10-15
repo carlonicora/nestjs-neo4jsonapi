@@ -400,6 +400,20 @@ describe("S3Service", () => {
     });
   });
 
+  describe("contentDispositionInline", () => {
+    it("names the file after the last segment of the key, decoding it", () => {
+      expect(service.contentDispositionInline("companies/c/emails/e/attachments/a/atto%20%C3%A8.pdf")).toBe(
+        `inline; filename="atto _.pdf"; filename*=UTF-8''atto%20%C3%A8.pdf`,
+      );
+    });
+
+    it("keeps a segment that is not URI-encoded as it is", () => {
+      expect(service.contentDispositionInline("companies/c/files/f/100%.pdf")).toBe(
+        `inline; filename="100%.pdf"; filename*=UTF-8''100%25.pdf`,
+      );
+    });
+  });
+
   describe("with different storage backends", () => {
     it("should configure MinIO correctly", async () => {
       // Arrange
