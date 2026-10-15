@@ -83,6 +83,9 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { S3CipherService } from "../s3-cipher.service";
 import { S3CipherKeyMissingError } from "../../cipher/s3-cipher.core";
+import { Global, Module } from "@nestjs/common";
+import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../../common/interfaces/s3.key-access.policy.interface";
+import { S3ServiceModule } from "../../s3.service.module";
 
 describe("S3Service", () => {
   let service: S3Service;
@@ -484,7 +487,7 @@ describe("S3Service", () => {
       return body;
     };
 
-    const buildService = async (s3Config: Record<string, unknown>) => {
+    const buildService = async (s3Config: Record<string, unknown>, policy?: S3KeyAccessPolicy) => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           S3Service,
@@ -493,6 +496,7 @@ describe("S3Service", () => {
           { provide: ConfigService, useValue: createMockConfigService(s3Config) },
           { provide: AppLoggingService, useValue: createMockAppLoggingService() },
           { provide: S3CipherService, useValue: cipher },
+          ...(policy ? [{ provide: S3_KEY_ACCESS_POLICY, useValue: policy }] : []),
         ],
       }).compile();
       return {
@@ -871,6 +875,82 @@ describe("S3Service", () => {
         expect(signInput()).toMatchObject({ op: "get", key: "avatars/a.png" });
         expect(signInput().expiresAt).toBeUndefined();
         expect(signInput().expiresInSeconds).toBeUndefined();
+      });
+
+      describe("permanent links decided by the bound policy", () => {
+        const ID_DOC_KEY = "companies/c/id-documents/x/front.jpg";
+
+        it("isPublic for a key the policy rejects signs the windowed expiry instead", async () => {
+          const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(false) };
+          const { service: guarded } = await buildService(HOUR_WINDOW_CONFIG, policy);
+
+          await guarded.generateSignedUrl({ key: ID_DOC_KEY, isPublic: true });
+
+          expect(policy.isPermanentKey).toHaveBeenCalledWith(ID_DOC_KEY);
+          expect(signInput()).toMatchObject({ op: "get", key: ID_DOC_KEY });
+          expect(signInput().expiresAt).toBe(WINDOW_START + 3600 + 3600);
+        });
+
+        it("isPublic for a key the policy allows carries no expiry", async () => {
+          const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(true) };
+          const { service: guarded } = await buildService(HOUR_WINDOW_CONFIG, policy);
+
+          await guarded.generateSignedUrl({ key: ID_DOC_KEY, isPublic: true });
+
+          expect(signInput().expiresAt).toBeUndefined();
+        });
+
+        it("isPublic with no policy bound carries no expiry (unchanged)", async () => {
+          await apiService.generateSignedUrl({ key: ID_DOC_KEY, isPublic: true });
+
+          expect(signInput().expiresAt).toBeUndefined();
+        });
+
+        it("isPublic with a policy that has no isPermanentKey carries no expiry (unchanged)", async () => {
+          const { service: guarded } = await buildService(HOUR_WINDOW_CONFIG, { canAccess: vi.fn() });
+
+          await guarded.generateSignedUrl({ key: ID_DOC_KEY, isPublic: true });
+
+          expect(signInput().expiresAt).toBeUndefined();
+        });
+
+        it("a non-public link does not consult the policy", async () => {
+          const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(true) };
+          const { service: guarded } = await buildService(HOUR_WINDOW_CONFIG, policy);
+
+          await guarded.generateSignedUrl({ key: ID_DOC_KEY });
+
+          expect(policy.isPermanentKey).not.toHaveBeenCalled();
+          expect(signInput().expiresAt).toBe(WINDOW_START + 3600 + 3600);
+        });
+
+        it("S3ServiceModule resolves a policy published by a @Global() app module", async () => {
+          const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(false) };
+
+          // Same shape as the apps' S3KeyAccessModule: the package module never imports it.
+          @Global()
+          @Module({
+            providers: [
+              { provide: S3_KEY_ACCESS_POLICY, useValue: policy },
+              { provide: JsonApiService, useValue: createMockJsonApiService() },
+              { provide: ClsService, useValue: createMockClsService() },
+              { provide: ConfigService, useValue: createMockConfigService(HOUR_WINDOW_CONFIG) },
+              { provide: AppLoggingService, useValue: createMockAppLoggingService() },
+            ],
+            exports: [S3_KEY_ACCESS_POLICY, JsonApiService, ClsService, ConfigService, AppLoggingService],
+          })
+          class AppPolicyModule {}
+
+          const module = await Test.createTestingModule({ imports: [AppPolicyModule, S3ServiceModule] })
+            .overrideProvider(S3CipherService)
+            .useValue(cipher)
+            .compile();
+
+          await module.get(S3Service).generateSignedUrl({ key: ID_DOC_KEY, isPublic: true });
+
+          expect(policy.isPermanentKey).toHaveBeenCalledWith(ID_DOC_KEY);
+          expect(signInput().expiresAt).toBe(WINDOW_START + 3600 + 3600);
+        });
       });
 
       it("put tokens expire 3600 s from now, not windowed", async () => {

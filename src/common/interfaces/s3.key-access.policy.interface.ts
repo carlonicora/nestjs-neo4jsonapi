@@ -32,6 +32,19 @@ export interface S3KeyAccessParams {
  */
 export interface S3KeyAccessPolicy {
   canAccess(params: S3KeyAccessParams): boolean | Promise<boolean>;
+
+  /**
+   * Optional: whether `key` may be signed as a permanent (non-expiring) link.
+   *
+   * When implemented, `S3Service.generateSignedUrl` signs a normal expiring
+   * link for an `isPublic` request on a key this returns false for, and the
+   * object route refuses (401) a token without expiry for such a key. The rule
+   * applies to every caller, Administrators included.
+   *
+   * When absent (or no policy is bound), `isPublic` is honoured and permanent
+   * tokens are accepted for every key, as before.
+   */
+  isPermanentKey?(key: string): boolean;
 }
 
 /**

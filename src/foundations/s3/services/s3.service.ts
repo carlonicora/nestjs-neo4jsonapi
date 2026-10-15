@@ -12,10 +12,11 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { Readable, pipeline } from "stream";
 import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from "@azure/storage-blob";
 import type { BlobDownloadResponseParsed } from "@azure/storage-blob";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
+import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { BaseConfigInterface, ConfigApiInterface, ConfigS3Interface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -46,6 +47,9 @@ export class S3Service {
     private readonly configService: ConfigService<BaseConfigInterface>,
     private readonly logger: AppLoggingService,
     private readonly cipher: S3CipherService,
+    @Optional()
+    @Inject(S3_KEY_ACCESS_POLICY)
+    private readonly keyPolicy?: S3KeyAccessPolicy,
   ) {}
 
   private get s3Config(): ConfigS3Interface {
@@ -412,15 +416,23 @@ export class S3Service {
     // passes the rest through. The expiry is anchored to the start of the current signing window
     // so the same key yields the same URL for the whole window and browser/image caches can hit;
     // the window is added so the URL stays valid for at least the requested ttl from now.
-    // Public assets get no expiry.
+    // Public assets get no expiry, but only for keys the bound policy allows to be permanent: any
+    // other key silently gets a normal expiring link (serialisers call this and must not throw).
+    const permanent = params.isPublic === true && this._mayBePermanent(params.key);
     const token = this.cipher.signObjectToken({
       op: "get",
       key: params.key,
       filename: params.filename,
-      expiresAt: params.isPublic ? undefined : this._windowedExpiry(params.ttl ?? S3_OBJECT_TOKEN_TTL_SECONDS),
+      expiresAt: permanent ? undefined : this._windowedExpiry(params.ttl ?? S3_OBJECT_TOKEN_TTL_SECONDS),
     });
 
     return this._apiObjectUrl(token);
+  }
+
+  /** True unless a bound policy implements `isPermanentKey` and rejects `key`. */
+  private _mayBePermanent(key: string): boolean {
+    if (!this.keyPolicy?.isPermanentKey) return true;
+    return this.keyPolicy.isPermanentKey(key);
   }
 
   /** Unix seconds: start of the current signing window + ttl + window (`s3.signingWindowSeconds`, default 3600). */

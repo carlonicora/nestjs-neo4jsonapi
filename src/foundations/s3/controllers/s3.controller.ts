@@ -247,6 +247,15 @@ export class S3Controller {
     }
     // Only the server signs tokens, but a signed key must still be one the logged-in routes accept.
     if (!isWellFormedS3Key(payload.k)) throw new BadRequestException("Invalid S3 key");
+    // A permanent (non-expiring) download link is honoured only for keys the bound policy allows to
+    // be permanent: this stops already-issued permanent links to sensitive files.
+    if (
+      op === "get" &&
+      payload.e === undefined &&
+      this.keyPolicy?.isPermanentKey &&
+      !this.keyPolicy.isPermanentKey(payload.k)
+    )
+      throw new UnauthorizedException("Permanent object token not allowed for this key");
     return payload;
   }
 }

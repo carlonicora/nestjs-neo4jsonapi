@@ -179,7 +179,7 @@ function generateS3TransformCode(fieldName: string, isArray: boolean): string {
         return Promise.all(
           data.${fieldName}.map(async (url: string) => {
             if (url.startsWith("~")) return url.substring(1);
-            return services.S3Service.generateSignedUrl({ key: url, isPublic: true });
+            return services.S3Service.generateSignedUrl({ key: url });
           }),
         );
       }`;
@@ -188,7 +188,7 @@ function generateS3TransformCode(fieldName: string, isArray: boolean): string {
     return `async (data, services) => {
         if (!data.${fieldName}) return undefined;
         if (data.${fieldName}.startsWith("~")) return data.${fieldName}.substring(1);
-        return await services.S3Service.generateSignedUrl({ key: data.${fieldName}, isPublic: true });
+        return await services.S3Service.generateSignedUrl({ key: data.${fieldName} });
       }`;
   }
 }

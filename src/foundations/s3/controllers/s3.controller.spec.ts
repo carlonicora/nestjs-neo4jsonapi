@@ -374,6 +374,97 @@ describe("S3Controller", () => {
     });
   });
 
+  describe("permanent get tokens and the bound policy", () => {
+    const ID_DOC_KEY = "companies/c/id-documents/x/front.jpg";
+    const makeReply = () => ({
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
+      removeHeader: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+    });
+
+    const build = async (policy?: Partial<S3KeyAccessPolicy>) => {
+      const verifyObjectToken = vi.fn();
+      const service = {
+        downloadObject: vi.fn().mockResolvedValue({ stream: Readable.from(["data"]), contentType: "image/jpeg" }),
+        contentDispositionAttachment: vi.fn(),
+        contentDispositionInline: vi.fn(),
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [S3Controller],
+        providers: [
+          { provide: S3Service, useValue: service },
+          { provide: ClsService, useValue: mockClsService },
+          { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken } },
+          { provide: ConfigService, useValue: mockConfigService },
+          ...(policy ? [{ provide: S3_KEY_ACCESS_POLICY, useValue: policy }] : []),
+        ],
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
+      return { ctrl: module.get<S3Controller>(S3Controller), verifyObjectToken, service };
+    };
+
+    it("refuses a token without expiry whose key the policy rejects (401)", async () => {
+      const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(false) };
+      const { ctrl, verifyObjectToken, service } = await build(policy);
+      verifyObjectToken.mockReturnValue({ o: "get", k: ID_DOC_KEY });
+      const reply = makeReply();
+
+      await expect(ctrl.getObject(reply as any, "token")).rejects.toThrow(
+        new UnauthorizedException("Permanent object token not allowed for this key"),
+      );
+      expect(policy.isPermanentKey).toHaveBeenCalledWith(ID_DOC_KEY);
+      expect(service.downloadObject).not.toHaveBeenCalled();
+      expect(reply.send).not.toHaveBeenCalled();
+    });
+
+    it("streams a token without expiry when no policy is bound (unchanged)", async () => {
+      const { ctrl, verifyObjectToken, service } = await build();
+      verifyObjectToken.mockReturnValue({ o: "get", k: ID_DOC_KEY });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: ID_DOC_KEY });
+      expect(reply.send).toHaveBeenCalled();
+    });
+
+    it("streams a token without expiry when the policy has no isPermanentKey (unchanged)", async () => {
+      const { ctrl, verifyObjectToken, service } = await build({ canAccess: vi.fn() });
+      verifyObjectToken.mockReturnValue({ o: "get", k: ID_DOC_KEY });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: ID_DOC_KEY });
+    });
+
+    it("streams a token without expiry whose key the policy allows", async () => {
+      const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(true) };
+      const { ctrl, verifyObjectToken, service } = await build(policy);
+      verifyObjectToken.mockReturnValue({ o: "get", k: "howtos/slug/01.png" });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: "howtos/slug/01.png" });
+    });
+
+    it("streams an expiring token even when the policy rejects the key as permanent", async () => {
+      const policy = { canAccess: vi.fn(), isPermanentKey: vi.fn().mockReturnValue(false) };
+      const { ctrl, verifyObjectToken, service } = await build(policy);
+      verifyObjectToken.mockReturnValue({ o: "get", k: ID_DOC_KEY, e: Math.floor(Date.now() / 1000) + 3600 });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: ID_DOC_KEY });
+      expect(reply.send).toHaveBeenCalled();
+    });
+  });
+
   describe("object token routes", () => {
     const makeReply = () => ({
       status: vi.fn().mockReturnThis(),

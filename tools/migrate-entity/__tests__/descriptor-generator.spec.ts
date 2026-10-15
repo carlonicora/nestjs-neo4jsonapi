@@ -434,7 +434,7 @@ describe("descriptor-generator", () => {
       // Check for single URL transform pattern with tilde prefix handling
       expect(result.code).toContain("if (!data.url) return undefined;");
       expect(result.code).toContain('if (data.url.startsWith("~")) return data.url.substring(1);');
-      expect(result.code).toContain("services.S3Service.generateSignedUrl({ key: data.url, isPublic: true })");
+      expect(result.code).toContain("services.S3Service.generateSignedUrl({ key: data.url })");
     });
 
     it("should generate array URL transform correctly", () => {
@@ -447,7 +447,7 @@ describe("descriptor-generator", () => {
       expect(result.code).toContain("if (!data.samplePhotographs?.length) return [];");
       expect(result.code).toContain("data.samplePhotographs.map(async (url: string) => {");
       expect(result.code).toContain('if (url.startsWith("~")) return url.substring(1);');
-      expect(result.code).toContain("services.S3Service.generateSignedUrl({ key: url, isPublic: true })");
+      expect(result.code).toContain("services.S3Service.generateSignedUrl({ key: url })");
     });
   });
 
