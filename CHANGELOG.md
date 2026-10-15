@@ -1,3 +1,15 @@
+## [5.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.18.0...v5.0.0) (2026-10-15)
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** every unscoped described entity descriptor must declare `tenancy`;
+`UserModulesRepository.findModuleIdsForUser` takes `(userId, companyId)`;
+`coerceSort` returns `{ sort } | { error }`; `MatchMode` gains "substring".
+
+### 🚀 Features
+
+* **mcp:** tenancy rule for unscoped entities, strict graph-tool filters, fair cross-source ranking ([64773a9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/64773a9471f5fa67e581407b3b641547e88829d2))
+
 ## [4.18.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v4.17.3...v4.18.0) (2026-10-14)
 
 ### 🚀 Features
