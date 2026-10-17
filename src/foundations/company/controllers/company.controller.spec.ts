@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -38,9 +38,9 @@ import { CompanyController } from "./company.controller";
 
 describe("CompanyController", () => {
   let controller: CompanyController;
-  let companyService: vi.Mocked<CompanyService>;
-  let cacheService: vi.Mocked<CacheService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let companyService: Mocked<CompanyService>;
+  let cacheService: Mocked<CacheService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const MOCK_COMPANY_ID = "550e8400-e29b-41d4-a716-446655440000";

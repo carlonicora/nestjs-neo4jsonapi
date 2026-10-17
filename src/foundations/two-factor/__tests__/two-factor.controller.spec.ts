@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -25,11 +25,11 @@ import { PendingAuthGuard } from "../guards/pending-auth.guard";
 
 describe("TwoFactorController", () => {
   let controller: TwoFactorController;
-  let mockTwoFactorService: vi.Mocked<TwoFactorService>;
-  let mockPasskeyService: vi.Mocked<PasskeyService>;
-  let mockBackupCodeService: vi.Mocked<BackupCodeService>;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockAuthService: vi.Mocked<AuthService>;
+  let mockTwoFactorService: Mocked<TwoFactorService>;
+  let mockPasskeyService: Mocked<PasskeyService>;
+  let mockBackupCodeService: Mocked<BackupCodeService>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockAuthService: Mocked<AuthService>;
 
   const TEST_IDS = {
     userId: "user-123",

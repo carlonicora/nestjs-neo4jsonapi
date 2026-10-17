@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -36,7 +36,7 @@ const companyMeta = {
 
 describe("StripeCustomerRepository", () => {
   let repository: StripeCustomerRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
@@ -48,6 +48,7 @@ describe("StripeCustomerRepository", () => {
 
   const MOCK_STRIPE_CUSTOMER: StripeCustomer = {
     id: TEST_IDS.customerId,
+    type: "stripe-customers",
     stripeCustomerId: TEST_IDS.stripeCustomerId,
     email: "test@example.com",
     name: "Test Customer",
@@ -62,7 +63,7 @@ describe("StripeCustomerRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   beforeEach(async () => {
@@ -83,7 +84,7 @@ describe("StripeCustomerRepository", () => {
     }).compile();
 
     repository = module.get<StripeCustomerRepository>(StripeCustomerRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     // Reset mocks before each test
     vi.clearAllMocks();

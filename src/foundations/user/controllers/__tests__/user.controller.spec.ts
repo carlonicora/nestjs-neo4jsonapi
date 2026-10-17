@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -40,6 +40,7 @@ import { FastifyReply } from "fastify";
 import { ClsService } from "nestjs-cls";
 import { RoleId } from "../../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "../../../../common/interfaces/authenticated.request.interface";
+import type { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { CacheService } from "../../../../core/cache/services/cache.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { CompanyService } from "../../../company/services/company.service";
@@ -50,14 +51,14 @@ import { UserController } from "../user.controller";
 
 describe("UserController", () => {
   let controller: UserController;
-  let userService: vi.Mocked<UserService>;
-  let securityService: vi.Mocked<SecurityService>;
-  let companyService: vi.Mocked<CompanyService>;
-  let cacheService: vi.Mocked<CacheService>;
-  let clsService: vi.Mocked<ClsService>;
-  let relevancyService: vi.Mocked<RelevancyService<any>>;
-  let cypherService: vi.Mocked<UserCypherService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let userService: Mocked<UserService>;
+  let securityService: Mocked<SecurityService>;
+  let companyService: Mocked<CompanyService>;
+  let cacheService: Mocked<CacheService>;
+  let clsService: Mocked<ClsService>;
+  let relevancyService: Mocked<RelevancyService<any>>;
+  let cypherService: Mocked<UserCypherService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const TEST_IDS = {
@@ -68,20 +69,20 @@ describe("UserController", () => {
     contentId: "880e8400-e29b-41d4-a716-446655440001",
   };
 
-  const MOCK_USER_RESPONSE = {
-    data: {
-      type: "users",
-      id: TEST_IDS.userId,
-      attributes: {
-        email: "test@example.com",
-        firstName: "Test",
-        lastName: "User",
-      },
+  // The service methods are declared to return JsonApiDataInterface, so the
+  // pass-through fixtures take that shape.
+  const MOCK_USER_RESPONSE: JsonApiDataInterface = {
+    type: "users",
+    id: TEST_IDS.userId,
+    attributes: {
+      email: "test@example.com",
+      firstName: "Test",
+      lastName: "User",
     },
   };
 
-  const MOCK_USERS_LIST_RESPONSE = {
-    data: [MOCK_USER_RESPONSE.data],
+  const MOCK_USERS_LIST_RESPONSE: JsonApiDataInterface = {
+    ...MOCK_USER_RESPONSE,
     meta: { total: 1 },
   };
 
@@ -99,17 +100,17 @@ describe("UserController", () => {
         roles: isAdmin ? [{ id: RoleId.Administrator, name: "Administrator" }] : [],
       },
       params,
-    } as AuthenticatedRequest;
+    } as unknown as AuthenticatedRequest;
   };
 
   // Create a mock Fastify reply
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     const reply = {
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
       header: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
     return reply;
   };
 

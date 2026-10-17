@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { ScopeGuard } from "../scope.guard";
+
+// buildMatchClause never reads the database; the guard still needs the dependency.
+const unusedNeo4j = { read: vi.fn() } as unknown as Neo4jService;
 
 const transcriptSegment = {
   type: "transcript-segments",
@@ -78,7 +82,7 @@ const unscopedCtx = { companyId: "c", userId: "u", userModuleIds: [] };
 
 describe("ScopeGuard.buildMatchClause", () => {
   it("emits a parameterised EXISTS chain for a three-hop scope", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any, unusedNeo4j);
     const result = guard.buildMatchClause({ entity: transcriptSegment, ctx: scopedCtx, nodeAlias: "node" })!;
 
     expect(result.cypher.replace(/\s+/g, " ").trim()).toBe(
@@ -89,13 +93,13 @@ describe("ScopeGuard.buildMatchClause", () => {
   });
 
   it("reverses the arrow for an inbound hop", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => npcInbound } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => npcInbound } as any, unusedNeo4j);
     const result = guard.buildMatchClause({ entity: npcInbound, ctx: scopedCtx, nodeAlias: "node" })!;
     expect(result.cypher).toContain("(node)<-[:OWNS]-(:Campaign { id: $scopeId })");
   });
 
   it("emits an alternation for an inline out hop", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => userInline } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => userInline } as any, unusedNeo4j);
     const ctx = { ...scopedCtx, scopeId: "p-1", scopeType: "proceedings" };
     const result = guard.buildMatchClause({ entity: userInline, ctx, nodeAlias: "node" })!;
     expect(result.cypher).toContain("-[:WORKS_ON|OWNS_PROCEEDING]->(:Proceeding { id: $scopeId })");
@@ -103,7 +107,7 @@ describe("ScopeGuard.buildMatchClause", () => {
   });
 
   it("returns an empty clause (no constraint) for a scopeShared entity in a scoped run", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => sharedLaw } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => sharedLaw } as any, unusedNeo4j);
     expect(guard.buildMatchClause({ entity: sharedLaw, ctx: scopedCtx, nodeAlias: "node" })).toEqual({
       cypher: "",
       params: {},
@@ -111,12 +115,12 @@ describe("ScopeGuard.buildMatchClause", () => {
   });
 
   it("returns null when the run is unscoped", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any, unusedNeo4j);
     expect(guard.buildMatchClause({ entity: transcriptSegment, ctx: unscopedCtx, nodeAlias: "node" })).toBeNull();
   });
 
   it("returns null when the entity's root type is not the run's scope type", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => transcriptSegment } as any, unusedNeo4j);
     const otherRoot = { ...scopedCtx, scopeType: "tenants" };
     expect(guard.buildMatchClause({ entity: transcriptSegment, ctx: otherRoot, nodeAlias: "node" })).toBeNull();
   });
@@ -206,7 +210,7 @@ describe("ScopeGuard on a viaService type", () => {
   });
 
   it("buildMatchClause returns null for a viaService type in a scoped run", () => {
-    const guard = new ScopeGuard({ getEntityDetail: () => massima } as any);
+    const guard = new ScopeGuard({ getEntityDetail: () => massima } as any, unusedNeo4j);
     expect(guard.buildMatchClause({ entity: massima, ctx: scopedCtx, nodeAlias: "node" })).toBeNull();
   });
 });

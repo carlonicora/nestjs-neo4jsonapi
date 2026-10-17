@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -106,8 +106,8 @@ vi.mock("../openrouter-fetch", () => ({
 
 describe("LLMService", () => {
   let service: LLMService;
-  let mockModelService: vi.Mocked<ModelService>;
-  let mockConfigService: vi.Mocked<ConfigService>;
+  let mockModelService: Mocked<ModelService>;
+  let mockConfigService: Mocked<ConfigService>;
   let mockLLM: any;
   let mockStructuredLLM: any;
 

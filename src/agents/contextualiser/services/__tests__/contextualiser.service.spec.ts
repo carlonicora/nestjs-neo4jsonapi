@@ -12,6 +12,9 @@ import { ChunkNodeService } from "../../nodes/chunk.node.service";
 import { ChunkVectorNodeService } from "../../nodes/chunk.vector.node.service";
 import { TracingService } from "../../../../core/tracing/services/tracing.service";
 import { ContextualiserContextState } from "../../contexts/contextualiser.context";
+import { DataLimits } from "../../../../common/types/data.limits";
+import { MessageInterface } from "../../../../common/interfaces/message.interface";
+import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 
 // Create mock invoke function that can be controlled by tests
 const mockInvoke = vi.fn();
@@ -161,7 +164,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -192,8 +195,8 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
-        messages: [{ role: "user", content: "Hello" }],
+        dataLimits: {},
+        messages: [{ type: AgentMessageType.User, content: "Hello" }],
         question: "What is this?",
       });
 
@@ -215,8 +218,8 @@ describe("ContextualiserService", () => {
       contextFactory.create.mockReturnValue(initialState);
       mockInvoke.mockResolvedValue(initialState);
 
-      const dataLimits = { keyConcepts: 10, atomicFacts: 20, chunks: 5 };
-      const messages = [{ role: "user", content: "Hello" }];
+      const dataLimits: DataLimits = {};
+      const messages: MessageInterface[] = [{ type: AgentMessageType.User, content: "Hello" }];
 
       // Act
       await service.run({
@@ -247,7 +250,7 @@ describe("ContextualiserService", () => {
       const initialState = createMockInitialState();
       const finalState = createMockInitialState({
         hops: 5,
-        context: "Final context",
+        annotations: "Final context",
       });
       contextFactory.create.mockReturnValue(initialState);
       mockInvoke.mockResolvedValue(finalState);
@@ -257,7 +260,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -277,7 +280,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -300,7 +303,7 @@ describe("ContextualiserService", () => {
           companyId: TEST_IDS.companyId,
           contentId: TEST_IDS.contentId,
           contentType: "Document",
-          dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+          dataLimits: {},
           messages: [],
           question: "What is this?",
         }),
@@ -321,7 +324,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         // question is undefined
       });
@@ -348,7 +351,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -369,7 +372,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -392,7 +395,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });
@@ -418,7 +421,7 @@ describe("ContextualiserService", () => {
         companyId: TEST_IDS.companyId,
         contentId: TEST_IDS.contentId,
         contentType: "Document",
-        dataLimits: { keyConcepts: 10, atomicFacts: 20, chunks: 5 },
+        dataLimits: {},
         messages: [],
         question: "What is this?",
       });

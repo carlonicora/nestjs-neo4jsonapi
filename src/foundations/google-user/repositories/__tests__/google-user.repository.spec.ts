@@ -43,7 +43,7 @@ describe("GoogleUserRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_GOOGLE_USER: GoogleUser = {
@@ -152,7 +152,7 @@ describe("GoogleUserRepository", () => {
         neo4jService.initQuery.mockReturnValue(mockQuery);
         neo4jService.readMany.mockResolvedValue([]);
 
-        const cursor = { limit: 10, offset: 0 };
+        const cursor = { cursor: 0, take: 10 };
         await repository.find({ cursor, fetchAll: true });
 
         expect(neo4jService.initQuery).toHaveBeenCalledWith(

@@ -3,7 +3,7 @@ import { PlannerNodeService } from "../planner.node.service";
 
 describe("PlannerNodeService seed titles", () => {
   it("passes the seed context titles to the planner LLM", async () => {
-    const call = vi.fn(async () => ({
+    const call = vi.fn(async (_params: Record<string, unknown>) => ({
       runGraph: true,
       runContextualiser: false,
       runDrift: false,

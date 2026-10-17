@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HealthCheckError } from "@nestjs/terminus";
 import { Neo4jHealthIndicator } from "../indicators/neo4j.health";
@@ -6,7 +6,7 @@ import { Neo4jService } from "../../neo4j/services/neo4j.service";
 
 describe("Neo4jHealthIndicator", () => {
   let indicator: Neo4jHealthIndicator;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   beforeEach(async () => {
     const mockNeo4jService = {
@@ -78,8 +78,16 @@ describe("Neo4jHealthIndicator", () => {
           }),
       );
 
-      await expect(indicator.isHealthy("neo4j")).rejects.toThrow(HealthCheckError);
-    }, 10000);
+      // Fake clock: the indicator's 3s race timeout fires without waiting it out.
+      vi.useFakeTimers();
+      try {
+        const assertion = expect(indicator.isHealthy("neo4j")).rejects.toThrow(HealthCheckError);
+        await vi.advanceTimersByTimeAsync(3000);
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
 
     it("should handle non-Error exceptions", async () => {
       neo4jService.read.mockRejectedValue("String error");

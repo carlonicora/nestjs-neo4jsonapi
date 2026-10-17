@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -38,15 +38,16 @@ import { StripeCustomerAdminService } from "../../services/stripe-customer-admin
 import { StripeCustomerApiService } from "../../services/stripe-customer-api.service";
 import { StripeCustomerRepository } from "../../repositories/stripe-customer.repository";
 import { JsonApiService } from "../../../../core/jsonapi";
+import { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 
 describe("StripeCustomerController", () => {
   let controller: StripeCustomerController;
-  let adminService: vi.Mocked<StripeCustomerAdminService>;
-  let apiService: vi.Mocked<StripeCustomerApiService>;
-  let repository: vi.Mocked<StripeCustomerRepository>;
-  let jsonApiService: vi.Mocked<JsonApiService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let adminService: Mocked<StripeCustomerAdminService>;
+  let apiService: Mocked<StripeCustomerApiService>;
+  let repository: Mocked<StripeCustomerRepository>;
+  let jsonApiService: Mocked<JsonApiService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const TEST_IDS = {
@@ -70,6 +71,7 @@ describe("StripeCustomerController", () => {
     updatedAt: new Date(),
   };
 
+  // StripeCustomerAdminService declares Promise<JsonApiDataInterface>, but returns a JSON:API document ({ data: ... }).
   const MOCK_CUSTOMER_RESPONSE = {
     data: {
       type: "stripe-customers",
@@ -83,7 +85,7 @@ describe("StripeCustomerController", () => {
         delinquent: false,
       },
     },
-  };
+  } as unknown as JsonApiDataInterface;
 
   const MOCK_PAYMENT_METHODS_RESPONSE = {
     data: [
@@ -115,13 +117,13 @@ describe("StripeCustomerController", () => {
   };
 
   // Create a mock Fastify reply
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     const reply = {
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
       header: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
     return reply;
   };
 

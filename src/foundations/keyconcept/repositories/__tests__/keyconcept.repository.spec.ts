@@ -107,7 +107,7 @@ describe("KeyConceptRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_KEY_CONCEPT: KeyConcept = {

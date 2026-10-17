@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { StripeProductAdminService } from "../stripe-product-admin.service";
@@ -6,16 +6,18 @@ import { StripeProductRepository } from "../../repositories/stripe-product.repos
 import { StripeProductApiService } from "../stripe-product-api.service";
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeProduct } from "../../entities/stripe-product.entity";
+import { stripeProductMeta } from "../../entities/stripe-product.meta";
 import Stripe from "stripe";
 
 describe("StripeProductAdminService", () => {
   let service: StripeProductAdminService;
-  let repository: vi.Mocked<StripeProductRepository>;
-  let apiService: vi.Mocked<StripeProductApiService>;
-  let jsonApiService: vi.Mocked<JsonApiService>;
+  let repository: Mocked<StripeProductRepository>;
+  let apiService: Mocked<StripeProductApiService>;
+  let jsonApiService: Mocked<JsonApiService>;
 
   const mockProduct: StripeProduct = {
     id: "test-uuid-123",
+    type: stripeProductMeta.type,
     stripeProductId: "prod_test_123",
     name: "Test Product",
     description: "Test Description",
@@ -34,12 +36,14 @@ describe("StripeProductAdminService", () => {
     description: "Test Description",
     images: [],
     livemode: false,
+    marketing_features: [],
     metadata: {},
     name: "Test Product",
     package_dimensions: null,
     shippable: null,
     statement_descriptor: null,
     tax_code: null,
+    type: "service",
     unit_label: null,
     updated: 1234567890,
     url: null,

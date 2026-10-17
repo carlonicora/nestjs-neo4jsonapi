@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UserDescriptor } from "../user";
+import type { RelationshipDef } from "../../../../common/interfaces/entity.schema.interface";
 
 describe("UserDescriptor security surface", () => {
   it("never indexes secrets in the fulltext search fields", () => {
@@ -20,7 +21,10 @@ describe("UserDescriptor security surface", () => {
   });
 
   it("leaves the other user relationships writable", () => {
-    expect(UserDescriptor.relationships.company.readOnly).toBeUndefined();
-    expect(UserDescriptor.relationships.module.readOnly).toBeUndefined();
+    // Widen to RelationshipDef: the inferred literal types omit the optional readOnly key.
+    const company: RelationshipDef = UserDescriptor.relationships.company;
+    const module: RelationshipDef = UserDescriptor.relationships.module;
+    expect(company.readOnly).toBeUndefined();
+    expect(module.readOnly).toBeUndefined();
   });
 });

@@ -12,6 +12,7 @@ import { SearchDocumentsTool } from "../search-documents.tool";
 import { SearchCommunitiesTool } from "../search-communities.tool";
 import { OperatorTestActionTool } from "../operator-test-action.tool";
 import { OperatorToolRegistry } from "../operator.tool.registry";
+import { ScopeGuard } from "../../../graph/services/scope.guard";
 
 // `baseConfig` is a module-level constant captured when the config module is
 // first imported, so a test that mutates `process.env` afterwards would never
@@ -32,6 +33,9 @@ vi.mock("../../../../config/base.config", async (importOriginal) => {
 
 // Real capture wrapper, dependencies unused by capture().
 const factory = new ToolFactory({} as any, {} as any);
+
+// Never reached: `ctx` carries no scopeId, so search_documents skips the scope filter.
+const scopeGuard = { filter: vi.fn() } as unknown as ScopeGuard;
 
 const ctx: OperatorRetrievalContext = {
   companyId: "company-1",
@@ -67,7 +71,7 @@ describe("SearchDocumentsTool", () => {
 
   it("invokes ContextualiserService with the responder-parity params", async () => {
     const run = vi.fn().mockResolvedValue(contextualiserState);
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: ToolCallRecord[] = [];
 
     await tool.invoke({ question: "When did Acme sign?" }, ctx, recorder);
@@ -93,7 +97,7 @@ describe("SearchDocumentsTool", () => {
 
   it("defaults contentId/contentType to empty strings like the responder branch", async () => {
     const run = vi.fn().mockResolvedValue(contextualiserState);
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
 
     await tool.invoke({ question: "q" }, { ...ctx, contentId: undefined, contentType: undefined }, []);
 
@@ -102,7 +106,7 @@ describe("SearchDocumentsTool", () => {
 
   it("returns the retrieved answer text and records chunk citations into the recorder", async () => {
     const run = vi.fn().mockResolvedValue(contextualiserState);
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: OperatorToolCallRecord[] = [];
 
     const answer = await tool.invoke({ question: "When did Acme sign?" }, ctx, recorder);
@@ -119,7 +123,7 @@ describe("SearchDocumentsTool", () => {
 
   it("returns a no-information message when the notebook is empty, without citations", async () => {
     const run = vi.fn().mockResolvedValue({ ...contextualiserState, notebook: [] });
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: OperatorToolCallRecord[] = [];
 
     const answer = await tool.invoke({ question: "q" }, ctx, recorder);
@@ -132,7 +136,7 @@ describe("SearchDocumentsTool", () => {
   it("attaches citations to its own record even when a foreign record interleaves mid-flight", async () => {
     let resolveRun!: (state: unknown) => void;
     const run = vi.fn().mockReturnValue(new Promise((resolve) => (resolveRun = resolve)));
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: OperatorToolCallRecord[] = [];
 
     const pending = tool.invoke({ question: "When did Acme sign?" }, ctx, recorder);
@@ -152,7 +156,7 @@ describe("SearchDocumentsTool", () => {
 
   it("records the failure in the recorder when the contextualiser throws", async () => {
     const run = vi.fn().mockRejectedValue(new Error("boom"));
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: ToolCallRecord[] = [];
 
     await expect(tool.invoke({ question: "q" }, ctx, recorder)).rejects.toThrow("boom");
@@ -162,7 +166,7 @@ describe("SearchDocumentsTool", () => {
 
   it("build() produces a DynamicStructuredTool named search_documents returning the answer text", async () => {
     const run = vi.fn().mockResolvedValue(contextualiserState);
-    const tool = new SearchDocumentsTool(factory, { run } as any);
+    const tool = new SearchDocumentsTool(factory, { run } as any, scopeGuard);
     const recorder: ToolCallRecord[] = [];
 
     const dst = tool.build(ctx, recorder);
@@ -259,7 +263,7 @@ describe("OperatorToolRegistry", () => {
       stubGraphTool("search_entities"),
       stubGraphTool("read_entity"),
       stubGraphTool("traverse"),
-      new SearchDocumentsTool(factory, contextualiser),
+      new SearchDocumentsTool(factory, contextualiser, scopeGuard),
       new SearchCommunitiesTool(factory, drift),
       new OperatorTestActionTool(factory),
       contributed,

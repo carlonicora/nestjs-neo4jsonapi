@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { LLMService } from "../llm.service";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 import { ModelWeight } from "../../enums/model.weight";
 
 describe("LLMService.call modelWeight", () => {
@@ -42,7 +43,9 @@ describe("LLMService.call modelWeight", () => {
       get: () => ({ ai: { model: "large-model", provider: "openrouter" }, aiLite: {}, aiLarge: {} }),
     };
 
-    const svc = new LLMService(modelService, config, dumper);
+    const tokenUsageService = { computeCost: vi.fn(), recordTokenUsage: vi.fn() } as unknown as TokenUsageService;
+
+    const svc = new LLMService(modelService, config, dumper, tokenUsageService);
 
     const result = await svc.call<{ value: string }>({
       inputParams: {},
@@ -87,7 +90,9 @@ describe("LLMService.call modelWeight", () => {
     const dumper: any = { startSession: vi.fn().mockReturnValue(session) };
     const config: any = { get: () => ({ ai: { model: "m", provider: "openrouter" }, aiLite: {}, aiLarge: {} }) };
 
-    const svc = new LLMService(modelService, config, dumper);
+    const tokenUsageService = { computeCost: vi.fn(), recordTokenUsage: vi.fn() } as unknown as TokenUsageService;
+
+    const svc = new LLMService(modelService, config, dumper, tokenUsageService);
     const result = await svc.call<{ value: string }>({
       inputParams: {},
       outputSchema: z.object({ value: z.string() }),

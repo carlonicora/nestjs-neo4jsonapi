@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ContextualiserContextState } from "../../contexts/contextualiser.context";
+import { ContextualiserContextState, ContextualiserGraphState } from "../../contexts/contextualiser.context";
 import { RetrievalSourceContribution } from "../../interfaces/retrieval.source.interface";
 import { ChunkVectorNodeService } from "../chunk.vector.node.service";
 import { modelRegistry } from "../../../../common/registries/registry";
@@ -7,7 +7,7 @@ import { modelRegistry } from "../../../../common/registries/registry";
 const MOCK_COMPANY_ID = "550e8400-e29b-41d4-a716-446655440000";
 const MOCK_CONTENT_ID = "660e8400-e29b-41d4-a716-446655440001";
 
-const createState = (overrides?: Partial<ContextualiserContextState>): ContextualiserContextState =>
+const createState = (overrides?: Partial<ContextualiserContextState>): ContextualiserGraphState =>
   ({
     companyId: MOCK_COMPANY_ID,
     contentId: MOCK_CONTENT_ID,
@@ -22,7 +22,7 @@ const createState = (overrides?: Partial<ContextualiserContextState>): Contextua
     nextStep: "key_concepts",
     tokens: { input: 0, output: 0 },
     ...overrides,
-  }) as ContextualiserContextState;
+  }) as ContextualiserGraphState;
 
 describe("ChunkVectorNodeService", () => {
   let chunkRepository: {
@@ -186,7 +186,7 @@ describe("chunk_vector embedding reuse", () => {
   const MOCK_COMPANY_ID_2 = "550e8400-e29b-41d4-a716-446655440000";
   const MOCK_CONTENT_ID_2 = "660e8400-e29b-41d4-a716-446655440001";
 
-  const createState2 = (overrides?: Partial<ContextualiserContextState>): ContextualiserContextState =>
+  const createState2 = (overrides?: Partial<ContextualiserContextState>): ContextualiserGraphState =>
     ({
       companyId: MOCK_COMPANY_ID_2,
       contentId: MOCK_CONTENT_ID_2,
@@ -201,7 +201,7 @@ describe("chunk_vector embedding reuse", () => {
       nextStep: "key_concepts",
       tokens: { input: 0, output: 0 },
       ...overrides,
-    }) as ContextualiserContextState;
+    }) as ContextualiserGraphState;
 
   let chunkRepository: {
     findPotentialChunks: ReturnType<typeof vi.fn>;

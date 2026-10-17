@@ -46,4 +46,40 @@ describe("HandbookAiSourceQueryProvider", () => {
     expect(result.cypher).not.toContain("page-1");
     expect(result.params).toEqual({ limitToHandbookPageId: "page-1" });
   });
+
+  describe("bindRequestContext: false", () => {
+    const unbound = { bindsRequestContext: false };
+    const companyInner = () => ({
+      build: vi.fn(() => ({ cypher: "MATCH (data)-[:BELONGS_TO]->(company)\n      WITH data", params: {} })),
+    });
+
+    it("refuses an inner fragment that uses the unbound company", () => {
+      const provider = new HandbookAiSourceQueryProvider(companyInner() as any, unbound as any);
+      expect(() => provider.build({ dataLimits: {} as any, returnsData: true })).toThrow(/bindRequestContext: false/);
+    });
+
+    it("refuses an inner fragment that uses the unbound currentUser", () => {
+      const inner = { build: vi.fn(() => ({ cypher: "MATCH (data)<-[:OWNS]-(currentUser)", params: {} })) };
+      const provider = new HandbookAiSourceQueryProvider(inner as any, unbound as any);
+      expect(() => provider.build({ dataLimits: {} as any, returnsData: true })).toThrow(/bindRequestContext: false/);
+    });
+
+    it("lets a global fragment through", () => {
+      const inner = { build: vi.fn(() => ({ cypher: "MATCH (data:HowTo)\n      WITH data", params: {} })) };
+      const provider = new HandbookAiSourceQueryProvider(inner as any, unbound as any);
+      expect(provider.build({ dataLimits: { howToMode: true } as any, returnsData: true }).cypher).toContain("HowTo");
+    });
+
+    it("still serves handbook mode", () => {
+      const provider = new HandbookAiSourceQueryProvider(companyInner() as any, unbound as any);
+      expect(provider.build({ dataLimits: { handbookMode: true }, returnsData: true }).cypher).toContain(
+        "HandbookPage",
+      );
+    });
+
+    it("keeps the company fragment when the request context is bound", () => {
+      const provider = new HandbookAiSourceQueryProvider(companyInner() as any, { bindsRequestContext: true } as any);
+      expect(provider.build({ dataLimits: {} as any, returnsData: true }).cypher).toContain("(company)");
+    });
+  });
 });

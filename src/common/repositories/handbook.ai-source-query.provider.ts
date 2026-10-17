@@ -1,4 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../core/security/services/security.service";
 import { DataLimits } from "../types/data.limits";
 import { AiSourceQueryProvider, AiSourceQueryResult } from "./ai-source-query.provider";
@@ -22,10 +23,17 @@ export const INNER_AI_SOURCE_QUERY = Symbol("INNER_AI_SOURCE_QUERY");
  * Handbook content is GLOBAL: HandbookPage nodes have no BELONGS_TO Company
  * edge, so the fragment carries no company filter, exactly as the HowTo branch
  * of DefaultAiSourceQueryProvider does.
+ *
+ * It also refuses an inner fragment that uses the request's `company` or
+ * `currentUser` when the app's Neo4j config sets `bindRequestContext: false`:
+ * initQuery does not bind them there, so `(company)` would match every company.
  */
 @Injectable()
 export class HandbookAiSourceQueryProvider implements AiSourceQueryProvider {
-  constructor(@Inject(INNER_AI_SOURCE_QUERY) private readonly inner: AiSourceQueryProvider) {}
+  constructor(
+    @Inject(INNER_AI_SOURCE_QUERY) private readonly inner: AiSourceQueryProvider,
+    @Optional() private readonly neo4j?: Neo4jService,
+  ) {}
 
   build(params: {
     dataLimits: DataLimits;
@@ -36,7 +44,14 @@ export class HandbookAiSourceQueryProvider implements AiSourceQueryProvider {
   }): AiSourceQueryResult {
     const { handbookMode, limitToHandbookPageId } = params.dataLimits;
 
-    if (!handbookMode && !limitToHandbookPageId) return this.inner.build(params);
+    if (!handbookMode && !limitToHandbookPageId) {
+      const result = this.inner.build(params);
+      if (this.neo4j?.bindsRequestContext === false && /\((company|currentUser)\)/.test(result.cypher))
+        throw new Error(
+          "AI source query uses the request's company or user, but this app's Neo4j config sets bindRequestContext: false.",
+        );
+      return result;
+    }
 
     const withClause = params.returnsKeyConcepts ? "WITH keyconcept" : "WITH data";
     const where = limitToHandbookPageId ? `\n      WHERE data.id = $limitToHandbookPageId` : "";

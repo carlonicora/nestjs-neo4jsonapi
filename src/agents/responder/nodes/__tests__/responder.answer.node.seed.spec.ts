@@ -37,7 +37,9 @@ describe("ResponderAnswerNodeService seed contexts", () => {
   const config = { get: vi.fn(() => undefined) } as any;
 
   it("renders seedSection with citable handles and remaps seed references", async () => {
-    const call = vi.fn(async () => llmResult([{ ref: "ref:0", relevance: 90, reason: "grounded" }]));
+    const call = vi.fn(async (_params: Record<string, unknown>) =>
+      llmResult([{ ref: "ref:0", relevance: 90, reason: "grounded" }]),
+    );
     const service = new ResponderAnswerNodeService({ call } as any, config);
 
     const state = await service.execute({ state: buildState() });
@@ -51,7 +53,7 @@ describe("ResponderAnswerNodeService seed contexts", () => {
   });
 
   it("dedupes a seed reference already present as a graph entity — the graph handle wins", async () => {
-    const call = vi.fn(async () => llmResult([]));
+    const call = vi.fn(async (_params: Record<string, unknown>) => llmResult([]));
     const service = new ResponderAnswerNodeService({ call } as any, config);
 
     const state = buildState({
@@ -71,7 +73,7 @@ describe("ResponderAnswerNodeService seed contexts", () => {
   });
 
   it("emits an empty seedSection and unchanged hasAnswer when no seeds exist", async () => {
-    const call = vi.fn(async () => llmResult([]));
+    const call = vi.fn(async (_params: Record<string, unknown>) => llmResult([]));
     const service = new ResponderAnswerNodeService({ call } as any, config);
 
     const state = await service.execute({ state: buildState({ seedContexts: undefined }) });

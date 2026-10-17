@@ -29,7 +29,7 @@ describe("AuditRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   beforeEach(async () => {
@@ -249,7 +249,7 @@ describe("AuditRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([]);
 
-      const cursor = { cursor: "10", take: 25 };
+      const cursor = { cursor: 10, take: 25 };
       await repository.findByEntity({
         entityType: "Quote",
         entityId: TEST_IDS.entityId,

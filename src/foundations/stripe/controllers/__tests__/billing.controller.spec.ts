@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -35,12 +35,13 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { BillingController } from "../billing.controller";
 import { BillingService } from "../../services/billing.service";
+import { MOCK_PAYMENT_METHOD } from "../../__tests__/fixtures/stripe.fixtures";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 
 describe("BillingController", () => {
   let controller: BillingController;
-  let billingService: vi.Mocked<BillingService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let billingService: Mocked<BillingService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const TEST_IDS = {
@@ -61,12 +62,12 @@ describe("BillingController", () => {
   };
 
   // Create a mock Fastify reply
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     const reply = {
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
     return reply;
   };
 
@@ -111,13 +112,7 @@ describe("BillingController", () => {
 
       it("should create setup intent successfully", async () => {
         const req = createMockRequest();
-        const mockSetupIntent = {
-          data: {
-            type: "setup-intents",
-            id: "seti_123",
-            attributes: { clientSecret: "secret_123" },
-          },
-        };
+        const mockSetupIntent = { clientSecret: "secret_123" };
         billingService.createSetupIntent.mockResolvedValue(mockSetupIntent);
 
         await controller.createSetupIntent(req, mockReply, validSetupIntentBody);
@@ -146,13 +141,7 @@ describe("BillingController", () => {
     describe("POST /billing/customer/portal-session", () => {
       it("should create portal session successfully", async () => {
         const req = createMockRequest();
-        const mockPortalSession = {
-          data: {
-            type: "portal-sessions",
-            id: "ps_123",
-            attributes: { url: "https://billing.stripe.com/session/test" },
-          },
-        };
+        const mockPortalSession = { url: "https://billing.stripe.com/session/test" };
         billingService.createPortalSession.mockResolvedValue(mockPortalSession);
 
         await controller.createPortalSession(req, mockReply);
@@ -185,15 +174,7 @@ describe("BillingController", () => {
     describe("GET /billing/payment-methods", () => {
       it("should list payment methods successfully", async () => {
         const req = createMockRequest();
-        const mockPaymentMethods = {
-          data: [
-            {
-              type: "payment-methods",
-              id: "pm_123",
-              attributes: { type: "card", last4: "4242" },
-            },
-          ],
-        };
+        const mockPaymentMethods = { data: [MOCK_PAYMENT_METHOD] };
         billingService.listPaymentMethods.mockResolvedValue(mockPaymentMethods);
 
         await controller.listPaymentMethods(req, mockReply);

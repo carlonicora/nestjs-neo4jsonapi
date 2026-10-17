@@ -5,6 +5,7 @@ import { GraphCreatorService } from "../graph.creator.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
+import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 
 describe("GraphCreatorService", () => {
   let service: GraphCreatorService;
@@ -81,6 +82,7 @@ describe("GraphCreatorService", () => {
       },
     ],
     tokenUsage: { input: 100, output: 50 },
+    modelWeight: ModelWeight.Normal,
   });
 
   beforeEach(async () => {
@@ -323,6 +325,7 @@ describe("GraphCreatorService", () => {
             { keyConcept: "!", description: "Invalid concept" },
           ],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseWithInvalidConcepts);
@@ -368,6 +371,7 @@ describe("GraphCreatorService", () => {
           ],
           keyConceptDescriptions: [],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseWithInvalidRelationships);
@@ -401,6 +405,7 @@ describe("GraphCreatorService", () => {
           ],
           keyConceptDescriptions: [{ keyConcept: "Joe Bauer", description: "A person" }],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseWithMixedCase);
@@ -430,6 +435,7 @@ describe("GraphCreatorService", () => {
           keyConceptsRelationships: [],
           keyConceptDescriptions: [],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseAllInvalid);
@@ -464,6 +470,7 @@ describe("GraphCreatorService", () => {
           keyConceptsRelationships: [],
           keyConceptDescriptions: [],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseMixedFacts);
@@ -497,6 +504,7 @@ describe("GraphCreatorService", () => {
             { keyConcept: "!", description: "Should also be filtered" },
           ],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseWithDescriptions);
@@ -529,6 +537,7 @@ describe("GraphCreatorService", () => {
           keyConceptsRelationships: [],
           keyConceptDescriptions: [],
           tokenUsage: { input: 50, output: 10 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(emptyLLMResponse);
@@ -553,6 +562,7 @@ describe("GraphCreatorService", () => {
           ],
           keyConceptsRelationships: [],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseNoDescriptions);
@@ -584,6 +594,7 @@ describe("GraphCreatorService", () => {
           ],
           keyConceptDescriptions: [],
           tokenUsage: { input: 100, output: 50 },
+          modelWeight: ModelWeight.Normal,
         };
 
         llmService.call.mockResolvedValue(llmResponseWithWhitespace);

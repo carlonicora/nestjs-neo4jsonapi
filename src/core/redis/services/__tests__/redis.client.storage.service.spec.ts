@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Create mock functions for the Redis pipeline
 const mockPipeline = {
@@ -56,7 +56,7 @@ import { RedisClientStorageService } from "../redis.client.storage.service";
 
 describe("RedisClientStorageService", () => {
   let service: RedisClientStorageService;
-  let mockConfigService: vi.Mocked<ConfigService>;
+  let mockConfigService: Mocked<ConfigService>;
 
   const TEST_CONFIG = {
     redis: {

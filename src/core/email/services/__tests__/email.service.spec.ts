@@ -497,7 +497,9 @@ describe("EmailService", () => {
 
   describe("Handlebars eq helper", () => {
     it("should register eq helper that compares values", () => {
-      const registerHelperCalls = vi.mocked(Handlebars.registerHelper).mock.calls;
+      // registerHelper is overloaded; select the (name, fn) signature the service uses.
+      const registerHelper = Handlebars.registerHelper as (name: string, fn: Handlebars.HelperDelegate) => void;
+      const registerHelperCalls = vi.mocked(registerHelper).mock.calls;
       const eqHelperCall = registerHelperCalls.find((call) => call[0] === "eq");
       expect(eqHelperCall).toBeDefined();
 
@@ -592,7 +594,7 @@ describe("EmailService", () => {
 
   describe("dates in the recipient's language", () => {
     it("passes the email's locale to the template as @locale", async () => {
-      const render = vi.fn(() => "<html><head><title>T</title></head><body>ok</body></html>");
+      const render = vi.fn((_data: unknown, _options?: unknown) => "<html><head><title>T</title></head><body>ok</body></html>");
       vi.mocked(Handlebars.compile).mockReturnValue(render as any);
       vi.mocked(fs.existsSync).mockImplementation(
         (p: any) => !/[\\/](it|en)[\\/](header|footer)\.hbs$/.test(String(p)),

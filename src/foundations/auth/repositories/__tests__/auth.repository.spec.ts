@@ -8,6 +8,8 @@ import { SecurityService } from "../../../../core/security/services/security.ser
 import { UserDescriptor } from "../../../user/entities/user";
 import { Auth, AuthDescriptor } from "../../entities/auth";
 import { AuthCode, AuthCodeDescriptor } from "../../entities/auth.code";
+import { authMeta } from "../../entities/auth.meta";
+import { authCodeMeta } from "../../entities/auth.code.meta";
 
 // Mock crypto.randomUUID
 vi.mock("crypto", () => ({
@@ -56,7 +58,7 @@ describe("AuthRepository", () => {
     modelRegistry.register(UserDescriptor.model);
   });
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, unknown> } => ({
     query: "",
     queryParams: {},
   });
@@ -76,6 +78,7 @@ describe("AuthRepository", () => {
 
   const MOCK_AUTH: Auth = {
     id: TEST_IDS.authId,
+    type: authMeta.type,
     token: "test-token-12345",
     expiration: new Date("2025-01-15T00:00:00Z"),
     createdAt: new Date("2025-01-01T00:00:00Z"),
@@ -85,6 +88,7 @@ describe("AuthRepository", () => {
 
   const MOCK_AUTH_CODE: AuthCode = {
     id: TEST_IDS.authCodeId,
+    type: authCodeMeta.type,
     expiration: new Date("2025-01-02T00:00:00Z"),
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),

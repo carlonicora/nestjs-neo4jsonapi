@@ -107,6 +107,7 @@ describe("the report does not double-report an unchecked question", () => {
     },
     evidenceRead: 0,
     chunksKept: 0,
+    chunksKeptCore: 0,
     readObserved: false,
     error: "boom",
   };

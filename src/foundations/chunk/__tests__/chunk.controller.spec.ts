@@ -1,4 +1,6 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
+
+import type { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -34,7 +36,7 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 
 describe("ChunkController", () => {
   let controller: ChunkController;
-  let chunkService: vi.Mocked<ChunkService>;
+  let chunkService: Mocked<ChunkService>;
 
   const TEST_IDS = {
     chunkId: "550e8400-e29b-41d4-a716-446655440001",
@@ -79,7 +81,8 @@ describe("ChunkController", () => {
           },
         },
       };
-      chunkService.findById.mockResolvedValue(mockChunk);
+      // ChunkService.findById declares JsonApiDataInterface but resolves a full JSON:API document.
+      chunkService.findById.mockResolvedValue(mockChunk as unknown as JsonApiDataInterface);
 
       const result = await controller.findById(TEST_IDS.chunkId);
 

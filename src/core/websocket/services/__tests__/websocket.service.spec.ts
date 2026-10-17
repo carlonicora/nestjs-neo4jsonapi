@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Server, Socket } from "socket.io";
@@ -10,9 +10,9 @@ import { AppLoggingService } from "../../../logging/services/logging.service";
 
 describe("WebSocketService", () => {
   let service: WebSocketService;
-  let eventEmitter: vi.Mocked<EventEmitter2>;
-  let redisClientStorage: vi.Mocked<RedisClientStorageService>;
-  let redisMessaging: vi.Mocked<RedisMessagingService>;
+  let eventEmitter: Mocked<EventEmitter2>;
+  let redisClientStorage: Mocked<RedisClientStorageService>;
+  let redisMessaging: Mocked<RedisMessagingService>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -43,6 +43,7 @@ describe("WebSocketService", () => {
     mode,
     enableControllers: mode === AppMode.API,
     enableWorkers: mode === AppMode.WORKER,
+    enableCronJobs: false,
   });
 
   const createMockRedisClientStorage = () => ({
@@ -390,6 +391,8 @@ describe("WebSocketService", () => {
         targetId: TEST_IDS.userId,
         event: "test-event",
         data: { data: "test" },
+        timestamp: new Date(),
+        source: "worker",
       });
 
       expect(mockSocket.emit).toHaveBeenCalledWith("test-event", { data: "test" });
@@ -405,6 +408,8 @@ describe("WebSocketService", () => {
         targetId: TEST_IDS.companyId,
         event: "test-event",
         data: { data: "test" },
+        timestamp: new Date(),
+        source: "worker",
       });
 
       expect(mockSocket.emit).toHaveBeenCalledWith("test-event", { data: "test" });
@@ -418,6 +423,8 @@ describe("WebSocketService", () => {
         type: "broadcast",
         event: "test-event",
         data: { data: "test" },
+        timestamp: new Date(),
+        source: "worker",
       });
 
       expect(mockServer.emit).toHaveBeenCalledWith("test-event", { data: "test" });
@@ -428,6 +435,8 @@ describe("WebSocketService", () => {
         type: "user",
         event: "test-event",
         data: { data: "test" },
+        timestamp: new Date(),
+        source: "worker",
       });
 
       // Should not throw
@@ -438,6 +447,8 @@ describe("WebSocketService", () => {
         type: "company",
         event: "test-event",
         data: { data: "test" },
+        timestamp: new Date(),
+        source: "worker",
       });
 
       // Should not throw

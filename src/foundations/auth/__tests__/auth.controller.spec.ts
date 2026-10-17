@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -11,11 +11,12 @@ import { HttpException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { AuthController } from "../controllers/auth.controller";
 import { AuthService } from "../services/auth.service";
+import type { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 
 describe("AuthController", () => {
   let controller: AuthController;
-  let authService: vi.Mocked<AuthService>;
+  let authService: Mocked<AuthService>;
 
   const TEST_CODES = {
     authCode: "auth-code-123",
@@ -58,7 +59,7 @@ describe("AuthController", () => {
 
   describe("POST /auth (findAuth)", () => {
     it("should find auth by code", async () => {
-      const mockResponse = { data: { type: "auths", id: "auth-123" } };
+      const mockResponse: JsonApiDataInterface = { type: "auths", id: "auth-123", attributes: {} };
       authService.findAuthByCode.mockResolvedValue(mockResponse);
 
       const result = await controller.findAuth(TEST_CODES.authCode);

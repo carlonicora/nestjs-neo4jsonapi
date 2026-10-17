@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeProductRepository } from "../stripe-product.repository";
 import { Neo4jService } from "../../../../core/neo4j";
@@ -7,10 +7,11 @@ import { stripeProductMeta } from "../../entities/stripe-product.meta";
 
 describe("StripeProductRepository", () => {
   let repository: StripeProductRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   const mockProduct: StripeProduct = {
     id: "test-uuid-123",
+    type: stripeProductMeta.type,
     stripeProductId: "prod_test_123",
     name: "Test Product",
     description: "Test Description",

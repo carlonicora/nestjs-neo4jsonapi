@@ -5,7 +5,7 @@ import { DiscordService } from "../discord.service";
 
 describe("DiscordService", () => {
   let service: DiscordService;
-  let mockClient: Partial<Client>;
+  let mockClient: ReturnType<typeof createMockClient>;
 
   const createMockClient = (isReady: boolean = true) => ({
     isReady: vi.fn().mockReturnValue(isReady),
@@ -20,7 +20,7 @@ describe("DiscordService", () => {
       replyFails?: boolean;
       editReplyFails?: boolean;
     } = {},
-  ): Partial<RepliableInteraction> => ({
+  ) => ({
     replied: options.replied ?? false,
     deferred: options.deferred ?? false,
     reply: options.replyFails
@@ -107,7 +107,7 @@ describe("DiscordService", () => {
         const error = new Error("Test error");
 
         // Act
-        await service.handleInteractionError(mockInteraction as RepliableInteraction, error);
+        await service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error);
 
         // Assert
         expect(mockInteraction.reply).toHaveBeenCalledWith({
@@ -123,7 +123,7 @@ describe("DiscordService", () => {
         const customMessage = "Custom error message";
 
         // Act
-        await service.handleInteractionError(mockInteraction as RepliableInteraction, error, customMessage);
+        await service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error, customMessage);
 
         // Assert
         expect(mockInteraction.reply).toHaveBeenCalledWith({
@@ -138,7 +138,7 @@ describe("DiscordService", () => {
         const error = new Error("Test error");
 
         // Act
-        await service.handleInteractionError(mockInteraction as RepliableInteraction, error);
+        await service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error);
 
         // Assert
         expect(mockInteraction.editReply).toHaveBeenCalledWith({
@@ -153,7 +153,7 @@ describe("DiscordService", () => {
         const error = new Error("Test error");
 
         // Act
-        await service.handleInteractionError(mockInteraction as RepliableInteraction, error);
+        await service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error);
 
         // Assert
         expect(mockInteraction.reply).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe("DiscordService", () => {
 
         // Act - should not throw
         await expect(
-          service.handleInteractionError(mockInteraction as RepliableInteraction, error),
+          service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error),
         ).resolves.not.toThrow();
       });
 
@@ -178,7 +178,7 @@ describe("DiscordService", () => {
 
         // Act - should not throw
         await expect(
-          service.handleInteractionError(mockInteraction as RepliableInteraction, error),
+          service.handleInteractionError(mockInteraction as unknown as RepliableInteraction, error),
         ).resolves.not.toThrow();
       });
     });

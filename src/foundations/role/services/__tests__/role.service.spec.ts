@@ -3,7 +3,13 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { RoleService } from "../role.service";
 import { RoleRepository } from "../../repositories/role.repository";
+import { Role } from "../../entities/role";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
+
+// RoleService declares Promise<JsonApiDataInterface>, but create/update return the
+// JSON:API document built by JsonApiService.buildSingle ({ data: ... }).
+type JsonApiDocument = { data: JsonApiDataInterface };
 
 describe("RoleService", () => {
   let service: RoleService;
@@ -15,15 +21,20 @@ describe("RoleService", () => {
     userId: "660e8400-e29b-41d4-a716-446655440001",
   };
 
-  const MOCK_ROLE = {
+  const MOCK_DATE = new Date("2025-01-01T00:00:00Z");
+
+  const MOCK_ROLE: Role = {
     id: TEST_IDS.roleId,
+    type: "roles",
+    createdAt: MOCK_DATE,
+    updatedAt: MOCK_DATE,
     name: "Administrator",
     description: "System administrator role",
   };
 
-  const MOCK_ROLES = [
-    { id: TEST_IDS.roleId, name: "Administrator", description: "Admin role" },
-    { id: "role-2", name: "Editor", description: "Editor role" },
+  const MOCK_ROLES: Role[] = [
+    { ...MOCK_ROLE, description: "Admin role" },
+    { ...MOCK_ROLE, id: "role-2", name: "Editor", description: "Editor role" },
   ];
 
   const MOCK_JSON_API_SINGLE = {
@@ -262,7 +273,7 @@ describe("RoleService", () => {
       });
 
       // Act
-      const result = await service.create({ data: createData as any });
+      const result = (await service.create({ data: createData as any })) as unknown as JsonApiDocument;
 
       // Assert
       expect(roleRepository.findById).toHaveBeenCalledWith({ roleId: createData.id });
@@ -289,7 +300,7 @@ describe("RoleService", () => {
       });
 
       // Act
-      const result = await service.update({ data: updateData as any });
+      const result = (await service.update({ data: updateData as any })) as unknown as JsonApiDocument;
 
       // Assert
       expect(roleRepository.findByNameNotId).toHaveBeenCalledWith({
@@ -306,7 +317,7 @@ describe("RoleService", () => {
 
     it("should throw CONFLICT when name is taken by another role", async () => {
       // Arrange
-      const existingRole = { id: "other-role-id", name: "Updated Role" };
+      const existingRole: Role = { ...MOCK_ROLE, id: "other-role-id", name: "Updated Role" };
       roleRepository.findByNameNotId.mockResolvedValue(existingRole);
 
       // Act & Assert

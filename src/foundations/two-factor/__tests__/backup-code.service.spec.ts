@@ -1,14 +1,31 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { BadRequestException } from "@nestjs/common";
 import { BackupCodeService } from "../services/backup-code.service";
 import { BackupCodeRepository } from "../repositories/backup-code.repository";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { BackupCode } from "../entities/backup-code";
+
+/**
+ * Real bcrypt, but at the minimum cost (4). The service hashes 10 codes per
+ * generation at cost 10, which is ~1s of CPU per test and times out under a
+ * full parallel run. The cost the service ASKS for is recorded so the spec
+ * still pins the production value; compare() reads the cost off the hash.
+ */
+const { requestedRounds } = vi.hoisted(() => ({ requestedRounds: [] as Array<string | number> }));
+vi.mock("bcrypt", async () => {
+  const actual = await vi.importActual<typeof import("bcrypt")>("bcrypt");
+  const hash = (data: string, rounds: string | number) => {
+    requestedRounds.push(rounds);
+    return actual.hash(data, 4);
+  };
+  return { ...actual, hash, default: { ...actual, hash } };
+});
 
 describe("BackupCodeService", () => {
   let service: BackupCodeService;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockBackupCodeRepository: vi.Mocked<BackupCodeRepository>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockBackupCodeRepository: Mocked<BackupCodeRepository>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -17,6 +34,7 @@ describe("BackupCodeService", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    requestedRounds.length = 0;
 
     mockJsonApiService = {
       buildSingle: vi.fn().mockImplementation((model, data) => ({ data })),
@@ -78,6 +96,8 @@ describe("BackupCodeService", () => {
       // Verify that bcrypt hashes are passed (they start with $2)
       const callArgs = mockBackupCodeRepository.createForUser.mock.calls[0][0];
       expect(callArgs.codeHash).toMatch(/^\$2[aby]\$/);
+      // Production cost factor is unchanged: every code is hashed at cost 10.
+      expect(requestedRounds).toEqual(Array(10).fill(10));
     });
 
     it("should throw BadRequestException when user already has backup codes", async () => {
@@ -98,7 +118,7 @@ describe("BackupCodeService", () => {
 
       // Mock the repository to return this hash
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
-        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null },
+        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null } as BackupCode,
       ]);
 
       const result = await service.validateCode({
@@ -112,7 +132,7 @@ describe("BackupCodeService", () => {
 
     it("should return false for invalid backup code", async () => {
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
-        { id: TEST_IDS.codeId, codeHash: "$2b$10$somehashedvalue", usedAt: null },
+        { id: TEST_IDS.codeId, codeHash: "$2b$10$somehashedvalue", usedAt: null } as BackupCode,
       ]);
 
       const result = await service.validateCode({
@@ -139,7 +159,7 @@ describe("BackupCodeService", () => {
       const storedHash = mockBackupCodeRepository.createForUser.mock.calls[0][0].codeHash;
 
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
-        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null },
+        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null } as BackupCode,
       ]);
 
       // Test with lowercase
@@ -213,8 +233,8 @@ describe("BackupCodeService", () => {
   describe("hasBackupCodes", () => {
     it("should return true when user has backup codes", async () => {
       mockBackupCodeRepository.findByUserId.mockResolvedValue([
-        { id: "code-1", codeHash: "hash1", usedAt: null },
-        { id: "code-2", codeHash: "hash2", usedAt: new Date() },
+        { id: "code-1", codeHash: "hash1", usedAt: null } as BackupCode,
+        { id: "code-2", codeHash: "hash2", usedAt: new Date() } as BackupCode,
       ]);
 
       const result = await service.hasBackupCodes({ userId: TEST_IDS.userId });
@@ -246,7 +266,7 @@ describe("BackupCodeService", () => {
       const storedHash = mockBackupCodeRepository.createForUser.mock.calls[0][0].codeHash;
 
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
-        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null },
+        { id: TEST_IDS.codeId, codeHash: storedHash, usedAt: null } as BackupCode,
       ]);
 
       await service.validateCode({

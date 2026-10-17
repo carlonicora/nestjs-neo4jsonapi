@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HttpException } from "@nestjs/common";
 import { OAuthClientService } from "./oauth.client.service";
 import { ConfigService } from "@nestjs/config";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { OAuthRepository } from "../repositories/oauth.repository";
 import { OAuthScopeService } from "./oauth.scope.service";
 import { OAuthClient } from "../entities/oauth.client.entity";
@@ -40,7 +41,9 @@ describe("OAuthClientService", () => {
 
     clientService = new OAuthClientService(
       mockRepository as OAuthRepository,
-      new OAuthScopeService({ get: vi.fn().mockReturnValue(undefined) } as unknown as ConfigService),
+      new OAuthScopeService({
+        get: vi.fn().mockReturnValue(undefined),
+      } as unknown as ConfigService<BaseConfigInterface>),
     );
   });
 

@@ -29,11 +29,17 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     password: string;
     database: string;
     computePaginationTotal?: boolean;
+    bindRequestContext?: boolean;
   };
   // When false, readMany skips the extra COUNT query for {CURSOR} pagination. Apps that paginate
   // by cursor and never read meta.total set this to avoid expensive count-side projection traversals
   // (the count query has no LIMIT, so it would run every OPTIONAL MATCH across all rows). Default true.
   private readonly computePaginationTotal: boolean;
+  // When false, initQuery binds neither `company` nor `currentUser`: the app's database holds no
+  // :Company / :User nodes (e.g. a corpus service on its own database). queryParams.companyId and
+  // currentUserId are still set. AbstractRepository reads this to stop carrying the unbound aliases
+  // and to refuse company-scoped entities. Default true.
+  readonly bindsRequestContext: boolean;
 
   constructor(
     private readonly entityFactory: EntityFactory,
@@ -49,6 +55,7 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
       throw new Error("Neo4j configuration is required. Ensure NEO4J_URI is set in environment.");
     }
     this.computePaginationTotal = this.neo4jConfig.computePaginationTotal !== false;
+    this.bindsRequestContext = this.neo4jConfig.bindRequestContext !== false;
 
     this._database = this.neo4jConfig.database;
     this.driver = driver(this.neo4jConfig.uri, auth.basic(this.neo4jConfig.username, this.neo4jConfig.password), {
@@ -74,9 +81,9 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     queryParams.currentUserId = this.cls.has("userId") ? this.cls.get("userId") : null;
 
     const query = `
-        ${queryParams.companyId ? `MATCH (company:Company {id: $companyId})` : ``}
+        ${this.bindsRequestContext && queryParams.companyId ? `MATCH (company:Company {id: $companyId})` : ``}
         ${
-          queryParams.currentUserId
+          this.bindsRequestContext && queryParams.currentUserId
             ? queryParams.companyId
               ? `MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company)`
               : `MATCH (currentUser:User {id: $currentUserId})`

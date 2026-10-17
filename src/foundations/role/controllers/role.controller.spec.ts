@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -41,7 +41,7 @@ import { RoleController } from "./role.controller";
 
 describe("RoleController", () => {
   let controller: RoleController;
-  let roleService: vi.Mocked<RoleService>;
+  let roleService: Mocked<RoleService>;
 
   // Test data constants
   const MOCK_ROLE_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -56,10 +56,11 @@ describe("RoleController", () => {
     },
   };
 
+  // RoleService.find declares Promise<JsonApiDataInterface> but returns a JSON:API list document.
   const mockListResponse = {
     data: [mockServiceResponse],
     meta: { total: 1 },
-  };
+  } as unknown as JsonApiDataInterface;
 
   beforeEach(async () => {
     const mockRoleService = {

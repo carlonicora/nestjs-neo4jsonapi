@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock @opentelemetry/api - must be defined inline without external variable references
 vi.mock("@opentelemetry/api", () => {
@@ -62,7 +62,7 @@ const getMockSpan = () => getMockTracer().startSpan();
 
 describe("TracingService", () => {
   let service: TracingService;
-  let mockClsService: vi.Mocked<ClsService>;
+  let mockClsService: Mocked<ClsService>;
   let mockSpan: any;
   let mockTracer: any;
 
@@ -454,7 +454,7 @@ describe("TracingService", () => {
 
 describe("TracingService (disabled)", () => {
   let service: TracingService;
-  let mockClsService: vi.Mocked<ClsService>;
+  let mockClsService: Mocked<ClsService>;
 
   beforeEach(async () => {
     vi.clearAllMocks();

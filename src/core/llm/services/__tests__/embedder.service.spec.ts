@@ -5,12 +5,35 @@ import { EmbedderService } from "../embedder.service";
 import { EmbedderBucketStarvedError } from "../rate-limited-embedder";
 
 /**
+ * The REAL js-tiktoken, memoised per model name. Building an encoder parses
+ * the whole BPE rank table (~200-400ms), and every test builds a fresh service
+ * that builds its own — enough to time out under a full parallel run. Unknown
+ * model names still throw from the real implementation, so the service's
+ * raw-then-normalised lookup and its heuristic fallback are still exercised.
+ */
+vi.mock("js-tiktoken", async () => {
+  const actual = await vi.importActual<typeof import("js-tiktoken")>("js-tiktoken");
+  const cache = new Map<string, ReturnType<typeof actual.encodingForModel>>();
+  const encodingForModel = ((model: Parameters<typeof actual.encodingForModel>[0], ...rest: unknown[]) => {
+    if (rest.length > 0) return (actual.encodingForModel as (...args: unknown[]) => unknown)(model, ...rest);
+    let encoder = cache.get(model);
+    if (!encoder) {
+      encoder = actual.encodingForModel(model);
+      cache.set(model, encoder);
+    }
+    return encoder;
+  }) as typeof actual.encodingForModel;
+  return { ...actual, encodingForModel };
+});
+
+/**
  * EmbedderService writes ONE token-usage record per invocation, and only when
  * the caller opts in with an attribution. Billing must be PRECISE, so tokens
  * are counted with the embedder model's own tiktoken tokenizer; the
  * chars-per-token heuristic is the fallback for models tiktoken does not know.
  *
- * Every test builds a FRESH service: the tokenizer is memoised per instance.
+ * Every test builds a FRESH service: the tokenizer is memoised per instance
+ * (the underlying js-tiktoken encoder is shared across tests, see the mock).
  */
 
 /** A literal whose tiktoken count (10) differs from the heuristic (ceil(44/4) = 11). */
@@ -487,7 +510,7 @@ describe("EmbedderService oversize guard", () => {
 
   it("bills the ORIGINAL text once — usage accounting ignores the slicing", async () => {
     spyOnWarn();
-    const recorder = { recordTokenUsage: vi.fn(async () => undefined) };
+    const recorder: { recordTokenUsage: ReturnType<typeof vi.fn> } = { recordTokenUsage: vi.fn(async () => undefined) };
     const { service } = makeService({
       inputCostPer1MTokens: 0.13,
       recorder,

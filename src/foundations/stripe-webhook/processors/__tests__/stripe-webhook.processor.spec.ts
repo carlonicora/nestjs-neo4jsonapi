@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -55,14 +55,14 @@ import {
 
 describe("StripeWebhookProcessor", () => {
   let processor: StripeWebhookProcessor;
-  let stripeWebhookEventRepository: vi.Mocked<StripeWebhookEventRepository>;
-  let subscriptionService: vi.Mocked<StripeSubscriptionAdminService>;
-  let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
-  let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
-  let stripeInvoiceRepository: vi.Mocked<StripeInvoiceRepository>;
-  let companyRepository: vi.Mocked<CompanyRepository>;
-  let notificationService: vi.Mocked<StripeWebhookNotificationService>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let stripeWebhookEventRepository: Mocked<StripeWebhookEventRepository>;
+  let subscriptionService: Mocked<StripeSubscriptionAdminService>;
+  let stripeCustomerRepository: Mocked<StripeCustomerRepository>;
+  let subscriptionRepository: Mocked<StripeSubscriptionRepository>;
+  let stripeInvoiceRepository: Mocked<StripeInvoiceRepository>;
+  let companyRepository: Mocked<CompanyRepository>;
+  let notificationService: Mocked<StripeWebhookNotificationService>;
+  let logger: Mocked<AppLoggingService>;
 
   const TEST_DATA = {
     webhookEventId: "550e8400-e29b-41d4-a716-446655440000",

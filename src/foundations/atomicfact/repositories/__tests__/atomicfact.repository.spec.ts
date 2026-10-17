@@ -52,18 +52,21 @@ describe("AtomicFactRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_ATOMIC_FACT: AtomicFact = {
     id: TEST_IDS.atomicFactId,
+    type: "atomicfacts",
+    createdAt: new Date("2025-01-01T00:00:00Z"),
+    updatedAt: new Date("2025-01-01T00:00:00Z"),
     content: "This is a test atomic fact",
     chunk: {
       id: TEST_IDS.chunkId,
+      type: "chunks",
       content: "Test chunk content",
-      tokenCount: 100,
       createdAt: new Date("2025-01-01T00:00:00Z"),
-      data: undefined as any,
+      updatedAt: new Date("2025-01-01T00:00:00Z"),
     },
   };
 

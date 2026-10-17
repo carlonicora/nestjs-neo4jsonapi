@@ -4,9 +4,12 @@
     "types": ["vitest/globals", "node"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "module": "ESNext",
+    "module": "Preserve",
+    "lib": ["ES2022"],
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
     "rootDir": "."
   },
   "include": [

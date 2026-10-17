@@ -8,7 +8,8 @@ import { CommunitySearchNodeService } from "../../nodes/community.search.node.se
 import { PrimerAnswerNodeService } from "../../nodes/primer.answer.node.service";
 import { FollowUpNodeService } from "../../nodes/followup.node.service";
 import { SynthesisNodeService } from "../../nodes/synthesis.node.service";
-import { DriftContextState } from "../../contexts/drift.context";
+import { DriftContextState, FollowUpAnswer } from "../../contexts/drift.context";
+import type { Community } from "../../../../foundations/community/entities/community.entity";
 
 describe("DriftSearchService", () => {
   let service: DriftSearchService;
@@ -24,7 +25,7 @@ describe("DriftSearchService", () => {
     communityId: "550e8400-e29b-41d4-a716-446655440000",
   };
 
-  const MOCK_COMMUNITIES = [
+  const MOCK_COMMUNITIES: Community[] = [
     {
       id: TEST_IDS.communityId,
       name: "Test Community",
@@ -32,7 +33,7 @@ describe("DriftSearchService", () => {
       memberCount: 5,
       rating: 50,
       summary: "A test community about AI",
-    },
+    } as Community,
   ];
 
   const createMockLogger = () => ({
@@ -349,7 +350,7 @@ describe("DriftSearchService", () => {
       followUpNode.execute.mockImplementation(async ({ state }) =>
         createPartialState(
           {
-            followUpAnswers: [{ question: "What else?", answer: "More details" }],
+            followUpAnswers: [{ question: "What else?", answer: "More details" } as FollowUpAnswer],
             nextStep: "synthesis",
           },
           state,

@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mocked } from "vitest";
 import { HttpException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { OAuthService } from "./oauth.service";
 import { OAuthRepository } from "../repositories/oauth.repository";
 import { OAuthClientService } from "./oauth.client.service";
@@ -14,8 +15,8 @@ describe("OAuthService", () => {
   let mockRepository: Partial<OAuthRepository>;
   let mockClientService: Partial<OAuthClientService>;
   let mockTokenService: Partial<OAuthTokenService>;
-  let mockPkceService: Partial<OAuthPkceService>;
-  let mockConfigService: Partial<ConfigService>;
+  let mockPkceService: Partial<Mocked<OAuthPkceService>>;
+  let mockConfigService: Partial<ConfigService<BaseConfigInterface>>;
 
   const mockClient: OAuthClient = {
     id: "client-uuid",
@@ -87,7 +88,9 @@ describe("OAuthService", () => {
     };
 
     mockPkceService = {
-      isValidChallengeMethod: vi.fn().mockReturnValue(true),
+      isValidChallengeMethod: vi
+        .fn()
+        .mockReturnValue(true) as unknown as Mocked<OAuthPkceService>["isValidChallengeMethod"], // a Mock cannot carry the type predicate
       validateCodeChallenge: vi.fn().mockReturnValue(true),
     };
 
@@ -110,8 +113,8 @@ describe("OAuthService", () => {
       mockClientService as OAuthClientService,
       mockTokenService as OAuthTokenService,
       mockPkceService as OAuthPkceService,
-      mockConfigService as ConfigService,
-      new OAuthScopeService(mockConfigService as ConfigService),
+      mockConfigService as ConfigService<BaseConfigInterface>,
+      new OAuthScopeService(mockConfigService as ConfigService<BaseConfigInterface>),
     );
   });
 

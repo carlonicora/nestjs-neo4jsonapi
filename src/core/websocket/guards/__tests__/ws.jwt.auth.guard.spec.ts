@@ -39,7 +39,7 @@ const createMockSocket = (options: { authToken?: string; queryToken?: string; au
       authorization: options.authHeader,
     },
   },
-  data: {},
+  data: {} as { user?: { userId: string; companyId: string; roles: string[] } },
 });
 
 const createMockWsContext = (socket: any): ExecutionContext =>
@@ -274,8 +274,8 @@ describe("WsJwtGuard", () => {
       await guard.canActivate(context);
 
       expect(socket.data.user).toEqual(MOCK_JWT_PAYLOAD);
-      expect(socket.data.user.userId).toBe(TEST_IDS.userId);
-      expect(socket.data.user.companyId).toBe(TEST_IDS.companyId);
+      expect(socket.data.user?.userId).toBe(TEST_IDS.userId);
+      expect(socket.data.user?.companyId).toBe(TEST_IDS.companyId);
     });
   });
 });

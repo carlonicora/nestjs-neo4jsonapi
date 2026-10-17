@@ -97,14 +97,42 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * The request aliases initQuery() actually bound and a query may carry in a `WITH`: `company`
+   * and `currentUser` when CLS holds them, none when the Neo4jService does not bind request
+   * context (`bindRequestContext: false`). A Neo4jService without the flag counts as binding.
+   */
+  private boundRequestAliases(): string[] {
+    if (this.neo4j.bindsRequestContext === false) return [];
+    return [
+      ...(this.clsService.get("companyId") ? ["company"] : []),
+      ...(this.clsService.get("userId") ? ["currentUser"] : []),
+    ];
+  }
+
+  /**
+   * Refuses an entity that needs the `company` alias (company-scoped, or tenancy "self" / { via })
+   * when initQuery() does not bind it: an unbound `company` in a MATCH matches every node (tenant
+   * leak) and in a CREATE creates an orphan node.
+   */
+  private assertCompanyBindable(): void {
+    if (this.neo4j.bindsRequestContext !== false) return;
+    const { isCompanyScoped, tenancy } = this.descriptor;
+    if (isCompanyScoped || tenancy === "self" || (tenancy && typeof tenancy === "object")) {
+      throw new Error(
+        `${this.descriptor.model.type}: needs the request's company, but this app's Neo4j config sets bindRequestContext: false.`,
+      );
+    }
+  }
+
+  /**
    * Builds the default MATCH query for the entity
    */
   protected buildDefaultMatch(options?: { searchField?: string; blockCompanyAndUser?: boolean }): string {
     const { nodeName, labelName } = this.descriptor.model;
     const { isCompanyScoped, tenancy } = this.descriptor;
 
-    const companyId = this.clsService.get("companyId");
-    const currentUserId = this.clsService.get("userId");
+    this.assertCompanyBindable();
+    const aliases = options?.blockCompanyAndUser ? [] : this.boundRequestAliases();
 
     // Unscoped entities whose rows still belong to one company: the company predicate is
     // derived from the descriptor's `tenancy` rule. `$companyId IS NULL` keeps automated jobs
@@ -130,9 +158,7 @@ export abstract class AbstractRepository<
           MATCH (${nodeName})${hop}${targetsCompany ? "" : "-[:BELONGS_TO]->(company)"}
         }`;
       }
-      const carried = options?.blockCompanyAndUser
-        ? [nodeName]
-        : [nodeName, ...(companyId ? ["company"] : []), ...(currentUserId ? ["currentUser"] : [])];
+      const carried = [nodeName, ...aliases];
       return `
         MATCH (${nodeName}:${labelName}${options?.searchField ? ` {${options.searchField}: $searchValue}` : ``})
         WHERE $companyId IS NULL
@@ -156,7 +182,7 @@ export abstract class AbstractRepository<
       OR EXISTS {
         MATCH (${nodeName})-[:BELONGS_TO]-(company)
       }
-      WITH ${nodeName}${options?.blockCompanyAndUser ? `` : `${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}`}
+      WITH ${[nodeName, ...aliases].join(", ")}
     `;
   }
 
@@ -445,14 +471,13 @@ export abstract class AbstractRepository<
    */
   protected buildFulltextAccessCheckedMatch(params: { hitFilter?: string; filterClause?: string }): string {
     const { nodeName } = this.descriptor.model;
-    const companyId = this.clsService.get("companyId");
-    const currentUserId = this.clsService.get("userId");
-    const carried = `${nodeName}${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}`;
+    const aliases = this.boundRequestAliases();
+    const carried = [nodeName, ...aliases].join(", ");
 
     return `CALL db.index.fulltext.queryNodes("${this.descriptor.fulltextIndexName}", $term)
       YIELD node, score
       ${params.hitFilter ? `WHERE ${params.hitFilter}` : ``}
-      WITH node AS ${nodeName}, score${companyId ? `, company` : ``}${currentUserId ? `, currentUser` : ``}
+      WITH ${["node AS " + nodeName, "score", ...aliases].join(", ")}
       CALL {
         WITH ${carried}
         ${this.buildDefaultMatch()}
@@ -775,6 +800,7 @@ export abstract class AbstractRepository<
   async create(params: { id: string; [key: string]: any }): Promise<void> {
     const { nodeName, labelName } = this.descriptor.model;
     const { fieldNames, fieldDefaults, fields, relationships } = this.descriptor;
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     // Validate related nodes exist
@@ -914,6 +940,7 @@ export abstract class AbstractRepository<
   async put(params: { id: string; [key: string]: any }): Promise<void> {
     const { nodeName, labelName } = this.descriptor.model;
     const { fieldNames, fields, relationships } = this.descriptor;
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     // Validate related nodes exist
@@ -1035,6 +1062,7 @@ export abstract class AbstractRepository<
   async patch(params: { id: string; [key: string]: any }): Promise<void> {
     const { nodeName, labelName } = this.descriptor.model;
     const { fieldNames, fields, relationships } = this.descriptor;
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     // Determine which fields to update (only those in params AND in fieldNames)
@@ -1170,6 +1198,7 @@ export abstract class AbstractRepository<
    */
   async delete(params: { id: string }): Promise<void> {
     const { nodeName, labelName } = this.descriptor.model;
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -1223,6 +1252,7 @@ export abstract class AbstractRepository<
       throw new BadRequestException(`Relationship '${params.relationship}' is read-only`);
     }
 
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     // Build items array with edge properties
@@ -1298,6 +1328,7 @@ export abstract class AbstractRepository<
       throw new BadRequestException(`Relationship '${params.relationship}' is read-only`);
     }
 
+    this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
     query.queryParams = {

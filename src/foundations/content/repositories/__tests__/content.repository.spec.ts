@@ -64,7 +64,7 @@ describe("ContentRepository", () => {
   let securityService: ReturnType<typeof createMockSecurityService>;
   let contentCypherService: ReturnType<typeof createMockContentCypherService>;
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, any> } => ({
     query: "",
     queryParams: {},
   });
@@ -157,7 +157,7 @@ describe("ContentRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([]);
 
-      const cursor = { limit: 10, offset: 20 };
+      const cursor = { take: 10, cursor: 20 };
       await repository.find({ cursor });
 
       expect(neo4jService.initQuery).toHaveBeenCalledWith(
@@ -291,7 +291,7 @@ describe("ContentRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([]);
 
-      const cursor = { limit: 5, offset: 0 };
+      const cursor = { take: 5, cursor: 0 };
       await repository.findByOwner({
         ownerId: TEST_IDS.ownerId,
         cursor,

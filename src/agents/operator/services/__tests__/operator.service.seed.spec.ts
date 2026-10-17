@@ -2,11 +2,12 @@ import { AIMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { describe, expect, it, vi } from "vitest";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
+import type { LLMService } from "../../../../core/llm/services/llm.service";
 import { OperatorService, renderSeedContexts } from "../operator.service";
 
 describe("OperatorService seed contexts", () => {
   const buildService = () => {
-    const callStep = vi.fn(async () => ({
+    const callStep = vi.fn<LLMService["callStep"]>(async () => ({
       message: new AIMessage({ content: "done" }),
       tokenUsage: { input: 1, output: 1 },
     }));

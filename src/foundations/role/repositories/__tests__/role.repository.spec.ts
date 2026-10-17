@@ -28,12 +28,12 @@ describe("RoleRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_CURSOR: JsonApiCursorInterface = {
-    limit: 10,
-    offset: 0,
+    cursor: 0,
+    take: 10,
   };
 
   const MOCK_ROLE: Role = {

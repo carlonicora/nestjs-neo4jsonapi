@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
@@ -15,10 +15,10 @@ import { AppLoggingService } from "../../../../core/logging";
 
 describe("FeatureSyncService", () => {
   let service: FeatureSyncService;
-  let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
-  let companyRepository: vi.Mocked<CompanyRepository>;
-  let stripePriceRepository: vi.Mocked<StripePriceRepository>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let subscriptionRepository: Mocked<StripeSubscriptionRepository>;
+  let companyRepository: Mocked<CompanyRepository>;
+  let stripePriceRepository: Mocked<StripePriceRepository>;
+  let logger: Mocked<AppLoggingService>;
 
   // Test data constants
   const MOCK_COMPANY_ID = "660e8400-e29b-41d4-a716-446655440001";

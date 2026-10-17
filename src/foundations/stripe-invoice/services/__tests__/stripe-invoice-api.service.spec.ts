@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeInvoiceApiService } from "../stripe-invoice-api.service";
 import { StripeService } from "../../../stripe/services/stripe.service";
@@ -14,7 +14,7 @@ import Stripe from "stripe";
 
 describe("StripeInvoiceApiService", () => {
   let service: StripeInvoiceApiService;
-  let stripeService: vi.Mocked<StripeService>;
+  let stripeService: Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
   beforeEach(async () => {
@@ -60,7 +60,7 @@ describe("StripeInvoiceApiService", () => {
       const result = await service.retrieveInvoice(TEST_IDS.invoiceId);
 
       expect(result.status).toBe("paid");
-      expect(result.paid).toBe(true);
+      expect(result).toHaveProperty("paid", true);
     });
 
     it("should handle Stripe API errors", async () => {
@@ -309,7 +309,7 @@ describe("StripeInvoiceApiService", () => {
   });
 
   describe("getUpcomingInvoice", () => {
-    const mockUpcomingInvoice: Stripe.UpcomingInvoice = {
+    const mockUpcomingInvoice: Stripe.Invoice = {
       ...MOCK_INVOICE,
       id: null,
       number: null,
@@ -394,7 +394,7 @@ describe("StripeInvoiceApiService", () => {
 
       expect(mockStripe.invoices.pay).toHaveBeenCalledWith(TEST_IDS.invoiceId);
       expect(result.status).toBe("paid");
-      expect(result.paid).toBe(true);
+      expect(result).toHaveProperty("paid", true);
     });
 
     it("should handle invoice already paid", async () => {
@@ -534,7 +534,7 @@ describe("StripeInvoiceApiService", () => {
 
       const result = await service.retrieveInvoice(TEST_IDS.invoiceId);
 
-      expect(result.subscription).toBeNull();
+      expect(result).toHaveProperty("subscription", null);
     });
   });
 

@@ -74,7 +74,7 @@ describe("VersionService with no api config", () => {
       providers: [FreshVersionService],
     }).compile();
 
-    const service = module.get<FreshVersionService>(FreshVersionService);
+    const service = module.get(FreshVersionService);
 
     const result = service.getApiUrl();
 
@@ -96,7 +96,7 @@ describe("VersionService with no api config", () => {
       providers: [FreshVersionService],
     }).compile();
 
-    const service = module.get<FreshVersionService>(FreshVersionService);
+    const service = module.get(FreshVersionService);
 
     const result = service.getApiUrl();
 

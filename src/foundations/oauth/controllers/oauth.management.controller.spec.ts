@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -31,13 +31,15 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { OAuthClientCreateDto, OAuthClientUpdateDto } from "../dtos/oauth.client.dto";
+import { OAuthClient } from "../entities/oauth.client.entity";
+import { User } from "../../user/entities/user";
 import { OAuthClientService } from "../services/oauth.client.service";
 import { OAuthManagementController } from "./oauth.management.controller";
 
 describe("OAuthManagementController", () => {
   let controller: OAuthManagementController;
-  let clientService: vi.Mocked<OAuthClientService>;
-  let clsService: vi.Mocked<ClsService>;
+  let clientService: Mocked<OAuthClientService>;
+  let clsService: Mocked<ClsService>;
 
   // Test data constants
   const MOCK_USER_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -46,8 +48,13 @@ describe("OAuthManagementController", () => {
   const MOCK_CLIENT_ID = "770e8400-e29b-41d4-a716-446655440002";
   const MOCK_CLIENT_SECRET = "secret_abc123";
 
-  const mockClient = {
+  const mockClient: OAuthClient = {
+    id: MOCK_CLIENT_ID,
+    type: "oauth-clients",
+    createdAt: new Date("2025-01-01T00:00:00Z"),
+    updatedAt: new Date("2025-01-01T00:00:00Z"),
     clientId: MOCK_CLIENT_ID,
+    clientSecretHash: "hashed_secret",
     name: "Test App",
     description: "A test application",
     redirectUris: ["https://example.com/callback"],
@@ -57,7 +64,7 @@ describe("OAuthManagementController", () => {
     isActive: true,
     accessTokenLifetime: 3600,
     refreshTokenLifetime: 86400,
-    owner: { id: MOCK_USER_ID },
+    owner: { id: MOCK_USER_ID } as User,
   };
 
   beforeEach(async () => {

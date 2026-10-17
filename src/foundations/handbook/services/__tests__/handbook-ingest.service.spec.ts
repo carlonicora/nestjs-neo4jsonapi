@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HandbookPageRepository } from "../../repositories/handbook-page.repository";
+import type { HandbookSectionRepository } from "../../repositories/handbook-section.repository";
 import { HandbookIngestService } from "../handbook-ingest.service";
+import type { HandbookPageService } from "../handbook-page.service";
 
 function makeRepository(existing: any[] = []) {
   const pages = [...existing];
@@ -13,19 +16,22 @@ function makeRepository(existing: any[] = []) {
     createPage: vi.fn(async (p: any) => {
       pages.push({ ...p });
     }),
-    updatePage: vi.fn(async () => {}),
-    updateMetadata: vi.fn(async () => {}),
-    updateDisplay: vi.fn(async () => {}),
-    deletePage: vi.fn(async () => {}),
+    updatePage: vi.fn<HandbookPageRepository["updatePage"]>(async () => {}),
+    updateMetadata: vi.fn<HandbookPageRepository["updateMetadata"]>(async () => {}),
+    updateDisplay: vi.fn<HandbookPageRepository["updateDisplay"]>(async () => {}),
+    deletePage: vi.fn<HandbookPageRepository["deletePage"]>(async () => {}),
   };
 }
 
 function makeSectionRepository() {
-  return { findAllSections: vi.fn(async () => []), replaceAll: vi.fn(async () => {}) };
+  return {
+    findAllSections: vi.fn(async () => []),
+    replaceAll: vi.fn<HandbookSectionRepository["replaceAll"]>(async () => {}),
+  };
 }
 
 function makePageService() {
-  return { chunkAndQueue: vi.fn(async () => {}), delete: vi.fn(async () => {}) };
+  return { chunkAndQueue: vi.fn<HandbookPageService["chunkAndQueue"]>(async () => {}), delete: vi.fn(async () => {}) };
 }
 
 function makeLogger() {

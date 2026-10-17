@@ -5,7 +5,7 @@
  * including 404 responses when disabled.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type Mocked } from "vitest";
 import { NotFoundException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 
@@ -27,8 +27,8 @@ vi.mock("../../../common/guards/jwt.auth.guard", () => ({
 describe("ReferralController", () => {
   let controller: ReferralController;
   let mockConfig: Required<ReferralModuleConfig>;
-  let mockReferralService: vi.Mocked<ReferralService>;
-  let mockReply: { send: vi.Mock };
+  let mockReferralService: Mocked<ReferralService>;
+  let mockReply: { send: Mock };
 
   beforeEach(async () => {
     mockConfig = { ...DEFAULT_REFERRAL_CONFIG, enabled: true };

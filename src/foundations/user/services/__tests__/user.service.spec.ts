@@ -8,7 +8,10 @@ import { UserRepository } from "../../repositories/user.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { EmailService } from "../../../../core/email/services/email.service";
 import { ResponseLanguageService } from "../response-language.service";
-import { UserDescriptor } from "../../entities/user";
+import { User, UserDescriptor } from "../../entities/user";
+import { userMeta } from "../../entities/user.meta";
+import { Company } from "../../../company/entities/company";
+import { companyMeta } from "../../../company/entities/company.meta";
 
 // Mock hashPassword to avoid crypto dependencies
 // `SecurityService` must be re-exported here: UserService imports UserRepository,
@@ -38,13 +41,33 @@ describe("UserService", () => {
     contentId: "880e8400-e29b-41d4-a716-446655440003",
   };
 
-  const MOCK_USER = {
+  const MOCK_COMPANY: Company = {
+    id: TEST_IDS.companyId,
+    type: companyMeta.type,
+    name: "Test Company",
+    isActiveSubscription: true,
+    ownerEmail: "owner@example.com",
+    monthlyCredits: 0,
+    availableMonthlyCredits: 0,
+    availableExtraCredits: 0,
+    feature: [],
+    module: [],
+    createdAt: new Date("2025-01-01"),
+    updatedAt: new Date("2025-01-01"),
+  };
+
+  const MOCK_USER: User = {
     id: TEST_IDS.userId,
+    type: userMeta.type,
     email: "test@example.com",
     name: "Test User",
     code: "test-code-123",
     codeExpiration: new Date("2025-12-31"),
-    company: { id: TEST_IDS.companyId, name: "Test Company" },
+    isActive: true,
+    isDeleted: false,
+    company: MOCK_COMPANY,
+    createdAt: new Date("2025-01-01"),
+    updatedAt: new Date("2025-01-01"),
   };
 
   const MOCK_JSON_API_RESPONSE = {
@@ -407,6 +430,7 @@ describe("UserService", () => {
             password: "newpassword",
             email: "test@example.com",
           },
+          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -435,6 +459,7 @@ describe("UserService", () => {
             name: "Updated Name",
             email: "test@example.com",
           },
+          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -462,6 +487,7 @@ describe("UserService", () => {
             name: "Updated Name",
             email: "test@example.com",
           },
+          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: true,
@@ -481,6 +507,7 @@ describe("UserService", () => {
           attributes: {
             email: "test@example.com",
           },
+          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -677,6 +704,7 @@ describe("UserService", () => {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
+            roles: undefined,
           },
         },
         language: "en",
@@ -705,12 +733,14 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
+            password: undefined,
             sendInvitationEmail: true,
           },
           relationships: {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
+            roles: undefined,
           },
         },
         language: "en",
@@ -733,8 +763,8 @@ describe("UserService", () => {
         data: {
           id: TEST_IDS.userId,
           type: "users",
-          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
-          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } } },
+          attributes: { name: "New User", email: "new@example.com", password: undefined, sendInvitationEmail: true },
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } }, roles: undefined },
         },
         language: "en",
       });
@@ -753,8 +783,8 @@ describe("UserService", () => {
         data: {
           id: TEST_IDS.userId,
           type: "users",
-          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
-          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } } },
+          attributes: { name: "New User", email: "new@example.com", password: undefined, sendInvitationEmail: true },
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } }, roles: undefined },
         },
         language: "de",
       });
@@ -777,11 +807,13 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
+            password: undefined,
           },
           relationships: {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
+            roles: undefined,
           },
         },
         forceCompanyAdmin: true,
@@ -809,7 +841,9 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
+            password: undefined,
           },
+          relationships: undefined,
         },
         language: "en",
       });
@@ -832,7 +866,8 @@ describe("UserService", () => {
         data: {
           id: TEST_IDS.userId,
           type: "users",
-          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
+          attributes: { name: "New User", email: "new@example.com", password: undefined, sendInvitationEmail: true },
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } }, roles: undefined },
         },
         language: "en",
       });

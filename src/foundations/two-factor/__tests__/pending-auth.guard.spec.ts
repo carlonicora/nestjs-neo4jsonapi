@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ExecutionContext, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -6,7 +6,7 @@ import { PendingAuthGuard, PendingAuthPayload } from "../guards/pending-auth.gua
 
 describe("PendingAuthGuard", () => {
   let guard: PendingAuthGuard;
-  let mockJwtService: vi.Mocked<JwtService>;
+  let mockJwtService: Mocked<JwtService>;
 
   const TEST_TOKEN = "valid.jwt.token";
   const TEST_PAYLOAD: PendingAuthPayload = {
@@ -136,7 +136,8 @@ describe("PendingAuthGuard", () => {
     });
 
     it("should throw UnauthorizedException when token payload is not an object", async () => {
-      mockJwtService.verify.mockReturnValue("string-payload");
+      // Deliberately malformed: `verify` is typed to return an object, the guard must reject a string.
+      mockJwtService.verify.mockReturnValue("string-payload" as unknown as object);
       const context = createMockExecutionContext(`Bearer ${TEST_TOKEN}`);
 
       await expect(guard.canActivate(context)).rejects.toThrow(UnauthorizedException);

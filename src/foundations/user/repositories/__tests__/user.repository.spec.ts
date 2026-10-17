@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { UserRepository } from "../user.repository";
@@ -10,10 +10,10 @@ import { RoleId } from "../../../../common/constants/system.roles";
 
 describe("UserRepository", () => {
   let repository: UserRepository;
-  let mockNeo4jService: vi.Mocked<Neo4jService>;
-  let mockSecurityService: vi.Mocked<SecurityService>;
-  let mockClsService: vi.Mocked<ClsService>;
-  let mockUserCypherService: vi.Mocked<UserCypherService>;
+  let mockNeo4jService: Mocked<Neo4jService>;
+  let mockSecurityService: Mocked<SecurityService>;
+  let mockClsService: Mocked<ClsService>;
+  let mockUserCypherService: Mocked<UserCypherService>;
 
   const TEST_IDS = {
     companyId: "company-test-123",

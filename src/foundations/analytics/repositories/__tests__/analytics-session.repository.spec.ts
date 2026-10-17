@@ -166,7 +166,7 @@ describe("AnalyticsSessionRepository", () => {
 
   describe("findForAdmin", () => {
     it("pages with {CURSOR} and filters by section/visitorId/userId", async () => {
-      const cursor = { cursor: "0", take: 25 };
+      const cursor = { cursor: 0, take: 25 };
       await repository.findForAdmin({
         cursor,
         from: "2026-09-03T00:00:00.000Z",

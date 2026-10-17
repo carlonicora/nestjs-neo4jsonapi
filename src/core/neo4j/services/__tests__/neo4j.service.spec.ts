@@ -93,10 +93,12 @@ describe("Neo4jService", () => {
   });
 
   const createMockSerialiser = (): DataModelInterface<any> => ({
+    type: "test-entities",
+    endpoint: "test-entities",
     nodeName: "TestEntity",
-    jsonapiType: "test-entities",
+    labelName: "TestEntity",
+    entity: undefined,
     mapper: vi.fn(),
-    attributes: {},
   });
 
   beforeEach(async () => {
@@ -175,7 +177,7 @@ describe("Neo4jService", () => {
     it("should include cursor and serialiser from params", () => {
       // Arrange
       clsService.has.mockReturnValue(false);
-      const cursor = { cursor: "10", take: 25 };
+      const cursor = { cursor: 10, take: 25 };
       const serialiser = createMockSerialiser();
 
       // Act
@@ -203,6 +205,52 @@ describe("Neo4jService", () => {
       expect(result.queryParams.currentUserId).toBe(TEST_IDS.userId);
       expect(result.query).toContain("MATCH (currentUser:User {id: $currentUserId})");
       expect(result.query).not.toContain("BELONGS_TO");
+    });
+
+    it("should bind request context by default", () => {
+      expect(service.bindsRequestContext).toBe(true);
+    });
+
+    it("should match neither company nor currentUser when bindRequestContext is false", async () => {
+      // Arrange
+      const mockConfigService = {
+        get: vi.fn((key: string) =>
+          key === "neo4j"
+            ? {
+                uri: "bolt://localhost:7687",
+                username: "neo4j",
+                password: "password",
+                database: "neo4j",
+                bindRequestContext: false,
+              }
+            : undefined,
+        ),
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          Neo4jService,
+          { provide: EntityFactory, useValue: createMockEntityFactory() },
+          { provide: ClsService, useValue: clsService },
+          { provide: AppLoggingService, useValue: createMockLogger() },
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+      const unbound = module.get<Neo4jService>(Neo4jService);
+      clsService.has.mockImplementation((key: string) => key === "companyId" || key === "userId");
+      clsService.get.mockImplementation((key: string) => {
+        if (key === "companyId") return TEST_IDS.companyId;
+        if (key === "userId") return TEST_IDS.userId;
+        return null;
+      });
+
+      // Act
+      const result = unbound.initQuery();
+
+      // Assert
+      expect(unbound.bindsRequestContext).toBe(false);
+      expect(result.query).not.toContain("MATCH");
+      expect(result.queryParams.companyId).toBe(TEST_IDS.companyId);
+      expect(result.queryParams.currentUserId).toBe(TEST_IDS.userId);
     });
   });
 
@@ -337,7 +385,7 @@ describe("Neo4jService", () => {
         query: "MATCH (n) RETURN n {CURSOR}",
         queryParams: {},
         serialiser,
-        cursor: { cursor: "10", take: 25 },
+        cursor: { cursor: 10, take: 25 },
         fetchAll: false,
       };
 
@@ -345,7 +393,7 @@ describe("Neo4jService", () => {
       await service.readManyWithoutCount(params);
 
       // Assert
-      expect(params.queryParams.cursor).toBe("10");
+      expect(params.queryParams.cursor).toBe(10);
       expect(params.queryParams.take).toBe(25);
     });
 
@@ -1016,8 +1064,16 @@ describe("Neo4jService", () => {
         serialiser,
       };
 
-      // Act
-      const result = await service.writeOne(params);
+      // Act — fake clock drains the 1s + 2s retry backoff without waiting it out
+      vi.useFakeTimers();
+      let result: unknown;
+      try {
+        const pending = service.writeOne(params);
+        await vi.runAllTimersAsync();
+        result = await pending;
+      } finally {
+        vi.useRealTimers();
+      }
 
       // Assert
       expect(result).toEqual({ id: "1" });
@@ -1034,8 +1090,16 @@ describe("Neo4jService", () => {
         queryParams: {},
       };
 
-      // Act & Assert
-      await expect(service.writeOne(params)).rejects.toThrow("Persistent failure");
+      // Act & Assert — fake clock drains the 1s + 2s retry backoff
+      vi.useFakeTimers();
+      try {
+        const assertion = expect(service.writeOne(params)).rejects.toThrow("Persistent failure");
+        await vi.runAllTimersAsync();
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(mockTxRun).toHaveBeenCalledTimes(3);
     });
   });
 });

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { ArgumentsHost, HttpException, HttpStatus } from "@nestjs/common";
 import { HttpExceptionFilter } from "../http-exception.filter";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
@@ -20,7 +20,7 @@ vi.mock("../../../config/base.config", async (importOriginal) => {
 
 describe("HttpExceptionFilter", () => {
   let filter: HttpExceptionFilter;
-  let mockLogger: vi.Mocked<Partial<AppLoggingService>>;
+  let mockLogger: Mocked<AppLoggingService>;
   let mockResponse: any;
   let mockRequest: any;
   let mockHost: ArgumentsHost;
@@ -30,7 +30,7 @@ describe("HttpExceptionFilter", () => {
       error: vi.fn(),
       warn: vi.fn(),
       getRequestContext: vi.fn(),
-    };
+    } as unknown as Mocked<AppLoggingService>;
 
     mockResponse = {
       status: vi.fn().mockReturnThis(),
@@ -54,7 +54,7 @@ describe("HttpExceptionFilter", () => {
       }),
     } as ArgumentsHost;
 
-    filter = new HttpExceptionFilter(mockLogger as AppLoggingService);
+    filter = new HttpExceptionFilter(mockLogger);
   });
 
   afterEach(() => {
@@ -193,7 +193,7 @@ describe("HttpExceptionFilter", () => {
       vi.stubEnv("NODE_ENV", "production");
 
       // Create new filter instance to pick up env change
-      const prodFilter = new HttpExceptionFilter(mockLogger as AppLoggingService);
+      const prodFilter = new HttpExceptionFilter(mockLogger);
       const exception = new HttpException(
         "Database connection failed: host=localhost:5432",
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -210,7 +210,7 @@ describe("HttpExceptionFilter", () => {
     it("should not sanitize 4xx error messages in production", () => {
       vi.stubEnv("NODE_ENV", "production");
 
-      const prodFilter = new HttpExceptionFilter(mockLogger as AppLoggingService);
+      const prodFilter = new HttpExceptionFilter(mockLogger);
       const exception = new HttpException("Invalid email format", HttpStatus.BAD_REQUEST);
 
       prodFilter.catch(exception, mockHost);

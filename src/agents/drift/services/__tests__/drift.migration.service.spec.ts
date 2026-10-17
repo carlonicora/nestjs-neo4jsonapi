@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { DriftMigrationService } from "../drift.migration.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
+import type { Company } from "../../../../foundations/company/entities/company";
 import { CompanyRepository } from "../../../../foundations/company/repositories/company.repository";
 import { CommunityRepository } from "../../../../foundations/community/repositories/community.repository";
 import { CommunityDetectorService } from "../../../community.detector/services/community.detector.service";
@@ -21,10 +22,10 @@ describe("DriftMigrationService", () => {
     companyId3: "770e8400-e29b-41d4-a716-446655440002",
   };
 
-  const MOCK_COMPANIES = [
-    { id: TEST_IDS.companyId1, name: "Company 1" },
-    { id: TEST_IDS.companyId2, name: "Company 2" },
-    { id: TEST_IDS.companyId3, name: "Company 3" },
+  const MOCK_COMPANIES: Company[] = [
+    { id: TEST_IDS.companyId1, name: "Company 1" } as Company,
+    { id: TEST_IDS.companyId2, name: "Company 2" } as Company,
+    { id: TEST_IDS.companyId3, name: "Company 3" } as Company,
   ];
 
   const createMockLogger = () => ({

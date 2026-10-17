@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { HealthCheckError } from "@nestjs/terminus";
@@ -17,7 +17,7 @@ vi.mock("@aws-sdk/client-s3", () => ({
 
 describe("S3HealthIndicator", () => {
   let indicator: S3HealthIndicator;
-  let configService: vi.Mocked<ConfigService>;
+  let configService: Mocked<ConfigService>;
 
   beforeEach(async () => {
     const mockConfigService = {

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -37,7 +37,7 @@ import { NotificationController } from "./notification.controller";
 
 describe("NotificationController", () => {
   let controller: NotificationController;
-  let notificationService: vi.Mocked<NotificationServices>;
+  let notificationService: Mocked<NotificationServices>;
 
   // Test data constants
   const MOCK_NOTIFICATION_ID = "550e8400-e29b-41d4-a716-446655440000";

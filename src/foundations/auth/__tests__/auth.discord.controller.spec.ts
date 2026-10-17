@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock the auth discord service to avoid complex dependency chain
 vi.mock("../services/auth.discord.service", () => ({
@@ -20,17 +20,17 @@ import { AuthDiscordService } from "../services/auth.discord.service";
 
 describe("AuthDiscordController", () => {
   let controller: AuthDiscordController;
-  let authDiscordService: vi.Mocked<AuthDiscordService>;
-  let configService: vi.Mocked<ConfigService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let authDiscordService: Mocked<AuthDiscordService>;
+  let configService: Mocked<ConfigService>;
+  let mockReply: Mocked<FastifyReply>;
 
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     return {
       redirect: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
   };
 
   const mockDiscordConfig = {

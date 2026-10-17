@@ -5,7 +5,7 @@
  * including feature enabled/disabled behavior.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type Mocked } from "vitest";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { getQueueToken } from "@nestjs/bullmq";
@@ -44,15 +44,15 @@ vi.mock("../../../config/base.config", async (importOriginal) => {
 describe("ReferralService", () => {
   let service: ReferralService;
   let mockConfig: Required<ReferralModuleConfig>;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockReferralRepository: vi.Mocked<ReferralRepository>;
-  let mockCompanyRepository: vi.Mocked<CompanyRepository>;
-  let mockUserRepository: vi.Mocked<UserRepository>;
-  let mockClsService: vi.Mocked<ClsService>;
-  let mockCacheService: vi.Mocked<CacheService>;
-  let mockEmailQueue: vi.Mocked<Queue>;
-  let mockRedisClient: { get: vi.Mock; setex: vi.Mock };
-  let mockResponseLanguage: { resolve: vi.Mock; resolveForUser: vi.Mock; resolveForEmail: vi.Mock };
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockReferralRepository: Mocked<ReferralRepository>;
+  let mockCompanyRepository: Mocked<CompanyRepository>;
+  let mockUserRepository: Mocked<UserRepository>;
+  let mockClsService: Mocked<ClsService>;
+  let mockCacheService: Mocked<CacheService>;
+  let mockEmailQueue: Mocked<Queue>;
+  let mockRedisClient: { get: Mock; setex: Mock };
+  let mockResponseLanguage: { resolve: Mock; resolveForUser: Mock; resolveForEmail: Mock };
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_USER_ID = "user-456";
@@ -215,7 +215,7 @@ describe("ReferralService", () => {
         mockCompanyRepository.findByReferralCode.mockResolvedValue({
           id: MOCK_REFERRER_COMPANY_ID,
         } as any);
-        mockReferralRepository.createReferral.mockResolvedValue();
+        mockReferralRepository.createReferral.mockResolvedValue(true);
 
         await service.trackReferral({ referralCode: MOCK_REFERRAL_CODE });
 
@@ -253,7 +253,7 @@ describe("ReferralService", () => {
         mockCompanyRepository.findByReferralCode.mockResolvedValue({
           id: MOCK_REFERRER_COMPANY_ID,
         } as any);
-        mockReferralRepository.createReferral.mockResolvedValue();
+        mockReferralRepository.createReferral.mockResolvedValue(true);
 
         await service.trackReferral({ referralCode: MOCK_REFERRAL_CODE });
 

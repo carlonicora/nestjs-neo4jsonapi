@@ -29,11 +29,12 @@ class HostRepository extends AbstractRepository<any, any> {
 }
 
 const model = (nodeName: string, labelName: string): DataModelInterface<any> => ({
+  type: `${nodeName}s`,
+  endpoint: `${nodeName}s`,
   nodeName,
   labelName,
-  jsonapiType: `${nodeName}s`,
+  entity: undefined,
   mapper: vi.fn(),
-  attributes: {},
 });
 
 const mockNeo4j = () =>
