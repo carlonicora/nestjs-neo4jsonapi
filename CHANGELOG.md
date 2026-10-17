@@ -1,3 +1,9 @@
+## [5.4.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.0...v5.4.1) (2026-10-17)
+
+### 🐛 Bug Fixes
+
+* **tests:** format render function for better readability in email service tests ([cff17a0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cff17a007d7b49dcaac20f7e2cbfdf3db22e78a9))
+
 ## [5.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.3.0...v5.4.0) (2026-10-17)
 
 ### 🚀 Features
