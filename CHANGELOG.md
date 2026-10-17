@@ -1,3 +1,9 @@
+## [5.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.3.0...v5.4.0) (2026-10-17)
+
+### 🚀 Features
+
+* **i18n:** opt-in response language for users, AI and emails ([da2297e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/da2297ec63021f23f9b0e6f90dc6c3f950a956b2))
+
 ## [5.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.2.0...v5.3.0) (2026-10-17)
 
 ### 🚀 Features
