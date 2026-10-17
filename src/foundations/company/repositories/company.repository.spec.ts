@@ -5,7 +5,7 @@
  * These tests verify that the repository works correctly before and after migration.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { CompanyRepository } from "./company.repository";
@@ -15,9 +15,9 @@ import { Company } from "../entities/company";
 
 describe("CompanyRepository", () => {
   let repository: CompanyRepository;
-  let mockNeo4jService: vi.Mocked<Neo4jService>;
-  let mockClsService: vi.Mocked<ClsService>;
-  let mockSecurityService: vi.Mocked<SecurityService>;
+  let mockNeo4jService: Mocked<Neo4jService>;
+  let mockClsService: Mocked<ClsService>;
+  let mockSecurityService: Mocked<SecurityService>;
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_COMPANY: Company = {
@@ -173,7 +173,7 @@ describe("CompanyRepository", () => {
 
   describe("createCompanyNode", () => {
     it("should create company with all parameters", async () => {
-      mockNeo4jService.validateExistingNodes.mockResolvedValue();
+      mockNeo4jService.validateExistingNodes.mockResolvedValue(undefined);
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
       const result = await repository.createCompanyNode({
@@ -194,7 +194,7 @@ describe("CompanyRepository", () => {
     });
 
     it("should create company with minimal parameters", async () => {
-      mockNeo4jService.validateExistingNodes.mockResolvedValue();
+      mockNeo4jService.validateExistingNodes.mockResolvedValue(undefined);
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
       const result = await repository.createCompanyNode({
@@ -208,7 +208,7 @@ describe("CompanyRepository", () => {
     });
 
     it("should validate feature and module IDs before creation", async () => {
-      mockNeo4jService.validateExistingNodes.mockResolvedValue();
+      mockNeo4jService.validateExistingNodes.mockResolvedValue(undefined);
       mockNeo4jService.writeOne.mockResolvedValue(MOCK_COMPANY);
 
       await repository.createCompanyNode({
@@ -229,8 +229,8 @@ describe("CompanyRepository", () => {
 
   describe("update", () => {
     it("should update company with all parameters", async () => {
-      mockNeo4jService.validateExistingNodes.mockResolvedValue();
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.update({
         companyId: MOCK_COMPANY_ID,
@@ -250,8 +250,8 @@ describe("CompanyRepository", () => {
     });
 
     it("should update company with only required parameters", async () => {
-      mockNeo4jService.validateExistingNodes.mockResolvedValue();
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.update({
         companyId: MOCK_COMPANY_ID,
@@ -264,7 +264,7 @@ describe("CompanyRepository", () => {
 
   describe("updateConfigurations", () => {
     it("should update only configurations", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateConfigurations({
         companyId: MOCK_COMPANY_ID,
@@ -276,7 +276,7 @@ describe("CompanyRepository", () => {
     });
 
     it("should handle empty configurations", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateConfigurations({
         companyId: MOCK_COMPANY_ID,
@@ -429,7 +429,7 @@ describe("CompanyRepository", () => {
 
   describe("markSubscriptionStatus", () => {
     it("should update subscription status", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.markSubscriptionStatus({
         companyId: MOCK_COMPANY_ID,
@@ -441,7 +441,7 @@ describe("CompanyRepository", () => {
     });
 
     it("should deactivate subscription", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.markSubscriptionStatus({
         companyId: MOCK_COMPANY_ID,
@@ -454,7 +454,7 @@ describe("CompanyRepository", () => {
 
   describe("updateTokens", () => {
     it("should update all credit fields", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateTokens({
         companyId: MOCK_COMPANY_ID,
@@ -468,7 +468,7 @@ describe("CompanyRepository", () => {
     });
 
     it("should update only specified credit fields", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateTokens({
         companyId: MOCK_COMPANY_ID,
@@ -479,7 +479,7 @@ describe("CompanyRepository", () => {
     });
 
     it("writes aiEnabled when provided", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateTokens({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
 
@@ -489,7 +489,7 @@ describe("CompanyRepository", () => {
     });
 
     it("omits aiEnabled from the SET clause when not provided", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.updateTokens({ companyId: MOCK_COMPANY_ID, monthlyCredits: 100 });
 
@@ -529,7 +529,7 @@ describe("CompanyRepository", () => {
 
   describe("delete", () => {
     it("should delete company by ID", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.delete({ id: MOCK_COMPANY_ID });
 
@@ -591,7 +591,7 @@ describe("CompanyRepository", () => {
 
   describe("scheduleCompanyDeletion", () => {
     it("should set deletion schedule with 30-day offset", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       const endDate = new Date("2025-01-15");
       await repository.scheduleCompanyDeletion({
@@ -653,7 +653,7 @@ describe("CompanyRepository", () => {
 
   describe("clearDeletionSchedule", () => {
     it("should clear all deletion fields to null", async () => {
-      mockNeo4jService.writeOne.mockResolvedValue();
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.clearDeletionSchedule({ companyId: MOCK_COMPANY_ID });
 

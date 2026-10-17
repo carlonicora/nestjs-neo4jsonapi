@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -13,15 +13,16 @@ import { stripeCustomerMeta } from "../../../stripe-customer/entities/stripe-cus
 import { stripePriceMeta } from "../../../stripe-price/entities/stripe-price.meta";
 import { stripeProductMeta } from "../../../stripe-product/entities/stripe-product.meta";
 import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
+import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
+import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 
 describe("StripeSubscriptionRepository", () => {
   let repository: StripeSubscriptionRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
     subscriptionId: "550e8400-e29b-41d4-a716-446655440000",
-    stripeCustomerId: "660e8400-e29b-41d4-a716-446655440001",
     priceId: "770e8400-e29b-41d4-a716-446655440002",
     stripeSubscriptionId: "sub_test123",
     stripeSubscriptionItemId: "si_test456",
@@ -41,6 +42,7 @@ describe("StripeSubscriptionRepository", () => {
 
   const MOCK_SUBSCRIPTION: StripeSubscription = {
     id: TEST_IDS.subscriptionId,
+    type: "stripe-subscriptions",
     stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
     stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
     status: "active",
@@ -52,11 +54,11 @@ describe("StripeSubscriptionRepository", () => {
     quantity: 1,
     createdAt: MOCK_DATES.createdAt,
     updatedAt: MOCK_DATES.updatedAt,
-    billingCustomer: {} as any,
-    price: {} as any,
+    stripeCustomer: {} as StripeCustomer,
+    stripePrice: {} as StripePrice,
   };
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, any> } => ({
     query: "",
     queryParams: {},
   });
@@ -80,7 +82,7 @@ describe("StripeSubscriptionRepository", () => {
     }).compile();
 
     repository = module.get<StripeSubscriptionRepository>(StripeSubscriptionRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     // Reset mocks before each test
     vi.clearAllMocks();

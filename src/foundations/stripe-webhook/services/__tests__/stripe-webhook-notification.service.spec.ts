@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -23,10 +23,10 @@ import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 
 describe("StripeWebhookNotificationService", () => {
   let service: StripeWebhookNotificationService;
-  let emailQueue: vi.Mocked<Queue>;
-  let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
-  let stripeInvoiceRepository: vi.Mocked<StripeInvoiceRepository>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let emailQueue: Mocked<Queue>;
+  let stripeCustomerRepository: Mocked<StripeCustomerRepository>;
+  let stripeInvoiceRepository: Mocked<StripeInvoiceRepository>;
+  let logger: Mocked<AppLoggingService>;
 
   const MOCK_STRIPE_CUSTOMER = {
     id: "internal_customer_id",
@@ -641,8 +641,8 @@ describe("StripeWebhookNotificationService", () => {
   });
 
   describe("sendDeletionWarningEmail", () => {
-    let companyRepository: vi.Mocked<CompanyRepository>;
-    let userRepository: vi.Mocked<UserRepository>;
+    let companyRepository: Mocked<CompanyRepository>;
+    let userRepository: Mocked<UserRepository>;
 
     const MOCK_COMPANY = {
       id: "company-test-123",
@@ -657,8 +657,8 @@ describe("StripeWebhookNotificationService", () => {
     };
 
     beforeEach(() => {
-      companyRepository = service["companyRepository"] as vi.Mocked<CompanyRepository>;
-      userRepository = service["userRepository"] as vi.Mocked<UserRepository>;
+      companyRepository = service["companyRepository"] as Mocked<CompanyRepository>;
+      userRepository = service["userRepository"] as Mocked<UserRepository>;
     });
 
     it("should log warning and return when company not found", async () => {
@@ -793,7 +793,7 @@ describe("StripeWebhookNotificationService", () => {
   });
 
   describe("sendSubscriptionCancelledEmail", () => {
-    let companyRepository: vi.Mocked<CompanyRepository>;
+    let companyRepository: Mocked<CompanyRepository>;
 
     const MOCK_COMPANY = {
       id: "company-test-123",
@@ -802,7 +802,7 @@ describe("StripeWebhookNotificationService", () => {
     };
 
     beforeEach(() => {
-      companyRepository = service["companyRepository"] as vi.Mocked<CompanyRepository>;
+      companyRepository = service["companyRepository"] as Mocked<CompanyRepository>;
     });
 
     it("should log warning and return when company not found", async () => {

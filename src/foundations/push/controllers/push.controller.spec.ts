@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -22,7 +22,7 @@ import { PushController } from "./push.controller";
 
 describe("PushController", () => {
   let controller: PushController;
-  let pushService: vi.Mocked<PushService>;
+  let pushService: Mocked<PushService>;
 
   // Test data
   const mockSubscription: PushSubscriptionDTO = {

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
@@ -13,14 +13,18 @@ import { CompanyRepository } from "../../../company/repositories/company.reposit
 import { CompanyService } from "../../../company/services/company.service";
 import { StripePriceRepository } from "../../../stripe-price/repositories/stripe-price.repository";
 import { AppLoggingService } from "../../../../core/logging";
+import { StripeSubscription } from "../../entities/stripe-subscription.entity";
+import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
+import { StripeProduct } from "../../../stripe-product/entities/stripe-product.entity";
+import { Company } from "../../../company/entities/company";
 
 describe("TokenAllocationService", () => {
   let service: TokenAllocationService;
-  let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
-  let companyRepository: vi.Mocked<CompanyRepository>;
-  let companyService: vi.Mocked<CompanyService>;
-  let stripePriceRepository: vi.Mocked<StripePriceRepository>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let subscriptionRepository: Mocked<StripeSubscriptionRepository>;
+  let companyRepository: Mocked<CompanyRepository>;
+  let companyService: Mocked<CompanyService>;
+  let stripePriceRepository: Mocked<StripePriceRepository>;
+  let logger: Mocked<AppLoggingService>;
 
   // Test data constants
   const MOCK_COMPANY_ID = "660e8400-e29b-41d4-a716-446655440001";
@@ -29,8 +33,9 @@ describe("TokenAllocationService", () => {
   const MOCK_PRICE_ID = "ee0e8400-e29b-41d4-a716-446655440001";
   const MOCK_TOKENS = 10000;
 
-  const MOCK_PRICE_WITH_TOKENS = {
+  const MOCK_PRICE_WITH_TOKENS: StripePrice = {
     id: MOCK_PRICE_ID,
+    type: "stripe-prices",
     stripePriceId: "price_stripe_123",
     token: MOCK_TOKENS,
     active: true,
@@ -39,16 +44,17 @@ describe("TokenAllocationService", () => {
     priceType: "recurring" as const,
     createdAt: new Date(),
     updatedAt: new Date(),
-    stripeProduct: {} as any,
+    stripeProduct: {} as StripeProduct,
   };
 
-  const MOCK_PRICE_WITHOUT_TOKENS = {
+  const MOCK_PRICE_WITHOUT_TOKENS: StripePrice = {
     ...MOCK_PRICE_WITH_TOKENS,
     token: undefined,
   };
 
-  const MOCK_SUBSCRIPTION = {
+  const MOCK_SUBSCRIPTION: StripeSubscription = {
     id: "aa0e8400-e29b-41d4-a716-446655440001",
+    type: "stripe-subscriptions",
     stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
     status: "active" as const,
     currentPeriodStart: new Date("2025-01-01T00:00:00Z"),
@@ -59,6 +65,7 @@ describe("TokenAllocationService", () => {
     updatedAt: new Date(),
     stripeCustomer: {
       id: MOCK_CUSTOMER_INTERNAL_ID,
+      type: "stripe-customers",
       stripeCustomerId: "cus_stripe_123",
       email: "test@example.com",
       name: "Test Customer",
@@ -67,20 +74,22 @@ describe("TokenAllocationService", () => {
       delinquent: false,
       createdAt: new Date(),
       updatedAt: new Date(),
-      company: {} as any,
+      company: {} as Company,
     },
     stripePrice: MOCK_PRICE_WITH_TOKENS,
   };
 
+  // Deliberately partial: the service only reads id and the credit fields.
   const MOCK_COMPANY = {
     id: MOCK_COMPANY_ID,
+    type: "companies",
     name: "Test Company",
     monthlyCredits: 5000,
     availableMonthlyCredits: 2500,
     availableExtraCredits: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
-  };
+  } as Company;
 
   beforeEach(async () => {
     const mockSubscriptionRepository = {
@@ -226,10 +235,11 @@ describe("TokenAllocationService", () => {
     });
 
     it("should handle BigInt conversion for previous tokens", async () => {
+      // Neo4j can hand back a BigInt where the entity type declares a number.
       const companyWithBigInt = {
         ...MOCK_COMPANY,
         availableMonthlyCredits: BigInt(5000),
-      };
+      } as unknown as Company;
       subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION);
       companyRepository.findByStripeCustomerId.mockResolvedValue(companyWithBigInt);
       companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);

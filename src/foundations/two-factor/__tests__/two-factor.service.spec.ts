@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { TwoFactorService } from "../services/two-factor.service";
@@ -8,6 +8,8 @@ import { TotpService } from "../services/totp.service";
 import { PasskeyService } from "../services/passkey.service";
 import { BackupCodeService } from "../services/backup-code.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { TwoFactorConfig } from "../entities/two-factor-config";
+import { PendingTwoFactor } from "../entities/pending-two-factor";
 
 // Mock baseConfig
 vi.mock("../../../config/base.config", () => ({
@@ -20,12 +22,12 @@ vi.mock("../../../config/base.config", () => ({
 
 describe("TwoFactorService", () => {
   let service: TwoFactorService;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockTwoFactorConfigRepository: vi.Mocked<TwoFactorConfigRepository>;
-  let mockPendingTwoFactorRepository: vi.Mocked<PendingTwoFactorRepository>;
-  let mockTotpService: vi.Mocked<TotpService>;
-  let mockPasskeyService: vi.Mocked<PasskeyService>;
-  let mockBackupCodeService: vi.Mocked<BackupCodeService>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockTwoFactorConfigRepository: Mocked<TwoFactorConfigRepository>;
+  let mockPendingTwoFactorRepository: Mocked<PendingTwoFactorRepository>;
+  let mockTotpService: Mocked<TotpService>;
+  let mockPasskeyService: Mocked<PasskeyService>;
+  let mockBackupCodeService: Mocked<BackupCodeService>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -106,7 +108,7 @@ describe("TwoFactorService", () => {
 
   describe("getConfig", () => {
     it("should return user 2FA config", async () => {
-      const config = { id: TEST_IDS.configId, isEnabled: true, preferredMethod: "totp" };
+      const config = { id: TEST_IDS.configId, isEnabled: true, preferredMethod: "totp" } as TwoFactorConfig;
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue(config);
 
       const result = await service.getConfig(TEST_IDS.userId);
@@ -129,7 +131,7 @@ describe("TwoFactorService", () => {
         id: TEST_IDS.configId,
         isEnabled: true,
         preferredMethod: "totp",
-      });
+      } as TwoFactorConfig);
       mockTotpService.hasVerifiedAuthenticator.mockResolvedValue(true);
       mockPasskeyService.hasPasskeys.mockResolvedValue(true);
       mockBackupCodeService.getRawUnusedCount.mockResolvedValue(8);
@@ -207,7 +209,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: false,
-      });
+      } as TwoFactorConfig);
       mockTotpService.hasVerifiedAuthenticator.mockResolvedValue(true);
 
       await service.enable(TEST_IDS.userId);
@@ -222,7 +224,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: true,
-      });
+      } as TwoFactorConfig);
 
       const result = await service.disable(TEST_IDS.userId);
 
@@ -248,7 +250,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: true,
-      });
+      } as TwoFactorConfig);
       mockTotpService.hasVerifiedAuthenticator.mockResolvedValue(true);
 
       await service.setPreferredMethod(TEST_IDS.userId, "totp");
@@ -264,7 +266,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: true,
-      });
+      } as TwoFactorConfig);
       mockTotpService.hasVerifiedAuthenticator.mockResolvedValue(false);
 
       await expect(service.setPreferredMethod(TEST_IDS.userId, "totp")).rejects.toThrow(BadRequestException);
@@ -335,7 +337,7 @@ describe("TwoFactorService", () => {
           challenge: "test-challenge",
           challengeType: "login",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
     });
@@ -378,7 +380,7 @@ describe("TwoFactorService", () => {
           challenge: "test-challenge",
           challengeType: "login",
           expiration: new Date(Date.now() - 60000), // Expired
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -394,7 +396,7 @@ describe("TwoFactorService", () => {
           challenge: "test-challenge",
           challengeType: "login",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
     });
@@ -432,7 +434,7 @@ describe("TwoFactorService", () => {
           challenge: "test-challenge",
           challengeType: "login",
           expiration: new Date(),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       };
       mockPendingTwoFactorRepository.findByIdWithUser.mockResolvedValue(pendingData);
@@ -466,7 +468,7 @@ describe("TwoFactorService", () => {
       mockBackupCodeService.getRawUnusedCount.mockResolvedValue(7);
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
-      });
+      } as TwoFactorConfig);
 
       await service.updateBackupCodesCount(TEST_IDS.userId);
 
@@ -493,7 +495,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: true,
-      });
+      } as TwoFactorConfig);
 
       const result = await service.checkAndDisableIfNoMethods(TEST_IDS.userId);
 
@@ -519,7 +521,7 @@ describe("TwoFactorService", () => {
       mockTwoFactorConfigRepository.findByUserId.mockResolvedValue({
         id: TEST_IDS.configId,
         isEnabled: false,
-      });
+      } as TwoFactorConfig);
 
       const result = await service.checkAndDisableIfNoMethods(TEST_IDS.userId);
 

@@ -23,7 +23,7 @@ describe("convertFieldValue — datetime", () => {
   });
 
   it("keeps the previous behaviour for a zone name with no offset instead of guessing the server zone", () => {
-    const value = new DateTime(2026, 5, 11, 20, 0, 0, 0, undefined, "Europe/Rome");
+    const value = new DateTime<number>(2026, 5, 11, 20, 0, 0, 0, undefined, "Europe/Rome");
     expect(Number.isNaN((convertFieldValue(value, "datetime") as Date).getTime())).toBe(true);
   });
 

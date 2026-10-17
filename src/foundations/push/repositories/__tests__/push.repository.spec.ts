@@ -24,7 +24,7 @@ describe("PushRepository", () => {
   let repository: PushRepository;
   let neo4jService: ReturnType<typeof createMockNeo4jService>;
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, unknown> } => ({
     query: "",
     queryParams: {},
   });

@@ -9,6 +9,7 @@ import { AppLoggingService } from "../../../../core/logging/services/logging.ser
 import { Community } from "../../../../foundations/community/entities/community.entity";
 import { communityMeta } from "../../../../foundations/community/entities/community.meta";
 import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
+import { ModelWeight } from "../../../../core/llm/enums/model.weight";
 
 describe("CommunitySummariserService", () => {
   let service: CommunitySummariserService;
@@ -21,6 +22,13 @@ describe("CommunitySummariserService", () => {
   const TEST_IDS = {
     communityId: "550e8400-e29b-41d4-a716-446655440000",
   };
+
+  // LLMService.call resolves with the parsed output plus token usage and model weight.
+  const llmResult = <T extends object>(output: T) => ({
+    ...output,
+    tokenUsage: { input: 0, output: 0 },
+    modelWeight: ModelWeight.Normal,
+  });
 
   const createMockLLMService = () => ({
     call: vi.fn(),
@@ -165,11 +173,13 @@ describe("CommunitySummariserService", () => {
         { id: "kc1", value: "Concept 1", description: "Description 1" },
       ]);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -210,11 +220,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue(relationships);
-      llmService.call.mockResolvedValue({
-        title: "Test Community Title",
-        summary: "This is a test summary for the community.",
-        rating: 85,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Community Title",
+          summary: "This is a test summary for the community.",
+          rating: 85,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -246,11 +258,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -274,11 +288,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -302,11 +318,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary Content",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary Content",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -331,11 +349,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -369,11 +389,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: longTitle,
-        summary: "Test Summary",
-        rating: 75,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: longTitle,
+          summary: "Test Summary",
+          rating: 75,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -395,11 +417,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 75.7, // Non-integer
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 75.7, // Non-integer
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -422,11 +446,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Generated Title",
-        summary: "Generated Summary",
-        rating: 80,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Generated Title",
+          summary: "Generated Summary",
+          rating: 80,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue(embedding);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -450,11 +476,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 85,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 85,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 
@@ -475,11 +503,13 @@ describe("CommunitySummariserService", () => {
 
       communityRepository.findMemberKeyConcepts.mockResolvedValue(members);
       communityRepository.findMemberRelationships.mockResolvedValue([]);
-      llmService.call.mockResolvedValue({
-        title: "Test Title",
-        summary: "Test Summary",
-        rating: 85,
-      });
+      llmService.call.mockResolvedValue(
+        llmResult({
+          title: "Test Title",
+          summary: "Test Summary",
+          rating: 85,
+        }),
+      );
       embedderService.vectoriseText.mockResolvedValue([0.1, 0.2, 0.3]);
       communityRepository.updateSummary.mockResolvedValue(undefined);
 

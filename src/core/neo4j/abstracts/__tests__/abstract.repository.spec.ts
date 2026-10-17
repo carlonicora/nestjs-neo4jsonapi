@@ -33,20 +33,22 @@ const TEST_IDS = {
 
 // Create mock model
 const createMockModel = (): DataModelInterface<TestEntity> => ({
+  type: "test-entities",
+  endpoint: "test-entities",
   nodeName: "testEntity",
   labelName: "TestEntity",
-  jsonapiType: "test-entities",
+  entity: undefined,
   mapper: vi.fn(),
-  attributes: {},
 });
 
 // Create mock related model
 const createMockRelatedModel = (): DataModelInterface<RelatedEntity> => ({
+  type: "related-entities",
+  endpoint: "related-entities",
   nodeName: "relatedEntity",
   labelName: "RelatedEntity",
-  jsonapiType: "related-entities",
+  entity: undefined,
   mapper: vi.fn(),
-  attributes: {},
 });
 
 // Test relationships type
@@ -349,11 +351,11 @@ describe("AbstractRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_ENTITY]);
 
-      await repository.find({ cursor: { cursor: "10", take: 25 } });
+      await repository.find({ cursor: { cursor: 10, take: 25 } });
 
       expect(neo4jService.initQuery).toHaveBeenCalledWith(
         expect.objectContaining({
-          cursor: { cursor: "10", take: 25 },
+          cursor: { cursor: 10, take: 25 },
         }),
       );
     });

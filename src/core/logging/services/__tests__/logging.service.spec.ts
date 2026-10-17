@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../logging.service";
@@ -16,10 +16,14 @@ const mockPinoLogger = {
 
 // Mock pino to return our mock logger
 vi.mock("pino", () => {
-  const mockPino = vi.fn(() => mockPinoLogger);
-  mockPino.stdTimeFunctions = { isoTime: vi.fn() };
-  mockPino.multistream = vi.fn((streams) => streams);
-  mockPino.transport = vi.fn((config) => config);
+  const mockPino = Object.assign(
+    vi.fn(() => mockPinoLogger),
+    {
+      stdTimeFunctions: { isoTime: vi.fn() },
+      multistream: vi.fn((streams: unknown) => streams),
+      transport: vi.fn((config: unknown) => config),
+    },
+  );
   return { default: mockPino };
 });
 
@@ -42,7 +46,7 @@ vi.mock("../../../../config/base.config", () => ({
 
 describe("AppLoggingService", () => {
   let service: AppLoggingService;
-  let mockClsService: vi.Mocked<ClsService>;
+  let mockClsService: Mocked<ClsService>;
   let clsStore: Record<string, any>;
 
   beforeEach(async () => {

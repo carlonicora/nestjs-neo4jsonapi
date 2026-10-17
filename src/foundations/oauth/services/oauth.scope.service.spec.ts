@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { ConfigService } from "@nestjs/config";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { OAuthScopeService } from "./oauth.scope.service";
 import { OAuthScopeDefinition } from "../constants/oauth.scopes";
 
 const buildService = (additionalScopes?: OAuthScopeDefinition[]): OAuthScopeService => {
   const configService = {
     get: vi.fn().mockImplementation((key: string) => (key === "oauth" ? { additionalScopes } : undefined)),
-  } as unknown as ConfigService;
+  } as unknown as ConfigService<BaseConfigInterface>;
   return new OAuthScopeService(configService);
 };
 

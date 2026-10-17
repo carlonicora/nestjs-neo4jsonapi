@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ConfigService } from "@nestjs/config";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { OAuthTokenService } from "./oauth.token.service";
 import { OAuthRepository } from "../repositories/oauth.repository";
 
 describe("OAuthTokenService", () => {
   let tokenService: OAuthTokenService;
   let mockRepository: Partial<OAuthRepository>;
-  let mockConfigService: Partial<ConfigService>;
+  let mockConfigService: Partial<ConfigService<BaseConfigInterface>>;
 
   beforeEach(() => {
     mockRepository = {
@@ -51,7 +52,10 @@ describe("OAuthTokenService", () => {
       }),
     };
 
-    tokenService = new OAuthTokenService(mockRepository as OAuthRepository, mockConfigService as ConfigService);
+    tokenService = new OAuthTokenService(
+      mockRepository as OAuthRepository,
+      mockConfigService as ConfigService<BaseConfigInterface>,
+    );
   });
 
   describe("generateAccessToken", () => {

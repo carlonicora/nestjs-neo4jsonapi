@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+import type { JsonApiDTOData } from "../../../../core/neo4j/abstracts/abstract.service";
 import { EntityWriteTools } from "../entity-write.tools";
 
 const npc = {
@@ -139,8 +140,8 @@ function buildTools(entity: any) {
   const service = {
     create: vi.fn(async () => undefined),
     patch: vi.fn(async () => undefined),
-    createFromDTO: vi.fn(async () => undefined),
-    patchFromDTO: vi.fn(async () => undefined),
+    createFromDTO: vi.fn(async (_params: { data: JsonApiDTOData }) => undefined),
+    patchFromDTO: vi.fn(async (_params: { data: JsonApiDTOData }) => undefined),
     delete: vi.fn(async () => undefined),
     addToRelationshipFromDTO: vi.fn(async () => undefined),
     removeFromRelationshipFromDTO: vi.fn(async () => undefined),
@@ -865,8 +866,8 @@ describe("EntityWriteTools — richtext fields", () => {
   function buildRichtextTools(options: { withConverter?: boolean } = {}) {
     const withConverter = options.withConverter ?? true;
     const service = {
-      createFromDTO: vi.fn(async () => undefined),
-      patchFromDTO: vi.fn(async () => undefined),
+      createFromDTO: vi.fn(async (_params: { data: JsonApiDTOData }) => undefined),
+      patchFromDTO: vi.fn(async (_params: { data: JsonApiDTOData }) => undefined),
       findRecordById: vi.fn(async ({ id }: { id: string }) => ({ id, name: NAMES[id] ?? "Someone" })),
     };
     const catalog = {

@@ -300,7 +300,8 @@ describe("ContentCypherService", () => {
           {
             relationship: "HAS_CATEGORY",
             direction: "out",
-            model: { nodeName: "category", labelName: "Category" },
+            cardinality: "one",
+            model: { type: "categories", endpoint: "categories", nodeName: "category", labelName: "Category" },
           },
         ],
       };
@@ -321,7 +322,8 @@ describe("ContentCypherService", () => {
           {
             relationship: "TAGGED",
             direction: "in",
-            model: { nodeName: "tag", labelName: "Tag" },
+            cardinality: "many",
+            model: { type: "tags", endpoint: "tags", nodeName: "tag", labelName: "Tag" },
           },
         ],
       };
@@ -341,12 +343,14 @@ describe("ContentCypherService", () => {
           {
             relationship: "HAS_CATEGORY",
             direction: "out",
-            model: { nodeName: "category", labelName: "Category" },
+            cardinality: "one",
+            model: { type: "categories", endpoint: "categories", nodeName: "category", labelName: "Category" },
           },
           {
             relationship: "TAGGED",
             direction: "in",
-            model: { nodeName: "tag", labelName: "Tag" },
+            cardinality: "many",
+            model: { type: "tags", endpoint: "tags", nodeName: "tag", labelName: "Tag" },
           },
         ],
       };

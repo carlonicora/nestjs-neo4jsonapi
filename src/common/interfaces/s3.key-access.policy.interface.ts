@@ -45,6 +45,17 @@ export interface S3KeyAccessPolicy {
    * tokens are accepted for every key, as before.
    */
   isPermanentKey?(key: string): boolean;
+
+  /**
+   * Optional: false = this app never serves `key` through the token routes (403, no storage call).
+   *
+   * When implemented, the `/s3/objects/:token` routes refuse (403) a validly signed
+   * `get` or `put` token for a key this returns false for, before any storage read
+   * or write. The rule applies to every caller, Administrators included.
+   *
+   * When absent (or no policy is bound), every well-formed key is served, as before.
+   */
+  isServableKey?(key: string): boolean;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -13,19 +13,21 @@ import { Queue } from "bullmq";
 import { StripeWebhookController } from "../stripe-webhook.controller";
 import { StripeWebhookService } from "../../services/stripe-webhook.service";
 import { StripeWebhookEventRepository } from "../../repositories/stripe-webhook-event.repository";
+import { StripeWebhookEvent } from "../../entities/stripe-webhook-event.entity";
+import { stripeWebhookEventMeta } from "../../entities/stripe-webhook-event.meta";
 import { StripeWebhookJobData } from "../../processors/stripe-webhook.processor";
 import { AppLoggingService } from "../../../../core/logging";
 import { QueueId } from "../../../../config/enums/queue.id";
-import { MOCK_WEBHOOK_EVENT, TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
+import { MOCK_INVOICE, MOCK_WEBHOOK_EVENT, TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 import Stripe from "stripe";
 
 describe("StripeWebhookController", () => {
   let controller: StripeWebhookController;
-  let stripeWebhookService: vi.Mocked<StripeWebhookService>;
-  let stripeWebhookEventRepository: vi.Mocked<StripeWebhookEventRepository>;
-  let webhookQueue: vi.Mocked<Queue<StripeWebhookJobData>>;
-  let logger: vi.Mocked<AppLoggingService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let stripeWebhookService: Mocked<StripeWebhookService>;
+  let stripeWebhookEventRepository: Mocked<StripeWebhookEventRepository>;
+  let webhookQueue: Mocked<Queue<StripeWebhookJobData>>;
+  let logger: Mocked<AppLoggingService>;
+  let mockReply: Mocked<FastifyReply>;
 
   const TEST_DATA = {
     signature: "t=1234567890,v1=signature_hash_abc123",
@@ -34,8 +36,9 @@ describe("StripeWebhookController", () => {
     eventType: "customer.subscription.created",
   };
 
-  const MOCK_WEBHOOK_EVENT_ENTITY = {
+  const MOCK_WEBHOOK_EVENT_ENTITY: StripeWebhookEvent = {
     id: TEST_DATA.webhookEventId,
+    type: stripeWebhookEventMeta.type,
     stripeEventId: TEST_DATA.stripeEventId,
     eventType: TEST_DATA.eventType,
     livemode: false,
@@ -56,13 +59,13 @@ describe("StripeWebhookController", () => {
   };
 
   // Create a mock Fastify reply
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     const reply = {
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
       header: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
     return reply;
   };
 
@@ -351,10 +354,12 @@ describe("StripeWebhookController", () => {
 
     it("should process different event types correctly", async () => {
       const req = createMockRequest();
+      // An invoice.paid event carries an Invoice, not the base fixture's Subscription.
       const invoiceEvent: Stripe.Event = {
         ...MOCK_WEBHOOK_EVENT,
         id: "evt_invoice_test",
         type: "invoice.paid",
+        data: { object: MOCK_INVOICE },
       };
       stripeWebhookService.constructEvent.mockReturnValue(invoiceEvent);
       stripeWebhookService.parseEvent.mockReturnValue({

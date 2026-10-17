@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
@@ -22,8 +22,8 @@ import { S3Service } from "../../../../foundations/s3/services/s3.service";
 
 describe("MigratorService", () => {
   let service: MigratorService;
-  let neo4jService: vi.Mocked<Neo4jService>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let neo4jService: Mocked<Neo4jService>;
+  let logger: Mocked<AppLoggingService>;
 
   const TEST_IDS = {
     migrationVersion: "20231201_01",
@@ -73,8 +73,8 @@ describe("MigratorService", () => {
     }).compile();
 
     service = module.get<MigratorService>(MigratorService);
-    neo4jService = module.get(Neo4jService) as vi.Mocked<Neo4jService>;
-    logger = module.get(AppLoggingService) as vi.Mocked<AppLoggingService>;
+    neo4jService = module.get(Neo4jService) as Mocked<Neo4jService>;
+    logger = module.get(AppLoggingService) as Mocked<AppLoggingService>;
   });
 
   afterEach(() => {

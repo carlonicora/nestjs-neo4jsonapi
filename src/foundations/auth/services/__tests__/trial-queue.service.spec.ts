@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { getQueueToken } from "@nestjs/bullmq";
-import { Queue } from "bullmq";
+import { BackoffOptions, Queue } from "bullmq";
 import { TrialQueueService } from "../trial-queue.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { QueueId } from "../../../../config/enums/queue.id";
@@ -145,8 +145,10 @@ describe("TrialQueueService", () => {
       const callArgs = trialQueue.add.mock.calls[0];
       const jobOptions = callArgs[2];
       expect(jobOptions.attempts).toBe(3);
-      expect(jobOptions.backoff.type).toBe("exponential");
-      expect(jobOptions.backoff.delay).toBe(5000);
+      // backoff is `number | BackoffOptions`; the service sets the object form.
+      const backoff = jobOptions.backoff as BackoffOptions;
+      expect(backoff.type).toBe("exponential");
+      expect(backoff.delay).toBe(5000);
     });
 
     it("should set removeOnComplete to true", async () => {

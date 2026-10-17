@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeUsageApiService } from "../stripe-usage-api.service";
 import { StripeService } from "../../../stripe/services/stripe.service";
@@ -14,10 +14,11 @@ import Stripe from "stripe";
 
 describe("StripeUsageApiService", () => {
   let service: StripeUsageApiService;
-  let stripeService: vi.Mocked<StripeService>;
+  let stripeService: Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
   const MOCK_METER_EVENT: Stripe.V2.Billing.MeterEvent = {
+    object: "v2.billing.meter_event",
     identifier: "meter_event_test_123",
     created: new Date().toISOString(),
     event_name: "api_requests",
@@ -26,6 +27,7 @@ describe("StripeUsageApiService", () => {
       stripe_customer_id: TEST_IDS.customerId,
       value: "100",
     },
+    timestamp: new Date().toISOString(),
   };
 
   const MOCK_METER_EVENT_SUMMARY: Stripe.Billing.MeterEventSummary = {
@@ -33,6 +35,7 @@ describe("StripeUsageApiService", () => {
     object: "billing.meter_event_summary",
     aggregated_value: 1000,
     livemode: false,
+    meter: TEST_IDS.meterId,
     start_time: Math.floor(Date.now() / 1000) - 86400,
     end_time: Math.floor(Date.now() / 1000),
   };
@@ -67,8 +70,11 @@ describe("StripeUsageApiService", () => {
     object: "subscription_item",
     billing_thresholds: null,
     created: Math.floor(Date.now() / 1000),
+    current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+    current_period_start: Math.floor(Date.now() / 1000),
     discounts: [],
     metadata: {},
+    plan: null,
     price: {
       id: "price_test_metered",
       object: "price",
@@ -84,7 +90,6 @@ describe("StripeUsageApiService", () => {
       nickname: "Metered Usage",
       product: TEST_IDS.productId,
       recurring: {
-        aggregate_usage: "sum",
         interval: "month",
         interval_count: 1,
         meter: TEST_IDS.meterId,
@@ -96,7 +101,7 @@ describe("StripeUsageApiService", () => {
       transform_quantity: null,
       type: "recurring",
       unit_amount: 100,
-      unit_amount_decimal: "100",
+      unit_amount_decimal: Stripe.Decimal.from("100"),
     },
     quantity: 1,
     subscription: TEST_IDS.subscriptionId,

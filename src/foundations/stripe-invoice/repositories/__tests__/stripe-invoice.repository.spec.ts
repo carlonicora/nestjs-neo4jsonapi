@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -12,10 +12,11 @@ import { stripeInvoiceMeta } from "../../entities/stripe-invoice.meta";
 import { stripeCustomerMeta } from "../../../stripe-customer/entities/stripe-customer.meta";
 import { stripeSubscriptionMeta } from "../../../stripe-subscription/entities/stripe-subscription.meta";
 import { StripeInvoice, StripeInvoiceStatus } from "../../entities/stripe-invoice.entity";
+import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 
 describe("StripeInvoiceRepository", () => {
   let repository: StripeInvoiceRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
@@ -36,6 +37,7 @@ describe("StripeInvoiceRepository", () => {
 
   const MOCK_INVOICE: StripeInvoice = {
     id: TEST_IDS.invoiceId,
+    type: "stripe-invoices",
     stripeInvoiceId: TEST_IDS.stripeInvoiceId,
     stripeInvoiceNumber: "ABC-1234",
     stripeHostedInvoiceUrl: "https://stripe.com/invoice/test123",
@@ -56,12 +58,12 @@ describe("StripeInvoiceRepository", () => {
     attempted: true,
     createdAt: MOCK_DATES.createdAt,
     updatedAt: MOCK_DATES.updatedAt,
-    billingCustomer: {} as any,
+    stripeCustomer: {} as StripeCustomer,
   };
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   beforeEach(async () => {
@@ -83,7 +85,7 @@ describe("StripeInvoiceRepository", () => {
     }).compile();
 
     repository = module.get<StripeInvoiceRepository>(StripeInvoiceRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     // Reset mocks before each test
     vi.clearAllMocks();

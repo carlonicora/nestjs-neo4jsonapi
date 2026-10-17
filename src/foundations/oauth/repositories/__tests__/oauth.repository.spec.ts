@@ -27,7 +27,7 @@ describe("OAuthRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_CLIENT = {

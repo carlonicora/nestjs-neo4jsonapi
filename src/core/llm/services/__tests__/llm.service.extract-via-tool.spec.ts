@@ -1,6 +1,7 @@
 import { vi, describe, it, expect } from "vitest";
 import { z } from "zod";
 import { LLMService } from "../llm.service";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 
 vi.mock("@langchain/core/messages", () => {
   class MockAIMessage {
@@ -91,7 +92,8 @@ function makeService(responses: MockResponse[]) {
   } as any;
   const configService = { get: vi.fn() } as any;
   // Constructor order: (modelService, config, dumper)
-  const svc = new LLMService(modelService, configService, dumper);
+  const tokenUsageService = { computeCost: vi.fn(), recordTokenUsage: vi.fn() } as unknown as TokenUsageService;
+  const svc = new LLMService(modelService, configService, dumper, tokenUsageService);
   return { svc, model, invoke };
 }
 

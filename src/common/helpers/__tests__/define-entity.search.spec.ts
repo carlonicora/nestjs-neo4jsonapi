@@ -53,7 +53,7 @@ describe("defineEntity — excludeFromSearch", () => {
   it("leaves entities that do not use the flag completely unchanged", () => {
     // This is the safety contract for a submodule shared with sibling repos:
     // absent the opt-in, derivation must behave exactly as it always has.
-    const descriptor = defineEntity<{ name: string; description: string }>()({
+    const descriptor = defineEntity<{ name: string; description: string; photoCount: number }>()({
       type: "galleries",
       endpoint: "galleries",
       nodeName: "gallery",

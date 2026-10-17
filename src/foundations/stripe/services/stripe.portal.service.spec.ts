@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripePortalService } from "./stripe.portal.service";
 import { StripeService } from "./stripe.service";
@@ -15,7 +15,7 @@ import {
 
 describe("StripePortalService", () => {
   let service: StripePortalService;
-  let stripeService: vi.Mocked<StripeService>;
+  let stripeService: Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
   const mockPortalReturnUrl = "https://example.com/billing";
@@ -315,7 +315,7 @@ describe("StripePortalService", () => {
 
       try {
         await service.createPortalSession(TEST_IDS.customerId);
-        fail("Should have thrown StripeError");
+        expect.unreachable("Should have thrown StripeError");
       } catch (error) {
         expect(error).toBeInstanceOf(StripeError);
         expect((error as StripeError).stripeCode).toBe(STRIPE_API_ERROR.code);
@@ -327,7 +327,7 @@ describe("StripePortalService", () => {
 
       try {
         await service.createPortalSession(TEST_IDS.customerId);
-        fail("Should have thrown StripeError");
+        expect.unreachable("Should have thrown StripeError");
       } catch (error) {
         expect(error).toBeInstanceOf(StripeError);
         expect((error as StripeError).stripeCode).toBe(STRIPE_INVALID_REQUEST_ERROR.code);

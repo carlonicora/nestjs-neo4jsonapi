@@ -237,6 +237,8 @@ describe("contextualiser — inherited usage attribution", () => {
       ontology: [],
       requests: [],
       nextStep: "rational_plan",
+      llmCalls: 0,
+      questionEmbedding: undefined,
       tokens: { input: 0, output: 0 },
     };
 

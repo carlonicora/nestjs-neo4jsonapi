@@ -3,7 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { FeatureService } from "../feature.service";
 import { FeatureRepository } from "../../repositories/feature.repository";
-import { FeatureDescriptor } from "../../entities/feature";
+import { Feature, FeatureDescriptor } from "../../entities/feature";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 
 describe("FeatureService", () => {
@@ -17,9 +17,27 @@ describe("FeatureService", () => {
     companyId: "770e8400-e29b-41d4-a716-446655440002",
   };
 
-  const MOCK_FEATURES = [
-    { id: TEST_IDS.featureId1, name: "Feature 1", isCore: true },
-    { id: TEST_IDS.featureId2, name: "Feature 2", isCore: false },
+  const MOCK_DATE = new Date("2026-01-01T00:00:00.000Z");
+
+  const MOCK_FEATURES: Feature[] = [
+    {
+      id: TEST_IDS.featureId1,
+      type: "features",
+      createdAt: MOCK_DATE,
+      updatedAt: MOCK_DATE,
+      name: "Feature 1",
+      isCore: true,
+      module: [],
+    },
+    {
+      id: TEST_IDS.featureId2,
+      type: "features",
+      createdAt: MOCK_DATE,
+      updatedAt: MOCK_DATE,
+      name: "Feature 2",
+      isCore: false,
+      module: [],
+    },
   ];
 
   const createMockFeatureRepository = () => ({
@@ -75,7 +93,7 @@ describe("FeatureService", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_FEATURES };
       featureRepository.find.mockResolvedValue(MOCK_FEATURES);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.find({ query: {} });
@@ -94,7 +112,7 @@ describe("FeatureService", () => {
     it("should pass search term to repository", async () => {
       // Arrange
       featureRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, term: "search term" });
@@ -110,7 +128,7 @@ describe("FeatureService", () => {
     it("should honour an explicit orderBy over the name ASC default", async () => {
       // Arrange
       featureRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, orderBy: "isCore DESC" });
@@ -126,7 +144,7 @@ describe("FeatureService", () => {
     it("should pass fetchAll through to the repository", async () => {
       // Arrange
       featureRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, fetchAll: true });
@@ -143,7 +161,7 @@ describe("FeatureService", () => {
       // Arrange
       const query = { page: { size: 10, after: "cursor123" } };
       featureRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query });
@@ -155,7 +173,7 @@ describe("FeatureService", () => {
     it("should return empty list when no features found", async () => {
       // Arrange
       featureRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       const result = await service.find({ query: {} });
@@ -178,7 +196,7 @@ describe("FeatureService", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_FEATURES };
       featureRepository.findByCompany.mockResolvedValue(MOCK_FEATURES);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findByCompany({ companyId: TEST_IDS.companyId });
@@ -194,7 +212,7 @@ describe("FeatureService", () => {
     it("should return empty list when no features found for company", async () => {
       // Arrange
       featureRepository.findByCompany.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       const result = await service.findByCompany({ companyId: TEST_IDS.companyId });

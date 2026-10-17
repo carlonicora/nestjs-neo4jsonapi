@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -14,7 +14,7 @@ import { StripeUsageRecord } from "../../entities/stripe-usage-record.entity";
 
 describe("StripeUsageRecordRepository", () => {
   let repository: StripeUsageRecordRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
@@ -35,6 +35,7 @@ describe("StripeUsageRecordRepository", () => {
 
   const MOCK_USAGE_RECORD: StripeUsageRecord = {
     id: TEST_IDS.usageRecordId,
+    type: stripeUsageRecordMeta.type,
     subscriptionId: TEST_IDS.subscriptionId,
     meterId: TEST_IDS.meterId,
     meterEventName: "api_requests",
@@ -45,7 +46,7 @@ describe("StripeUsageRecordRepository", () => {
     updatedAt: MOCK_DATES.updatedAt,
   };
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, any> } => ({
     query: "",
     queryParams: {},
   });
@@ -70,7 +71,7 @@ describe("StripeUsageRecordRepository", () => {
     }).compile();
 
     repository = module.get<StripeUsageRecordRepository>(StripeUsageRecordRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     // Reset mocks before each test
     vi.clearAllMocks();

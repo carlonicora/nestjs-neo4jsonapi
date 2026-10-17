@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
@@ -8,8 +8,8 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 
 describe("AuditController", () => {
   let controller: AuditController;
-  let auditService: vi.Mocked<AuditService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let auditService: Mocked<AuditService>;
+  let mockReply: Mocked<FastifyReply>;
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440001",
@@ -23,12 +23,12 @@ describe("AuditController", () => {
     } as AuthenticatedRequest;
   };
 
-  const createMockReply = (): vi.Mocked<FastifyReply> => {
+  const createMockReply = (): Mocked<FastifyReply> => {
     return {
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
-    } as unknown as vi.Mocked<FastifyReply>;
+    } as unknown as Mocked<FastifyReply>;
   };
 
   beforeEach(async () => {

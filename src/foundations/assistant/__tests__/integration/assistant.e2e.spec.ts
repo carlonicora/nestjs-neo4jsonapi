@@ -1,5 +1,8 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AssistantService } from "../../services/assistant.service";
+import { AssistantMentionExtractor } from "../../services/assistant-mention.extractor";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+import { ScopeGuard } from "../../../../agents/graph/services/scope.guard";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 
 const EMPTY_CONTEXT_RESPONSE = {
@@ -233,6 +236,9 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
       undefined as any, // assistantActionRepo
       undefined as any, // webSocketService
       { get: vi.fn() } as any, // configService: no app config, so inline entity links stay off
+      undefined as unknown as AssistantMentionExtractor, // mentions: not reached by these tests
+      undefined as unknown as BlockNoteService, // blockNote: not reached by these tests
+      undefined as unknown as ScopeGuard, // scopeGuard: not reached by these tests
     );
   });
 
@@ -322,6 +328,7 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
 
   it("inherited find() returns the user's assistant threads via JsonApiService.buildList", async () => {
     const response = await service.find({ query: {} });
+    if (!("data" in response)) throw new Error("find did not return a JSON:API document");
     expect(response.data).toBeDefined();
     expect(Array.isArray((response as any).data)).toBe(true);
     expect((response as any).data.length).toBe(1);
@@ -478,6 +485,9 @@ describe("Assistant lifecycle (integration, references shape)", () => {
       undefined as any, // assistantActionRepo
       undefined as any, // webSocketService
       { get: vi.fn() } as any, // configService: no app config, so inline entity links stay off
+      undefined as unknown as AssistantMentionExtractor, // mentions: not reached by these tests
+      undefined as unknown as BlockNoteService, // blockNote: not reached by these tests
+      undefined as unknown as ScopeGuard, // scopeGuard: not reached by these tests
     );
   });
 

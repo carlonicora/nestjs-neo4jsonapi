@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeWebhookService, WebhookEventData } from "../stripe-webhook.service";
 import { StripeService } from "../../../stripe/services/stripe.service";
@@ -19,8 +19,8 @@ import Stripe from "stripe";
 
 describe("StripeWebhookService", () => {
   let service: StripeWebhookService;
-  let stripeService: vi.Mocked<StripeService>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let stripeService: Mocked<StripeService>;
+  let logger: Mocked<AppLoggingService>;
   let mockStripe: MockStripeClient;
 
   const mockWebhookSecret = "whsec_test_secret_123";
@@ -234,8 +234,9 @@ describe("StripeWebhookService", () => {
     });
 
     it("should handle events with previous_attributes", () => {
-      const eventWithPrevious: Stripe.Event = {
-        ...MOCK_WEBHOOK_EVENT,
+      // The base fixture is a customer.subscription.created event; narrow to that member.
+      const eventWithPrevious: Stripe.CustomerSubscriptionCreatedEvent = {
+        ...(MOCK_WEBHOOK_EVENT as Stripe.CustomerSubscriptionCreatedEvent),
         data: {
           object: MOCK_SUBSCRIPTION,
           previous_attributes: {
@@ -594,7 +595,8 @@ describe("StripeWebhookService", () => {
       const callOrder: string[] = [];
       stripeService.getClient = vi.fn(() => {
         callOrder.push("getClient");
-        return mockStripe;
+        // The mock covers only the Stripe surface these tests touch.
+        return mockStripe as unknown as Stripe;
       });
       stripeService.getWebhookSecret = vi.fn(() => {
         callOrder.push("getWebhookSecret");

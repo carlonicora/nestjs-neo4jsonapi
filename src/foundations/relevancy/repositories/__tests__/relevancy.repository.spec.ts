@@ -39,7 +39,6 @@ const createMockCypherService = () => ({
 const createMockModel = <T>(): DataModelInterface<T> =>
   ({
     nodeName: "content",
-    primaryNode: "content",
   }) as DataModelInterface<T>;
 
 describe("RelevancyRepository", () => {
@@ -57,8 +56,8 @@ describe("RelevancyRepository", () => {
   });
 
   const MOCK_CURSOR: JsonApiCursorInterface = {
-    limit: 10,
-    offset: 0,
+    cursor: 0,
+    take: 10,
   };
 
   const MOCK_CONTENT = {
@@ -71,8 +70,7 @@ describe("RelevancyRepository", () => {
   const MOCK_USER: User = {
     id: TEST_IDS.userId,
     email: "test@example.com",
-    firstName: "Test",
-    lastName: "User",
+    name: "Test User",
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   } as User;
@@ -411,8 +409,7 @@ describe("RelevancyRepository", () => {
       const secondUser: User = {
         id: TEST_IDS.authorId,
         email: "author@example.com",
-        firstName: "Author",
-        lastName: "User",
+        name: "Author User",
         createdAt: new Date("2025-01-02T00:00:00Z"),
         updatedAt: new Date("2025-01-02T00:00:00Z"),
       } as User;
@@ -498,8 +495,8 @@ describe("RelevancyRepository", () => {
       securityService.userHasAccess.mockReturnValue("");
 
       const customCursor: JsonApiCursorInterface = {
-        limit: 50,
-        offset: 100,
+        cursor: 100,
+        take: 50,
       };
 
       await repository.findById({

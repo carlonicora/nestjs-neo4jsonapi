@@ -1,10 +1,12 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { PasskeyService } from "../services/passkey.service";
 import { PasskeyRepository } from "../repositories/passkey.repository";
 import { PendingTwoFactorRepository } from "../repositories/pending-two-factor.repository";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { PendingTwoFactor } from "../entities/pending-two-factor";
+import { Passkey } from "../entities/passkey";
 
 // Mock baseConfig
 vi.mock("../../../config/base.config", () => ({
@@ -39,9 +41,9 @@ vi.mock("@simplewebauthn/server", () => ({
 
 describe("PasskeyService", () => {
   let service: PasskeyService;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockPasskeyRepository: vi.Mocked<PasskeyRepository>;
-  let mockPendingTwoFactorRepository: vi.Mocked<PendingTwoFactorRepository>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockPasskeyRepository: Mocked<PasskeyRepository>;
+  let mockPendingTwoFactorRepository: Mocked<PendingTwoFactorRepository>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -138,7 +140,7 @@ describe("PasskeyService", () => {
 
     it("should exclude existing passkeys from registration", async () => {
       mockPasskeyRepository.findAllByUserIdWithCredentials.mockResolvedValue([
-        { id: "existing-1", credentialId: "cred-1", transports: '["internal"]' },
+        { id: "existing-1", credentialId: "cred-1", transports: '["internal"]' } as Passkey,
       ]);
 
       await service.generateRegistrationOptions({
@@ -196,7 +198,7 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "passkey-registration",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -232,7 +234,7 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "login", // Wrong type
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -252,7 +254,7 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "passkey-registration",
           expiration: new Date(Date.now() - 60000), // Expired
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -272,7 +274,7 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "passkey-registration",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -295,7 +297,7 @@ describe("PasskeyService", () => {
   describe("generateAuthenticationOptions", () => {
     it("should generate authentication options", async () => {
       mockPasskeyRepository.findAllByUserIdWithCredentials.mockResolvedValue([
-        { id: TEST_IDS.passkeyId, ...TEST_CREDENTIAL },
+        { id: TEST_IDS.passkeyId, ...TEST_CREDENTIAL } as Passkey,
       ]);
 
       const result = await service.generateAuthenticationOptions({ userId: TEST_IDS.userId });
@@ -315,8 +317,8 @@ describe("PasskeyService", () => {
 
     it("should include user passkeys in allowCredentials", async () => {
       mockPasskeyRepository.findAllByUserIdWithCredentials.mockResolvedValue([
-        { id: "pk-1", credentialId: "cred-1", transports: '["internal"]' },
-        { id: "pk-2", credentialId: "cred-2", transports: '["usb"]' },
+        { id: "pk-1", credentialId: "cred-1", transports: '["internal"]' } as Passkey,
+        { id: "pk-2", credentialId: "cred-2", transports: '["usb"]' } as Passkey,
       ]);
 
       await service.generateAuthenticationOptions({ userId: TEST_IDS.userId });
@@ -360,14 +362,14 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "passkey-authentication",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
       mockPasskeyRepository.findByCredentialId.mockResolvedValue({
         id: TEST_IDS.passkeyId,
         ...TEST_CREDENTIAL,
-      });
+      } as Passkey);
 
       const result = await service.verifyAuthentication({
         pendingId: TEST_IDS.pendingId,
@@ -402,7 +404,7 @@ describe("PasskeyService", () => {
           challenge: "test-challenge",
           challengeType: "passkey-authentication",
           expiration: new Date(Date.now() + 300000),
-        },
+        } as PendingTwoFactor,
         userId: TEST_IDS.userId,
       });
 
@@ -422,7 +424,7 @@ describe("PasskeyService", () => {
       const passkeys = [
         { id: "pk-1", name: "Passkey 1", backedUp: true },
         { id: "pk-2", name: "Passkey 2", backedUp: false },
-      ];
+      ] as Passkey[];
       mockPasskeyRepository.findByUserId.mockResolvedValue(passkeys);
 
       const result = await service.listPasskeys({ userId: TEST_IDS.userId });
@@ -434,7 +436,7 @@ describe("PasskeyService", () => {
 
   describe("removePasskey", () => {
     it("should remove an existing passkey", async () => {
-      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId });
+      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId } as Passkey);
 
       await service.removePasskey({ passkeyId: TEST_IDS.passkeyId });
 
@@ -450,7 +452,7 @@ describe("PasskeyService", () => {
 
   describe("renamePasskey", () => {
     it("should rename a passkey", async () => {
-      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId, name: "Old Name" });
+      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId, name: "Old Name" } as Passkey);
 
       await service.renamePasskey({ passkeyId: TEST_IDS.passkeyId, name: "New Name" });
 
@@ -469,7 +471,7 @@ describe("PasskeyService", () => {
     });
 
     it("should throw BadRequestException for empty name", async () => {
-      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId });
+      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId } as Passkey);
 
       await expect(service.renamePasskey({ passkeyId: TEST_IDS.passkeyId, name: "" })).rejects.toThrow(
         BadRequestException,
@@ -477,7 +479,7 @@ describe("PasskeyService", () => {
     });
 
     it("should trim whitespace from name", async () => {
-      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId });
+      mockPasskeyRepository.findByIdForUser.mockResolvedValue({ id: TEST_IDS.passkeyId } as Passkey);
 
       await service.renamePasskey({ passkeyId: TEST_IDS.passkeyId, name: "  My Passkey  " });
 

@@ -1,17 +1,18 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
 import { TotpService } from "../services/totp.service";
 import { TotpEncryptionService } from "../services/totp-encryption.service";
 import { TotpAuthenticatorRepository } from "../repositories/totp-authenticator.repository";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { TotpAuthenticator } from "../entities/totp-authenticator";
 import * as OTPAuth from "otpauth";
 
 describe("TotpService", () => {
   let service: TotpService;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockTotpAuthenticatorRepository: vi.Mocked<TotpAuthenticatorRepository>;
-  let mockTotpEncryptionService: vi.Mocked<TotpEncryptionService>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockTotpAuthenticatorRepository: Mocked<TotpAuthenticatorRepository>;
+  let mockTotpEncryptionService: Mocked<TotpEncryptionService>;
 
   const TEST_IDS = {
     userId: "user-123",
@@ -129,7 +130,7 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: false,
-      });
+      } as TotpAuthenticator);
 
       const result = await service.generateQRCodeUri({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -157,7 +158,7 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: true,
-      });
+      } as TotpAuthenticator);
 
       await expect(
         service.generateQRCodeUri({
@@ -185,9 +186,9 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: true,
-      });
+      } as TotpAuthenticator);
       mockTotpEncryptionService.decrypt.mockReturnValue(secret.base32);
-      mockTotpAuthenticatorRepository.updateAuthenticator.mockResolvedValue({});
+      mockTotpAuthenticatorRepository.updateAuthenticator.mockResolvedValue({} as TotpAuthenticator);
 
       const result = await service.verifyCode({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -208,7 +209,7 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: true,
-      });
+      } as TotpAuthenticator);
 
       const result = await service.verifyCode({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -244,13 +245,13 @@ describe("TotpService", () => {
       const validCode = totp.generate();
 
       mockTotpAuthenticatorRepository.findAllByUserIdWithSecrets.mockResolvedValue([
-        { id: "auth-1", secret: "encrypted-wrong", verified: true },
-        { id: "auth-2", secret: TEST_SECRETS.encrypted, verified: true },
+        { id: "auth-1", secret: "encrypted-wrong", verified: true } as TotpAuthenticator,
+        { id: "auth-2", secret: TEST_SECRETS.encrypted, verified: true } as TotpAuthenticator,
       ]);
       mockTotpEncryptionService.decrypt
         .mockReturnValueOnce(wrongSecret.base32) // First authenticator - wrong secret (but valid base32)
         .mockReturnValueOnce(correctSecret.base32); // Second authenticator - correct secret
-      mockTotpAuthenticatorRepository.updateAuthenticator.mockResolvedValue({});
+      mockTotpAuthenticatorRepository.updateAuthenticator.mockResolvedValue({} as TotpAuthenticator);
 
       const result = await service.verifyCodeForUser({
         userId: TEST_IDS.userId,
@@ -262,7 +263,7 @@ describe("TotpService", () => {
 
     it("should return null when no authenticator matches", async () => {
       mockTotpAuthenticatorRepository.findAllByUserIdWithSecrets.mockResolvedValue([
-        { id: "auth-1", secret: TEST_SECRETS.encrypted, verified: true },
+        { id: "auth-1", secret: TEST_SECRETS.encrypted, verified: true } as TotpAuthenticator,
       ]);
 
       const result = await service.verifyCodeForUser({
@@ -301,13 +302,13 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: false,
-      });
+      } as TotpAuthenticator);
       mockTotpEncryptionService.decrypt.mockReturnValue(secret.base32);
       mockTotpAuthenticatorRepository.updateAuthenticator.mockResolvedValue({
         id: TEST_IDS.authenticatorId,
         name: "Test Auth",
         verified: true,
-      });
+      } as TotpAuthenticator);
 
       const result = await service.addAuthenticator({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -327,7 +328,7 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: false,
-      });
+      } as TotpAuthenticator);
 
       const result = await service.addAuthenticator({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -353,7 +354,7 @@ describe("TotpService", () => {
         id: TEST_IDS.authenticatorId,
         secret: TEST_SECRETS.encrypted,
         verified: true,
-      });
+      } as TotpAuthenticator);
 
       await expect(
         service.addAuthenticator({
@@ -368,7 +369,7 @@ describe("TotpService", () => {
     it("should remove an existing authenticator", async () => {
       mockTotpAuthenticatorRepository.findByIdForUser.mockResolvedValue({
         id: TEST_IDS.authenticatorId,
-      });
+      } as TotpAuthenticator);
 
       await service.removeAuthenticator({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -395,7 +396,7 @@ describe("TotpService", () => {
       const authenticators = [
         { id: "auth-1", name: "Auth 1", verified: true },
         { id: "auth-2", name: "Auth 2", verified: false },
-      ];
+      ] as TotpAuthenticator[];
       mockTotpAuthenticatorRepository.findAllByUserIdWithSecrets.mockResolvedValue(authenticators);
 
       const result = await service.listAuthenticators({ userId: TEST_IDS.userId });
@@ -405,7 +406,7 @@ describe("TotpService", () => {
     });
 
     it("should return only verified authenticators when verifiedOnly is true", async () => {
-      const verifiedAuthenticators = [{ id: "auth-1", name: "Auth 1", verified: true }];
+      const verifiedAuthenticators = [{ id: "auth-1", name: "Auth 1", verified: true }] as TotpAuthenticator[];
       mockTotpAuthenticatorRepository.findVerifiedByUserId.mockResolvedValue(verifiedAuthenticators);
 
       const result = await service.listAuthenticators({
@@ -441,7 +442,7 @@ describe("TotpService", () => {
       mockTotpAuthenticatorRepository.findByIdForUser.mockResolvedValue({
         id: TEST_IDS.authenticatorId,
         verified: false,
-      });
+      } as TotpAuthenticator);
 
       await service.deleteUnverifiedAuthenticator({
         authenticatorId: TEST_IDS.authenticatorId,
@@ -466,7 +467,7 @@ describe("TotpService", () => {
       mockTotpAuthenticatorRepository.findByIdForUser.mockResolvedValue({
         id: TEST_IDS.authenticatorId,
         verified: true,
-      });
+      } as TotpAuthenticator);
 
       await expect(
         service.deleteUnverifiedAuthenticator({

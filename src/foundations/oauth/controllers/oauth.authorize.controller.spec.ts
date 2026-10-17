@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -33,9 +33,9 @@ import { OAuthAuthorizeController } from "./oauth.authorize.controller";
 
 describe("OAuthAuthorizeController", () => {
   let controller: OAuthAuthorizeController;
-  let oauthService: vi.Mocked<OAuthService>;
-  let clsService: vi.Mocked<ClsService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let oauthService: Mocked<OAuthService>;
+  let clsService: Mocked<ClsService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const MOCK_USER_ID = "550e8400-e29b-41d4-a716-446655440000";

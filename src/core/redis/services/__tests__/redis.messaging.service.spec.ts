@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // `baseConfig` is a module-level constant captured when the config module is
 // first imported, so a test that mutates `process.env` afterwards would never
@@ -69,8 +69,8 @@ import { RedisMessagingService, NotificationMessage } from "../redis.messaging.s
 
 describe("RedisMessagingService", () => {
   let service: RedisMessagingService;
-  let mockConfigService: vi.Mocked<ConfigService>;
-  let mockEventEmitter: vi.Mocked<EventEmitter2>;
+  let mockConfigService: Mocked<ConfigService>;
+  let mockEventEmitter: Mocked<EventEmitter2>;
 
   const TEST_CONFIG = {
     redis: {

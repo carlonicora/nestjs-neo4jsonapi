@@ -468,6 +468,87 @@ describe("S3Controller", () => {
     });
   });
 
+  describe("isServableKey", () => {
+    const CORPUS_KEY = "judgements/2026/abc.pdf";
+    const EXPIRY = () => Math.floor(Date.now() / 1000) + 3600;
+    const makeReply = () => ({
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
+      removeHeader: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+    });
+
+    const build = async (policy: Partial<S3KeyAccessPolicy>) => {
+      const verifyObjectToken = vi.fn();
+      const service = {
+        uploadStream: vi.fn(),
+        downloadObject: vi.fn().mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" }),
+        contentDispositionAttachment: vi.fn(),
+        contentDispositionInline: vi.fn(),
+        contentDispositionInlineFilename: vi.fn(),
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [S3Controller],
+        providers: [
+          { provide: S3Service, useValue: service },
+          { provide: ClsService, useValue: mockClsService },
+          { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken } },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: S3_KEY_ACCESS_POLICY, useValue: policy },
+        ],
+      })
+        .overrideGuard(JwtAuthGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
+      return { ctrl: module.get<S3Controller>(S3Controller), verifyObjectToken, service };
+    };
+
+    it("GET /s3/objects/:token answers 403 and never reads storage when the policy refuses the key", async () => {
+      const { ctrl, verifyObjectToken, service } = await build({ canAccess: vi.fn(), isServableKey: () => false });
+      verifyObjectToken.mockReturnValue({ o: "get", k: CORPUS_KEY, e: EXPIRY() });
+      const reply = makeReply();
+
+      await expect(ctrl.getObject(reply as any, "token")).rejects.toThrow(ForbiddenException);
+      expect(service.downloadObject).not.toHaveBeenCalled();
+      expect(reply.send).not.toHaveBeenCalled();
+    });
+
+    it("PUT /s3/objects/:token answers 403 and never writes when the policy refuses the key", async () => {
+      const { ctrl, verifyObjectToken, service } = await build({ canAccess: vi.fn(), isServableKey: () => false });
+      verifyObjectToken.mockReturnValue({ o: "put", k: CORPUS_KEY, c: "application/pdf", e: EXPIRY() });
+      const reply = makeReply();
+      const req = { body: Readable.from([Buffer.alloc(5, 1)]) } as any;
+
+      await expect(ctrl.putObject(req, reply as any, "token")).rejects.toThrow(ForbiddenException);
+      expect(service.uploadStream).not.toHaveBeenCalled();
+      expect(reply.send).not.toHaveBeenCalled();
+    });
+
+    it("serves the key when isServableKey returns true", async () => {
+      const isServableKey = vi.fn().mockReturnValue(true);
+      const { ctrl, verifyObjectToken, service } = await build({ canAccess: vi.fn(), isServableKey });
+      verifyObjectToken.mockReturnValue({ o: "get", k: MOCK_KEY, e: EXPIRY() });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(isServableKey).toHaveBeenCalledWith(MOCK_KEY);
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: MOCK_KEY });
+      expect(reply.send).toHaveBeenCalled();
+    });
+
+    it("serves the key when the policy does not implement isServableKey", async () => {
+      const { ctrl, verifyObjectToken, service } = await build({ canAccess: vi.fn() });
+      verifyObjectToken.mockReturnValue({ o: "get", k: CORPUS_KEY, e: EXPIRY() });
+      const reply = makeReply();
+
+      await ctrl.getObject(reply as any, "token");
+
+      expect(service.downloadObject).toHaveBeenCalledWith({ key: CORPUS_KEY });
+      expect(reply.send).toHaveBeenCalled();
+    });
+  });
+
   describe("object token routes", () => {
     const makeReply = () => ({
       status: vi.fn().mockReturnThis(),

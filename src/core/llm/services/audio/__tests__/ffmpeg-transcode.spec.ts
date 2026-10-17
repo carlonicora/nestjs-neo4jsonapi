@@ -26,7 +26,7 @@ function queueFfmpeg(code = 0, stderr = "  Duration: 00:00:05.00, start: 0.0\n")
 
 /** Extract the `-af` filter string from the most recent spawn call, or null. */
 function lastFilterArg(): string | null {
-  const [, args] = mockSpawn.mock.calls.at(-1) as [string, string[]];
+  const [, args] = mockSpawn.mock.calls.at(-1)!;
   const i = args.indexOf("-af");
   return i === -1 ? null : args[i + 1];
 }

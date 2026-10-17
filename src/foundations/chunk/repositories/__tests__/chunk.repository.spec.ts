@@ -80,18 +80,15 @@ describe("ChunkRepository", () => {
 
   const createMockQuery = () => ({
     query: "",
-    queryParams: {},
+    queryParams: {} as Record<string, unknown>,
   });
 
   const MOCK_CHUNK: Chunk = {
     id: TEST_IDS.chunkId,
+    type: "chunks",
     content: "Test chunk content",
-    tokenCount: 100,
     createdAt: new Date("2025-01-01T00:00:00Z"),
-    data: {
-      id: TEST_IDS.contentId,
-      type: "Content",
-    } as any,
+    updatedAt: new Date("2025-01-01T00:00:00Z"),
   };
 
   beforeEach(async () => {
@@ -873,7 +870,7 @@ describe("ChunkRepository", () => {
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
-      const statuses = [AiStatus.Pending, AiStatus.InProgress, AiStatus.Completed, AiStatus.Error];
+      const statuses = [AiStatus.Pending, AiStatus.InProgress, AiStatus.Completed, AiStatus.Failed];
 
       for (const status of statuses) {
         vi.clearAllMocks();

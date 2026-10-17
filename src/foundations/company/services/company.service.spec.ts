@@ -5,7 +5,7 @@
  * These tests verify that the service works correctly before and after migration.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mocked } from "vitest";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Test, TestingModule } from "@nestjs/testing";
@@ -26,16 +26,16 @@ import { COMPANY_AI_DISABLED_EVENT } from "../events/company.events";
 
 describe("CompanyService", () => {
   let service: CompanyService;
-  let mockRepository: vi.Mocked<CompanyRepository>;
-  let mockJsonApiService: vi.Mocked<JsonApiService>;
-  let mockQueue: vi.Mocked<Queue>;
-  let mockClsService: vi.Mocked<ClsService>;
-  let mockNeo4jService: vi.Mocked<Neo4jService>;
-  let mockVersionService: vi.Mocked<VersionService>;
-  let mockModuleRef: vi.Mocked<ModuleRef>;
-  let mockWebSocketService: vi.Mocked<WebSocketService>;
-  let mockConfigService: vi.Mocked<ConfigService>;
-  let mockEventEmitter: vi.Mocked<EventEmitter2>;
+  let mockRepository: Mocked<CompanyRepository>;
+  let mockJsonApiService: Mocked<JsonApiService>;
+  let mockQueue: Mocked<Queue>;
+  let mockClsService: Mocked<ClsService>;
+  let mockNeo4jService: Mocked<Neo4jService>;
+  let mockVersionService: Mocked<VersionService>;
+  let mockModuleRef: Mocked<ModuleRef>;
+  let mockWebSocketService: Mocked<WebSocketService>;
+  let mockConfigService: Mocked<ConfigService>;
+  let mockEventEmitter: Mocked<EventEmitter2>;
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_COMPANY: Company = {
@@ -279,19 +279,19 @@ describe("CompanyService", () => {
 
   describe("isAiEnabled", () => {
     it("returns true when the company has no aiEnabled property (legacy row)", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID } as Company);
 
       await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
     });
 
     it("returns true when aiEnabled is true", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
 
       await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
     });
 
     it("returns false ONLY when aiEnabled is explicitly false", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false } as Company);
 
       await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(false);
     });
@@ -313,7 +313,7 @@ describe("CompanyService", () => {
         aiEnabled: true,
         availableMonthlyCredits: 0,
         availableExtraCredits: 0,
-      });
+      } as Company);
 
       await expect(service.isAiEnabled({ companyId: MOCK_COMPANY_ID })).resolves.toBe(true);
     });
@@ -321,7 +321,7 @@ describe("CompanyService", () => {
 
   describe("updateTokensAndAiFlag", () => {
     it("writes the balances and the flag through the repository", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
 
       await service.updateTokensAndAiFlag({
         companyId: MOCK_COMPANY_ID,
@@ -339,7 +339,7 @@ describe("CompanyService", () => {
     });
 
     it("emits COMPANY_AI_DISABLED_EVENT when aiEnabled goes true -> false", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
 
@@ -349,7 +349,7 @@ describe("CompanyService", () => {
     });
 
     it("does NOT emit when the company was already AI-free", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
 
@@ -357,7 +357,7 @@ describe("CompanyService", () => {
     });
 
     it("does NOT emit when AI is being enabled", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
 
@@ -369,7 +369,7 @@ describe("CompanyService", () => {
     // the stale capability until the user logs out and back in — a page reload
     // is not enough.
     it("broadcasts company:subscription_updated when AI is switched OFF", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: false });
 
@@ -383,7 +383,7 @@ describe("CompanyService", () => {
     // The direction that was actually broken: upgrading back to an AI plan left
     // the GM staring at an AI-free product.
     it("broadcasts company:subscription_updated when AI is switched ON", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: false } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
 
@@ -395,7 +395,7 @@ describe("CompanyService", () => {
     });
 
     it("does NOT broadcast when the flag is unchanged (every renewal)", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
 
       await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, aiEnabled: true });
 
@@ -403,7 +403,7 @@ describe("CompanyService", () => {
     });
 
     it("still completes the write when the broadcast throws", async () => {
-      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true });
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
       mockWebSocketService.sendMessageToCompany.mockRejectedValueOnce(new Error("socket gone"));
 
       await expect(

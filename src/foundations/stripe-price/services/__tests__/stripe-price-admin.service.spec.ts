@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { StripePriceAdminService } from "../stripe-price-admin.service";
@@ -8,17 +8,30 @@ import { StripeProductRepository } from "../../../stripe-product/repositories/st
 import { StripeProductAdminService } from "../../../stripe-product/services/stripe-product-admin.service";
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripePrice } from "../../entities/stripe-price.entity";
+import { stripePriceMeta } from "../../entities/stripe-price.meta";
+import { StripeProduct } from "../../../stripe-product/entities/stripe-product.entity";
+import { stripeProductMeta } from "../../../stripe-product/entities/stripe-product.meta";
 import Stripe from "stripe";
 
 describe("StripePriceAdminService - Archive/Reactivate", () => {
   let service: StripePriceAdminService;
-  let repository: vi.Mocked<StripePriceRepository>;
-  let apiService: vi.Mocked<StripeProductApiService>;
+  let repository: Mocked<StripePriceRepository>;
+  let apiService: Mocked<StripeProductApiService>;
+
+  const mockProduct: StripeProduct = {
+    id: "test-uuid-product-123",
+    type: stripeProductMeta.type,
+    stripeProductId: "prod_test_123",
+    name: "Test Product",
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
 
   const mockPrice: StripePrice = {
     id: "test-uuid-price-123",
+    type: stripePriceMeta.type,
     stripePriceId: "price_test_123",
-    productId: "test-uuid-product-123",
     active: true,
     currency: "usd",
     unitAmount: 2999,
@@ -31,6 +44,7 @@ describe("StripePriceAdminService - Archive/Reactivate", () => {
     metadata: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    stripeProduct: mockProduct,
   };
 
   const mockStripePrice: Stripe.Price = {
@@ -44,7 +58,6 @@ describe("StripePriceAdminService - Archive/Reactivate", () => {
       interval: "month",
       interval_count: 1,
       usage_type: "licensed",
-      aggregate_usage: null,
       meter: null,
       trial_period_days: null,
     },
@@ -58,7 +71,7 @@ describe("StripePriceAdminService - Archive/Reactivate", () => {
     tax_behavior: "unspecified",
     tiers_mode: null,
     transform_quantity: null,
-    unit_amount_decimal: "2999",
+    unit_amount_decimal: Stripe.Decimal.from("2999"),
     custom_unit_amount: null,
   };
 

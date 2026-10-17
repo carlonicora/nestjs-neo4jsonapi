@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -14,7 +14,7 @@ import { StripeWebhookEvent, StripeWebhookEventStatus } from "../../entities/str
 
 describe("StripeWebhookEventRepository", () => {
   let repository: StripeWebhookEventRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
@@ -24,6 +24,7 @@ describe("StripeWebhookEventRepository", () => {
 
   const MOCK_WEBHOOK_EVENT: StripeWebhookEvent = {
     id: TEST_IDS.webhookEventId,
+    type: stripeWebhookEventMeta.type,
     stripeEventId: TEST_IDS.stripeEventId,
     eventType: "customer.subscription.created",
     livemode: false,
@@ -35,7 +36,7 @@ describe("StripeWebhookEventRepository", () => {
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   };
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, unknown> } => ({
     query: "",
     queryParams: {},
   });
@@ -59,7 +60,7 @@ describe("StripeWebhookEventRepository", () => {
     }).compile();
 
     repository = module.get<StripeWebhookEventRepository>(StripeWebhookEventRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     vi.clearAllMocks();
   });

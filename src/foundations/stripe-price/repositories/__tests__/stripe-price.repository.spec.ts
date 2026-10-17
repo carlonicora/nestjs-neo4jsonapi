@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -10,6 +10,7 @@ import { Neo4jService } from "../../../../core/neo4j";
 import { StripePriceRepository } from "../stripe-price.repository";
 import { stripePriceMeta } from "../../entities/stripe-price.meta";
 import { stripeProductMeta } from "../../../stripe-product/entities/stripe-product.meta";
+import { StripeProduct } from "../../../stripe-product/entities/stripe-product.entity";
 import {
   StripePrice,
   StripePriceType,
@@ -19,7 +20,7 @@ import {
 
 describe("StripePriceRepository", () => {
   let repository: StripePriceRepository;
-  let neo4jService: vi.Mocked<Neo4jService>;
+  let neo4jService: Mocked<Neo4jService>;
 
   // Test data constants
   const TEST_IDS = {
@@ -28,8 +29,19 @@ describe("StripePriceRepository", () => {
     stripePriceId: "price_test123",
   };
 
+  const MOCK_STRIPE_PRODUCT: StripeProduct = {
+    id: TEST_IDS.productId,
+    type: stripeProductMeta.type,
+    stripeProductId: "prod_test123",
+    name: "Test Product",
+    active: true,
+    createdAt: new Date("2025-01-01T00:00:00Z"),
+    updatedAt: new Date("2025-01-01T00:00:00Z"),
+  };
+
   const MOCK_STRIPE_PRICE_ONE_TIME: StripePrice = {
     id: TEST_IDS.priceId,
+    type: stripePriceMeta.type,
     stripePriceId: TEST_IDS.stripePriceId,
     active: true,
     currency: "usd",
@@ -43,11 +55,12 @@ describe("StripePriceRepository", () => {
     metadata: JSON.stringify({ test: "data" }),
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
-    product: {} as any,
+    stripeProduct: MOCK_STRIPE_PRODUCT,
   };
 
   const MOCK_STRIPE_PRICE_RECURRING: StripePrice = {
     id: TEST_IDS.priceId,
+    type: stripePriceMeta.type,
     stripePriceId: "price_recurring_test",
     active: true,
     currency: "usd",
@@ -61,11 +74,12 @@ describe("StripePriceRepository", () => {
     metadata: JSON.stringify({ tier: "premium" }),
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
-    product: {} as any,
+    stripeProduct: MOCK_STRIPE_PRODUCT,
   };
 
   const MOCK_STRIPE_PRICE_METERED: StripePrice = {
     id: TEST_IDS.priceId,
+    type: stripePriceMeta.type,
     stripePriceId: "price_metered_test",
     active: true,
     currency: "usd",
@@ -79,10 +93,10 @@ describe("StripePriceRepository", () => {
     metadata: undefined,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
-    product: {} as any,
+    stripeProduct: MOCK_STRIPE_PRODUCT,
   };
 
-  const createMockQuery = () => ({
+  const createMockQuery = (): { query: string; queryParams: Record<string, unknown> } => ({
     query: "",
     queryParams: {},
   });
@@ -106,7 +120,7 @@ describe("StripePriceRepository", () => {
     }).compile();
 
     repository = module.get<StripePriceRepository>(StripePriceRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as vi.Mocked<Neo4jService>;
+    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
 
     // Reset mocks before each test
     vi.clearAllMocks();

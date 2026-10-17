@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HealthCheckService, HealthCheckResult } from "@nestjs/terminus";
 import { HealthController } from "../controllers/health.controller";
@@ -9,11 +9,11 @@ import { DiskHealthIndicator } from "../indicators/disk.health";
 
 describe("HealthController", () => {
   let controller: HealthController;
-  let healthCheckService: vi.Mocked<HealthCheckService>;
-  let neo4jHealth: vi.Mocked<Neo4jHealthIndicator>;
-  let redisHealth: vi.Mocked<RedisHealthIndicator>;
-  let s3Health: vi.Mocked<S3HealthIndicator>;
-  let diskHealth: vi.Mocked<DiskHealthIndicator>;
+  let healthCheckService: Mocked<HealthCheckService>;
+  let neo4jHealth: Mocked<Neo4jHealthIndicator>;
+  let redisHealth: Mocked<RedisHealthIndicator>;
+  let s3Health: Mocked<S3HealthIndicator>;
+  let diskHealth: Mocked<DiskHealthIndicator>;
 
   const mockHealthCheckResult: HealthCheckResult = {
     status: "ok",

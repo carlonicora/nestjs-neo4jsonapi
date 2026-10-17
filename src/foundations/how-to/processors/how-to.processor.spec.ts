@@ -3,6 +3,7 @@ import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AiStatus } from "../../../common/enums/ai.status";
+import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { ChunkRepository } from "../../chunk/repositories/chunk.repository";
 import { ChunkService } from "../../chunk/services/chunk.service";
@@ -43,7 +44,7 @@ describe("HowToProcessor", () => {
     };
     chunkService = { propagateAndEmbedDates: vi.fn(async () => undefined) };
 
-    const configService = { get: vi.fn(() => jobNames) } as unknown as ConfigService;
+    const configService = { get: vi.fn(() => jobNames) } as unknown as ConfigService<BaseConfigInterface>;
 
     return new HowToProcessor(
       logger as unknown as AppLoggingService,

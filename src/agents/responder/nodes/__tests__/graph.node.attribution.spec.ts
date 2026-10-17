@@ -58,7 +58,11 @@ describe("GraphNodeService — usage attribution", () => {
   };
 
   it("attributes the first call and the zero-tool-call retry", async () => {
-    const call = vi.fn(async () => ({ answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } }));
+    const call = vi.fn(async (_params: Record<string, unknown>) => ({
+      answer: "…",
+      entities: [],
+      tokenUsage: { input: 1, output: 1 },
+    }));
     await buildSut(call).execute({ state });
 
     expect(call).toHaveBeenCalledTimes(2);
@@ -83,7 +87,11 @@ describe("GraphNodeService — usage attribution", () => {
   });
 
   it("falls back to the assistant thread when the turn has no scope root", async () => {
-    const call = vi.fn(async () => ({ answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } }));
+    const call = vi.fn(async (_params: Record<string, unknown>) => ({
+      answer: "…",
+      entities: [],
+      tokenUsage: { input: 1, output: 1 },
+    }));
     await buildSut(call).execute({
       state: { ...state, scopeId: undefined, scopeType: undefined, assistantId: "assistant-1" },
     });
@@ -101,7 +109,11 @@ describe("GraphNodeService — usage attribution", () => {
   });
 
   it("leaves the relationship unset when there is neither a scope nor a thread", async () => {
-    const call = vi.fn(async () => ({ answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } }));
+    const call = vi.fn(async (_params: Record<string, unknown>) => ({
+      answer: "…",
+      entities: [],
+      tokenUsage: { input: 1, output: 1 },
+    }));
     await buildSut(call).execute({ state: { ...state, scopeId: undefined, scopeType: undefined } });
 
     // first pass + zero-tool-call retry: without this the loop below would pass

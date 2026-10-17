@@ -1,6 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { LLMService } from "../llm.service";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 import { REPEATED_TOOL_FAILURE_LIMIT } from "../tool-error-feedback";
 
 vi.mock("@langchain/core/messages", () => {
@@ -148,7 +149,8 @@ describe("LLMService tool loop — repeated schema rejections", () => {
           : undefined,
       ),
     } as any;
-    const service = new LLMService(modelService, configService, dumper);
+    const tokenUsageService = { computeCost: vi.fn(), recordTokenUsage: vi.fn() } as unknown as TokenUsageService;
+    const service = new LLMService(modelService, configService, dumper, tokenUsageService);
     return { service, bound, tool };
   };
 

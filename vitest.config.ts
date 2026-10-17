@@ -31,7 +31,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.spec.ts", "tools/**/*.spec.ts", "scripts/**/*.spec.ts"],
     silent: true,
-    reporters: ["default"],
+    // default output unchanged; the slow-test list is appended (report only).
+    reporters: ["default", "./vitest.slow-tests.reporter.ts"],
     onConsoleLog: () => false,
     coverage: {
       provider: "v8",

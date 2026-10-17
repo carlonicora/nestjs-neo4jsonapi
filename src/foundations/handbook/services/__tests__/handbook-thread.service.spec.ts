@@ -1,6 +1,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
+import type { JsonApiDTOData } from "../../../../core/neo4j/abstracts/abstract.service";
 import { HandbookThreadDescriptor } from "../../entities/handbook-thread";
 import { handbookThreadMeta } from "../../entities/handbook-thread.meta";
 import { HandbookThreadMessageDescriptor } from "../../entities/handbook-thread-message";
@@ -50,7 +51,7 @@ function build(
 
   const responder = { run: vi.fn(async () => params.response ?? makeResponderResponse()) };
 
-  const messages = { createFromDTO: vi.fn(async () => ({})) };
+  const messages = { createFromDTO: vi.fn(async (_call: { data: JsonApiDTOData }) => ({})) };
 
   const written: Message[] = [];
   const messageRepository = {

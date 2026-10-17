@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -33,18 +33,22 @@ import { StripeUsageRecord } from "../../entities/stripe-usage-record.entity";
 import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
+import type Stripe from "stripe";
+import type { Company } from "../../../company/entities/company";
+import type { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 
 describe("StripeUsageAdminService", () => {
   let service: StripeUsageAdminService;
-  let usageRecordRepository: vi.Mocked<StripeUsageRecordRepository>;
-  let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
-  let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
-  let stripeUsageApiService: vi.Mocked<StripeUsageApiService>;
-  let jsonApiService: vi.Mocked<JsonApiService>;
+  let usageRecordRepository: Mocked<StripeUsageRecordRepository>;
+  let subscriptionRepository: Mocked<StripeSubscriptionRepository>;
+  let stripeCustomerRepository: Mocked<StripeCustomerRepository>;
+  let stripeUsageApiService: Mocked<StripeUsageApiService>;
+  let jsonApiService: Mocked<JsonApiService>;
 
   // Test data constants
   const MOCK_STRIPE_CUSTOMER: StripeCustomer = {
     id: "990e8400-e29b-41d4-a716-446655440001",
+    type: "stripe-customers",
     stripeCustomerId: TEST_IDS.customerId,
     email: "test@example.com",
     name: "Test Customer",
@@ -54,11 +58,12 @@ describe("StripeUsageAdminService", () => {
     defaultPaymentMethodId: TEST_IDS.paymentMethodId,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
-    company: {} as any,
+    company: {} as Company,
   };
 
   const MOCK_SUBSCRIPTION: StripeSubscription = {
     id: "aa0e8400-e29b-41d4-a716-446655440001",
+    type: "stripe-subscriptions",
     stripeSubscriptionId: TEST_IDS.subscriptionId,
     stripeSubscriptionItemId: "si_test_123",
     status: "active",
@@ -67,13 +72,14 @@ describe("StripeUsageAdminService", () => {
     cancelAtPeriodEnd: false,
     quantity: 1,
     stripeCustomer: MOCK_STRIPE_CUSTOMER,
-    price: {} as any,
+    stripePrice: {} as StripePrice,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   };
 
   const MOCK_USAGE_RECORD: StripeUsageRecord = {
     id: "cc0e8400-e29b-41d4-a716-446655440001",
+    type: "stripe-usage-records",
     subscriptionId: MOCK_SUBSCRIPTION.id,
     meterId: TEST_IDS.meterId,
     meterEventName: "api_call",
@@ -84,10 +90,14 @@ describe("StripeUsageAdminService", () => {
     updatedAt: new Date("2025-01-15T12:00:00Z"),
   };
 
-  const MOCK_STRIPE_METER_EVENT = {
+  const MOCK_STRIPE_METER_EVENT: Stripe.V2.Billing.MeterEvent = {
+    object: "v2.billing.meter_event",
     identifier: "evt_usage_123",
-    created: Math.floor(new Date("2025-01-15T12:00:00Z").getTime() / 1000),
+    created: "2025-01-15T12:00:00.000Z",
+    event_name: "api_call",
     livemode: false,
+    payload: {},
+    timestamp: "2025-01-15T12:00:00.000Z",
   };
 
   const MOCK_JSON_API_RESPONSE = {
@@ -193,7 +203,7 @@ describe("StripeUsageAdminService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripeUsageApiService.reportMeterEvent.mockResolvedValue(MOCK_STRIPE_METER_EVENT);
       usageRecordRepository.create.mockResolvedValue(MOCK_USAGE_RECORD);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.reportUsage(validReportParams);
 
@@ -229,7 +239,7 @@ describe("StripeUsageAdminService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripeUsageApiService.reportMeterEvent.mockResolvedValue(MOCK_STRIPE_METER_EVENT);
       usageRecordRepository.create.mockResolvedValue(MOCK_USAGE_RECORD);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.reportUsage({
         ...validReportParams,
@@ -261,7 +271,7 @@ describe("StripeUsageAdminService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripeUsageApiService.reportMeterEvent.mockResolvedValue(MOCK_STRIPE_METER_EVENT);
       usageRecordRepository.create.mockResolvedValue(MOCK_USAGE_RECORD);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.reportUsage({
         ...validReportParams,
@@ -323,7 +333,7 @@ describe("StripeUsageAdminService", () => {
         identifier: customStripeEventId,
       });
       usageRecordRepository.create.mockResolvedValue(MOCK_USAGE_RECORD);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.reportUsage(validReportParams);
 
@@ -339,7 +349,7 @@ describe("StripeUsageAdminService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripeUsageApiService.reportMeterEvent.mockResolvedValue(MOCK_STRIPE_METER_EVENT);
       usageRecordRepository.create.mockResolvedValue(MOCK_USAGE_RECORD);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.reportUsage(validReportParams);
 
@@ -359,7 +369,7 @@ describe("StripeUsageAdminService", () => {
         callOrder.push("database");
         return MOCK_USAGE_RECORD;
       });
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.reportUsage(validReportParams);
 
@@ -389,7 +399,7 @@ describe("StripeUsageAdminService", () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       usageRecordRepository.findBySubscriptionId.mockResolvedValue([MOCK_USAGE_RECORD]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       const result = await service.listUsageRecords(validListParams);
 
@@ -444,7 +454,7 @@ describe("StripeUsageAdminService", () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       usageRecordRepository.findBySubscriptionId.mockResolvedValue([MOCK_USAGE_RECORD]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       await service.listUsageRecords({
         ...validListParams,
@@ -463,7 +473,7 @@ describe("StripeUsageAdminService", () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       usageRecordRepository.findBySubscriptionId.mockResolvedValue([MOCK_USAGE_RECORD]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       await service.listUsageRecords({
         ...validListParams,
@@ -483,7 +493,7 @@ describe("StripeUsageAdminService", () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       usageRecordRepository.findBySubscriptionId.mockResolvedValue([MOCK_USAGE_RECORD]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       await service.listUsageRecords({
         ...validListParams,
@@ -502,7 +512,7 @@ describe("StripeUsageAdminService", () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       usageRecordRepository.findBySubscriptionId.mockResolvedValue([MOCK_USAGE_RECORD]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       const result = await service.listUsageRecords(validListParams);
 
@@ -523,10 +533,7 @@ describe("StripeUsageAdminService", () => {
       total: 1500,
       count: 10,
       byMeter: {
-        [TEST_IDS.meterId]: {
-          total: 1500,
-          count: 10,
-        },
+        [TEST_IDS.meterId]: 1500,
       },
     };
 
@@ -639,15 +646,21 @@ describe("StripeUsageAdminService", () => {
       endTime: new Date("2025-01-31T23:59:59Z"),
     };
 
-    const MOCK_STRIPE_SUMMARIES = [
+    const MOCK_STRIPE_SUMMARIES: Stripe.Billing.MeterEventSummary[] = [
       {
         id: "summary_1",
+        object: "billing.meter_event_summary",
+        meter: TEST_IDS.meterId,
+        livemode: false,
         aggregated_value: 1500,
         start_time: 1704067200, // 2024-01-01T00:00:00Z
         end_time: 1706745599, // 2024-01-31T23:59:59Z
       },
       {
         id: "summary_2",
+        object: "billing.meter_event_summary",
+        meter: TEST_IDS.meterId,
+        livemode: false,
         aggregated_value: 2000,
         start_time: 1706745600, // 2024-02-01T00:00:00Z
         end_time: 1709251199, // 2024-02-29T23:59:59Z
@@ -724,8 +737,11 @@ describe("StripeUsageAdminService", () => {
     });
 
     it("should convert Unix timestamp to Date to ISO string in response", async () => {
-      const testSummary = {
+      const testSummary: Stripe.Billing.MeterEventSummary = {
         id: "summary_test",
+        object: "billing.meter_event_summary",
+        meter: TEST_IDS.meterId,
+        livemode: false,
         aggregated_value: 500,
         start_time: 1737389445, // Should become "2025-01-20T15:30:45.000Z"
         end_time: 1737475845, // Should become "2025-01-21T15:30:45.000Z"
@@ -762,21 +778,21 @@ describe("StripeUsageAdminService", () => {
   });
 
   describe("listMeters", () => {
-    const MOCK_STRIPE_METERS = [
+    const MOCK_STRIPE_METERS: Stripe.Billing.Meter[] = [
       {
         id: TEST_IDS.meterId,
         display_name: "API Calls",
         event_name: "api_call",
         status: "active",
         default_aggregation: { formula: "sum" },
-      },
+      } as Stripe.Billing.Meter,
       {
         id: "mtr_test_456",
         display_name: "Storage Usage",
         event_name: "storage_usage",
         status: "active",
         default_aggregation: { formula: "last" },
-      },
+      } as Stripe.Billing.Meter,
     ];
 
     it("should list meters successfully", async () => {

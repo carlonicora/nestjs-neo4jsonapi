@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { PresenceService, PresenceStatus } from "../presence.service";
 import { RedisClientStorageService } from "../../../redis/services/redis.client.storage.service";
@@ -6,8 +6,8 @@ import { AppLoggingService } from "../../../logging/services/logging.service";
 
 describe("PresenceService", () => {
   let service: PresenceService;
-  let redisService: vi.Mocked<RedisClientStorageService>;
-  let logger: vi.Mocked<AppLoggingService>;
+  let redisService: Mocked<RedisClientStorageService>;
+  let logger: Mocked<AppLoggingService>;
 
   const mockRedisClient = {
     get: vi.fn(),
@@ -497,7 +497,7 @@ describe("PresenceService", () => {
 
   describe("when RedisClientStorageService is undefined", () => {
     let serviceWithoutRedis: PresenceService;
-    let loggerWithoutRedis: vi.Mocked<AppLoggingService>;
+    let loggerWithoutRedis: Mocked<AppLoggingService>;
 
     beforeEach(async () => {
       const mockLogger = createMockLogger();

@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HealthCheckError } from "@nestjs/terminus";
 import { RedisHealthIndicator } from "../indicators/redis.health";
@@ -6,7 +6,7 @@ import { RedisClientStorageService } from "../../redis/services/redis.client.sto
 
 describe("RedisHealthIndicator", () => {
   let indicator: RedisHealthIndicator;
-  let redisService: vi.Mocked<RedisClientStorageService>;
+  let redisService: Mocked<RedisClientStorageService>;
 
   const mockRedisClient = {
     ping: vi.fn(),
@@ -115,7 +115,15 @@ describe("RedisHealthIndicator", () => {
           }),
       );
 
-      await expect(indicator.isHealthy("redis")).rejects.toThrow(HealthCheckError);
-    }, 10000);
+      // Fake clock: the indicator's 3s race timeout fires without waiting it out.
+      vi.useFakeTimers();
+      try {
+        const assertion = expect(indicator.isHealthy("redis")).rejects.toThrow(HealthCheckError);
+        await vi.advanceTimersByTimeAsync(3000);
+        await assertion;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

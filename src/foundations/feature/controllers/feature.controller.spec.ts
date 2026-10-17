@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -44,7 +44,7 @@ import { FeatureController } from "./feature.controller";
 
 describe("FeatureController", () => {
   let controller: FeatureController;
-  let featureService: vi.Mocked<FeatureService>;
+  let featureService: Mocked<FeatureService>;
 
   // Test data constants
   const MOCK_FEATURE_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -69,10 +69,16 @@ describe("FeatureController", () => {
     },
   };
 
-  const mockListResponse = {
+  // FeatureService.find is declared to return JsonApiDataInterface (one resource
+  // object) but resolves to a JSON:API document; the mock uses the real document
+  // shape, re-typed once here to the declared signature.
+  const asDocument = (document: { data: unknown; meta?: Record<string, unknown> }): JsonApiDataInterface =>
+    document as unknown as JsonApiDataInterface;
+
+  const mockListResponse = asDocument({
     data: [mockServiceResponse],
     meta: { total: 1 },
-  };
+  });
 
   beforeEach(async () => {
     const mockFeatureService = {
@@ -161,7 +167,7 @@ describe("FeatureController", () => {
     });
 
     it("should return empty results when no features found", async () => {
-      const emptyResponse = { data: [], meta: { total: 0 } };
+      const emptyResponse = asDocument({ data: [], meta: { total: 0 } });
       featureService.find.mockResolvedValue(emptyResponse);
 
       const result = await controller.findBySearch(mockRequest, mockQuery);

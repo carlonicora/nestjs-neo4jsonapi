@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -38,19 +38,21 @@ import { StripeInvoiceApiService } from "../stripe-invoice-api.service";
 import { StripeInvoice, StripeInvoiceStatus } from "../../entities/stripe-invoice.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
+import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 import { MOCK_INVOICE, TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 
 describe("StripeInvoiceAdminService", () => {
   let service: StripeInvoiceAdminService;
-  let invoiceRepository: vi.Mocked<StripeInvoiceRepository>;
-  let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
-  let subscriptionRepository: vi.Mocked<StripeSubscriptionRepository>;
-  let stripeInvoiceApiService: vi.Mocked<StripeInvoiceApiService>;
-  let jsonApiService: vi.Mocked<JsonApiService>;
+  let invoiceRepository: Mocked<StripeInvoiceRepository>;
+  let stripeCustomerRepository: Mocked<StripeCustomerRepository>;
+  let subscriptionRepository: Mocked<StripeSubscriptionRepository>;
+  let stripeInvoiceApiService: Mocked<StripeInvoiceApiService>;
+  let jsonApiService: Mocked<JsonApiService>;
 
   // Test data constants
   const MOCK_STRIPE_CUSTOMER: StripeCustomer = {
     id: "stripe_customer_123",
+    type: "stripe-customers",
     stripeCustomerId: TEST_IDS.customerId,
     email: "test@example.com",
     name: "Test Customer",
@@ -65,6 +67,7 @@ describe("StripeInvoiceAdminService", () => {
 
   const MOCK_DB_SUBSCRIPTION: StripeSubscription = {
     id: "subscription_db_123",
+    type: "stripe-subscriptions",
     stripeSubscriptionId: TEST_IDS.subscriptionId,
     stripeSubscriptionItemId: "si_test_123",
     status: "active",
@@ -75,11 +78,12 @@ describe("StripeInvoiceAdminService", () => {
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
     stripeCustomer: MOCK_STRIPE_CUSTOMER,
-    price: {} as any,
+    stripePrice: {} as StripePrice,
   };
 
   const MOCK_DB_INVOICE: StripeInvoice = {
     id: "invoice_db_123",
+    type: "stripe-invoices",
     stripeInvoiceId: TEST_IDS.invoiceId,
     stripeInvoiceNumber: "INV-001",
     stripeHostedInvoiceUrl: "https://invoice.stripe.com/i/test",
@@ -202,7 +206,7 @@ describe("StripeInvoiceAdminService", () => {
     it("should return paginated invoices list", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       invoiceRepository.findByStripeCustomerId.mockResolvedValue([MOCK_DB_INVOICE]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       const result = await service.listInvoices(validParams);
 
@@ -234,7 +238,7 @@ describe("StripeInvoiceAdminService", () => {
       const paramsWithStatus = { ...validParams, status: "paid" as StripeInvoiceStatus };
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       invoiceRepository.findByStripeCustomerId.mockResolvedValue([MOCK_DB_INVOICE]);
-      jsonApiService.buildList.mockReturnValue(MOCK_JSON_API_LIST_RESPONSE);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE);
 
       await service.listInvoices(paramsWithStatus);
 
@@ -251,7 +255,7 @@ describe("StripeInvoiceAdminService", () => {
       const paramsWithCustomQuery = { ...validParams, query: customQuery };
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       invoiceRepository.findByStripeCustomerId.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [], meta: {} });
+      jsonApiService.buildList.mockResolvedValue({ data: [], meta: {} });
 
       await service.listInvoices(paramsWithCustomQuery);
 
@@ -265,7 +269,7 @@ describe("StripeInvoiceAdminService", () => {
     it("should return empty list when no invoices exist", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       invoiceRepository.findByStripeCustomerId.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [], meta: {} });
+      jsonApiService.buildList.mockResolvedValue({ data: [], meta: {} });
 
       const result = await service.listInvoices(validParams);
 
@@ -282,7 +286,7 @@ describe("StripeInvoiceAdminService", () => {
     it("should return invoice when found and ownership verified", async () => {
       invoiceRepository.findById.mockResolvedValue(MOCK_DB_INVOICE);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.getInvoice(validParams);
 
@@ -335,7 +339,7 @@ describe("StripeInvoiceAdminService", () => {
 
       try {
         await service.getInvoice(validParams);
-        fail("Should have thrown HttpException");
+        expect.fail("Should have thrown HttpException");
       } catch (error) {
         expect(error).toBeInstanceOf(HttpException);
         expect((error as HttpException).getStatus()).toBe(HttpStatus.FORBIDDEN);
@@ -349,7 +353,7 @@ describe("StripeInvoiceAdminService", () => {
       companyId: TEST_IDS.companyId,
     };
 
-    const mockUpcomingInvoice: Stripe.UpcomingInvoice = {
+    const mockUpcomingInvoice: Stripe.Invoice = {
       ...MOCK_INVOICE,
       subtotal: 999,
       total: 1099,
@@ -974,7 +978,7 @@ describe("StripeInvoiceAdminService", () => {
       const validParams = { id: MOCK_DB_INVOICE.id, companyId: TEST_IDS.companyId };
       invoiceRepository.findById.mockResolvedValue(MOCK_DB_INVOICE);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const promises = [
         service.getInvoice(validParams),

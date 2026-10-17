@@ -497,7 +497,9 @@ describe("EmailService", () => {
 
   describe("Handlebars eq helper", () => {
     it("should register eq helper that compares values", () => {
-      const registerHelperCalls = vi.mocked(Handlebars.registerHelper).mock.calls;
+      // registerHelper is overloaded; select the (name, fn) signature the service uses.
+      const registerHelper = Handlebars.registerHelper as (name: string, fn: Handlebars.HelperDelegate) => void;
+      const registerHelperCalls = vi.mocked(registerHelper).mock.calls;
       const eqHelperCall = registerHelperCalls.find((call) => call[0] === "eq");
       expect(eqHelperCall).toBeDefined();
 

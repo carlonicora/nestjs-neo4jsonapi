@@ -41,6 +41,7 @@ const mockDescriptor: EntityDescriptor<any, Record<string, RelationshipDef>> = {
     endpoint: "photographs",
     nodeName: "photograph",
     labelName: "Photograph",
+    entity: {},
     childrenTokens: [],
     mapper: {} as any,
   },
@@ -55,9 +56,12 @@ const mockDescriptor: EntityDescriptor<any, Record<string, RelationshipDef>> = {
     title: { type: "string", required: true },
   },
   computed: {},
+  virtualFields: {},
   injectServices: [],
   constraints: [],
   indexes: [],
+  fulltextIndexName: "photograph_search_index",
+  defaultOrderBy: "createdAt DESC",
 };
 
 describe("api-jsonapi-response.decorator", () => {

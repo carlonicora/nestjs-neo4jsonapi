@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock OAuth service
 vi.mock("../services/oauth.service", () => ({
@@ -15,12 +15,12 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { OAuthIntrospectRequestDto } from "../dtos/oauth.introspect.dto";
 import { OAuthRevokeRequestDto } from "../dtos/oauth.revoke.dto";
 import { OAuthTokenRequestDto } from "../dtos/oauth.token.dto";
-import { OAuthService } from "../services/oauth.service";
+import { OAuthService, TokenResponse } from "../services/oauth.service";
 import { OAuthTokenController } from "./oauth.token.controller";
 
 describe("OAuthTokenController", () => {
   let controller: OAuthTokenController;
-  let oauthService: vi.Mocked<OAuthService>;
+  let oauthService: Mocked<OAuthService>;
 
   // Test data constants
   const MOCK_CLIENT_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -31,7 +31,7 @@ describe("OAuthTokenController", () => {
   const MOCK_REFRESH_TOKEN = "refresh_token_456";
   const MOCK_CODE_VERIFIER = "code_verifier_789";
 
-  const mockTokenResponse = {
+  const mockTokenResponse: TokenResponse = {
     access_token: MOCK_ACCESS_TOKEN,
     token_type: "Bearer",
     expires_in: 3600,

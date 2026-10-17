@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -41,15 +41,16 @@ import {
 
 describe("BillingService", () => {
   let service: BillingService;
-  let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
-  let stripeCustomerApiService: vi.Mocked<StripeCustomerApiService>;
-  let stripePaymentService: vi.Mocked<StripePaymentService>;
-  let stripePortalService: vi.Mocked<StripePortalService>;
-  let jsonApiService: vi.Mocked<JsonApiService>;
+  let stripeCustomerRepository: Mocked<StripeCustomerRepository>;
+  let stripeCustomerApiService: Mocked<StripeCustomerApiService>;
+  let stripePaymentService: Mocked<StripePaymentService>;
+  let stripePortalService: Mocked<StripePortalService>;
+  let jsonApiService: Mocked<JsonApiService>;
 
   // Test data constants
   const MOCK_STRIPE_CUSTOMER: StripeCustomer = {
     id: "billing_customer_123",
+    type: "stripe-customers",
     stripeCustomerId: TEST_IDS.customerId,
     email: "test@example.com",
     name: "Test Customer",
@@ -209,7 +210,7 @@ describe("BillingService", () => {
 
       try {
         await service.getCustomerOrFail({ companyId: TEST_IDS.companyId });
-        fail("Should have thrown HttpException");
+        expect.unreachable("Should have thrown HttpException");
       } catch (error) {
         expect(error).toBeInstanceOf(HttpException);
         expect((error as HttpException).getStatus()).toBe(HttpStatus.NOT_FOUND);
@@ -238,7 +239,7 @@ describe("BillingService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
       stripeCustomerApiService.createCustomer.mockResolvedValue(MOCK_CUSTOMER);
       stripeCustomerRepository.create.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.createCustomer(validCreateParams);
 
@@ -280,7 +281,7 @@ describe("BillingService", () => {
 
       try {
         await service.createCustomer(validCreateParams);
-        fail("Should have thrown HttpException");
+        expect.unreachable("Should have thrown HttpException");
       } catch (error) {
         expect(error).toBeInstanceOf(HttpException);
         expect((error as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
@@ -299,7 +300,7 @@ describe("BillingService", () => {
         callOrder.push("database");
         return MOCK_STRIPE_CUSTOMER;
       });
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.createCustomer(validCreateParams);
 
@@ -314,7 +315,7 @@ describe("BillingService", () => {
         id: customStripeId,
       });
       stripeCustomerRepository.create.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.createCustomer(validCreateParams);
 
@@ -331,7 +332,7 @@ describe("BillingService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
       stripeCustomerApiService.createCustomer.mockResolvedValue(MOCK_CUSTOMER);
       stripeCustomerRepository.create.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.createCustomer(validCreateParams);
 
@@ -349,7 +350,7 @@ describe("BillingService", () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
       stripeCustomerApiService.createCustomer.mockResolvedValue(MOCK_CUSTOMER);
       stripeCustomerRepository.create.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.createCustomer(exactParams);
 
@@ -392,7 +393,7 @@ describe("BillingService", () => {
   describe("getCustomer", () => {
     it("should get customer and format as JSON:API", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const result = await service.getCustomer({ companyId: TEST_IDS.companyId });
 
@@ -415,7 +416,7 @@ describe("BillingService", () => {
 
     it("should use getCustomerOrFail internally", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.getCustomer({ companyId: TEST_IDS.companyId });
 
@@ -757,7 +758,7 @@ describe("BillingService", () => {
           companyId: TEST_IDS.companyId,
           paymentMethodId: TEST_IDS.paymentMethodId,
         });
-        fail("Should have thrown HttpException");
+        expect.unreachable("Should have thrown HttpException");
       } catch (error) {
         expect(error).toBeInstanceOf(HttpException);
         expect((error as HttpException).getStatus()).toBe(HttpStatus.FORBIDDEN);
@@ -1043,7 +1044,7 @@ describe("BillingService", () => {
   describe("Edge Cases", () => {
     it("should handle concurrent requests for same company", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       const promises = [
         service.getCustomer({ companyId: TEST_IDS.companyId }),
@@ -1085,7 +1086,7 @@ describe("BillingService", () => {
   describe("Service Integration", () => {
     it("should call repository methods with correct parameters", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
-      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
 
       await service.getCustomer({ companyId: TEST_IDS.companyId });
 
@@ -1108,7 +1109,7 @@ describe("BillingService", () => {
         callOrder.push("createDatabase");
         return MOCK_STRIPE_CUSTOMER;
       });
-      jsonApiService.buildSingle.mockImplementation(() => {
+      jsonApiService.buildSingle.mockImplementation(async () => {
         callOrder.push("formatResponse");
         return MOCK_JSON_API_RESPONSE;
       });

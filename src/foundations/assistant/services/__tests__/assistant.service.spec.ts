@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantService, MAX_MESSAGES_TO_LLM } from "../assistant.service";
+import { AssistantMentionExtractor } from "../assistant-mention.extractor";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+import { ScopeGuard } from "../../../../agents/graph/services/scope.guard";
 import { assistantMeta } from "../../entities/assistant.meta";
 import { assistantMessageMeta } from "../../../assistant-message/entities/assistant-message.meta";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
@@ -157,6 +160,9 @@ describe("AssistantService", () => {
       undefined as any, // assistantActionRepo
       undefined as any, // webSocketService
       { get: vi.fn() } as any, // configService: no app config, so inline entity links stay off
+      undefined as unknown as AssistantMentionExtractor, // mentions: not reached by these tests
+      undefined as unknown as BlockNoteService, // blockNote: not reached by these tests
+      undefined as unknown as ScopeGuard, // scopeGuard: not reached by these tests
     );
     return {
       service,
@@ -183,7 +189,7 @@ describe("AssistantService", () => {
   describe("createWithFirstMessage", () => {
     it("auto-generates a title from the first message when none is provided", async () => {
       const { service } = buildSut();
-      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const spy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -196,7 +202,7 @@ describe("AssistantService", () => {
 
     it("trims an auto-title to <=60 chars on a word boundary", async () => {
       const { service } = buildSut();
-      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const spy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       const longMessage =
         "This is a deliberately long first message that should be trimmed on a word boundary somewhere before sixty";
       await service.createWithFirstMessage({
@@ -213,7 +219,7 @@ describe("AssistantService", () => {
 
     it("respects a caller-supplied title when provided", async () => {
       const { service } = buildSut();
-      const spy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const spy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -225,7 +231,7 @@ describe("AssistantService", () => {
 
     it("does NOT emit a hydration system message on the first turn (no prior refs)", async () => {
       const { service, responder } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -237,7 +243,7 @@ describe("AssistantService", () => {
 
     it("creates user message at position 0 and assistant message at position 1 via AssistantMessageService", async () => {
       const { service, assistantMessages, createdMessages } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -253,7 +259,7 @@ describe("AssistantService", () => {
 
     it("materialises REFERENCES edges for the assistant turn via linkReferences", async () => {
       const { service, assistantMessageRepo, linkedRefs } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -265,7 +271,7 @@ describe("AssistantService", () => {
 
     it("calls linkCitations with chunk citations from the responder's sources", async () => {
       const { service, assistantMessageRepo, linkedCitations } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -278,7 +284,7 @@ describe("AssistantService", () => {
 
     it("calls setTrace with stringified UnifiedTrace JSON", async () => {
       const { service, assistantMessageRepo, setTraceCalls } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -294,7 +300,7 @@ describe("AssistantService", () => {
 
     it("returns the Assistant plus the two new messages and propagated toolCalls", async () => {
       const { service } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       const result = await service.createWithFirstMessage({
         companyId: "c",
         userId: "u",
@@ -310,7 +316,7 @@ describe("AssistantService", () => {
   describe("module visibility is bound to the request company", () => {
     it("createWithFirstMessage resolves modules for the user within params.companyId", async () => {
       const { service, userModules } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessage({ companyId: "c", userId: "u", firstMessage: "hi" });
       expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
     });
@@ -718,7 +724,7 @@ describe("AssistantService", () => {
   describe("howToMode propagation", () => {
     it("forwards howToMode to responder.run in createWithFirstMessage", async () => {
       const { service, responder } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
 
       await service.createWithFirstMessage({
         companyId: "co-1",
@@ -759,7 +765,7 @@ describe("AssistantService", () => {
 
     it("passes empty dataLimits when howToMode is omitted (regression)", async () => {
       const { service, responder } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
 
       await service.createWithFirstMessage({
         companyId: "co-1",

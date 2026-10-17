@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { StripeProductApiService } from "../stripe-product-api.service";
 import { StripeService } from "../../../stripe/services/stripe.service";
@@ -16,7 +16,7 @@ import {
 
 describe("StripeProductApiService", () => {
   let service: StripeProductApiService;
-  let stripeService: vi.Mocked<StripeService>;
+  let stripeService: Mocked<StripeService>;
   let mockStripe: MockStripeClient;
 
   beforeEach(async () => {

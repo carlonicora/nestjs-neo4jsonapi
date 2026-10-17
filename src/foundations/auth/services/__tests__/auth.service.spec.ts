@@ -13,7 +13,7 @@ import { EmailService } from "../../../../core/email/services/email.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
-import { PendingRegistrationService } from "../pending-registration.service";
+import { PendingRegistration, PendingRegistrationService } from "../pending-registration.service";
 import { DiscordUserService } from "../../../discord-user/services/discord-user.service";
 import { GoogleUserService } from "../../../google-user/services/google-user.service";
 import { TrialQueueService } from "../trial-queue.service";
@@ -795,20 +795,24 @@ describe("AuthService", () => {
       marketingConsentAt: "2024-01-01T00:00:00Z",
     };
 
-    const mockPendingDiscord = {
+    const mockPendingDiscord: PendingRegistration = {
+      id: "pending-123",
       provider: "discord",
       providerUserId: "discord-123",
       email: "discord@example.com",
       name: "Discord User",
       avatar: "https://cdn.discordapp.com/avatar.png",
+      createdAt: "2024-01-01T00:00:00Z",
     };
 
-    const mockPendingGoogle = {
+    const mockPendingGoogle: PendingRegistration = {
+      id: "pending-123",
       provider: "google",
       providerUserId: "google-123",
       email: "google@example.com",
       name: "Google User",
       avatar: "https://lh3.googleusercontent.com/photo.jpg",
+      createdAt: "2024-01-01T00:00:00Z",
     };
 
     it("should complete OAuth registration for Discord user", async () => {
@@ -905,7 +909,8 @@ describe("AuthService", () => {
 
     it("should throw BAD_REQUEST for unsupported provider", async () => {
       // Arrange
-      const unsupportedProvider = { ...mockPendingDiscord, provider: "facebook" };
+      // Deliberately invalid: "facebook" is outside PendingRegistration["provider"].
+      const unsupportedProvider = { ...mockPendingDiscord, provider: "facebook" } as unknown as PendingRegistration;
       pendingRegistrationService.get.mockResolvedValue(unsupportedProvider);
 
       // Act & Assert

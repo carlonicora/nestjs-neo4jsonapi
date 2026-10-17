@@ -1,5 +1,6 @@
 import { vi, describe, it, expect } from "vitest";
 import { GraphSearchService } from "./graph.search.service";
+import type { ScopeGuard } from "./scope.guard";
 
 const entityAccount = {
   type: "accounts",
@@ -20,6 +21,9 @@ const indexNames = {
 
 const catalog: any = { getAllChatEnabledEntities: vi.fn(() => [entityAccount]) };
 
+// Every run below is unscoped, so the guard is never consulted.
+const unscopedGuard = { buildMatchClause: vi.fn(), filter: vi.fn() } as unknown as ScopeGuard;
+
 describe("GraphSearchService — tier Cypher projection", () => {
   // First read() is always SHOW INDEXES (cached lookup of existing fulltext/vector
   // indexes — see GraphSearchService.getExistingIndexes). Tier queries follow.
@@ -29,7 +33,7 @@ describe("GraphSearchService — tier Cypher projection", () => {
   it("tier 1 substring Cypher projects properties(node) alongside id and score", async () => {
     const neo4j = { read: vi.fn().mockResolvedValue({ records: [] }) };
     const embedder = { vectoriseText: vi.fn() };
-    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
+    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog, unscopedGuard);
     await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     const cypher = tierCalls(neo4j.read)[0][0] as string;
@@ -48,7 +52,7 @@ describe("GraphSearchService — tier Cypher projection", () => {
         .mockResolvedValueOnce({ records: [] }), // tier 3
     };
     const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
-    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
+    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog, unscopedGuard);
     await svc.resolveEntity({ text: "x", companyId: "co1", userModuleIds: ["11111111-1111-1111-1111-111111111111"] });
 
     const cypher = tierCalls(neo4j.read)[2][0] as string;
@@ -60,7 +64,7 @@ describe("GraphSearchService — tier Cypher projection", () => {
     const neo4j = { read: vi.fn().mockResolvedValue({ records: [] }) };
     const embedder = { vectoriseText: vi.fn().mockResolvedValue([0.1]) };
 
-    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog);
+    const svc = new GraphSearchService(neo4j as any, embedder as any, indexNames as any, catalog, unscopedGuard);
     await svc.resolveEntity({
       text: "Faby & Carlo",
       companyId: "co1",

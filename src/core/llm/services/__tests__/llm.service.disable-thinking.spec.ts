@@ -1,6 +1,7 @@
 import { vi, it, expect } from "vitest";
 import { z } from "zod";
 import { LLMService } from "../llm.service";
+import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
 
 vi.mock("@langchain/core/messages", () => {
   class MockAIMessage {
@@ -74,7 +75,8 @@ it("forwards disableThinking to getLLM", async () => {
       close: vi.fn(),
     }),
   } as any;
-  const svc = new LLMService(modelService, { get: vi.fn() } as any, dumper);
+  const tokenUsageService = { computeCost: vi.fn(), recordTokenUsage: vi.fn() } as unknown as TokenUsageService;
+  const svc = new LLMService(modelService, { get: vi.fn() } as any, dumper, tokenUsageService);
   await svc.extractViaTool({
     systemPrompts: [],
     prompt: "x",

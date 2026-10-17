@@ -89,6 +89,6 @@ describe("HandbookController", () => {
     const handlers = Object.getOwnPropertyNames(HandbookController.prototype).filter((name) => name !== "constructor");
 
     expect(handlers).not.toContain("ask");
-    expect((HandbookController.prototype as Record<string, unknown>).ask).toBeUndefined();
+    expect(Reflect.get(HandbookController.prototype, "ask")).toBeUndefined();
   });
 });

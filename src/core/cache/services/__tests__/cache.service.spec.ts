@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Create mock functions that we can reference
 const mockPipeline = {
@@ -45,8 +45,8 @@ import { AppLoggingService } from "../../../logging/services/logging.service";
 
 describe("CacheService", () => {
   let service: CacheService;
-  let mockLogger: vi.Mocked<AppLoggingService>;
-  let mockConfigService: vi.Mocked<ConfigService>;
+  let mockLogger: Mocked<AppLoggingService>;
+  let mockConfigService: Mocked<ConfigService>;
 
   // `queue` is the per-project namespace (REDIS_QUEUE) that BullMQ uses as its
   // key prefix; the cache keys carry it too so two stacks sharing one Redis

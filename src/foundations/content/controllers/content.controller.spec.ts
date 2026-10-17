@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -90,10 +90,10 @@ import { ContentController } from "./content.controller";
 
 describe("ContentController", () => {
   let controller: ContentController;
-  let contentService: vi.Mocked<ContentService>;
-  let relevancyService: vi.Mocked<RelevancyService<any>>;
-  let cypherService: vi.Mocked<ContentCypherService>;
-  let mockReply: vi.Mocked<FastifyReply>;
+  let contentService: Mocked<ContentService>;
+  let relevancyService: Mocked<RelevancyService<any>>;
+  let cypherService: Mocked<ContentCypherService>;
+  let mockReply: Mocked<FastifyReply>;
 
   // Test data constants
   const MOCK_CONTENT_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -119,10 +119,13 @@ describe("ContentController", () => {
     },
   };
 
+  // The services return the JSON:API document buildList produces, but declare
+  // `Promise<JsonApiDataInterface>` (a single resource). The cast bridges that
+  // declared type, not the fixture shape.
   const mockListResponse = {
     data: [mockServiceResponse],
     meta: { total: 1 },
-  };
+  } as unknown as JsonApiDataInterface;
 
   beforeEach(async () => {
     const mockContentService = {
@@ -503,7 +506,7 @@ describe("ContentController", () => {
     const mockRelevantContents = {
       data: [mockServiceResponse],
       meta: { total: 1 },
-    };
+    } as unknown as JsonApiDataInterface;
 
     it("should find relevant contents for a content ID", async () => {
       relevancyService.findRelevant.mockResolvedValue(mockRelevantContents);
@@ -546,7 +549,7 @@ describe("ContentController", () => {
     });
 
     it("should return empty results when no relevant content found", async () => {
-      const emptyResponse = { data: [], meta: { total: 0 } };
+      const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
       relevancyService.findRelevant.mockResolvedValue(emptyResponse);
 
       const result = await controller.findContentsRelevantForContent(mockQuery, MOCK_CONTENT_ID);
@@ -616,7 +619,7 @@ describe("ContentController", () => {
       });
 
       it("should handle empty array response", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } };
+        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
         contentService.find.mockResolvedValue(emptyResponse);
 
         await controller.findContents(mockRequest, mockReply, mockQuery);

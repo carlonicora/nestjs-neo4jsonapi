@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
@@ -41,17 +41,19 @@ vi.mock("../../../core/security/services/security.service", () => ({
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { RoleService } from "../services/role.service";
 import { RoleUserController } from "./role.user.controller";
 
 describe("RoleUserController", () => {
   let controller: RoleUserController;
-  let roleService: vi.Mocked<RoleService>;
+  let roleService: Mocked<RoleService>;
 
   // Test data constants
   const MOCK_USER_ID = "550e8400-e29b-41d4-a716-446655440000";
 
+  // RoleService.findForUser/findNotInUser declare Promise<JsonApiDataInterface> but return a JSON:API list document.
   const mockRolesResponse = {
     data: [
       {
@@ -72,7 +74,7 @@ describe("RoleUserController", () => {
       },
     ],
     meta: { total: 2 },
-  };
+  } as unknown as JsonApiDataInterface;
 
   const mockRequest = { user: { id: MOCK_USER_ID } };
 
@@ -156,7 +158,7 @@ describe("RoleUserController", () => {
       });
 
       it("should handle empty results", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } };
+        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
         roleService.findForUser.mockResolvedValue(emptyResponse);
 
         const result = await controller.findBySearch(mockRequest, mockQuery, MOCK_USER_ID);
@@ -203,7 +205,7 @@ describe("RoleUserController", () => {
       });
 
       it("should handle empty results", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } };
+        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
         roleService.findNotInUser.mockResolvedValue(emptyResponse);
 
         const result = await controller.findBySearch(mockRequest, mockQuery, MOCK_USER_ID, undefined, true);

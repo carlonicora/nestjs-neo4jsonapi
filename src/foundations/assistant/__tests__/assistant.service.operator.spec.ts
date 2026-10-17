@@ -1,6 +1,9 @@
 import { ConflictException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantService, MAX_MESSAGES_TO_LLM } from "../services/assistant.service";
+import { AssistantMentionExtractor } from "../services/assistant-mention.extractor";
+import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
+import { ScopeGuard } from "../../../agents/graph/services/scope.guard";
 import { assistantMessageMeta } from "../../assistant-message/entities/assistant-message.meta";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { modelRegistry } from "../../../common/registries/registry";
@@ -200,6 +203,9 @@ describe("AssistantService — operator turns", () => {
       assistantActionRepo,
       webSocketService,
       configService,
+      undefined as unknown as AssistantMentionExtractor, // mentions: not reached by these tests
+      undefined as unknown as BlockNoteService, // blockNote: not reached by these tests
+      undefined as unknown as ScopeGuard, // scopeGuard: not reached by these tests
     );
 
     return {
@@ -228,7 +234,7 @@ describe("AssistantService — operator turns", () => {
   describe("createWithFirstMessageOperator — completed run", () => {
     it("persists user message at position 0 and assistant message at position 1 with the operator answer", async () => {
       const { service, assistantMessages, createdMessages } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       const result = await service.createWithFirstMessageOperator({
         companyId: "c",
         userId: "u",
@@ -253,7 +259,7 @@ describe("AssistantService — operator turns", () => {
 
     it("links references and citations exactly like the responder path", async () => {
       const { service, assistantMessageRepo, linkedRefs, linkedCitations } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
       expect(assistantMessageRepo.linkReferences).toHaveBeenCalledTimes(1);
       expect(linkedRefs[0].references).toEqual(COMPLETED_RESULT.references);
@@ -263,7 +269,7 @@ describe("AssistantService — operator turns", () => {
 
     it('persists `engine: "operator"` on the created assistant', async () => {
       const { service } = buildSut();
-      const createSpy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const createSpy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
       expect(createSpy).toHaveBeenCalledTimes(1);
       expect(createSpy.mock.calls[0][0].data.attributes).toEqual(expect.objectContaining({ engine: "operator" }));
@@ -274,7 +280,7 @@ describe("AssistantService — operator turns", () => {
       // the placeholder Assistant model and 400s with "One or more related
       // nodes do not exist." — the responder path binds after create, so must this.
       const { service, repo } = buildSut();
-      const createSpy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const createSpy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessageOperator({
         companyId: "c",
         userId: "u",
@@ -290,7 +296,7 @@ describe("AssistantService — operator turns", () => {
 
     it("invokes operator.run with threadId `${assistantId}:${userMessageId}` and the question", async () => {
       const { service, operator, createdMessages } = buildSut();
-      const createSpy = vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      const createSpy = vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
       const assistantId = createSpy.mock.calls[0][0].data.id;
       const userMessageId = createdMessages[0].data.id;
@@ -309,7 +315,7 @@ describe("AssistantService — operator turns", () => {
   describe("operator module visibility is bound to the request company", () => {
     it("createWithFirstMessageOperator resolves modules for the user within params.companyId", async () => {
       const { service, userModules } = buildSut();
-      vi.spyOn(service as any, "createFromDTO").mockResolvedValue(undefined);
+      vi.spyOn(service, "createFromDTO").mockResolvedValue(undefined);
       await service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "go" });
       expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u", "c");
     });

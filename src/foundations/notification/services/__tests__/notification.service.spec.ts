@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { NotificationServices } from "../notification.service";
 import { NotificationRepository } from "../../repositories/notification.repository";
+import { Notification } from "../../entities/notification";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 
 describe("NotificationServices", () => {
@@ -16,9 +17,27 @@ describe("NotificationServices", () => {
     notificationId2: "770e8400-e29b-41d4-a716-446655440002",
   };
 
-  const MOCK_NOTIFICATIONS = [
-    { id: TEST_IDS.notificationId1, message: "Notification 1", isRead: false },
-    { id: TEST_IDS.notificationId2, message: "Notification 2", isRead: true },
+  const MOCK_DATE = new Date("2026-01-01T00:00:00.000Z");
+
+  const MOCK_NOTIFICATIONS: Notification[] = [
+    {
+      id: TEST_IDS.notificationId1,
+      type: "notifications",
+      createdAt: MOCK_DATE,
+      updatedAt: MOCK_DATE,
+      notificationType: "test",
+      message: "Notification 1",
+      isRead: false,
+    },
+    {
+      id: TEST_IDS.notificationId2,
+      type: "notifications",
+      createdAt: MOCK_DATE,
+      updatedAt: MOCK_DATE,
+      notificationType: "test",
+      message: "Notification 2",
+      isRead: true,
+    },
   ];
 
   const createMockNotificationRepository = () => ({
@@ -69,7 +88,7 @@ describe("NotificationServices", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_NOTIFICATIONS };
       notificationRepository.findForUser.mockResolvedValue(MOCK_NOTIFICATIONS);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findForUser({ query: {}, userId: TEST_IDS.userId });
@@ -86,7 +105,7 @@ describe("NotificationServices", () => {
 
     it("should build the list with the descriptor model", async () => {
       notificationRepository.findForUser.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       await service.findForUser({ query: {}, userId: TEST_IDS.userId });
 
@@ -100,7 +119,7 @@ describe("NotificationServices", () => {
     it("should filter by isArchived when provided", async () => {
       // Arrange
       notificationRepository.findForUser.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.findForUser({ query: {}, userId: TEST_IDS.userId, isArchived: true });
@@ -117,7 +136,7 @@ describe("NotificationServices", () => {
       // Arrange
       const query = { page: { size: 10, after: "cursor123" } };
       notificationRepository.findForUser.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.findForUser({ query, userId: TEST_IDS.userId });
@@ -141,7 +160,7 @@ describe("NotificationServices", () => {
       const mockNotification = MOCK_NOTIFICATIONS[0];
       const mockJsonApiResponse = { data: mockNotification };
       notificationRepository.findByIdForUser.mockResolvedValue(mockNotification);
-      jsonApiService.buildSingle.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildSingle.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findByIdForUser({
@@ -176,7 +195,7 @@ describe("NotificationServices", () => {
     it("should mark notifications as read", async () => {
       // Arrange
       const notificationIds = [TEST_IDS.notificationId1, TEST_IDS.notificationId2];
-      notificationRepository.markAsRead.mockResolvedValue({ updated: 2 });
+      notificationRepository.markAsRead.mockResolvedValue(undefined);
 
       // Act
       const result = await service.markAsRead({
@@ -189,12 +208,12 @@ describe("NotificationServices", () => {
         userId: TEST_IDS.userId,
         notificationIds,
       });
-      expect(result).toEqual({ updated: 2 });
+      expect(result).toBeUndefined();
     });
 
     it("should handle empty notification IDs array", async () => {
       // Arrange
-      notificationRepository.markAsRead.mockResolvedValue({ updated: 0 });
+      notificationRepository.markAsRead.mockResolvedValue(undefined);
 
       // Act
       const result = await service.markAsRead({
@@ -203,7 +222,7 @@ describe("NotificationServices", () => {
       });
 
       // Assert
-      expect(result).toEqual({ updated: 0 });
+      expect(result).toBeUndefined();
     });
 
     it("should propagate errors from repository", async () => {

@@ -15,6 +15,8 @@ import { AppLoggingService } from "../../../../core/logging/services/logging.ser
 import { TracingService } from "../../../../core/tracing/services/tracing.service";
 import { AiStatus } from "../../../../common/enums/ai.status";
 import { modelRegistry } from "../../../../common/registries/registry";
+import { ChunkAnalysisInterface } from "../../../../common/interfaces/agents/graph.creator.interface";
+import { Chunk } from "../../entities/chunk.entity";
 
 // Mock crypto
 vi.mock("crypto", async () => {
@@ -96,7 +98,6 @@ describe("ChunkService", () => {
     deleteChunksByNodeType: vi.fn(),
     updateStatus: vi.fn(),
     updateDates: vi.fn(),
-    findParentName: vi.fn(),
     enrichContentAndEmbedBatch: vi.fn(),
     clearFinalisationClaim: vi.fn(),
   });
@@ -184,10 +185,10 @@ describe("ChunkService", () => {
   describe("findById", () => {
     it("should find a chunk by ID and return JSON:API response", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       const mockJsonApiResponse = { data: { type: "chunks", id: TEST_IDS.chunkId } };
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
-      jsonApiService.buildSingle.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildSingle.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findById({ chunkId: TEST_IDS.chunkId });
@@ -217,7 +218,7 @@ describe("ChunkService", () => {
       const expectedChunks = [
         { id: "chunk-1", content: "Content 1" },
         { id: "chunk-2", content: "Content 2" },
-      ];
+      ] as Chunk[];
       chunkRepository.createChunk.mockResolvedValue(undefined);
       chunkRepository.findChunks.mockResolvedValue(expectedChunks);
 
@@ -242,7 +243,7 @@ describe("ChunkService", () => {
     it("returns the lean chunks from findChunks (no embeddings on the create path)", async () => {
       // Arrange
       const documents: Document[] = [{ pageContent: "Content 1", metadata: {}, id: undefined }];
-      const leanChunks = [{ id: "chunk-1", content: "Content 1", heading: "H", position: 0, dates: [] }];
+      const leanChunks = [{ id: "chunk-1", content: "Content 1", heading: "H", position: 0, dates: [] }] as Chunk[];
       chunkRepository.createChunk.mockResolvedValue(undefined);
       chunkRepository.findChunks.mockResolvedValue(leanChunks);
 
@@ -305,7 +306,7 @@ describe("ChunkService", () => {
   describe("deleteChunks", () => {
     it("should delete chunks and cleanup related data", async () => {
       // Arrange
-      const mockChunks = [{ id: "chunk-1" }, { id: "chunk-2" }];
+      const mockChunks = [{ id: "chunk-1" }, { id: "chunk-2" }] as Chunk[];
       chunkRepository.findChunks.mockResolvedValue(mockChunks);
       keyConceptService.resizeKeyConceptRelationshipsWeightOnChunkDeletion.mockResolvedValue(undefined);
       chunkRepository.deleteChunksByNodeType.mockResolvedValue(undefined);
@@ -350,19 +351,20 @@ describe("ChunkService", () => {
   });
 
   describe("generateGraph", () => {
-    const mockChunkAnalysis = {
+    const mockChunkAnalysis: ChunkAnalysisInterface = {
       atomicFacts: [
         { content: "Fact 1", keyConcepts: ["concept1", "concept2"] },
         { content: "Fact 2", keyConcepts: ["concept2", "concept3"] },
       ],
       keyConceptsRelationships: [{ keyConcept1: "concept1", keyConcept2: "concept2", relationship: "relates to" }],
       keyConceptDescriptions: [{ keyConcept: "concept1", description: "Description 1" }],
+      dates: [],
       tokens: { input: 100, output: 50 },
     };
 
     it("should generate graph for a chunk", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
@@ -406,7 +408,7 @@ describe("ChunkService", () => {
     // content being analysed, not left unattributed.
     it("attributes the orphan key-concept embeddings to the analysed content", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       chunkRepository.updateDates.mockResolvedValue(undefined);
@@ -435,29 +437,29 @@ describe("ChunkService", () => {
       );
     });
 
-    it("should retry on graph generation failure and return empty fallback", { timeout: 30000 }, async () => {
+    it("should retry on graph generation failure and return empty fallback", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockRejectedValue(new Error("LLM error"));
       clsService.get.mockReturnValue(TEST_IDS.companyId);
       mockQueue.add.mockResolvedValue(undefined);
 
-      // Act
-      await service.generateGraph({
+      // Act — start the call, then drain the backoff sleeps on the fake clock
+      // (awaiting first would wait out ~7-10s of real backoff).
+      const pending = service.generateGraph({
         companyId: TEST_IDS.companyId,
         userId: TEST_IDS.userId,
         chunkId: TEST_IDS.chunkId,
         id: TEST_IDS.contentId,
         type: "content",
       });
-
-      // Advance timers for retries
       await vi.runAllTimersAsync();
+      await pending;
 
       // Assert - should have tried 4 times (initial + 3 retries)
-      expect(graphCreatorService.generateGraph).toHaveBeenCalled();
+      expect(graphCreatorService.generateGraph).toHaveBeenCalledTimes(4);
       expect(logger.warn).toHaveBeenCalled();
       expect(chunkRepository.updateStatus).toHaveBeenCalledWith({
         id: TEST_IDS.chunkId,
@@ -467,7 +469,7 @@ describe("ChunkService", () => {
 
     it("should handle null chunk analysis", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(null);
@@ -494,7 +496,7 @@ describe("ChunkService", () => {
 
     it("should queue next job after completion", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
@@ -538,7 +540,7 @@ describe("ChunkService", () => {
       };
 
       const arrange = (analysis: any) => {
-        const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+        const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
         chunkRepository.findChunkById.mockResolvedValue(mockChunk);
         chunkRepository.updateStatus.mockResolvedValue(undefined);
         chunkRepository.updateDates.mockResolvedValue(undefined);
@@ -592,7 +594,7 @@ describe("ChunkService", () => {
 
     it("should throw error when queue is not found", async () => {
       // Arrange
-      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" };
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
       chunkRepository.findChunkById.mockResolvedValue(mockChunk);
       chunkRepository.updateStatus.mockResolvedValue(undefined);
       graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
@@ -624,7 +626,7 @@ describe("ChunkService", () => {
       chunkRepository.findChunks.mockResolvedValue([
         { id: "chunk-1", content: "First chunk", dates: [] },
         { id: "chunk-2", content: "Second chunk", dates: [] },
-      ]);
+      ] as Chunk[]);
       chunkRepository.findParentName.mockResolvedValue("Atto di citazione");
       chunkRepository.enrichContentAndEmbedBatch.mockResolvedValue(undefined);
 
@@ -649,7 +651,7 @@ describe("ChunkService", () => {
     });
 
     it("bills key-concept embeddings to the entity being ingested", async () => {
-      chunkRepository.findChunkById.mockResolvedValue({ id: TEST_IDS.chunkId, content: "Test content" });
+      chunkRepository.findChunkById.mockResolvedValue({ id: TEST_IDS.chunkId, content: "Test content" } as Chunk);
       graphCreatorService.generateGraph.mockResolvedValue({
         atomicFacts: [{ content: "Fact 1", keyConcepts: ["concept1"] }],
         keyConceptsRelationships: [],
@@ -681,7 +683,7 @@ describe("ChunkService", () => {
       chunkRepository.findChunks.mockResolvedValue([
         { id: "c1", content: "one", dates: [] },
         { id: "c2", content: "two", dates: [] },
-      ]);
+      ] as Chunk[]);
       chunkRepository.findParentName.mockResolvedValue("Bartender");
 
       await service.propagateAndEmbedDates({ id: "npc-1", nodeType: "Npc" });

@@ -44,6 +44,12 @@ describe("TokenUsageService", () => {
   });
 
   const createMockAiConfig = (): ConfigAiInterface => ({
+    mock: false,
+    requestTimeoutMs: 120000,
+    requestDeadlineAttempts: 3,
+    requestWatchdogMs: 30000,
+    dump: { enabled: false, dir: "", redact: false, keepFields: [] },
+    documentAi: { enabled: false, provider: "azure", apiKey: "", model: "", url: "" },
     ai: {
       provider: "openai",
       apiKey: "test-key",
@@ -89,6 +95,31 @@ describe("TokenUsageService", () => {
       dimensions: 1536,
     },
     connectionCooldownMinutes: 5,
+    image: {
+      provider: "",
+      apiKey: "",
+      model: "",
+      url: "",
+      inputCostPer1MTokens: 0,
+      outputCostPer1MTokens: 0,
+    },
+    audio: {
+      provider: "",
+      apiKey: "",
+      model: "",
+      url: "",
+      inputCostPer1MTokens: 0,
+      outputCostPer1MTokens: 0,
+    },
+    audioDiarize: {
+      provider: "",
+      apiKey: "",
+      model: "",
+      url: "",
+      inputCostPer1MTokens: 0,
+      outputCostPer1MTokens: 0,
+      providerOptions: {},
+    },
   });
 
   /**

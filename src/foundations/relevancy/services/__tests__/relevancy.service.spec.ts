@@ -4,6 +4,7 @@ import { RelevancyService } from "../relevancy.service";
 import { RelevancyRepository } from "../../repositories/relevancy.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { DataModelInterface } from "../../../../common/interfaces/datamodel.interface";
+import type { User } from "../../../user/entities/user";
 
 describe("RelevancyService", () => {
   let service: RelevancyService<any>;
@@ -17,13 +18,11 @@ describe("RelevancyService", () => {
 
   const MOCK_MODEL: DataModelInterface<any> = {
     type: "test-entities",
-    attributes: ["name", "description"],
-    relationships: [],
-    toJsonApi: vi.fn((entity) => ({
-      type: "test-entities",
-      id: entity.id,
-      attributes: { name: entity.name },
-    })),
+    endpoint: "test-entities",
+    nodeName: "testEntity",
+    labelName: "TestEntity",
+    entity: undefined,
+    mapper: vi.fn(),
   };
 
   const MOCK_CYPHER_SERVICE = {
@@ -208,10 +207,7 @@ describe("RelevancyService", () => {
   });
 
   describe("findRelevantUsers", () => {
-    const MOCK_USERS = [
-      { id: "user-1", name: "User 1" },
-      { id: "user-2", name: "User 2" },
-    ];
+    const MOCK_USERS: User[] = [{ id: "user-1", name: "User 1" } as User, { id: "user-2", name: "User 2" } as User];
 
     const MOCK_USERS_RESPONSE = {
       data: [

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClsService } from "nestjs-cls";
 import { AssistantMessageRepository } from "../assistant-message.repository";
 import { modelRegistry } from "../../../../common/registries/registry";
+import type { EntityReference } from "../../../../agents/responder/interfaces/entity.reference.interface";
 
 describe("AssistantMessageRepository.getNextPosition", () => {
   let repo: AssistantMessageRepository;
@@ -84,7 +85,7 @@ describe("AssistantMessageRepository.linkReferences", () => {
   it("issues one MERGE per known reference with reason set on the edge", async () => {
     await repo.linkReferences({
       messageId: "m-1",
-      references: [{ type: "accounts", id: "acc-1", reason: "primary match" }],
+      references: [{ type: "accounts", id: "acc-1", reason: "primary match", relevance: 80 }],
     });
     expect(writes).toHaveLength(1);
     expect(writes[0].query).toContain(":Account {id: $refId}");
@@ -100,13 +101,13 @@ describe("AssistantMessageRepository.linkReferences", () => {
   it("skips references whose type is not in modelRegistry", async () => {
     await repo.linkReferences({
       messageId: "m-1",
-      references: [{ type: "unknowns", id: "u-1", reason: "n/a" }],
+      references: [{ type: "unknowns", id: "u-1", reason: "n/a", relevance: 50 }],
     });
     expect(writes).toHaveLength(0);
   });
 
   it("issues the same query shape on repeat calls (MERGE is idempotent in Neo4j)", async () => {
-    const refs = [{ type: "accounts", id: "acc-1", reason: "first" }];
+    const refs: EntityReference[] = [{ type: "accounts", id: "acc-1", reason: "first", relevance: 70 }];
     await repo.linkReferences({ messageId: "m-1", references: refs });
     await repo.linkReferences({ messageId: "m-1", references: refs });
     expect(writes).toHaveLength(2);
@@ -138,7 +139,8 @@ describe("AssistantMessageRepository.linkReferences", () => {
   it("passes relevance: null when the reference has no relevance", async () => {
     await repo.linkReferences({
       messageId: "m-1",
-      references: [{ type: "accounts", id: "acc-1", reason: "no score" }],
+      // A reference without a score (the source defends against it with `?? null`).
+      references: [{ type: "accounts", id: "acc-1", reason: "no score" } as EntityReference],
     });
     expect(writes).toHaveLength(1);
     expect(writes[0].queryParams).toMatchObject({

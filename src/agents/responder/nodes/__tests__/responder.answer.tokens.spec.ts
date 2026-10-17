@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ResponderContext } from "../../contexts/responder.context";
+import { buildAnswerNodeUnderTest } from "./helpers/answer-node.harness";
 
 /**
  * `Annotation.Root` compiles each channel into a LangGraph
@@ -41,7 +42,6 @@ describe("responder token accounting", () => {
 describe("ResponderAnswerNodeService return contract", () => {
   it("returns only the answer call's own token usage", async () => {
     // Arrange a node whose state already carries the contextualiser's spend.
-    const { buildAnswerNodeUnderTest } = await import("./helpers/answer-node.harness");
     const node = buildAnswerNodeUnderTest({
       llmTokenUsage: { input: 8296, output: 2650 },
     });
@@ -57,7 +57,6 @@ describe("ResponderAnswerNodeService return contract", () => {
   });
 
   it("still reports the run total on the trace", async () => {
-    const { buildAnswerNodeUnderTest } = await import("./helpers/answer-node.harness");
     const node = buildAnswerNodeUnderTest({
       llmTokenUsage: { input: 8296, output: 2650 },
     });

@@ -1,11 +1,11 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { VersionController } from "../controllers/version.controller";
 import { VersionService } from "../services/version.service";
 
 describe("VersionController", () => {
   let controller: VersionController;
-  let versionService: vi.Mocked<VersionService>;
+  let versionService: Mocked<VersionService>;
 
   beforeEach(async () => {
     const mockVersionService = {

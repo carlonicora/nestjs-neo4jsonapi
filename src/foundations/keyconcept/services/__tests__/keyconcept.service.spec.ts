@@ -2,6 +2,9 @@ import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "v
 import { Test, TestingModule } from "@nestjs/testing";
 import { KeyConceptService } from "../keyconcept.service";
 import { KeyConceptRepository } from "../../repositories/keyconcept.repository";
+import { KeyConcept } from "../../entities/key.concept.entity";
+
+const keyConcept = (id: string): KeyConcept => ({ id }) as KeyConcept;
 
 describe("KeyConceptService", () => {
   let service: KeyConceptService;
@@ -50,7 +53,7 @@ describe("KeyConceptService", () => {
     it("should create only missing key concepts", async () => {
       // Arrange
       const keyConceptValues = ["concept1", "concept2", "concept3"];
-      keyConceptRepository.findKeyConceptsByValues.mockResolvedValue([{ id: "concept1" }, { id: "concept3" }]);
+      keyConceptRepository.findKeyConceptsByValues.mockResolvedValue([keyConcept("concept1"), keyConcept("concept3")]);
       keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
 
       // Act
@@ -83,7 +86,7 @@ describe("KeyConceptService", () => {
     it("should not create any concepts when all exist", async () => {
       // Arrange
       const keyConceptValues = ["concept1", "concept2"];
-      keyConceptRepository.findKeyConceptsByValues.mockResolvedValue([{ id: "concept1" }, { id: "concept2" }]);
+      keyConceptRepository.findKeyConceptsByValues.mockResolvedValue([keyConcept("concept1"), keyConcept("concept2")]);
       keyConceptRepository.createOrphanKeyConcepts.mockResolvedValue(undefined);
 
       // Act
@@ -128,7 +131,7 @@ describe("KeyConceptService", () => {
 
     it("should create relation when key concept already exists", async () => {
       // Arrange
-      keyConceptRepository.findKeyConceptByValue.mockResolvedValue({ id: "existing-concept" });
+      keyConceptRepository.findKeyConceptByValue.mockResolvedValue(keyConcept("existing-concept"));
       keyConceptRepository.createKeyConceptRelation.mockResolvedValue(undefined);
 
       // Act

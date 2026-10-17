@@ -13,6 +13,7 @@ import { EmailService } from "../../../core/email/services/email.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { TwoFactorConfig } from "../entities/two-factor-config";
 import { PendingRegistrationService } from "../../auth/services/pending-registration.service";
 import { DiscordUserService } from "../../discord-user/services/discord-user.service";
 import { GoogleUserService } from "../../google-user/services/google-user.service";
@@ -97,7 +98,7 @@ describe("AuthService - 2FA Integration", () => {
 
   const MOCK_AUTH: Auth = {
     id: TEST_IDS.authId,
-    refreshTokenExpiration: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiration: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     user: MOCK_USER,
   } as Auth;
 
@@ -243,7 +244,7 @@ describe("AuthService - 2FA Integration", () => {
         id: "config-123",
         isEnabled: true,
         preferredMethod: "totp",
-      });
+      } as TwoFactorConfig);
 
       const result = await service.login({
         data: {
@@ -302,7 +303,7 @@ describe("AuthService - 2FA Integration", () => {
         id: "config-123",
         isEnabled: false,
         preferredMethod: "totp",
-      });
+      } as TwoFactorConfig);
 
       const result = await service.login({
         data: {
@@ -380,7 +381,7 @@ describe("AuthService - 2FA Integration", () => {
         id: "config-123",
         isEnabled: true,
         preferredMethod: "totp",
-      });
+      } as TwoFactorConfig);
 
       // Login with wrong password should fail before 2FA check
       await expect(

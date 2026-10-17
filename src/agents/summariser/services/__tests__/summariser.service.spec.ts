@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, Mock, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { SUMMARISER_MAP_CONCURRENCY, SummariserService } from "../summariser.service";
@@ -60,6 +60,14 @@ describe("SummariserService", () => {
     },
   });
 
+  // The stub chat model returned by the mocked ModelService.getLLM.
+  type MockLLM = {
+    invoke: Mock<
+      (input: unknown) => Promise<{ content: unknown; usage_metadata: { input_tokens: number; output_tokens: number } }>
+    >;
+  };
+  const getMockLLM = () => modelService.getLLM({}) as unknown as MockLLM;
+
   beforeEach(async () => {
     vi.clearAllMocks();
 
@@ -97,7 +105,7 @@ describe("SummariserService", () => {
     it("should return summary content with tldr and token usage", async () => {
       // Arrange
       const chunks = createMockChunks();
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       // Mock responses for map phase (one per chunk)
       mockLLM.invoke
@@ -127,7 +135,7 @@ describe("SummariserService", () => {
     it("should call getLLM from model service", async () => {
       // Arrange
       const chunks = createMockChunks();
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary 1"))
@@ -146,7 +154,7 @@ describe("SummariserService", () => {
     it("should process each chunk in the map phase", async () => {
       // Arrange
       const chunks = createMockChunks();
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary 1"))
@@ -166,7 +174,7 @@ describe("SummariserService", () => {
     it("should handle single chunk", async () => {
       // Arrange
       const chunks = [createMockChunks()[0]];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary of single chunk"))
@@ -186,7 +194,7 @@ describe("SummariserService", () => {
     it("should handle empty chunks array", async () => {
       // Arrange
       const chunks: Chunk[] = [];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       // When no chunks, only combine and tldr will be called
       mockLLM.invoke
@@ -206,7 +214,7 @@ describe("SummariserService", () => {
     it("should handle missing usage_metadata gracefully", async () => {
       // Arrange
       const chunks = [createMockChunks()[0]];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       // Response without usage_metadata
       const responseWithoutMetadata = {
@@ -232,7 +240,7 @@ describe("SummariserService", () => {
     it("should accumulate tokens from all phases", async () => {
       // Arrange
       const chunks = [createMockChunks()[0], createMockChunks()[1]];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary 1", 100, 40))
@@ -253,7 +261,7 @@ describe("SummariserService", () => {
     it("should combine map summaries with newlines", async () => {
       // Arrange
       const chunks = createMockChunks();
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary A"))
@@ -280,7 +288,7 @@ describe("SummariserService", () => {
           embedding: [],
         } as Chunk,
       ];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       mockLLM.invoke
         .mockResolvedValueOnce(createMockLLMResponse("Summary"))
@@ -298,7 +306,7 @@ describe("SummariserService", () => {
     it("should return string content from LLM response", async () => {
       // Arrange
       const chunks = [createMockChunks()[0]];
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       // LLM response content might be various types, should be converted to string
       mockLLM.invoke
@@ -332,7 +340,7 @@ describe("SummariserService", () => {
             embedding: [],
           }) as unknown as Chunk,
       );
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       let inFlight = 0;
       let peakInFlight = 0;
@@ -370,7 +378,7 @@ describe("SummariserService", () => {
             embedding: [],
           }) as unknown as Chunk,
       );
-      const mockLLM = modelService.getLLM({});
+      const mockLLM = getMockLLM();
 
       // The chunk index is read back off the prompt rather than off the call
       // order — under a bounded pool the two deliberately differ.

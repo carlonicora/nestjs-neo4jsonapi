@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -6,12 +6,25 @@ import { ClsService } from "nestjs-cls";
 import { JsonApiService } from "../jsonapi.service";
 import { JsonApiSerialiserFactory } from "../../factories/jsonapi.serialiser.factory";
 import { JsonApiPaginator } from "../../serialisers/jsonapi.paginator";
+import { JsonApiDataInterface } from "../../interfaces/jsonapi.data.interface";
+
+/**
+ * `serialise` is declared to return `JsonApiDataInterface`, but at runtime it
+ * returns a JSON:API document carrying `data` and, when present, `included`.
+ * This guard narrows the declared type to the document shape the tests read.
+ */
+type SerialisedDocument = JsonApiDataInterface & { data: any; included?: any[] };
+
+const asDocument = (result: JsonApiDataInterface): SerialisedDocument => {
+  if (!("data" in result)) throw new Error("serialise did not return a JSON:API document");
+  return result;
+};
 
 describe("JsonApiService", () => {
   let service: JsonApiService;
-  let mockSerialiserFactory: vi.Mocked<JsonApiSerialiserFactory>;
-  let mockClsService: vi.Mocked<ClsService>;
-  let mockConfigService: vi.Mocked<ConfigService>;
+  let mockSerialiserFactory: Mocked<JsonApiSerialiserFactory>;
+  let mockClsService: Mocked<ClsService>;
+  let mockConfigService: Mocked<ConfigService>;
 
   const TEST_API_CONFIG = {
     url: "https://api.example.com",
@@ -190,7 +203,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items/123");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items/123"));
 
       expect(result.links.self).toBe("https://api.example.com/items/123");
       expect(result.data.type).toBe("items");
@@ -213,7 +226,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.links.self).toBe("https://api.example.com/items");
       expect(Array.isArray(result.data)).toBe(true);
@@ -233,7 +246,7 @@ describe("JsonApiService", () => {
         return undefined;
       });
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.meta).toBeDefined();
       expect(result.meta.total).toBe(42);
@@ -251,7 +264,9 @@ describe("JsonApiService", () => {
 
       mockClsService.get.mockReturnValue(undefined);
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items", paginator);
+      const result = asDocument(
+        await service.serialise(data, builder as any, "https://api.example.com/items", paginator),
+      );
 
       expect(result.meta).toBeDefined();
       expect(result.meta.total).toBe(100);
@@ -265,7 +280,7 @@ describe("JsonApiService", () => {
         attributes: { name: "name" },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.data.id).toBe("abc-123");
     });
@@ -280,7 +295,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/users");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/users"));
 
       expect(result.data.attributes.fullName).toBe("John Doe");
     });
@@ -296,7 +311,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.data.meta).toBeDefined();
       expect(result.data.meta.createdAt).toBe("2024-01-01");
@@ -313,7 +328,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.data.meta).toBeDefined();
       expect(result.data.meta.formattedDate).toBe("2024-01-01T00:00:00.000Z");
@@ -330,7 +345,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.data.links).toBeDefined();
       expect(result.data.links.self).toBe("https://api.example.com/items/123");
@@ -351,7 +366,9 @@ describe("JsonApiService", () => {
       };
       const paginator = new JsonApiPaginator();
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items", paginator);
+      const result = asDocument(
+        await service.serialise(data, builder as any, "https://api.example.com/items", paginator),
+      );
 
       expect(result.links).toBeDefined();
       expect(result.links.self).toBeDefined();
@@ -366,7 +383,7 @@ describe("JsonApiService", () => {
       };
       const paginator = new JsonApiPaginator();
 
-      const result = await service.serialise(data, builder as any, "", paginator);
+      const result = asDocument(await service.serialise(data, builder as any, "", paginator));
 
       expect(result.links).toBeUndefined();
     });
@@ -384,7 +401,9 @@ describe("JsonApiService", () => {
       };
       const paginator = new JsonApiPaginator("fields[items]=name,description");
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items", paginator);
+      const result = asDocument(
+        await service.serialise(data, builder as any, "https://api.example.com/items", paginator),
+      );
 
       expect(result.data.attributes.name).toBe("Test");
       expect(result.data.attributes.description).toBe("Test Desc");
@@ -409,7 +428,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships).toBeDefined();
       expect(result.data.relationships.author.data.type).toBe("users");
@@ -432,7 +451,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.author.data.id).toBe("author-789");
     });
@@ -456,7 +475,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.author.links).toBeDefined();
       expect(result.data.relationships.author.links.related).toBe("https://api.example.com/users/author-456");
@@ -479,7 +498,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.writer).toBeDefined();
       expect(result.data.relationships.author).toBeUndefined();
@@ -494,7 +513,7 @@ describe("JsonApiService", () => {
         relationships: {},
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/items");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/items"));
 
       expect(result.data.relationships).toBeUndefined();
     });
@@ -530,7 +549,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.included).toBeDefined();
       expect(result.included.length).toBeGreaterThan(0);
@@ -568,7 +587,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.included).toBeUndefined();
     });
@@ -616,7 +635,9 @@ describe("JsonApiService", () => {
       // Only include author relationship, not category (JSON:API spec: include uses relationship names)
       const paginator = new JsonApiPaginator("include=author");
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts", paginator);
+      const result = asDocument(
+        await service.serialise(data, builder as any, "https://api.example.com/posts", paginator),
+      );
 
       expect(result.included).toBeDefined();
       const includedTypes = result.included.map((i: any) => i.type);
@@ -650,7 +671,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.included).toBeDefined();
       // Should only have one user with id 456, not duplicates
@@ -690,7 +711,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.tags.data).toBeInstanceOf(Array);
       expect(result.data.relationships.tags.data.length).toBe(2);
@@ -728,7 +749,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       // Should be a single object, not array
       expect(result.data.relationships.primaryAuthor.data).not.toBeInstanceOf(Array);
@@ -764,7 +785,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.author.meta).toBeDefined();
       expect(result.data.relationships.author.meta.role).toBe("editor");
@@ -802,7 +823,7 @@ describe("JsonApiService", () => {
         },
       };
 
-      const result = await service.serialise(data, builder as any, "https://api.example.com/posts");
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
 
       expect(result.data.relationships.author.meta).toBeDefined();
       expect(result.data.relationships.author.meta.permissionCount).toBe(2);

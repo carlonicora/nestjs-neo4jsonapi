@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "v
 import { Test, TestingModule } from "@nestjs/testing";
 import { ContentService } from "../content.service";
 import { ContentRepository } from "../../repositories/content.repository";
+import type { Content } from "../../entities/content";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { modelRegistry } from "../../../../common/registries/registry";
 
@@ -16,9 +17,9 @@ describe("ContentService", () => {
     ownerId: "770e8400-e29b-41d4-a716-446655440002",
   };
 
-  const MOCK_CONTENTS = [
-    { id: TEST_IDS.contentId1, title: "Content 1" },
-    { id: TEST_IDS.contentId2, title: "Content 2" },
+  const MOCK_CONTENTS: Content[] = [
+    { id: TEST_IDS.contentId1, name: "Content 1" } as Content,
+    { id: TEST_IDS.contentId2, name: "Content 2" } as Content,
   ];
 
   const createMockContentRepository = () => ({
@@ -82,7 +83,7 @@ describe("ContentService", () => {
   describe("model resolution", () => {
     it("should serialise with the model registered by ContentModule.forRoot", async () => {
       contentRepository.find.mockResolvedValue(MOCK_CONTENTS);
-      jsonApiService.buildList.mockReturnValue({ data: MOCK_CONTENTS });
+      jsonApiService.buildList.mockResolvedValue({ data: MOCK_CONTENTS });
 
       await service.find({ query: {} });
 
@@ -95,7 +96,7 @@ describe("ContentService", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_CONTENTS };
       contentRepository.find.mockResolvedValue(MOCK_CONTENTS);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.find({ query: {} });
@@ -114,7 +115,7 @@ describe("ContentService", () => {
     it("should pass search term to repository", async () => {
       // Arrange
       contentRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, term: "search term" });
@@ -130,7 +131,7 @@ describe("ContentService", () => {
     it("should pass fetchAll flag to repository", async () => {
       // Arrange
       contentRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, fetchAll: true });
@@ -146,7 +147,7 @@ describe("ContentService", () => {
     it("should pass orderBy to repository", async () => {
       // Arrange
       contentRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query: {}, orderBy: "createdAt" });
@@ -163,7 +164,7 @@ describe("ContentService", () => {
       // Arrange
       const query = { page: { size: 10, after: "cursor123" } };
       contentRepository.find.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.find({ query });
@@ -186,7 +187,7 @@ describe("ContentService", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_CONTENTS };
       contentRepository.findByIds.mockResolvedValue(MOCK_CONTENTS);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findByIds({
@@ -204,7 +205,7 @@ describe("ContentService", () => {
     it("should handle empty ID array", async () => {
       // Arrange
       contentRepository.findByIds.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       const result = await service.findByIds({ contentIds: [] });
@@ -228,7 +229,7 @@ describe("ContentService", () => {
       // Arrange
       const mockJsonApiResponse = { data: MOCK_CONTENTS };
       contentRepository.findByOwner.mockResolvedValue(MOCK_CONTENTS);
-      jsonApiService.buildList.mockReturnValue(mockJsonApiResponse);
+      jsonApiService.buildList.mockResolvedValue(mockJsonApiResponse);
 
       // Act
       const result = await service.findByOwner({
@@ -251,7 +252,7 @@ describe("ContentService", () => {
     it("should pass search term to repository", async () => {
       // Arrange
       contentRepository.findByOwner.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.findByOwner({
@@ -271,7 +272,7 @@ describe("ContentService", () => {
     it("should pass fetchAll flag to repository", async () => {
       // Arrange
       contentRepository.findByOwner.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.findByOwner({
@@ -291,7 +292,7 @@ describe("ContentService", () => {
     it("should pass orderBy to repository", async () => {
       // Arrange
       contentRepository.findByOwner.mockResolvedValue([]);
-      jsonApiService.buildList.mockReturnValue({ data: [] });
+      jsonApiService.buildList.mockResolvedValue({ data: [] });
 
       // Act
       await service.findByOwner({
