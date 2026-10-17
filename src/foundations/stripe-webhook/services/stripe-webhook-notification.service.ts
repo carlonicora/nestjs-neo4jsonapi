@@ -3,6 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { QueueId } from "../../../config/enums/queue.id";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { AppLoggingService } from "../../../core/logging";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
@@ -64,6 +65,7 @@ export class StripeWebhookNotificationService {
     private readonly companyRepository: CompanyRepository,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
+    private readonly responseLanguage: ResponseLanguageService,
   ) {}
 
   /**
@@ -103,7 +105,7 @@ export class StripeWebhookNotificationService {
             currency: currency || "usd",
             invoiceUrl: invoiceDetails?.stripeHostedInvoiceUrl,
             invoiceNumber: invoiceDetails?.stripeInvoiceNumber || undefined,
-            locale: "en",
+            locale: (await this.responseLanguage.resolveForEmail({ email: stripeCustomer.email })) ?? "en",
           },
         },
         {
@@ -151,7 +153,7 @@ export class StripeWebhookNotificationService {
             stripeCustomerId,
             subscriptionId,
             status,
-            locale: "en",
+            locale: (await this.responseLanguage.resolveForEmail({ email: stripeCustomer.email })) ?? "en",
           },
         },
         {
@@ -211,7 +213,7 @@ export class StripeWebhookNotificationService {
                 invoiceUrl: invoiceDetails?.stripeHostedInvoiceUrl,
                 invoiceNumber: invoiceDetails?.stripeInvoiceNumber || undefined,
                 isOneTimePurchase: isOneTimePurchase || false,
-                locale: "en",
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
               },
             },
             {
@@ -280,7 +282,7 @@ export class StripeWebhookNotificationService {
                 amount,
                 currency: currency || "usd",
                 isOneTimePurchase: isOneTimePurchase || false,
-                locale: "en",
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
               },
             },
             {
@@ -329,7 +331,7 @@ export class StripeWebhookNotificationService {
                 stripeCustomerId,
                 stripeSubscriptionId,
                 trialEndDate: trialEndDate.toISOString(),
-                locale: "en",
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
               },
             },
             {
@@ -388,7 +390,7 @@ export class StripeWebhookNotificationService {
                 stripeSubscriptionId,
                 trialEndDate: trialEndDate.toISOString(),
                 dataRemovalDate: dataRemovalDate.toISOString(),
-                locale: "en",
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
               },
             },
             {
@@ -454,7 +456,7 @@ export class StripeWebhookNotificationService {
                 reason,
                 isTrialExpired: reason === "trial_expired",
                 isSubscriptionCancelled: reason === "subscription_cancelled",
-                locale: "en",
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
               },
             },
             {
@@ -503,7 +505,7 @@ export class StripeWebhookNotificationService {
               to: ownerEmail,
               companyName: company.name ?? "Your company",
               dataRemovalDate: dataRemovalDate.toISOString(),
-              locale: "en",
+              locale: (await this.responseLanguage.resolveForEmail({ email: ownerEmail })) ?? "en",
             },
           },
           {

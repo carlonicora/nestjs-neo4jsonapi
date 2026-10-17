@@ -1,5 +1,5 @@
 import { HumanMessage } from "@langchain/core/messages";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ZodType } from "zod";
 import { BaseConfigInterface, ConfigAiInterface } from "../../../config/interfaces";
@@ -7,6 +7,8 @@ import { ModelService } from "../../llm/services/model.service";
 import { AiConnectionType, ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { convertZodToJsonSchema, sanitizeSchemaForGemini } from "../utils/schema.utils";
 import { StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
+import { ResponseLanguageService } from "../../../foundations/user/services/response-language.service";
+import { buildResponseLanguageInstruction } from "../utils/response-language-instruction";
 
 /**
  * The failover surface `ModelService` gained with DB-backed AI connections,
@@ -38,6 +40,7 @@ interface VisionCallParams<T> {
   systemPrompt: string;
   outputSchema: ZodType<T>;
   temperature?: number;
+  skipResponseLanguage?: boolean; // Optional: true = never append the response-language line. Default: false.
 }
 
 @Injectable()
@@ -49,7 +52,24 @@ export class VisionLLMService {
   constructor(
     private readonly modelService: ModelService,
     private readonly config: ConfigService<BaseConfigInterface>,
+    // Optional: resolves the language the model must write in. Absent means no
+    // line is ever appended.
+    @Optional() private readonly responseLanguage?: ResponseLanguageService,
   ) {}
+
+  /**
+   * Appends the response-language line to the system prompt (separated by a
+   * blank line) when the resolved language is not English. Returns the prompt
+   * unchanged otherwise.
+   */
+  private async withResponseLanguage(systemPrompt: string, skip?: boolean): Promise<string> {
+    if (skip === true || !this.responseLanguage) return systemPrompt;
+    const language = await this.responseLanguage.resolve();
+    if (!language) return systemPrompt;
+    const line = buildResponseLanguageInstruction(language);
+    if (!line) return systemPrompt;
+    return systemPrompt + "\n\n" + line;
+  }
 
   /**
    * Checks if an error is a rate limit (429) error
@@ -304,6 +324,8 @@ export class VisionLLMService {
    * @throws {Error} If LLM call fails or returns invalid structured output
    */
   async call<T>(params: VisionCallParams<T>): Promise<T & { tokenUsage: { input: number; output: number } }> {
+    const systemPrompt = await this.withResponseLanguage(params.systemPrompt, params.skipResponseLanguage);
+    if (systemPrompt !== params.systemPrompt) params = { ...params, systemPrompt };
     // Create message first so it can be reused in fallback
     const message = new HumanMessage({
       content: [

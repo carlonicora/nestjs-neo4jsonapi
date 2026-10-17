@@ -193,6 +193,7 @@ export class GraphNodeService implements OnModuleInit {
       readIds.clear();
       return this.llm.call({
         systemPrompts: extraInstruction ? [systemPrompt, extraInstruction] : [systemPrompt],
+        skipResponseLanguage: true,
         history,
         outputSchema: graphOutputSchema,
         inputParams: {

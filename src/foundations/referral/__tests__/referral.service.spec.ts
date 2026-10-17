@@ -21,6 +21,7 @@ import {
 } from "../interfaces/referral.config.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { CacheService } from "../../../core/cache/services/cache.service";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { QueueId } from "../../../config/enums/queue.id";
@@ -51,6 +52,7 @@ describe("ReferralService", () => {
   let mockCacheService: vi.Mocked<CacheService>;
   let mockEmailQueue: vi.Mocked<Queue>;
   let mockRedisClient: { get: vi.Mock; setex: vi.Mock };
+  let mockResponseLanguage: { resolve: vi.Mock; resolveForUser: vi.Mock; resolveForEmail: vi.Mock };
 
   const MOCK_COMPANY_ID = "company-123";
   const MOCK_USER_ID = "user-456";
@@ -102,6 +104,12 @@ describe("ReferralService", () => {
       add: vi.fn(),
     } as any;
 
+    mockResponseLanguage = {
+      resolve: vi.fn().mockResolvedValue(undefined),
+      resolveForUser: vi.fn().mockResolvedValue(undefined),
+      resolveForEmail: vi.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ReferralService,
@@ -113,6 +121,7 @@ describe("ReferralService", () => {
         { provide: ClsService, useValue: mockClsService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: getQueueToken(QueueId.EMAIL), useValue: mockEmailQueue },
+        { provide: ResponseLanguageService, useValue: mockResponseLanguage },
       ],
     }).compile();
 
@@ -142,6 +151,7 @@ describe("ReferralService", () => {
           { provide: ClsService, useValue: mockClsService },
           { provide: CacheService, useValue: mockCacheService },
           { provide: getQueueToken(QueueId.EMAIL), useValue: mockEmailQueue },
+          { provide: ResponseLanguageService, useValue: mockResponseLanguage },
         ],
       }).compile();
 
@@ -165,6 +175,7 @@ describe("ReferralService", () => {
           { provide: ClsService, useValue: mockClsService },
           { provide: CacheService, useValue: mockCacheService },
           { provide: getQueueToken(QueueId.EMAIL), useValue: mockEmailQueue },
+          { provide: ResponseLanguageService, useValue: mockResponseLanguage },
         ],
       }).compile();
 
@@ -403,6 +414,24 @@ describe("ReferralService", () => {
         );
       });
 
+      it("should queue the invite in the inviter's resolved language", async () => {
+        mockResponseLanguage.resolve.mockResolvedValue("it");
+
+        await service.sendReferralInvite({ email: testEmail });
+
+        expect(mockEmailQueue.add).toHaveBeenCalledWith(
+          "referral-invite",
+          expect.objectContaining({ payload: expect.objectContaining({ locale: "it" }) }),
+        );
+      });
+
+      it("should leave the invite locale undefined when i18n is disabled", async () => {
+        await service.sendReferralInvite({ email: testEmail });
+
+        const payload = (mockEmailQueue.add.mock.calls[0][1] as any).payload;
+        expect(payload.locale).toBeUndefined();
+      });
+
       it("should throw BadRequestException when email already invited recently", async () => {
         mockRedisClient.get.mockResolvedValue("1");
 
@@ -573,6 +602,7 @@ describe("ReferralService", () => {
           { provide: ClsService, useValue: mockClsService },
           { provide: CacheService, useValue: mockCacheService },
           { provide: getQueueToken(QueueId.EMAIL), useValue: mockEmailQueue },
+          { provide: ResponseLanguageService, useValue: mockResponseLanguage },
         ],
       }).compile();
 
@@ -616,6 +646,7 @@ describe("ReferralService", () => {
           { provide: ClsService, useValue: mockClsService },
           { provide: CacheService, useValue: mockCacheService },
           { provide: getQueueToken(QueueId.EMAIL), useValue: mockEmailQueue },
+          { provide: ResponseLanguageService, useValue: mockResponseLanguage },
         ],
       }).compile();
 

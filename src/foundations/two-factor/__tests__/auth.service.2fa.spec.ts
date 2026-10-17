@@ -19,6 +19,7 @@ import { GoogleUserService } from "../../google-user/services/google-user.servic
 import { TrialQueueService } from "../../auth/services/trial-queue.service";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { TwoFactorService } from "../services/two-factor.service";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { Auth } from "../../auth/entities/auth";
 import { User } from "../../user/entities/user";
 
@@ -224,6 +225,15 @@ describe("AuthService - 2FA Integration", () => {
         { provide: TrialQueueService, useValue: mockTrialQueueService },
         { provide: WaitlistService, useValue: mockWaitlistService },
         { provide: TwoFactorService, useValue: mockTwoFactorService },
+        {
+          provide: ResponseLanguageService,
+          useValue: {
+            resolve: vi.fn().mockResolvedValue(undefined),
+            resolveForUser: vi.fn().mockResolvedValue(undefined),
+            resolveForEmail: vi.fn().mockResolvedValue(undefined),
+            normalise: vi.fn(),
+          },
+        },
       ],
     }).compile();
 

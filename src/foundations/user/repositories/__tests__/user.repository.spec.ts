@@ -324,4 +324,41 @@ describe("UserRepository", () => {
       expect(query).not.toContain("IN_COMPANY");
     });
   });
+
+  describe("patchLanguage", () => {
+    it("writes the language and updatedAt with parameterised values", async () => {
+      await repository.patchLanguage({ userId: TEST_IDS.userId, language: "it" });
+
+      const written = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(written.query).toContain("WITH currentUser AS user");
+      expect(written.query).toContain("WHERE user.id = $userId");
+      expect(written.query).toMatch(/SET user\.language = \$language,\s+user\.updatedAt = datetime\(\)/);
+      expect(written.queryParams).toEqual({ userId: TEST_IDS.userId, language: "it" });
+    });
+  });
+
+  describe("findForLanguage", () => {
+    it("reads the bare user node by id through readOne", async () => {
+      mockNeo4jService.readOne.mockResolvedValue({ id: TEST_IDS.userId, language: "it" });
+
+      const user = await repository.findForLanguage({ userId: TEST_IDS.userId });
+
+      const read = mockNeo4jService.readOne.mock.calls[0][0];
+      expect(read.query).toContain("MATCH (user:User {id: $userId})");
+      expect(read.query).toContain("RETURN user");
+      expect(read.queryParams).toEqual({ userId: TEST_IDS.userId });
+      expect(user?.language).toBe("it");
+    });
+
+    it("reads by lower-cased email", async () => {
+      mockNeo4jService.readOne.mockResolvedValue(null);
+
+      const user = await repository.findForLanguage({ email: "A@B.C" });
+
+      const read = mockNeo4jService.readOne.mock.calls[0][0];
+      expect(read.query).toContain("WHERE toLower(user.email) = $email");
+      expect(read.queryParams).toEqual({ email: "a@b.c" });
+      expect(user).toBeUndefined();
+    });
+  });
 });

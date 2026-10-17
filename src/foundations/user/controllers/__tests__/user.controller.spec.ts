@@ -34,7 +34,7 @@ vi.mock("../../../relevancy/services/relevancy.service", () => ({
   })),
 }));
 
-import { HttpException } from "@nestjs/common";
+import { ForbiddenException, HttpException, PreconditionFailedException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { ClsService } from "nestjs-cls";
@@ -127,6 +127,7 @@ describe("UserController", () => {
       putUser: vi.fn(),
       reactivate: vi.fn(),
       patchRate: vi.fn(),
+      patchLanguage: vi.fn(),
       sendInvitationEmail: vi.fn(),
       deleteUser: vi.fn(),
       findInRole: vi.fn(),
@@ -455,6 +456,55 @@ describe("UserController", () => {
 
       expect(userService.patchRate).toHaveBeenCalledWith({ data: body.data });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
+    });
+  });
+
+  describe("PATCH /users/:userId/language", () => {
+    const languageBody = (id: string) => ({
+      data: { type: "users", id, attributes: { language: "it" } },
+    });
+
+    it("throws ForbiddenException when the caller is not the target user", async () => {
+      const req = createMockRequest(TEST_IDS.adminUserId, TEST_IDS.companyId, true, { userId: TEST_IDS.userId });
+
+      await expect(
+        controller.updateUserLanguage(req, TEST_IDS.userId, languageBody(TEST_IDS.userId) as any, mockReply),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(userService.patchLanguage).not.toHaveBeenCalled();
+    });
+
+    it("saves the caller's own language and sends the user", async () => {
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
+      const body = languageBody(TEST_IDS.userId);
+      securityService.isUserInRoles.mockReturnValue(false);
+      userService.patchLanguage.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.updateUserLanguage(req, TEST_IDS.userId, body as any, mockReply);
+
+      expect(userService.patchLanguage).toHaveBeenCalledWith({ data: body.data, isAdmin: false });
+      expect(mockReply.send).toHaveBeenCalledWith(MOCK_USER_RESPONSE);
+    });
+
+    it("tells the service when the caller is a platform administrator", async () => {
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
+      const body = languageBody(TEST_IDS.userId);
+      securityService.isUserInRoles.mockReturnValue(true);
+      userService.patchLanguage.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.updateUserLanguage(req, TEST_IDS.userId, body as any, mockReply);
+
+      expect(userService.patchLanguage).toHaveBeenCalledWith({ data: body.data, isAdmin: true });
+    });
+
+    it("rejects a body id that differs from the URL user", async () => {
+      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
+
+      await expect(
+        controller.updateUserLanguage(req, TEST_IDS.userId, languageBody(TEST_IDS.adminUserId) as any, mockReply),
+      ).rejects.toThrow(PreconditionFailedException);
+
+      expect(userService.patchLanguage).not.toHaveBeenCalled();
     });
   });
 

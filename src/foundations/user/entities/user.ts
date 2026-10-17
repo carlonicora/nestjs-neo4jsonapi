@@ -21,6 +21,7 @@ export type User = Entity & {
   avatar?: string;
   phone?: string;
   rate?: number;
+  language?: string;
   isActive: boolean;
   lastLogin?: Date;
   isDeleted: boolean;
@@ -63,6 +64,8 @@ export const UserDescriptor = defineEntity<User>()({
     },
     phone: { type: "string" },
     rate: { type: "number" },
+    // Saved UI/AI language; null until the user (or the first load) sets it
+    language: { type: "string", excludeFromSearch: true },
     isActive: { type: "boolean", meta: true },
     lastLogin: { type: "datetime", meta: true },
     isDeleted: { type: "boolean", meta: true },

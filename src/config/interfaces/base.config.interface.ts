@@ -12,6 +12,7 @@ import { ConfigCreditsInterface } from "./config.credits.interface";
 import { ConfigDiscordInterface } from "./config.discord.interface";
 import { ConfigEmbeddingContextInterface } from "./config.embedding.context.interface";
 import { ConfigGoogleInterface } from "./config.google.interface";
+import { ConfigI18nInterface } from "./config.i18n.interface";
 import { ConfigEmailInterface } from "./config.email.interface";
 import { ConfigEncryptionInterface } from "./config.encryption.interface";
 import { ConfigEnvironmentInterface } from "./config.environment.interface";
@@ -67,6 +68,7 @@ export interface BaseConfigInterface {
   jobNames: ConfigJobNamesInterface;
   discord: ConfigDiscordInterface;
   google: ConfigGoogleInterface;
+  i18n: ConfigI18nInterface;
   oauth: ConfigOAuthInterface;
   mcp: ConfigMcpInterface;
   modelManager: ConfigModelManagerInterface;

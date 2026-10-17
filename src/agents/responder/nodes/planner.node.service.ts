@@ -69,6 +69,7 @@ export class PlannerNodeService {
     try {
       const out = await this.llm.call<z.infer<typeof PlannerOutputSchema>>({
         systemPrompts: [this.systemPrompt],
+        skipResponseLanguage: true,
         inputSchema: PlannerInputSchema,
         inputParams: {
           rawQuestion: state.rawQuestion,

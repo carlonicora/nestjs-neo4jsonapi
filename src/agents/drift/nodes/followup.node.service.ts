@@ -109,6 +109,7 @@ export class FollowUpNodeService {
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
+      skipResponseLanguage: true,
       temperature: 0.3,
       // Billed to the CALLING agent: its ledger category, its entity. Spread
       // LAST so nothing above can overwrite the attribution.

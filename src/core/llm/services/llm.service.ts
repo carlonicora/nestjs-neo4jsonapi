@@ -20,6 +20,8 @@ import { ResolvedAiCandidate } from "../interfaces/ai-candidate.interface";
 import { ModelWeight } from "../enums/model.weight";
 import { ReasoningEffort } from "../enums/reasoning.effort";
 import { LLMCacheService, buildCacheKey } from "./llm-cache.service";
+import { ResponseLanguageService } from "../../../foundations/user/services/response-language.service";
+import { buildResponseLanguageInstruction } from "../utils/response-language-instruction";
 import { ModelService } from "../../llm/services/model.service";
 import {
   convertZodToDraftJsonSchema,
@@ -282,6 +284,7 @@ interface LLMCallParams<T> {
   cacheable?: boolean; // Optional: when true, the response is read from / written to the Redis LLM cache keyed on generic params (modelWeight/temperature/systemPrompts/prompt). A hit returns early WITHOUT invoking the provider — and therefore costs no tokens. Default: false.
   disableThinking?: boolean; // Optional: turn off reasoning/"thinking" for this call (maps to reasoning_effort: "none"). Use for fast structured calls on reasoning-capable models. Default: false.
   reasoningEffort?: ReasoningEffort; // Optional: how much hidden reasoning the model may spend. Overrides disableThinking and the tier default. Unset = provider default.
+  skipResponseLanguage?: boolean; // Optional: true = never append the response-language line (internal calls whose output nobody reads directly). Default: false.
 }
 
 /**
@@ -421,7 +424,26 @@ export class LLMService {
     // this token is bound, persistUsage writes through the app's implementation
     // instead; when it is absent, behaviour is unchanged.
     @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
+    // Optional: resolves the language the model must write in. Absent (test
+    // harnesses, apps that do not register it) means no line is ever appended.
+    @Optional() private readonly responseLanguage?: ResponseLanguageService,
   ) {}
+
+  /**
+   * Appends the response-language line as the LAST system prompt when the
+   * resolved language is not English. Runs first in every entry point, before
+   * the cache key and the dumper, so the cache is per-language and the dump
+   * shows exactly what was sent. Returns the SAME array when nothing is
+   * appended, so English and disabled calls are byte-identical to before.
+   */
+  private async withResponseLanguage(systemPrompts: string[], skip?: boolean): Promise<string[]> {
+    if (skip === true || !this.responseLanguage) return systemPrompts;
+    const language = await this.responseLanguage.resolve();
+    if (!language) return systemPrompts;
+    const line = buildResponseLanguageInstruction(language);
+    if (!line) return systemPrompts;
+    return [...systemPrompts, line];
+  }
 
   /**
    * The per-ATTEMPT budget for one provider request. `params.timeout` wins;
@@ -1052,6 +1074,8 @@ export class LLMService {
   async call<T>(
     params: LLMCallParams<T>,
   ): Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }> {
+    const callSystemPrompts = await this.withResponseLanguage(params.systemPrompts, params.skipResponseLanguage);
+    if (callSystemPrompts !== params.systemPrompts) params = { ...params, systemPrompts: callSystemPrompts };
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
 
     // MOCK_AI short-circuit: return synthetic structured output derived from the
@@ -1889,6 +1913,8 @@ export class LLMService {
     partialObjectStream: AsyncIterable<Partial<T>>;
     result: Promise<T & { tokenUsage: { input: number; output: number }; modelWeight: ModelWeight }>;
   }> {
+    const streamSystemPrompts = await this.withResponseLanguage(params.systemPrompts, params.skipResponseLanguage);
+    if (streamSystemPrompts !== params.systemPrompts) params = { ...params, systemPrompts: streamSystemPrompts };
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
@@ -2169,6 +2195,8 @@ export class LLMService {
     tokenUsageType?: string;
     relationshipId?: string;
     relationshipType?: string;
+    /** true = never append the response-language line. Default: false. */
+    skipResponseLanguage?: boolean;
   }): Promise<{
     fullStream: AsyncIterable<{ type: "text" | "reasoning"; delta: string }>;
     result: Promise<{
@@ -2178,6 +2206,8 @@ export class LLMService {
       modelWeight: ModelWeight;
     }>;
   }> {
+    const textSystemPrompts = await this.withResponseLanguage(params.systemPrompts, params.skipResponseLanguage);
+    if (textSystemPrompts !== params.systemPrompts) params = { ...params, systemPrompts: textSystemPrompts };
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({
@@ -2405,7 +2435,11 @@ export class LLMService {
     cacheable?: boolean;
     /** Per-attempt request budget in ms. Defaults to `ai.requestTimeoutMs`. */
     timeout?: number;
+    /** true = never append the response-language line. Default: false. */
+    skipResponseLanguage?: boolean;
   }): Promise<T> {
+    const extractSystemPrompts = await this.withResponseLanguage(params.systemPrompts, params.skipResponseLanguage);
+    if (extractSystemPrompts !== params.systemPrompts) params = { ...params, systemPrompts: extractSystemPrompts };
     const modelWeight = params.modelWeight ?? ModelWeight.Normal;
 
     // Cache lookup BEFORE provider invocation. A hit returns the stored payload
@@ -2664,7 +2698,11 @@ export class LLMService {
     tokenUsageType?: string;
     relationshipId?: string;
     relationshipType?: string;
+    /** true = never append the response-language line. Default: false. */
+    skipResponseLanguage?: boolean;
   }): Promise<{ message: AIMessage; tokenUsage: { input: number; output: number } }> {
+    const stepSystemPrompts = await this.withResponseLanguage(params.systemPrompts, params.skipResponseLanguage);
+    if (stepSystemPrompts !== params.systemPrompts) params = { ...params, systemPrompts: stepSystemPrompts };
     const modelWeight = ModelWeight.Normal;
     const aiConfig = this.modelService.getResolvedConfig(modelWeight);
     const session: DumpSession = this.dumper.startSession({

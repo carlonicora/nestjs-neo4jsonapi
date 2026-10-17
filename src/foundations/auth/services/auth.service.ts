@@ -4,6 +4,7 @@ import { ModuleRef } from "@nestjs/core";
 import { randomUUID } from "crypto";
 import { RoleId } from "../../../common/constants/system.roles";
 import { EmailService } from "../../../core/email/services/email.service";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { checkPassword, hashPassword, SecurityService } from "../../../core/security/services/security.service";
 import { AuthPostLoginDataDTO } from "../../auth/dtos/auth.post.login.dto";
 
@@ -86,6 +87,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     @Optional()
     @Inject(forwardRef(() => TwoFactorService))
     private readonly twoFactorService: TwoFactorService | undefined,
+    private readonly responseLanguage: ResponseLanguageService,
   ) {
     super(jsonApiService, authRepository, clsService, AuthDescriptor.model);
   }
@@ -456,10 +458,6 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       });
     }
 
-    const locale = this.emailLocale;
-
-    const link: string = `${this.appConfig.url}${locale}/activation/${user.code}`;
-
     // Delivery failure must not fail registration. By this point the company, the
     // user and its membership are already committed, so throwing here reports a
     // failure for an account that demonstrably exists — and the caller cannot
@@ -468,6 +466,12 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     // admin notification below. Log and continue: the activation mail can be
     // re-sent, an unreachable SMTP host cannot be un-registered.
     try {
+      // The new user has no saved language yet, so resolveForEmail falls back to the
+      // request language (x-language) instead of the app default.
+      const locale = (await this.responseLanguage.resolveForEmail({ email: user.email })) ?? this.emailLocale;
+
+      const link: string = `${this.appConfig.url}${locale}/activation/${user.code}`;
+
       await this.emailService.sendEmail(
         "activationEmail",
         {
@@ -518,7 +522,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     user = await this.authRepository.startResetPassword({ userId: user.id });
 
-    const locale = lng ?? this.emailLocale;
+    const locale = (await this.responseLanguage.resolveForEmail({ email: user.email })) ?? lng ?? this.emailLocale;
 
     const link: string = `${this.appConfig.url}${locale}/reset/${user.code}`;
 
@@ -749,12 +753,11 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
         return;
       }
 
-      const locale = this.emailLocale;
-
-      const dashboardLink = `${this.appConfig.url}${locale}/administration`;
-
       for (const admin of platformAdmins) {
         try {
+          const locale = (await this.responseLanguage.resolveForEmail({ email: admin.email })) ?? this.emailLocale;
+          const dashboardLink = `${this.appConfig.url}${locale}/administration`;
+
           await this.emailService.sendEmail(
             "registrationAdminNotification",
             {

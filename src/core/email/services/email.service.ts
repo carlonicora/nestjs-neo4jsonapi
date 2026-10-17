@@ -112,6 +112,23 @@ export class EmailService {
     return fs.readFileSync(templatePath, "utf8");
   }
 
+  /**
+   * Per-locale header/footer partials. When `templates/email/<locale>/header.hbs`
+   * or `footer.hbs` exists, it is returned so the render can pass it as a runtime
+   * partial, overriding the globally registered root partial for this email only.
+   * Returns undefined when the locale has neither, so the root partials apply.
+   */
+  private loadLocalePartials(locale: string): Record<string, string> | undefined {
+    const partials: Record<string, string> = {};
+
+    for (const name of ["header", "footer"]) {
+      const partialPath = join(this.templateBasePath, locale, `${name}.hbs`);
+      if (fs.existsSync(partialPath)) partials[name] = fs.readFileSync(partialPath, "utf8");
+    }
+
+    return Object.keys(partials).length > 0 ? partials : undefined;
+  }
+
   async sendEmail(templateId: string, emailParams: EmailParams, locale: string): Promise<void> {
     const templateContent = this.loadTemplate(templateId, locale);
     const appConfig = this.config.get<ConfigAppInterface>("app");
@@ -123,10 +140,17 @@ export class EmailService {
     const templateParams = { ...emailParams };
     delete templateParams.attachments;
 
+    const localePartials = this.loadLocalePartials(locale);
+
     let html: string;
     try {
       const template = Handlebars.compile(templateContent);
-      html = template(templateParams);
+      // `@locale` in the data frame lets helpers (formatDateTime) render in
+      // the recipient's language without the caller passing it as a param.
+      html = template(templateParams, {
+        data: { locale },
+        ...(localePartials ? { partials: localePartials } : {}),
+      });
     } catch (error) {
       this.logger.error("Error compiling Handlebars template", error, "EmailService");
       throw new Error("Failed to compile email template");

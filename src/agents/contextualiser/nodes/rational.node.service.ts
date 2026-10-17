@@ -81,6 +81,7 @@ export class RationalNodeService {
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
+      skipResponseLanguage: true,
       temperature: 0.1,
       metadata: { agentName: "contextualiser", nodeName: "rational_plan" },
       // Billed to the CALLING agent: its ledger category, its entity. Spread

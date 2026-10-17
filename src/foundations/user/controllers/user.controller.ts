@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpException,
@@ -18,6 +19,7 @@ import {
 } from "@nestjs/common";
 import { RoleId } from "../../../common/constants/system.roles";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
+import { ValidateId } from "../../../common/decorators/validate-id.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { SecurityService } from "../../../core/security/services/security.service";
 
@@ -33,6 +35,7 @@ import { contentMeta } from "../../content/entities/content.meta";
 import { RelevancyService } from "../../relevancy/services/relevancy.service";
 import { roleMeta } from "../../role/entities/role.meta";
 import { UserPatchAvatarDTO } from "../../user/dtos/user.patch.avatar.dto";
+import { UserPatchLanguageDTO } from "../../user/dtos/user.patch.language.dto";
 import { UserPatchRateDTO } from "../../user/dtos/user.patch.rate.dto";
 import { UserPostDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDTO } from "../../user/dtos/user.put.dto";
@@ -211,6 +214,28 @@ export class UserController {
     @Res() reply: FastifyReply,
   ) {
     const response = await this.users.patchAvatar({ data: body.data });
+    reply.send(response);
+  }
+
+  /**
+   * Saves the caller's own language. Self only: an administrator cannot set
+   * another user's language through this endpoint.
+   */
+  @Patch(`${userMeta.endpoint}/:userId/language`)
+  @ValidateId("userId")
+  @CacheInvalidate(userMeta, "userId")
+  async updateUserLanguage(
+    @Request() request: any,
+    @Param("userId") userId: string,
+    @Body() body: UserPatchLanguageDTO,
+    @Res() reply: FastifyReply,
+  ) {
+    if (request.user?.userId !== userId) throw new ForbiddenException("You can only change your own language");
+
+    const response = await this.users.patchLanguage({
+      data: body.data,
+      isAdmin: this.security.isUserInRoles({ user: request.user, roles: [RoleId.Administrator] }),
+    });
     reply.send(response);
   }
 

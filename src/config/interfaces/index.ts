@@ -17,6 +17,7 @@ export * from "./config.credits.interface";
 export * from "./config.discord.interface";
 export * from "./config.embedding.context.interface";
 export * from "./config.google.interface";
+export * from "./config.i18n.interface";
 export * from "./config.email.interface";
 export * from "./config.encryption.interface";
 export * from "./config.environment.interface";

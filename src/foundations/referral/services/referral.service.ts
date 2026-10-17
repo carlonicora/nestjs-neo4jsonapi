@@ -7,6 +7,7 @@ import { ClsService } from "nestjs-cls";
 import { baseConfig } from "../../../config/base.config";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { CacheService } from "../../../core/cache/services/cache.service";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { QueueId } from "../../../config/enums/queue.id";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { UserRepository } from "../../user/repositories/user.repository";
@@ -38,6 +39,7 @@ export class ReferralService implements ReferralCompletionHandler {
     private readonly clsService: ClsService,
     private readonly cacheService: CacheService,
     @InjectQueue(QueueId.EMAIL) private readonly emailQueue: Queue,
+    private readonly responseLanguage: ResponseLanguageService,
   ) {}
 
   /**
@@ -179,6 +181,9 @@ export class ReferralService implements ReferralCompletionHandler {
         inviterName: user.name,
         inviterEmail: user.email,
         referralUrl: this.buildReferralUrl(referralCode),
+        // The invitee is not a user: the invite goes out in the inviter's language.
+        // Undefined when i18n is disabled, so the queued payload stays unchanged.
+        locale: await this.responseLanguage.resolve(),
       },
     });
 
@@ -233,6 +238,7 @@ export class ReferralService implements ReferralCompletionHandler {
                 to: admin.email,
                 userName: admin.name,
                 tokensAwarded: rewardTokens,
+                locale: await this.responseLanguage.resolveForUser({ userId: admin.id }),
               },
             });
           }

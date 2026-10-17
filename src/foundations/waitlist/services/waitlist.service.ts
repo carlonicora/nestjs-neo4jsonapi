@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
 import { EmailService } from "../../../core/email/services/email.service";
+import { ResponseLanguageService } from "../../user/services/response-language.service";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
@@ -25,6 +26,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
     private readonly emailService: EmailService,
     private readonly configService: ConfigService<BaseConfigInterface>,
     private readonly userRepository: UserRepository,
+    private readonly responseLanguage: ResponseLanguageService,
   ) {
     super(jsonApiService, waitlistRepository, clsService, WaitlistDescriptor.model);
   }
@@ -67,8 +69,9 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
       status: WaitlistStatus.Pending,
     });
 
-    // Send confirmation email
-    const confirmationLink = `${this.appConfig.url}en/waitlist/confirm/${confirmationCode}`;
+    // Send confirmation email. The recipient is not a user yet: use the requester's language.
+    const locale = (await this.responseLanguage.resolve()) ?? "en";
+    const confirmationLink = `${this.appConfig.url}${locale}/waitlist/confirm/${confirmationCode}`;
     await this.emailService.sendEmail(
       "waitlistConfirmation",
       {
@@ -78,7 +81,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
         expirationTime: confirmationCodeExpiration.toTimeString(),
         expiresAt: confirmationCodeExpiration.toISOString(),
       },
-      "en",
+      locale,
     );
 
     return this.findById({ id });
@@ -157,8 +160,10 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
       invitedAt: new Date(),
     });
 
-    // Send invitation email
-    const registrationLink = `${this.appConfig.url}en/register?invite=${inviteCode}`;
+    // Send invitation email. A waitlist entry stores no language: a saved user language
+    // for that email wins, else the inviting admin's request language.
+    const locale = (await this.responseLanguage.resolveForEmail({ email: entry.email })) ?? "en";
+    const registrationLink = `${this.appConfig.url}${locale}/register?invite=${inviteCode}`;
     await this.emailService.sendEmail(
       "waitlistInvitation",
       {
@@ -168,7 +173,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
         expirationTime: inviteCodeExpiration.toTimeString(),
         expiresAt: inviteCodeExpiration.toISOString(),
       },
-      "en",
+      locale,
     );
 
     return this.findById({ id: entry.id });
@@ -250,10 +255,11 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
         return;
       }
 
-      const dashboardLink = `${this.appConfig.url}en/administration/waitlist`;
-
       for (const admin of platformAdmins) {
         try {
+          const locale = (await this.responseLanguage.resolveForEmail({ email: admin.email })) ?? "en";
+          const dashboardLink = `${this.appConfig.url}${locale}/administration/waitlist`;
+
           await this.emailService.sendEmail(
             "waitlistAdminNotification",
             {
@@ -264,7 +270,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
               questionnaire: entry.questionnaire || null,
               dashboardLink,
             },
-            "en",
+            locale,
           );
         } catch (emailError) {
           this.logger.error(`Failed to send waitlist notification to admin ${admin.email}:`, emailError);

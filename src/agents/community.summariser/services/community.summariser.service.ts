@@ -132,6 +132,7 @@ export class CommunitySummariserService {
       inputParams,
       outputSchema,
       systemPrompts: [this.systemPrompt],
+      skipResponseLanguage: true,
       temperature: 0.3,
       tokenUsageType: TokenUsageType.CommunitySummariser,
       relationshipId: community.id,

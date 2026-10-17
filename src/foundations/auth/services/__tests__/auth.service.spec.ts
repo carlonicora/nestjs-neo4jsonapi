@@ -19,6 +19,7 @@ import { GoogleUserService } from "../../../google-user/services/google-user.ser
 import { TrialQueueService } from "../trial-queue.service";
 import { WaitlistService } from "../../../waitlist/services/waitlist.service";
 import { TwoFactorService } from "../../../two-factor/services/two-factor.service";
+import { ResponseLanguageService } from "../../../user/services/response-language.service";
 import { Auth, AuthDescriptor } from "../../entities/auth";
 import { AuthCode } from "../../entities/auth.code";
 import { PendingAuthDescriptor } from "../../entities/pending-auth";
@@ -205,6 +206,13 @@ describe("AuthService", () => {
     markAsRegistered: vi.fn(),
   });
 
+  const createMockResponseLanguageService = () => ({
+    resolve: vi.fn().mockResolvedValue(undefined),
+    resolveForUser: vi.fn().mockResolvedValue(undefined),
+    resolveForEmail: vi.fn().mockResolvedValue(undefined),
+    normalise: vi.fn(),
+  });
+
   const createMockTwoFactorService = () => ({
     getConfig: vi.fn().mockResolvedValue(null),
     createPendingSession: vi.fn(),
@@ -234,6 +242,7 @@ describe("AuthService", () => {
         { provide: TrialQueueService, useValue: createMockTrialQueueService() },
         { provide: WaitlistService, useValue: createMockWaitlistService() },
         { provide: TwoFactorService, useValue: createMockTwoFactorService() },
+        { provide: ResponseLanguageService, useValue: createMockResponseLanguageService() },
       ],
     }).compile();
 
@@ -695,6 +704,35 @@ describe("AuthService", () => {
     });
   });
 
+  describe("startResetPassword", () => {
+    let responseLanguage: ReturnType<typeof createMockResponseLanguageService>;
+
+    beforeEach(() => {
+      responseLanguage = (service as any).responseLanguage;
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+      authRepository.startResetPassword.mockResolvedValue(MOCK_USER);
+    });
+
+    it("sends the reset email in the recipient's saved language", async () => {
+      responseLanguage.resolveForEmail.mockResolvedValue("it");
+
+      await service.startResetPassword(MOCK_USER.email, "en");
+
+      expect(responseLanguage.resolveForEmail).toHaveBeenCalledWith({ email: MOCK_USER.email });
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "resetEmail",
+        expect.objectContaining({ resetLink: `https://example.com/it/reset/${MOCK_USER.code}` }),
+        "it",
+      );
+    });
+
+    it("falls back to the lng query value when no language resolves", async () => {
+      await service.startResetPassword(MOCK_USER.email, "fr");
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith("resetEmail", expect.any(Object), "fr");
+    });
+  });
+
   describe("acceptInvitation", () => {
     it("should accept invitation and set password", async () => {
       // Arrange
@@ -963,6 +1001,7 @@ describe("AuthService", () => {
         { provide: GoogleUserService, useValue: createMockGoogleUserService() },
         { provide: TrialQueueService, useValue: createMockTrialQueueService() },
         { provide: WaitlistService, useValue: createMockWaitlistService() },
+        { provide: ResponseLanguageService, useValue: createMockResponseLanguageService() },
       ];
 
       const omit = params?.omit ?? [];

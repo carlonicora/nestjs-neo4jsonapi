@@ -104,6 +104,7 @@ export class RubricJudgeService {
         },
         outputSchema,
         systemPrompts: [RUBRIC_JUDGE_PROMPT],
+        skipResponseLanguage: true,
         // A grading pass is judgement, not creation: no sampling variance, so
         // the same answer is graded the same way on every run.
         temperature: 0,

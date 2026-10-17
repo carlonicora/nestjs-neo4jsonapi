@@ -15,5 +15,6 @@ export * from "./services/rate-limited-embedder";
 export * from "./services/vision.llm.service";
 export * from "./utils/message.content";
 export * from "./utils/mock-from-zod";
+export * from "./utils/response-language-instruction";
 export * from "./utils/tools.utils";
 export * from "./utils/vertex.utils";

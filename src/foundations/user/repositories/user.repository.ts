@@ -670,6 +670,55 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     await this.neo4j.writeOne(query);
   }
 
+  async patchLanguage(params: { userId: string; language: string }): Promise<void> {
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+      language: params.language,
+    };
+
+    // Scoped to the signed-in user bound by initQuery (inside their company when
+    // there is one, so platform administrators without a company can save too).
+    query.query += `
+      WITH currentUser AS user
+      WHERE user.id = $userId
+      SET user.language = $language,
+          user.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * The bare user node (no company, roles or features), by id or by email, so
+   * callers can read a stored attribute such as `language`. Undefined when no
+   * user matches.
+   */
+  async findForLanguage(params: { userId?: string; email?: string }): Promise<User | undefined> {
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
+
+    query.queryParams = params.userId
+      ? { ...query.queryParams, userId: params.userId }
+      : { ...query.queryParams, email: (params.email ?? "").toLowerCase() };
+
+    // Assigned, not appended: a language lookup must not depend on who is signed
+    // in or on the company context (same as findByEmail).
+    query.query = params.userId
+      ? `
+      MATCH (user:User {id: $userId})
+      RETURN user
+    `
+      : `
+      MATCH (user:User)
+      WHERE toLower(user.email) = $email
+      RETURN user
+    `;
+
+    return (await this.neo4j.readOne(query)) ?? undefined;
+  }
+
   async patchAvatar(params: { userId: string; avatar: string }): Promise<void> {
     const query = this.neo4j.initQuery();
 

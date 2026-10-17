@@ -178,6 +178,7 @@ export class KeyConceptsNodeService {
       inputParams: inputParams,
       outputSchema: outputSchema,
       systemPrompts: [this.systemPrompt],
+      skipResponseLanguage: true,
       temperature: 0.1,
       metadata: { agentName: "contextualiser", nodeName: "key_concepts" },
       // Billed to the CALLING agent: its ledger category, its entity. Spread

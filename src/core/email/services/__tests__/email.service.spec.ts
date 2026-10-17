@@ -256,7 +256,7 @@ describe("EmailService", () => {
 
       await service.sendEmail("welcome", { to: "user@example.com", name: "John" }, "en");
 
-      expect(compiledTemplate).toHaveBeenCalledWith(
+      expect(compiledTemplate.mock.calls[0][0]).toEqual(
         expect.objectContaining({
           url: "https://example.com",
         }),
@@ -532,6 +532,103 @@ describe("EmailService", () => {
       const readPaths = vi.mocked(fs.readFileSync).mock.calls.map((call) => String(call[0]));
       expect(readPaths.some((p) => p.includes(join("it", "taskCompleted.hbs")))).toBe(true);
       expect(readPaths.some((p) => p.includes(join("en", "taskCompleted.hbs")))).toBe(false);
+    });
+  });
+
+  describe("per-locale header and footer partials", () => {
+    const itFooterPath = join("templates", "email", "it", "footer.hbs");
+    const itHeaderPath = join("templates", "email", "it", "header.hbs");
+    const rootFooterPath = join("templates", "email", "footer.hbs");
+
+    const renderWithPartials = vi.fn(
+      (_data: any, options?: { partials?: Record<string, string> }) =>
+        `<html><head><title>T</title></head><body>${options?.partials?.footer ?? "ROOT FOOTER"}</body></html>`,
+    );
+
+    beforeEach(() => {
+      renderWithPartials.mockClear();
+      vi.mocked(Handlebars.compile).mockReturnValue(renderWithPartials as any);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        const pathStr = String(p);
+        if (pathStr.endsWith(itFooterPath)) return "<footer>Piè di pagina italiano</footer>";
+        if (pathStr.endsWith(rootFooterPath)) return "<footer>Root footer</footer>";
+        return mockTemplateContent;
+      });
+    });
+
+    it("renders the Italian footer when templates/email/it/footer.hbs exists", async () => {
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "1" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => !String(p).endsWith(itHeaderPath));
+
+      await service.sendEmail("x", { to: "user@example.com" }, "it");
+
+      expect(renderWithPartials).toHaveBeenCalledWith(expect.any(Object), {
+        data: { locale: "it" },
+        partials: { footer: "<footer>Piè di pagina italiano</footer>" },
+      });
+      expect(mockSendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ html: expect.stringContaining("Piè di pagina italiano") }),
+      );
+    });
+
+    it("keeps the globally registered root footer when the locale has no footer.hbs", async () => {
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "1" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => {
+        const pathStr = String(p);
+        return !pathStr.endsWith(itFooterPath) && !pathStr.endsWith(itHeaderPath);
+      });
+
+      await service.sendEmail("x", { to: "user@example.com" }, "it");
+
+      expect(renderWithPartials).toHaveBeenCalledTimes(1);
+      expect(renderWithPartials.mock.calls[0][1]).toEqual({ data: { locale: "it" } });
+      expect(mockSendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ html: expect.stringContaining("ROOT FOOTER") }),
+      );
+    });
+  });
+
+  describe("dates in the recipient's language", () => {
+    it("passes the email's locale to the template as @locale", async () => {
+      const render = vi.fn(() => "<html><head><title>T</title></head><body>ok</body></html>");
+      vi.mocked(Handlebars.compile).mockReturnValue(render as any);
+      vi.mocked(fs.existsSync).mockImplementation(
+        (p: any) => !/[\\/](it|en)[\\/](header|footer)\.hbs$/.test(String(p)),
+      );
+
+      await service.sendEmail("x", { to: "user@example.com" }, "it");
+      await service.sendEmail("x", { to: "user@example.com" }, "en");
+
+      expect(render.mock.calls[0][1]).toEqual({ data: { locale: "it" } });
+      expect(render.mock.calls[1][1]).toEqual({ data: { locale: "en" } });
+    });
+
+    it("renders {{formatDateTime}} in Italian for an Italian email and unchanged in English", async () => {
+      const real = await vi.importActual<typeof import("handlebars")>("handlebars");
+      const instance = ((real as any).default ?? real).create() as typeof Handlebars;
+      const { registerEmailTemplateHelpers } =
+        await vi.importActual<typeof import("../../email.helpers")>("../../email.helpers");
+      registerEmailTemplateHelpers(instance as any);
+      const source = "<html><head><title>T</title></head><body>{{formatDateTime expiresAt}}</body></html>";
+      vi.mocked(fs.readFileSync).mockReturnValue(source);
+      vi.mocked(fs.existsSync).mockImplementation(
+        (p: any) => !/[\\/](it|en)[\\/](header|footer)\.hbs$/.test(String(p)),
+      );
+      vi.mocked(Handlebars.compile).mockImplementation(((src: string) => instance.compile(src)) as any);
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "1" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+
+      await service.sendEmail("x", { to: "user@example.com", expiresAt: "2026-08-09T14:32:05.000Z" }, "it");
+      await service.sendEmail("x", { to: "user@example.com", expiresAt: "2026-08-09T14:32:05.000Z" }, "en");
+
+      const italian = mockSendMail.mock.calls[0][0].html as string;
+      expect(italian).toContain("9 agosto 2026");
+      expect(italian).toContain("14:32 UTC");
+      expect(mockSendMail.mock.calls[1][0].html).toBe(
+        "<html><head><title>T</title></head><body>9 August 2026 at 14:32 UTC</body></html>",
+      );
     });
   });
 

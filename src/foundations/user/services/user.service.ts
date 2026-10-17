@@ -1,19 +1,21 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { RoleId } from "../../../common/constants/system.roles";
 import { EmailService } from "../../../core/email/services/email.service";
+import { ResponseLanguageService } from "./response-language.service";
 import { hashPassword } from "../../../core/security/services/security.service";
 import { UserPostDataDTO } from "../../user/dtos/user.post.dto";
 import { UserPutDataDTO } from "../../user/dtos/user.put.dto";
 
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
-import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
+import { BaseConfigInterface, ConfigAppInterface, ConfigI18nInterface } from "../../../config/interfaces";
 import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { UserPatchAvatarDataDTO } from "../../user/dtos/user.patch.avatar.dto";
+import { UserPatchLanguageDataDTO } from "../../user/dtos/user.patch.language.dto";
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
@@ -42,6 +44,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     protected readonly emailService: EmailService,
     protected readonly configService: ConfigService<BaseConfigInterface>,
     clsService: ClsService,
+    protected readonly responseLanguage: ResponseLanguageService,
   ) {
     super(jsonApiService, userRepository, clsService, UserDescriptor.model);
   }
@@ -257,6 +260,29 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
+  /**
+   * Saves the user's language and returns the user. A platform administrator
+   * belongs to no company, so `isAdmin` reloads them the way GET users/:id does.
+   */
+  async patchLanguage(params: { data: UserPatchLanguageDataDTO; isAdmin?: boolean }): Promise<JsonApiDataInterface> {
+    const supportedLanguages = this.configService.get<ConfigI18nInterface>("i18n")?.supportedLanguages ?? ["en"];
+    const language = params.data.attributes?.language;
+
+    if (!language || !supportedLanguages.includes(language))
+      throw new BadRequestException(`Unsupported language: ${language}`);
+
+    await this.userRepository.patchLanguage({
+      userId: params.data.id,
+      language: language,
+    });
+
+    if (params.isAdmin) return this.findOneForAdmin({ userId: params.data.id });
+
+    return this.findByUserId({
+      userId: params.data.id,
+    });
+  }
+
   async patchRate(params: { data: UserPatchRateDataDTO }): Promise<JsonApiDataInterface> {
     await this.userRepository.patchRate({
       userId: params.data.id,
@@ -270,8 +296,9 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
 
   async sendInvitationEmail(params: { userId: string }): Promise<void> {
     const user = await this.userRepository.resetCode({ userId: params.userId });
+    const language = await this.responseLanguage.resolveForEmail({ email: user.email });
 
-    const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
+    const link: string = `${this.appConfig.url}${language ?? "en"}/invitation/${user.code}`;
 
     await this.emailService.sendEmail(
       "invitationEmail",
@@ -283,7 +310,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         expiresAt: user.codeExpiration.toISOString(),
         companyName: user.company.name,
       },
-      "en",
+      language ?? "en",
     );
   }
 
@@ -321,7 +348,8 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
       });
 
     if (params.data.attributes.sendInvitationEmail) {
-      const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
+      const language = await this.responseLanguage.resolveForEmail({ email: user.email });
+      const link: string = `${this.appConfig.url}${language ?? "en"}/invitation/${user.code}`;
       await this.emailService.sendEmail(
         params.data.attributes.sendInvitationEmail ? "invitationEmail" : "activationEmail",
         {
@@ -332,7 +360,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
           expiresAt: user.codeExpiration.toISOString(),
           companyName: user.company.name,
         },
-        params.language,
+        language ?? params.language,
       );
     }
 
@@ -359,7 +387,8 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
 
     if (params.data.attributes.sendInvitationEmail) {
-      const link: string = `${this.appConfig.url}en/invitation/${user.code}`;
+      const language = await this.responseLanguage.resolveForEmail({ email: user.email });
+      const link: string = `${this.appConfig.url}${language ?? "en"}/invitation/${user.code}`;
       await this.emailService.sendEmail(
         params.data.attributes.sendInvitationEmail ? "invitationEmail" : "activationEmail",
         {
@@ -370,7 +399,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
           expiresAt: user.codeExpiration.toISOString(),
           companyName: user.company.name,
         },
-        params.language,
+        language ?? params.language,
       );
     }
 

@@ -162,6 +162,7 @@ export class AtomicFactsNodeService {
           inputParams: inputParams,
           outputSchema: outputSchema,
           systemPrompts: [this.systemPrompt],
+          skipResponseLanguage: true,
           temperature: 0.1,
           metadata: { agentName: "contextualiser", nodeName: "atomic_facts" },
           // Billed to the CALLING agent: its ledger category, its entity. Spread

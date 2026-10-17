@@ -489,6 +489,7 @@ export class GraphCreatorService {
       inputParams: inputParams,
       outputSchema: this.outputSchema,
       systemPrompts: [this.systemPrompt],
+      skipResponseLanguage: true,
       temperature: 0.1,
       tokenUsageType: TokenUsageType.GraphCreator,
       relationshipId: params.relationshipId,

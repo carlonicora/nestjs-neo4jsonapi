@@ -40,6 +40,7 @@ import { StripeModule } from "./stripe/stripe.module";
 import { StripeTrialModule } from "./stripe-trial/stripe-trial.module";
 import { TokenUsageModule } from "./tokenusage/tokenusage.module";
 import { TwoFactorModule } from "./two-factor/two-factor.module";
+import { ResponseLanguageModule } from "./user/response-language.module";
 import { UserModule } from "./user/user.module";
 import { UserActivityModule } from "./user-activity/user-activity.module";
 import { UserActivityModuleConfig } from "./user-activity/interfaces/user-activity.config.interface";
@@ -105,6 +106,7 @@ const STATIC_FOUNDATION_MODULES = [
   TokenUsageModule,
   TwoFactorModule,
   UserModule,
+  ResponseLanguageModule,
   WaitlistModule,
   StripeModule,
   // Every other stripe-* foundation was registered here; this one was omitted,

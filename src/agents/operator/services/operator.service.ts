@@ -281,6 +281,7 @@ export class OperatorService {
       .addNode("agent", async (state) => {
         const response = await this.llm.callStep({
           systemPrompts: seedPrompt ? [this.systemPrompt, seedPrompt] : [this.systemPrompt],
+          skipResponseLanguage: true,
           messages: state.messages,
           tools,
           // Deterministic tool-following: at the config-default temperature the
@@ -453,6 +454,7 @@ export class OperatorService {
           inputParams: { question: state.question, conversation: transcript },
           outputSchema: finalAnswerSchema,
           systemPrompts: [this.systemPrompt],
+          skipResponseLanguage: true,
           // LLMService.call() renders inputParams ONLY through {placeholder}
           // substitution in this template — params without a matching
           // placeholder are silently dropped and the model never sees them.

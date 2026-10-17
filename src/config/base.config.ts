@@ -590,6 +590,12 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
       clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
     },
+    // Saved user language + AI response language. Off by default; an app opts
+    // in by overriding this section with its supported languages.
+    i18n: {
+      enabled: false,
+      supportedLanguages: ["en"],
+    },
     oauth: {
       enabled: process.env.OAUTH_ENABLED === "true",
       authorizationCodeLifetime: parseInt(process.env.OAUTH_AUTHORIZATION_CODE_LIFETIME || "600"),

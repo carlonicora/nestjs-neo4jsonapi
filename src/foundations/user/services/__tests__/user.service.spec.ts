@@ -1,12 +1,13 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
-import { HttpException, HttpStatus } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { UserService } from "../user.service";
 import { UserRepository } from "../../repositories/user.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { EmailService } from "../../../../core/email/services/email.service";
+import { ResponseLanguageService } from "../response-language.service";
 import { UserDescriptor } from "../../entities/user";
 
 // Mock hashPassword to avoid crypto dependencies
@@ -28,6 +29,7 @@ describe("UserService", () => {
   let jsonApiService: MockedObject<JsonApiService>;
   let emailService: MockedObject<EmailService>;
   let configService: MockedObject<ConfigService>;
+  let responseLanguage: MockedObject<ResponseLanguageService>;
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440000",
@@ -76,6 +78,7 @@ describe("UserService", () => {
     deleteUser: vi.fn(),
     reactivate: vi.fn(),
     patchRate: vi.fn(),
+    patchLanguage: vi.fn(),
     resetCode: vi.fn(),
     addUserToRole: vi.fn(),
     removeUserFromRole: vi.fn(),
@@ -100,8 +103,19 @@ describe("UserService", () => {
           url: "https://example.com/",
         };
       }
+      if (key === "i18n") {
+        return { enabled: true, supportedLanguages: ["en", "it"] };
+      }
       return undefined;
     }),
+  });
+
+  // Default: resolves nothing, i.e. the behaviour of an app with i18n disabled.
+  const createMockResponseLanguageService = () => ({
+    resolve: vi.fn().mockResolvedValue(undefined),
+    resolveForUser: vi.fn().mockResolvedValue(undefined),
+    resolveForEmail: vi.fn().mockResolvedValue(undefined),
+    normalise: vi.fn(),
   });
 
   const createMockClsService = () => ({
@@ -118,6 +132,7 @@ describe("UserService", () => {
     const mockEmailService = createMockEmailService();
     const mockConfigService = createMockConfigService();
     const mockClsService = createMockClsService();
+    const mockResponseLanguageService = createMockResponseLanguageService();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -127,6 +142,7 @@ describe("UserService", () => {
         { provide: EmailService, useValue: mockEmailService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockClsService },
+        { provide: ResponseLanguageService, useValue: mockResponseLanguageService },
       ],
     }).compile();
 
@@ -135,6 +151,7 @@ describe("UserService", () => {
     jsonApiService = module.get(JsonApiService) as MockedObject<JsonApiService>;
     emailService = module.get(EmailService) as MockedObject<EmailService>;
     configService = module.get(ConfigService) as MockedObject<ConfigService>;
+    responseLanguage = module.get(ResponseLanguageService) as MockedObject<ResponseLanguageService>;
   });
 
   afterEach(() => {
@@ -540,7 +557,87 @@ describe("UserService", () => {
     });
   });
 
+  describe("patchLanguage", () => {
+    it("throws BadRequestException for an unsupported language", async () => {
+      await expect(
+        service.patchLanguage({
+          data: { id: TEST_IDS.userId, type: "users", attributes: { language: "fr" } },
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(userRepository.patchLanguage).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when the language is missing", async () => {
+      await expect(
+        service.patchLanguage({
+          data: { id: TEST_IDS.userId, type: "users", attributes: {} },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("saves a supported language and returns the user", async () => {
+      userRepository.patchLanguage.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+      const findByUserId = vi.spyOn(service, "findByUserId");
+
+      const result = await service.patchLanguage({
+        data: { id: TEST_IDS.userId, type: "users", attributes: { language: "it" } },
+      });
+
+      expect(userRepository.patchLanguage).toHaveBeenCalledWith({ userId: TEST_IDS.userId, language: "it" });
+      expect(findByUserId).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("reloads a platform administrator, who has no company, through the admin lookup", async () => {
+      userRepository.patchLanguage.mockResolvedValue(undefined);
+      userRepository.findOneForAdmin.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+      const findByUserId = vi.spyOn(service, "findByUserId");
+
+      await service.patchLanguage({
+        data: { id: TEST_IDS.userId, type: "users", attributes: { language: "en" } },
+        isAdmin: true,
+      });
+
+      expect(userRepository.findOneForAdmin).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(findByUserId).not.toHaveBeenCalled();
+    });
+  });
+
   describe("sendInvitationEmail", () => {
+    it("sends in the recipient's saved language with a localised link", async () => {
+      userRepository.resetCode.mockResolvedValue(MOCK_USER);
+      responseLanguage.resolveForEmail.mockResolvedValue("it");
+
+      await service.sendInvitationEmail({ userId: TEST_IDS.userId });
+
+      expect(responseLanguage.resolveForEmail).toHaveBeenCalledWith({ email: "test@example.com" });
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "invitationEmail",
+        expect.objectContaining({
+          activationLink: "https://example.com/it/invitation/test-code-123",
+        }),
+        "it",
+      );
+    });
+
+    it("keeps the English link and locale when no language resolves (i18n disabled)", async () => {
+      userRepository.resetCode.mockResolvedValue(MOCK_USER);
+
+      await service.sendInvitationEmail({ userId: TEST_IDS.userId });
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "invitationEmail",
+        expect.objectContaining({
+          activationLink: "https://example.com/en/invitation/test-code-123",
+        }),
+        "en",
+      );
+    });
+
     it("should send invitation email", async () => {
       userRepository.resetCode.mockResolvedValue(MOCK_USER);
       emailService.sendEmail.mockResolvedValue(undefined);
@@ -628,6 +725,47 @@ describe("UserService", () => {
       );
     });
 
+    it("sends the invitation in the recipient's resolved language over the request language", async () => {
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
+      responseLanguage.resolveForEmail.mockResolvedValue("it");
+
+      await service.createUser({
+        data: {
+          id: TEST_IDS.userId,
+          type: "users",
+          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } } },
+        },
+        language: "en",
+      });
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "invitationEmail",
+        expect.objectContaining({ activationLink: "https://example.com/it/invitation/test-code-123" }),
+        "it",
+      );
+    });
+
+    it("keeps the request language and English link when no language resolves", async () => {
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
+
+      await service.createUser({
+        data: {
+          id: TEST_IDS.userId,
+          type: "users",
+          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.companyId } } },
+        },
+        language: "de",
+      });
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "invitationEmail",
+        expect.objectContaining({ activationLink: "https://example.com/en/invitation/test-code-123" }),
+        "de",
+      );
+    });
+
     it("should make company admin when forceCompanyAdmin is true", async () => {
       userRepository.createUser.mockResolvedValue(MOCK_USER);
       userRepository.makeCompanyAdmin.mockResolvedValue(undefined);
@@ -682,6 +820,28 @@ describe("UserService", () => {
         }),
       );
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("sends the invitation in the recipient's resolved language", async () => {
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      responseLanguage.resolveForEmail.mockResolvedValue("it");
+
+      await service.createForCompany({
+        companyId: TEST_IDS.companyId,
+        data: {
+          id: TEST_IDS.userId,
+          type: "users",
+          attributes: { name: "New User", email: "new@example.com", sendInvitationEmail: true },
+        },
+        language: "en",
+      });
+
+      expect(emailService.sendEmail).toHaveBeenCalledWith(
+        "invitationEmail",
+        expect.objectContaining({ activationLink: "https://example.com/it/invitation/test-code-123" }),
+        "it",
+      );
     });
   });
 
@@ -777,6 +937,7 @@ describe("UserService", () => {
         emailService as any,
         configService as any,
         { get: vi.fn(), set: vi.fn(), has: vi.fn() } as any,
+        responseLanguage as any,
       );
 
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);

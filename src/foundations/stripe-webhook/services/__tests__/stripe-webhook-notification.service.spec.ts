@@ -18,6 +18,7 @@ import { UserRepository } from "../../../user/repositories/user.repository";
 import { CompanyRepository } from "../../../company/repositories/company.repository";
 import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../../../../core/logging";
+import { ResponseLanguageService } from "../../../user/services/response-language.service";
 import { QueueId } from "../../../../config/enums/queue.id";
 import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 
@@ -27,6 +28,7 @@ describe("StripeWebhookNotificationService", () => {
   let stripeCustomerRepository: vi.Mocked<StripeCustomerRepository>;
   let stripeInvoiceRepository: vi.Mocked<StripeInvoiceRepository>;
   let logger: vi.Mocked<AppLoggingService>;
+  let responseLanguage: { resolve: vi.Mock; resolveForUser: vi.Mock; resolveForEmail: vi.Mock };
 
   const MOCK_STRIPE_CUSTOMER = {
     id: "internal_customer_id",
@@ -86,9 +88,19 @@ describe("StripeWebhookNotificationService", () => {
       verbose: vi.fn(),
     };
 
+    responseLanguage = {
+      resolve: vi.fn().mockResolvedValue(undefined),
+      resolveForUser: vi.fn().mockResolvedValue(undefined),
+      resolveForEmail: vi.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StripeWebhookNotificationService,
+        {
+          provide: ResponseLanguageService,
+          useValue: responseLanguage,
+        },
         {
           provide: getQueueToken(QueueId.EMAIL),
           useValue: mockQueue,
@@ -181,6 +193,22 @@ describe("StripeWebhookNotificationService", () => {
       );
       expect(logger.log).toHaveBeenCalledWith(
         expect.stringContaining(`Queued payment failure notification for customer ${TEST_IDS.customerId}`),
+      );
+    });
+
+    it("should queue the payment failure email in the customer's saved language", async () => {
+      stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
+      stripeInvoiceRepository.findByStripeInvoiceId.mockResolvedValue(MOCK_INVOICE as any);
+      emailQueue.add.mockResolvedValue({} as any);
+      responseLanguage.resolveForEmail.mockResolvedValue("it");
+
+      await service.sendPaymentFailedEmail(baseParams);
+
+      expect(responseLanguage.resolveForEmail).toHaveBeenCalledWith({ email: MOCK_STRIPE_CUSTOMER.email });
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({ payload: expect.objectContaining({ locale: "it" }) }),
+        expect.any(Object),
       );
     });
 
@@ -726,6 +754,30 @@ describe("StripeWebhookNotificationService", () => {
         }),
         expect.any(Object),
       );
+    });
+
+    it("should queue each admin's email in that admin's saved language", async () => {
+      const mockAdmins = [
+        { ...MOCK_ADMIN, id: "admin-1", email: "admin1@test.com" },
+        { ...MOCK_ADMIN, id: "admin-2", email: "admin2@test.com" },
+      ];
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue(mockAdmins);
+      emailQueue.add.mockResolvedValue({} as any);
+      responseLanguage.resolveForUser.mockImplementation(async ({ userId }: { userId: string }) =>
+        userId === "admin-1" ? "it" : undefined,
+      );
+
+      await service.sendDeletionWarningEmail({
+        companyId: MOCK_COMPANY.id,
+        daysRemaining: 7,
+        deletionDate: new Date("2025-02-25"),
+        reason: "trial_expired",
+      });
+
+      const payloads = emailQueue.add.mock.calls.map((call: any[]) => call[1].payload);
+      expect(payloads.find((p: any) => p.to === "admin1@test.com").locale).toBe("it");
+      expect(payloads.find((p: any) => p.to === "admin2@test.com").locale).toBe("en");
     });
 
     it("should set correct flags for trial_expired reason", async () => {
