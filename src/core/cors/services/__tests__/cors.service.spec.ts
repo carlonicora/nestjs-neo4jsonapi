@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { CorsService } from "../cors.service";
 import { ConfigCorsInterface } from "../../../../config/interfaces";
+import { TRUSTED_ORIGINS_RESOLVER, TrustedOriginsResolver } from "../../interfaces/trusted-origins.resolver.interface";
 
 describe("CorsService", () => {
   let service: CorsService;
@@ -377,6 +378,103 @@ describe("CorsService", () => {
       const result = newService.getCredentialsPolicy();
 
       expect(result).toBe(false);
+    });
+  });
+
+  describe("with a bound TRUSTED_ORIGINS_RESOLVER", () => {
+    type Validator = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => unknown;
+
+    const build = async (params: { cors: Partial<ConfigCorsInterface>; resolver: TrustedOriginsResolver }) => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === "cors" ? createMockCorsConfig(params.cors) : undefined,
+      );
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          CorsService,
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: TRUSTED_ORIGINS_RESOLVER, useValue: params.resolver },
+        ],
+      }).compile();
+      return module.get<CorsService>(CorsService);
+    };
+
+    const decide = (validator: Validator, origin: string | undefined) =>
+      new Promise<{ allow: boolean | undefined; calls: number }>((resolve) => {
+        const callback = vi.fn((_err: Error | null, allow?: boolean) => {
+          // Let any stray second call land before resolving.
+          setTimeout(() => resolve({ allow, calls: callback.mock.calls.length }), 0);
+        });
+        validator(origin, callback);
+      });
+
+    it("asks the resolver when the static lists reject the origin", async () => {
+      const resolver = { isTrusted: vi.fn().mockResolvedValue(true), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: ["http://a.test"], originPatterns: [] }, resolver });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      const result = await decide(validator, "https://clienti.rossi.it");
+
+      expect(result).toEqual({ allow: true, calls: 1 });
+      expect(resolver.isTrusted).toHaveBeenCalledWith("https://clienti.rossi.it");
+    });
+
+    it("returns nothing a promise-aware CORS plugin could mistake for a second answer", async () => {
+      const resolver = { isTrusted: vi.fn().mockResolvedValue(true), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: ["http://a.test"], originPatterns: [] }, resolver });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      expect(validator("https://clienti.rossi.it", vi.fn())).toBeUndefined();
+    });
+
+    it("rejects when the resolver says no", async () => {
+      const resolver = { isTrusted: vi.fn().mockResolvedValue(false), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: ["http://a.test"], originPatterns: [] }, resolver });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      expect(await decide(validator, "https://evil.test")).toEqual({ allow: false, calls: 1 });
+    });
+
+    it("rejects, and logs when asked to, when the resolver throws", async () => {
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const resolver = { isTrusted: vi.fn().mockRejectedValue(new Error("boom")), listOrigins: vi.fn() };
+      const svc = await build({
+        cors: { origins: ["http://a.test"], originPatterns: [], logViolations: true },
+        resolver,
+      });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      expect(await decide(validator, "https://clienti.rossi.it")).toEqual({ allow: false, calls: 1 });
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "CORS: Trusted-origins resolver failed for origin: https://clienti.rossi.it",
+        expect.any(Error),
+      );
+      consoleErrorSpy.mockRestore();
+    });
+
+    it("does not ask the resolver for an origin the static lists allow", async () => {
+      const resolver = { isTrusted: vi.fn(), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: ["http://a.test"], originPatterns: [] }, resolver });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      expect(await decide(validator, "http://a.test")).toEqual({ allow: true, calls: 1 });
+      expect(resolver.isTrusted).not.toHaveBeenCalled();
+    });
+
+    it("keeps allow-all when no lists are configured", async () => {
+      const resolver = { isTrusted: vi.fn(), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: [], originPatterns: [] }, resolver });
+
+      expect(svc.getCorsConfiguration().origin).toBe(true);
+      expect(resolver.isTrusted).not.toHaveBeenCalled();
+    });
+
+    it("keeps allowing an absent Origin", async () => {
+      const resolver = { isTrusted: vi.fn(), listOrigins: vi.fn() };
+      const svc = await build({ cors: { origins: ["http://a.test"], originPatterns: [] }, resolver });
+      const validator = svc.getCorsConfiguration().origin as Validator;
+
+      expect(await decide(validator, undefined)).toEqual({ allow: true, calls: 1 });
+      expect(resolver.isTrusted).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,11 +1,17 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { CorsOptions } from "@nestjs/common/interfaces/external/cors-options.interface";
 import { ConfigService } from "@nestjs/config";
 import { BaseConfigInterface, ConfigCorsInterface } from "../../../config/interfaces";
+import { TRUSTED_ORIGINS_RESOLVER, TrustedOriginsResolver } from "../interfaces/trusted-origins.resolver.interface";
 
 @Injectable()
 export class CorsService {
-  constructor(private readonly configService: ConfigService<BaseConfigInterface>) {}
+  constructor(
+    private readonly configService: ConfigService<BaseConfigInterface>,
+    // Optional application-provided source of extra trusted origins (e.g. per-tenant custom
+    // domains). Asked only for an origin the static lists reject; absent = behaviour unchanged.
+    @Optional() @Inject(TRUSTED_ORIGINS_RESOLVER) private readonly resolver?: TrustedOriginsResolver,
+  ) {}
 
   private get corsConfig(): ConfigCorsInterface {
     return this.configService.get<ConfigCorsInterface>("cors");
@@ -44,14 +50,38 @@ export class CorsService {
         return callback(null, true);
       }
 
-      const isAllowed = this.isOriginAllowed(origin);
-
-      if (!isAllowed && logViolations) {
-        console.error(`CORS: Rejected request from origin: ${origin}`);
+      if (this.isOriginAllowed(origin)) {
+        return callback(null, true);
       }
 
-      callback(null, isAllowed);
+      if (!this.resolver) {
+        if (logViolations) {
+          console.error(`CORS: Rejected request from origin: ${origin}`);
+        }
+        return callback(null, false);
+      }
+
+      // The resolver is asynchronous, but this function must NOT return a promise:
+      // @fastify/cors treats a returned promise as a second answer and would call back twice.
+      void this.isOriginTrustedByResolver(origin, logViolations).then((isAllowed) => {
+        if (!isAllowed && logViolations) {
+          console.error(`CORS: Rejected request from origin: ${origin}`);
+        }
+
+        callback(null, isAllowed);
+      });
     };
+  }
+
+  private async isOriginTrustedByResolver(origin: string, logViolations: boolean): Promise<boolean> {
+    try {
+      return (await this.resolver.isTrusted(origin)) === true;
+    } catch (error) {
+      if (logViolations) {
+        console.error(`CORS: Trusted-origins resolver failed for origin: ${origin}`, error);
+      }
+      return false;
+    }
   }
 
   private isOriginAllowed(origin: string): boolean {

@@ -1,3 +1,9 @@
+## [6.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.0.0...v6.1.0) (2026-10-18)
+
+### 🚀 Features
+
+* **cors:** optional trusted-origins resolver for CORS and S3 frame-ancestors ([5ad0ea2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5ad0ea2843618dfc7ae02322459527568cddfd15))
+
 ## [6.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.2...v6.0.0) (2026-10-18)
 
 ### ⚠ BREAKING CHANGES
