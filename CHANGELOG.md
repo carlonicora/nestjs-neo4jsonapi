@@ -1,3 +1,9 @@
+## [6.1.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.1...v6.1.2) (2026-10-18)
+
+### 🐛 Bug Fixes
+
+* **isolation:** enhance LOCATION_STUB_PATTERN to handle additional location replacement cases ([e70c2d8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e70c2d8a026ac61cc2fbbc2c65c4dccdab6fe5a3))
+
 ## [6.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.0...v6.1.1) (2026-10-18)
 
 ### ⚡ Performance Improvements
