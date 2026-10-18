@@ -28,9 +28,12 @@ export const ISOLATION_PATTERN =
 
 // The vmThreads/vmForks pools host jsdom inside a node:vm context, where
 // `window.location` is non-configurable: `Object.defineProperty(window,
-// "location", ...)` throws "Cannot redefine property: location". Specs that
-// stub location that way must run in the forks or threads pool.
-export const LOCATION_STUB_PATTERN = /\bdefineProperty\(\s*(window|globalThis|global)\s*,\s*["']location["']/;
+// "location", ...)` and `vi.stubGlobal("location", ...)` throw "Cannot
+// redefine property: location" and `delete window.location` throws "Cannot
+// delete property". Specs that replace location in any of those ways must run
+// in the forks or threads pool.
+export const LOCATION_STUB_PATTERN =
+  /\bdefineProperty\(\s*(window|globalThis|global)\s*,\s*["\x27]location["\x27]|\bvi\.stubGlobal\(\s*["\x27]location["\x27]|\bdelete\s+\(?(window|globalThis|global)(\s+as\s+any)?\)?\.location\b/;
 
 const SKIPPED_DIRECTORY = /^(node_modules|dist.*|\.next.*)$/;
 
