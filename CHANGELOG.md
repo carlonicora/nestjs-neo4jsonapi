@@ -1,3 +1,9 @@
+## [6.1.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.0...v6.1.1) (2026-10-18)
+
+### ⚡ Performance Improvements
+
+* **tests:** reuse workers across spec files ([09418a8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/09418a8d02161fcf8a99790cb65a5a1d99347fdd))
+
 ## [6.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.0.0...v6.1.0) (2026-10-18)
 
 ### 🚀 Features
