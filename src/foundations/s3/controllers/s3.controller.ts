@@ -31,6 +31,10 @@ import {
   S3KeyAction,
 } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import {
+  TRUSTED_ORIGINS_RESOLVER,
+  TrustedOriginsResolver,
+} from "../../../core/cors/interfaces/trusted-origins.resolver.interface";
 import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
 import {
   S3CipherKeyMissingError,
@@ -55,6 +59,11 @@ export class S3Controller {
     @Optional()
     @Inject(S3_KEY_ACCESS_POLICY)
     private readonly keyPolicy?: S3KeyAccessPolicy,
+    // Optional application-provided extra origins (e.g. per-tenant custom domains) that may
+    // also frame a downloaded object. Absent = only the app origin, as before.
+    @Optional()
+    @Inject(TRUSTED_ORIGINS_RESOLVER)
+    private readonly trustedOrigins?: TrustedOriginsResolver,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -205,10 +214,10 @@ export class S3Controller {
     reply.header("Accept-Ranges", "none");
 
     // The web app embeds downloaded PDFs in an iframe, but a host that registers helmet (the corpus)
-    // denies framing by default. Let the app origin, and only it, frame this response.
-    const appOrigin = this._appOrigin();
-    if (appOrigin) {
-      reply.header("Content-Security-Policy", `frame-ancestors ${appOrigin}`);
+    // denies framing by default. Let the app origin, plus any origin the application trusts, frame it.
+    const frameAncestors = await this._frameAncestors();
+    if (frameAncestors) {
+      reply.header("Content-Security-Policy", `frame-ancestors ${frameAncestors}`);
       reply.removeHeader("X-Frame-Options");
     }
 
@@ -225,6 +234,28 @@ export class S3Controller {
     if (payload.e === undefined) return `private, max-age=${PERMANENT_LINK_CACHE_SECONDS}`;
     const remaining = Math.max(0, payload.e - Math.floor(Date.now() / 1000));
     return `private, max-age=${remaining}`;
+  }
+
+  /**
+   * The space-separated `frame-ancestors` source list: the app origin, then every origin the bound
+   * TRUSTED_ORIGINS_RESOLVER lists, deduplicated. Undefined when the list is empty. A failing
+   * resolver falls back to the app origin alone.
+   */
+  private async _frameAncestors(): Promise<string | undefined> {
+    const origins: string[] = [];
+    const appOrigin = this._appOrigin();
+    if (appOrigin) origins.push(appOrigin);
+
+    if (this.trustedOrigins) {
+      try {
+        origins.push(...(await this.trustedOrigins.listOrigins()));
+      } catch (error) {
+        console.error("S3: Trusted-origins resolver failed; framing limited to the app origin", error);
+      }
+    }
+
+    const unique = [...new Set(origins.filter((origin) => typeof origin === "string" && origin.length > 0))];
+    return unique.length > 0 ? unique.join(" ") : undefined;
   }
 
   private _appOrigin(): string | undefined {

@@ -32,3 +32,7 @@ export * from "./openapi";
 
 // RedisLockService is not re-exported by core/redis/index.ts, so export explicitly here.
 export { RedisLockService } from "./core/redis/services/redis.lock.service";
+
+// Trusted-origins hook (CORS + S3 frame-ancestors); the app binds TRUSTED_ORIGINS_RESOLVER.
+export { TRUSTED_ORIGINS_RESOLVER } from "./core/cors/interfaces/trusted-origins.resolver.interface";
+export type { TrustedOriginsResolver } from "./core/cors/interfaces/trusted-origins.resolver.interface";

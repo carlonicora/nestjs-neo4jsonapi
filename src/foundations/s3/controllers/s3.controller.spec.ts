@@ -54,6 +54,10 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { S3Service } from "../services/s3.service";
 import { S3Controller } from "./s3.controller";
+import {
+  TRUSTED_ORIGINS_RESOLVER,
+  TrustedOriginsResolver,
+} from "../../../core/cors/interfaces/trusted-origins.resolver.interface";
 
 const CLS_VALUES: Record<string, unknown> = {
   userId: "user-1",
@@ -774,6 +778,98 @@ describe("S3Controller", () => {
       expect(reply.header).not.toHaveBeenCalledWith("Content-Security-Policy", expect.anything());
       expect(reply.removeHeader).not.toHaveBeenCalled();
       expect(reply.send).toHaveBeenCalled();
+    });
+
+    describe("with a bound TRUSTED_ORIGINS_RESOLVER", () => {
+      const buildWithResolver = async (resolver: TrustedOriginsResolver) => {
+        const module: TestingModule = await Test.createTestingModule({
+          controllers: [S3Controller],
+          providers: [
+            { provide: S3Service, useValue: s3Service },
+            { provide: ClsService, useValue: mockClsService },
+            { provide: S3CipherService, useValue: cipher },
+            { provide: ConfigService, useValue: mockConfigService },
+            { provide: TRUSTED_ORIGINS_RESOLVER, useValue: resolver },
+          ],
+        })
+          .overrideGuard(JwtAuthGuard)
+          .useValue({ canActivate: () => true })
+          .compile();
+        return module.get<S3Controller>(S3Controller);
+      };
+
+      const frameAncestorsFor = async (ctrl: S3Controller) => {
+        cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+        s3Service.downloadObject.mockResolvedValue({
+          stream: Readable.from(["data"]),
+          contentType: "application/pdf",
+        });
+        const reply = makeReply();
+        await ctrl.getObject(reply as any, "token");
+        const headers = Object.fromEntries((reply.header as any).mock.calls as [string, string][]);
+        return { headers, reply };
+      };
+
+      it("lists the app origin and every resolver origin in frame-ancestors", async () => {
+        appUrl = "https://studioai.avvocato360.it/";
+        const ctrl = await buildWithResolver({
+          isTrusted: vi.fn(),
+          listOrigins: vi.fn().mockResolvedValue(["https://clienti.rossi.it"]),
+        });
+
+        const { headers, reply } = await frameAncestorsFor(ctrl);
+
+        expect(headers["Content-Security-Policy"]).toBe(
+          "frame-ancestors https://studioai.avvocato360.it https://clienti.rossi.it",
+        );
+        expect(reply.removeHeader).toHaveBeenCalledWith("X-Frame-Options");
+      });
+
+      it("drops duplicate origins", async () => {
+        appUrl = "https://studioai.avvocato360.it/";
+        const ctrl = await buildWithResolver({
+          isTrusted: vi.fn(),
+          listOrigins: vi
+            .fn()
+            .mockResolvedValue([
+              "https://clienti.rossi.it",
+              "https://studioai.avvocato360.it",
+              "https://clienti.rossi.it",
+            ]),
+        });
+
+        const { headers } = await frameAncestorsFor(ctrl);
+
+        expect(headers["Content-Security-Policy"]).toBe(
+          "frame-ancestors https://studioai.avvocato360.it https://clienti.rossi.it",
+        );
+      });
+
+      it("falls back to the app origin alone when the resolver throws", async () => {
+        appUrl = "https://studioai.avvocato360.it/";
+        const ctrl = await buildWithResolver({
+          isTrusted: vi.fn(),
+          listOrigins: vi.fn().mockRejectedValue(new Error("boom")),
+        });
+
+        const { headers } = await frameAncestorsFor(ctrl);
+
+        expect(headers["Content-Security-Policy"]).toBe("frame-ancestors https://studioai.avvocato360.it");
+      });
+    });
+
+    it("falls back to the app origin alone without a resolver", async () => {
+      appUrl = "https://studioai.avvocato360.it/";
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "k" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "application/pdf" });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(reply.header).toHaveBeenCalledWith(
+        "Content-Security-Policy",
+        "frame-ancestors https://studioai.avvocato360.it",
+      );
     });
 
     it("GET /s3/objects answers 404 when downloadObject returns null", async () => {
