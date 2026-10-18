@@ -1,3 +1,21 @@
+## [6.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.2...v6.0.0) (2026-10-18)
+
+### ⚠ BREAKING CHANGES
+
+* **jsonapi:** every document-returning service method listed above changed
+its declared return type to `Promise<JsonApiSingleDocument>`,
+`Promise<JsonApiListDocument>` or `Promise<JsonApiDocument>` (`| null` and
+`| void` unions kept). Subclasses that override these methods with
+`Promise<JsonApiDataInterface>` no longer compile (TS2416), and resource-shaped
+mocks (`{ type, id, attributes }`) passed to `mockResolvedValue` must become
+documents (`{ data: { type, id, attributes } }`). Apps that exclude `UserModule`
+must also exclude `ResponseLanguageModule` and provide `ResponseLanguageService`
+themselves.
+
+### 🚀 Features
+
+* **jsonapi:** typed JSON:API document returns ([825c726](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/825c726b38574ce4692bf00bec83eb125110ad24))
+
 ## [5.4.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.1...v5.4.2) (2026-10-18)
 
 ### 🐛 Bug Fixes
