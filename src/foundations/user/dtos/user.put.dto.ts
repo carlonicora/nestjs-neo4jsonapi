@@ -37,7 +37,7 @@ export class UserPutRelationshipsDTO {
   @ValidateNested({ each: true })
   @IsOptional()
   @Type(() => RoleDataListDTO)
-  roles: RoleDataListDTO;
+  roles?: RoleDataListDTO;
 }
 
 export class UserPutDataDTO {
@@ -50,12 +50,12 @@ export class UserPutDataDTO {
   @ValidateNested({ each: true })
   @IsOptional()
   @Type(() => UserPutAttributesDTO)
-  attributes: UserPutAttributesDTO;
+  attributes?: UserPutAttributesDTO;
 
   @ValidateNested({ each: true })
   @IsOptional()
   @Type(() => UserPutRelationshipsDTO)
-  relationships: UserPutRelationshipsDTO;
+  relationships?: UserPutRelationshipsDTO;
 }
 
 export class UserPutDTO {
@@ -65,5 +65,5 @@ export class UserPutDTO {
   data: UserPutDataDTO;
 
   @IsOptional()
-  included: any[];
+  included?: any[];
 }

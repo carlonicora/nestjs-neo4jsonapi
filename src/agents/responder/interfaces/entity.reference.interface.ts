@@ -2,6 +2,7 @@
 export interface EntityReference {
   type: string;
   id: string;
-  relevance: number;
+  /** 0–100. Optional: a reference without a score is persisted with `relevance: null`. */
+  relevance?: number;
   reason: string;
 }

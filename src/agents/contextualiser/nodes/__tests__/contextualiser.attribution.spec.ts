@@ -208,8 +208,9 @@ describe("contextualiser — inherited usage attribution", () => {
 
   it("keeps ContextualiserContextState constructible without the attribution keys", () => {
     // `ContextualiserService.run` returns this type, so it is reachable from
-    // outside the package. This only COMPILES if the five attribution keys are
-    // optional — the regression a required LangGraph channel would cause.
+    // outside the package. This only COMPILES if the five attribution keys and
+    // the two defaulted channels (`llmCalls`, `questionEmbedding`) are optional —
+    // the regression a required LangGraph channel would cause.
     const preTask10: ContextualiserContextState = {
       companyId: "company-1",
       contentId: "",
@@ -237,8 +238,6 @@ describe("contextualiser — inherited usage attribution", () => {
       ontology: [],
       requests: [],
       nextStep: "rational_plan",
-      llmCalls: 0,
-      questionEmbedding: undefined,
       tokens: { input: 0, output: 0 },
     };
 

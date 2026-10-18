@@ -23,11 +23,11 @@ export class UserPostAttributesDTO {
 
   @IsOptional()
   @IsDefined()
-  name: string;
+  name?: string;
 
   @IsOptional()
   @IsString()
-  password: string;
+  password?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -58,7 +58,7 @@ export class UserPostRelationshipsDTO {
   @ValidateNested({ each: true })
   @IsOptional()
   @Type(() => RoleDataListDTO)
-  roles: RoleDataListDTO;
+  roles?: RoleDataListDTO;
 
   @ValidateNested({ each: true })
   @IsDefined()
@@ -81,7 +81,7 @@ export class UserPostDataDTO {
   @ValidateNested()
   @IsOptional()
   @Type(() => UserPostRelationshipsDTO)
-  relationships: UserPostRelationshipsDTO;
+  relationships?: UserPostRelationshipsDTO;
 }
 
 export class UserPostDTO {
@@ -91,5 +91,5 @@ export class UserPostDTO {
   data: UserPostDataDTO;
 
   @IsOptional()
-  included: CompanyPostDataDTO[];
+  included?: CompanyPostDataDTO[];
 }

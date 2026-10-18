@@ -356,7 +356,7 @@ export class ResponderAnswerNodeService {
     // synthesizer invented that doesn't appear in the graph node's output.
     const byRef = new Map(refMap.map((e) => [e.ref, e]));
     const references: EntityReference[] = (llmResponse.references ?? [])
-      .map((r) => {
+      .map((r): EntityReference | null => {
         const hit = byRef.get(r.ref);
         if (!hit) return null;
         return {

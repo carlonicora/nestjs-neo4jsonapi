@@ -153,7 +153,12 @@ export class UserController {
     }
 
     let forceCompanyAdmin = false;
-    if (body.included.length === 0) {
+    if (!body.included?.length) {
+      if (!body.data.relationships?.company?.data?.id)
+        throw new HttpException(
+          "A new user needs a company relationship or an included company",
+          HttpStatus.BAD_REQUEST,
+        );
       await this.companyService.validate({
         companyId: body.data.relationships.company.data.id,
       });

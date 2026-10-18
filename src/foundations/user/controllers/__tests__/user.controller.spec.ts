@@ -378,6 +378,31 @@ describe("UserController", () => {
       });
     });
 
+    it("creates the user with an existing company when the request has no included", async () => {
+      const req = createMockRequest();
+      const { included: _included, ...bodyWithoutIncluded } = createBody;
+      userService.expectNotExists.mockResolvedValue(undefined);
+      companyService.validate.mockResolvedValue(undefined);
+      userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.createUser(req, bodyWithoutIncluded as any, mockReply, "en");
+
+      expect(companyService.validate).toHaveBeenCalledWith({ companyId: TEST_IDS.companyId });
+      expect(userService.createUser).toHaveBeenCalled();
+    });
+
+    it("refuses with 400 a user with neither a company relationship nor an included company", async () => {
+      const req = createMockRequest();
+      const body = { data: { type: "users", attributes: { email: "new@example.com" } } };
+      userService.expectNotExists.mockResolvedValue(undefined);
+
+      await expect(controller.createUser(req, body as any, mockReply, "en")).rejects.toMatchObject({
+        status: 400,
+      });
+      expect(companyService.validate).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
+    });
+
     it("should return existing user if email already exists", async () => {
       const req = createMockRequest();
       userService.expectNotExists.mockRejectedValue(new Error("User exists"));

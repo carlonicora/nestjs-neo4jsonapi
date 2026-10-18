@@ -196,7 +196,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     isAdmin: boolean;
     isCurrentUser: boolean;
   }): Promise<JsonApiDataInterface> {
-    if (params.data.attributes.password || params.data.attributes.name) {
+    if (params.data.attributes?.password || params.data.attributes?.name) {
       if (params.data.attributes.password)
         params.data.attributes.password = await hashPassword(params.data.attributes.password);
 

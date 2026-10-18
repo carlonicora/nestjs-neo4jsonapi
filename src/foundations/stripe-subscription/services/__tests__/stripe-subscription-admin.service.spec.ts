@@ -467,6 +467,41 @@ describe("StripeSubscriptionAdminService", () => {
       expect(stripeSubscriptionApiService.createSubscription).not.toHaveBeenCalled();
     });
 
+    it("should throw CONFLICT when the customer already has an active recurring subscription for the same price", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([MOCK_DB_SUBSCRIPTION]);
+
+      const error = await service.createSubscription(validParams).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
+      expect(subscriptionRepository.findByStripeCustomerId).toHaveBeenCalledWith({
+        stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
+      });
+      expect(stripeSubscriptionApiService.createSubscription).not.toHaveBeenCalled();
+      expect(subscriptionRepository.create).not.toHaveBeenCalled();
+    });
+
+    it("should proceed when the customer has no active recurring subscription", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
+      // Same price, but canceled: not a duplicate.
+      const canceled: StripeSubscription = { ...MOCK_DB_SUBSCRIPTION, status: "canceled" };
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([canceled]);
+      stripeSubscriptionApiService.createSubscription.mockResolvedValue(mockStripeSubscriptionWithItem);
+      subscriptionRepository.create.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+
+      const result = await service.createSubscription(validParams);
+
+      expect(subscriptionRepository.findByStripeCustomerId).toHaveBeenCalledWith({
+        stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
+      });
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledTimes(1);
+      expect(result.data).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
     it("should convert Unix timestamps to Date objects (multiply by 1000)", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);

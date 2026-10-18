@@ -249,7 +249,8 @@ export const ContextualiserContext = Annotation.Root({
  * LangGraph's `StateType` makes EVERY channel a required property, so adding a
  * channel to the root above would add a required key to this published type and
  * break any consumer that builds a state literal. The attribution channels are
- * therefore re-declared through {@link CallerAttributionState}, where they are
+ * therefore re-declared through {@link CallerAttributionState}, and the later
+ * defaulted channels through `ContextualiserDefaultedChannels`, where they are
  * optional — the state still carries them, existing literals still compile.
  *
  * {@link ContextualiserGraphState} is the un-widened shape LangGraph itself
@@ -258,5 +259,17 @@ export const ContextualiserContext = Annotation.Root({
  */
 export type ContextualiserGraphState = typeof ContextualiserContext.State;
 
-export type ContextualiserContextState = Omit<ContextualiserGraphState, keyof CallerAttributionState> &
-  CallerAttributionState;
+/**
+ * Channels added after the type was published. LangGraph fills both from their
+ * annotation defaults at runtime (`llmCalls` → 0, `questionEmbedding` →
+ * undefined), so a state literal may omit them; readers use `?? 0` /
+ * treat a missing embedding as "not computed yet".
+ */
+type ContextualiserDefaultedChannels = Partial<Pick<ContextualiserGraphState, "llmCalls" | "questionEmbedding">>;
+
+export type ContextualiserContextState = Omit<
+  ContextualiserGraphState,
+  keyof CallerAttributionState | keyof ContextualiserDefaultedChannels
+> &
+  CallerAttributionState &
+  ContextualiserDefaultedChannels;

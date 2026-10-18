@@ -139,8 +139,8 @@ describe("AssistantMessageRepository.linkReferences", () => {
   it("passes relevance: null when the reference has no relevance", async () => {
     await repo.linkReferences({
       messageId: "m-1",
-      // A reference without a score (the source defends against it with `?? null`).
-      references: [{ type: "accounts", id: "acc-1", reason: "no score" } as EntityReference],
+      // `relevance` is optional on EntityReference; the repository stores it as null.
+      references: [{ type: "accounts", id: "acc-1", reason: "no score" }],
     });
     expect(writes).toHaveLength(1);
     expect(writes[0].queryParams).toMatchObject({

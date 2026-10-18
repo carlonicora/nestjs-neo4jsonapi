@@ -21,8 +21,8 @@ export class SearchDocumentsTool {
   constructor(
     private readonly factory: ToolFactory,
     private readonly contextualiserService: ContextualiserService,
-    // ScopeGuard is deliberately the LAST constructor parameter so existing
-    // positional call sites keep working.
+    // Required: dropOutOfScope() filters every retrieved chunk through it. All
+    // call sites (Nest DI and the specs) pass it.
     private readonly scopeGuard: ScopeGuard,
   ) {}
 

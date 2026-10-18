@@ -416,6 +416,20 @@ describe("UserService", () => {
   });
 
   describe("put", () => {
+    it("leaves the user untouched when the request has no attributes", async () => {
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+
+      const result = await service.putUser({
+        data: { id: TEST_IDS.userId, type: "users" },
+        isAdmin: false,
+        isCurrentUser: false,
+      });
+
+      expect(userRepository.putUser).not.toHaveBeenCalled();
+      expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
     it("should update user with password", async () => {
       userRepository.putUser.mockResolvedValue(undefined);
       userRepository.findByUserId.mockResolvedValue(MOCK_USER);
@@ -430,7 +444,6 @@ describe("UserService", () => {
             password: "newpassword",
             email: "test@example.com",
           },
-          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -459,7 +472,6 @@ describe("UserService", () => {
             name: "Updated Name",
             email: "test@example.com",
           },
-          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -487,7 +499,6 @@ describe("UserService", () => {
             name: "Updated Name",
             email: "test@example.com",
           },
-          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: true,
@@ -507,7 +518,6 @@ describe("UserService", () => {
           attributes: {
             email: "test@example.com",
           },
-          relationships: undefined,
         },
         isAdmin: false,
         isCurrentUser: false,
@@ -704,7 +714,6 @@ describe("UserService", () => {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
-            roles: undefined,
           },
         },
         language: "en",
@@ -733,14 +742,12 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
-            password: undefined,
             sendInvitationEmail: true,
           },
           relationships: {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
-            roles: undefined,
           },
         },
         language: "en",
@@ -807,13 +814,11 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
-            password: undefined,
           },
           relationships: {
             company: {
               data: { type: "companies", id: TEST_IDS.companyId },
             },
-            roles: undefined,
           },
         },
         forceCompanyAdmin: true,
@@ -841,9 +846,7 @@ describe("UserService", () => {
           attributes: {
             name: "New User",
             email: "new@example.com",
-            password: undefined,
           },
-          relationships: undefined,
         },
         language: "en",
       });
