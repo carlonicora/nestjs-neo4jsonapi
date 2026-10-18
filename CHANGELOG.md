@@ -1,3 +1,9 @@
+## [5.4.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.1...v5.4.2) (2026-10-18)
+
+### 🐛 Bug Fixes
+
+* **user:** reject user creation without a company, skip empty updates ([fc057dd](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fc057dd9ab75d9f87c5981a101575c2ec942dee2))
+
 ## [5.4.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v5.4.0...v5.4.1) (2026-10-17)
 
 ### 🐛 Bug Fixes
