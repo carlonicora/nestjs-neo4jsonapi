@@ -16,6 +16,7 @@ import {
 } from "../../tokenusage/repositories/tokenusage.repository";
 import { ModelWeight } from "../../../core/llm/enums/model.weight";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Per-call cost rates, in euros per 1M tokens, belonging to the AI connection
@@ -231,7 +232,12 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
    * KEPT (custom filtering not covered by inherited find()): date-range + tokenUsageType
    * filtering. Backs GET /tokenusages in consuming apps.
    */
-  async findByCompany(params: { query: any; startDate?: string; endDate?: string; tokenUsageType?: string }) {
+  async findByCompany(params: {
+    query: any;
+    startDate?: string;
+    endDate?: string;
+    tokenUsageType?: string;
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(

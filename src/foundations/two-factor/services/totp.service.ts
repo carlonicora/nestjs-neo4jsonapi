@@ -8,6 +8,10 @@ import { TotpAuthenticatorDescriptor } from "../entities/totp-authenticator";
 import { TotpSetupDescriptor } from "../entities/totp-setup";
 import { TotpAuthenticatorRepository } from "../repositories/totp-authenticator.repository";
 import { TotpEncryptionService } from "./totp-encryption.service";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 export interface TotpSetupResponse {
   authenticatorId: string;
@@ -52,7 +56,7 @@ export class TotpService {
    * @param params.accountName - The account name to display in authenticator apps (typically email)
    * @returns JSON:API response with setup info (QR code, secret)
    */
-  async generateSecret(params: { userId: string; name: string; accountName: string }): Promise<any> {
+  async generateSecret(params: { userId: string; name: string; accountName: string }): Promise<JsonApiSingleDocument> {
     // Generate a new TOTP secret
     const secret = new OTPAuth.Secret({ size: 20 });
 
@@ -233,7 +237,7 @@ export class TotpService {
    * @param params.code - The 6-digit TOTP code from the authenticator app
    * @returns JSON:API response with verified authenticator, or null if verification failed
    */
-  async addAuthenticator(params: { authenticatorId: string; code: string }): Promise<any> {
+  async addAuthenticator(params: { authenticatorId: string; code: string }): Promise<JsonApiSingleDocument | null> {
     const authenticator = await this.totpAuthenticatorRepository.findByIdWithSecret({
       authenticatorId: params.authenticatorId,
     });
@@ -291,7 +295,7 @@ export class TotpService {
    * @param params.verifiedOnly - If true, only return verified authenticators
    * @returns JSON:API response with list of authenticators
    */
-  async listAuthenticators(params: { userId: string; verifiedOnly?: boolean }): Promise<any> {
+  async listAuthenticators(params: { userId: string; verifiedOnly?: boolean }): Promise<JsonApiListDocument> {
     const authenticators = params.verifiedOnly
       ? await this.totpAuthenticatorRepository.findVerifiedByUserId({ userId: params.userId })
       : await this.totpAuthenticatorRepository.findAllByUserIdWithSecrets({ userId: params.userId });

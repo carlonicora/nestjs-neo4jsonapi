@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
@@ -57,7 +57,7 @@ export class StripeInvoiceAdminService {
     companyId: string;
     query: any;
     status?: StripeInvoiceStatus;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
@@ -84,7 +84,7 @@ export class StripeInvoiceAdminService {
    * @throws {HttpException} NOT_FOUND if invoice not found
    * @throws {HttpException} FORBIDDEN if invoice doesn't belong to company
    */
-  async getInvoice(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
+  async getInvoice(params: { id: string; companyId: string }): Promise<JsonApiSingleDocument> {
     const invoice = await this.stripeInvoiceRepository.findById({ id: params.id });
 
     if (!invoice) {

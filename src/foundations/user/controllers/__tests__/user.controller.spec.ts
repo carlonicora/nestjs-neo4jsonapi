@@ -40,7 +40,6 @@ import { FastifyReply } from "fastify";
 import { ClsService } from "nestjs-cls";
 import { RoleId } from "../../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "../../../../common/interfaces/authenticated.request.interface";
-import type { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { CacheService } from "../../../../core/cache/services/cache.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { CompanyService } from "../../../company/services/company.service";
@@ -48,6 +47,10 @@ import { RelevancyService } from "../../../relevancy/services/relevancy.service"
 import { UserCypherService } from "../../services/user.cypher.service";
 import { UserService } from "../../services/user.service";
 import { UserController } from "../user.controller";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("UserController", () => {
   let controller: UserController;
@@ -69,20 +72,20 @@ describe("UserController", () => {
     contentId: "880e8400-e29b-41d4-a716-446655440001",
   };
 
-  // The service methods are declared to return JsonApiDataInterface, so the
-  // pass-through fixtures take that shape.
-  const MOCK_USER_RESPONSE: JsonApiDataInterface = {
-    type: "users",
-    id: TEST_IDS.userId,
-    attributes: {
-      email: "test@example.com",
-      firstName: "Test",
-      lastName: "User",
+  const MOCK_USER_RESPONSE: JsonApiSingleDocument = {
+    data: {
+      type: "users",
+      id: TEST_IDS.userId,
+      attributes: {
+        email: "test@example.com",
+        firstName: "Test",
+        lastName: "User",
+      },
     },
   };
 
-  const MOCK_USERS_LIST_RESPONSE: JsonApiDataInterface = {
-    ...MOCK_USER_RESPONSE,
+  const MOCK_USERS_LIST_RESPONSE: JsonApiListDocument = {
+    data: [MOCK_USER_RESPONSE.data],
     meta: { total: 1 },
   };
 

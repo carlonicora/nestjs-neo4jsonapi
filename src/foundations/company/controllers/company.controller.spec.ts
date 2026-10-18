@@ -29,12 +29,15 @@ import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CacheService } from "../../../core/cache/services/cache.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { CompanyPostDTO } from "../dtos/company.post.dto";
 import { CompanyPutDTO } from "../dtos/company.put.dto";
 import { companyMeta } from "../entities/company.meta";
 import { CompanyService } from "../services/company.service";
 import { CompanyController } from "./company.controller";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("CompanyController", () => {
   let controller: CompanyController;
@@ -68,16 +71,19 @@ describe("CompanyController", () => {
     language: "en",
   };
 
-  const mockServiceResponse: JsonApiDataInterface = {
-    type: "companies",
-    id: MOCK_COMPANY_ID,
-    attributes: {
-      name: "Test Company",
-      monthlyCredits: 1000,
-      availableMonthlyCredits: 200,
-      availableExtraCredits: 500,
+  const mockServiceResponse: JsonApiSingleDocument = {
+    data: {
+      type: "companies",
+      id: MOCK_COMPANY_ID,
+      attributes: {
+        name: "Test Company",
+        monthlyCredits: 1000,
+        availableMonthlyCredits: 200,
+        availableExtraCredits: 500,
+      },
     },
   };
+  const mockServiceResponseList: JsonApiListDocument = { data: [mockServiceResponse.data] };
 
   beforeEach(async () => {
     const mockCompanyService = {
@@ -134,7 +140,7 @@ describe("CompanyController", () => {
     const mockSearch = "test search";
 
     it("should fetch all companies with search term and query parameters", async () => {
-      companyService.find.mockResolvedValue(mockServiceResponse);
+      companyService.find.mockResolvedValue(mockServiceResponseList);
 
       await controller.fetchAllCompanies(mockRequest, mockReply, mockQuery, mockSearch);
 
@@ -142,11 +148,11 @@ describe("CompanyController", () => {
         term: mockSearch,
         query: mockQuery,
       });
-      expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponse);
+      expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponseList);
     });
 
     it("should fetch all companies without search term", async () => {
-      companyService.find.mockResolvedValue(mockServiceResponse);
+      companyService.find.mockResolvedValue(mockServiceResponseList);
 
       await controller.fetchAllCompanies(mockRequest, mockReply, mockQuery);
 
@@ -154,7 +160,7 @@ describe("CompanyController", () => {
         term: undefined,
         query: mockQuery,
       });
-      expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponse);
+      expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponseList);
     });
 
     it("should handle service errors", async () => {
@@ -556,7 +562,7 @@ describe("CompanyController", () => {
       it("should handle empty query parameters in fetchAllCompanies", async () => {
         const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
         const emptyQuery = {};
-        companyService.find.mockResolvedValue(mockServiceResponse);
+        companyService.find.mockResolvedValue(mockServiceResponseList);
 
         await controller.fetchAllCompanies(mockRequest, mockReply, emptyQuery);
 
@@ -570,7 +576,7 @@ describe("CompanyController", () => {
         const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
         const mockQuery = { page: { number: 1, size: 10 } };
         const emptySearch = "";
-        companyService.find.mockResolvedValue(mockServiceResponse);
+        companyService.find.mockResolvedValue(mockServiceResponseList);
 
         await controller.fetchAllCompanies(mockRequest, mockReply, mockQuery, emptySearch);
 
@@ -597,10 +603,14 @@ describe("CompanyController", () => {
       it("should handle empty service response in fetchAllCompanies", async () => {
         const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
         const mockQuery = { page: { number: 1, size: 10 } };
-        const emptyResponse: JsonApiDataInterface = {
-          type: "companies",
-          id: "empty",
-          attributes: {},
+        const emptyResponse: JsonApiListDocument = {
+          data: [
+            {
+              type: "companies",
+              id: "empty",
+              attributes: {},
+            },
+          ],
         };
         companyService.find.mockResolvedValue(emptyResponse);
 

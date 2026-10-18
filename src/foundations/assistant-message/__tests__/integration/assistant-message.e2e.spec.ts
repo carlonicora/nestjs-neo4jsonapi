@@ -94,14 +94,14 @@ describe("AssistantMessage lifecycle (integration, in-memory stubs)", () => {
       id: "a-1",
       query: {},
     });
-    expect((response as any).data.length).toBe(2);
-    expect((response as any).data[0].attributes.position).toBe(0);
-    expect((response as any).data[1].attributes.position).toBe(1);
+    expect(response.data.length).toBe(2);
+    expect(response.data[0].attributes.position).toBe(0);
+    expect(response.data[1].attributes.position).toBe(1);
   });
 
   it("inherited findById returns a single message", async () => {
     const response = await service.findById({ id: "m-1" });
-    expect((response as any).data).toMatchObject({ type: "assistant-messages", id: "m-1" });
+    expect(response.data).toMatchObject({ type: "assistant-messages", id: "m-1" });
   });
 
   it("inherited delete removes a message", async () => {

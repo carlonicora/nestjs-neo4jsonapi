@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeProductRepository } from "../../stripe-product/repositories/stripe-product.repository";
 import { StripeProductAdminService } from "../../stripe-product/services/stripe-product-admin.service";
 import { StripeProductApiService } from "../../stripe-product/services/stripe-product-api.service";
@@ -52,7 +52,7 @@ export class StripePriceAdminService {
    * });
    * ```
    */
-  async listPrices(params: { query: any; productId?: string; active?: boolean }): Promise<JsonApiDataInterface> {
+  async listPrices(params: { query: any; productId?: string; active?: boolean }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const prices = await this.stripePriceRepository.findAll({
@@ -71,7 +71,7 @@ export class StripePriceAdminService {
    * @returns JSON:API formatted price data
    * @throws {HttpException} NOT_FOUND if price not found
    */
-  async getPrice(params: { id: string }): Promise<JsonApiDataInterface> {
+  async getPrice(params: { id: string }): Promise<JsonApiSingleDocument> {
     const price = await this.stripePriceRepository.findById({ id: params.id });
 
     if (!price) {
@@ -121,7 +121,7 @@ export class StripePriceAdminService {
    * });
    * ```
    */
-  async createPrice(params: { data: StripePricePostDataDTO }): Promise<JsonApiDataInterface> {
+  async createPrice(params: { data: StripePricePostDataDTO }): Promise<JsonApiSingleDocument> {
     const product = await this.stripeProductRepository.findById({ id: params.data.attributes.productId });
 
     if (!product) {
@@ -180,7 +180,7 @@ export class StripePriceAdminService {
    * @returns JSON:API formatted updated price data
    * @throws {HttpException} NOT_FOUND if price not found
    */
-  async updatePrice(params: { data: StripePricePutDataDTO }): Promise<JsonApiDataInterface> {
+  async updatePrice(params: { data: StripePricePutDataDTO }): Promise<JsonApiSingleDocument> {
     const existingPrice = await this.stripePriceRepository.findById({ id: params.data.id });
 
     if (!existingPrice) {

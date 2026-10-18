@@ -5,6 +5,7 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { BackupCodesCountDescriptor } from "../entities/backup-codes-count";
 import { BackupCodesGenerationDescriptor } from "../entities/backup-codes-generation";
 import { BackupCodeRepository } from "../repositories/backup-code.repository";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 const BACKUP_CODE_COUNT = 10;
 const BACKUP_CODE_LENGTH = 8; // 8 hex characters
@@ -36,7 +37,7 @@ export class BackupCodeService {
    * @param params.userId - The user's ID
    * @returns JSON:API response with plain text backup codes (show to user once)
    */
-  async generateCodes(params: { userId: string }): Promise<any> {
+  async generateCodes(params: { userId: string }): Promise<JsonApiSingleDocument> {
     // Check if user already has backup codes
     const existingCount = await this.backupCodeRepository.findUnusedCount({
       userId: params.userId,
@@ -97,7 +98,7 @@ export class BackupCodeService {
    * @param params.userId - The user's ID
    * @returns JSON:API response with unused backup codes count
    */
-  async getUnusedCount(params: { userId: string }): Promise<any> {
+  async getUnusedCount(params: { userId: string }): Promise<JsonApiSingleDocument> {
     const count = await this.backupCodeRepository.findUnusedCount({ userId: params.userId });
 
     return this.jsonApiService.buildSingle(BackupCodesCountDescriptor.model, {
@@ -123,7 +124,7 @@ export class BackupCodeService {
    * @param params.userId - The user's ID
    * @returns JSON:API response with new plain text backup codes (show to user once)
    */
-  async regenerateCodes(params: { userId: string }): Promise<any> {
+  async regenerateCodes(params: { userId: string }): Promise<JsonApiSingleDocument> {
     // Delete all existing backup codes
     await this.backupCodeRepository.deleteAllByUserId({ userId: params.userId });
 

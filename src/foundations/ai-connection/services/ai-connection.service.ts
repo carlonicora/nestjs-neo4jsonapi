@@ -15,6 +15,10 @@ import { AiConnection, AiConnectionDescriptor } from "../entities/ai-connection"
 import { AI_PROVIDER_REGISTRY, validateAiConnectionAttributes } from "../registry/ai-provider.registry";
 import { AiConnectionRepository } from "../repositories/ai-connection.repository";
 import { AiConnectionEncryptionService } from "./ai-connection-encryption.service";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 const SECRET_FIELDS = ["apiKey", "googleCredentialsBase64"] as const;
 
@@ -37,7 +41,7 @@ export class AiConnectionService extends AbstractService<AiConnection, typeof Ai
    * List with the editor's meta: the provider field registry and the .env
    * defaults per connection type (never secrets) — spec § 3.
    */
-  async findAllWithMeta(params: { query: any }): Promise<any> {
+  async findAllWithMeta(params: { query: any }): Promise<JsonApiListDocument> {
     const response = await this.find({ query: params.query, fetchAll: true });
     const ai = this.configService.get<ConfigAiInterface>("ai");
     const envBlockFor = (type: AiConnectionType) => {
@@ -82,7 +86,7 @@ export class AiConnectionService extends AbstractService<AiConnection, typeof Ai
    * keeps both entry points working: a JSON:API body always carries `data`,
    * mapped repository params never do.
    */
-  async create(body: any, included?: unknown[]): Promise<any> {
+  async create(body: any, included?: unknown[]): Promise<JsonApiSingleDocument> {
     if (!body?.data) return super.create(body, included);
 
     this.validateAndEncrypt(body.data.attributes);
@@ -91,7 +95,9 @@ export class AiConnectionService extends AbstractService<AiConnection, typeof Ai
     return response;
   }
 
-  async update(body: { data: { id: string; attributes: Record<string, any>; [k: string]: any } }): Promise<any> {
+  async update(body: {
+    data: { id: string; attributes: Record<string, any>; [k: string]: any };
+  }): Promise<JsonApiSingleDocument> {
     const existing = await this.aiConnectionRepository.findById({ id: body.data.id });
     // Blank/omitted secret = keep the stored (already encrypted) value; a
     // supplied one is validated + re-encrypted (spec § Decisions "Secrets").

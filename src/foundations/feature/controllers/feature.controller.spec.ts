@@ -38,7 +38,10 @@ vi.mock("../../../common/decorators/roles.decorator", () => ({
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import {
+  JsonApiListDocument,
+  JsonApiResourceObject,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 import { FeatureService } from "../services/feature.service";
 import { FeatureController } from "./feature.controller";
 
@@ -60,7 +63,7 @@ describe("FeatureController", () => {
 
   const mockRequest = { user: mockAdminUser };
 
-  const mockServiceResponse: JsonApiDataInterface = {
+  const mockServiceResponse: JsonApiResourceObject = {
     type: "features",
     id: MOCK_FEATURE_ID,
     attributes: {
@@ -69,16 +72,10 @@ describe("FeatureController", () => {
     },
   };
 
-  // FeatureService.find is declared to return JsonApiDataInterface (one resource
-  // object) but resolves to a JSON:API document; the mock uses the real document
-  // shape, re-typed once here to the declared signature.
-  const asDocument = (document: { data: unknown; meta?: Record<string, unknown> }): JsonApiDataInterface =>
-    document as unknown as JsonApiDataInterface;
-
-  const mockListResponse = asDocument({
+  const mockListResponse: JsonApiListDocument = {
     data: [mockServiceResponse],
     meta: { total: 1 },
-  });
+  };
 
   beforeEach(async () => {
     const mockFeatureService = {
@@ -167,7 +164,7 @@ describe("FeatureController", () => {
     });
 
     it("should return empty results when no features found", async () => {
-      const emptyResponse = asDocument({ data: [], meta: { total: 0 } });
+      const emptyResponse: JsonApiListDocument = { data: [], meta: { total: 0 } };
       featureService.find.mockResolvedValue(emptyResponse);
 
       const result = await controller.findBySearch(mockRequest, mockQuery);

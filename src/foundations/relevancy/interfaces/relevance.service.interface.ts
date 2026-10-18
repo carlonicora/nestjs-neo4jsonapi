@@ -1,5 +1,5 @@
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 export interface RelevanceServiceInterface {
   findRelevantByUser<T>(params: {
@@ -7,12 +7,12 @@ export interface RelevanceServiceInterface {
     cypherService: any;
     userId: string;
     query?: any;
-  }): Promise<JsonApiDataInterface>;
+  }): Promise<JsonApiListDocument>;
 
   findRelevant<T>(params: {
     model: DataModelInterface<T>;
     cypherService: any;
     id: string;
     query?: any;
-  }): Promise<JsonApiDataInterface>;
+  }): Promise<JsonApiListDocument>;
 }

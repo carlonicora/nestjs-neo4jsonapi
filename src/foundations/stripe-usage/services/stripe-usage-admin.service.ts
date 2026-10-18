@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { JsonApiDataInterface } from "../../../core/jsonapi";
+import { JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { JsonApiPaginator } from "../../../core/jsonapi";
 import { JsonApiService } from "../../../core/jsonapi";
 import { StripeUsageApiService } from "./stripe-usage-api.service";
@@ -42,7 +42,7 @@ export class StripeUsageAdminService {
     meterEventName: string;
     quantity: number;
     timestamp?: Date;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.subscriptionId });
     if (!subscription) {
       throw new HttpException("Subscription not found", HttpStatus.NOT_FOUND);
@@ -85,7 +85,7 @@ export class StripeUsageAdminService {
     query: any;
     startTime?: Date;
     endTime?: Date;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const subscription = await this.subscriptionRepository.findById({ id: params.subscriptionId });

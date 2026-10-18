@@ -1,5 +1,5 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeProductPostDataDTO, StripeProductPutDataDTO } from "../dtos/stripe-product.dto";
 import { StripeProductModel } from "../entities/stripe-product.model";
 import { StripeProductRepository } from "../repositories/stripe-product.repository";
@@ -43,7 +43,7 @@ export class StripeProductAdminService {
    * });
    * ```
    */
-  async listProducts(params: { query: any; active?: boolean }): Promise<JsonApiDataInterface> {
+  async listProducts(params: { query: any; active?: boolean }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const products = await this.stripeProductRepository.findAll({
@@ -61,7 +61,7 @@ export class StripeProductAdminService {
    * @returns JSON:API formatted product data
    * @throws {HttpException} NOT_FOUND if product not found
    */
-  async getProduct(params: { id: string }): Promise<JsonApiDataInterface> {
+  async getProduct(params: { id: string }): Promise<JsonApiSingleDocument> {
     const product = await this.stripeProductRepository.findById({ id: params.id });
 
     if (!product) {
@@ -101,7 +101,7 @@ export class StripeProductAdminService {
    * });
    * ```
    */
-  async createProduct(params: { data: StripeProductPostDataDTO }): Promise<JsonApiDataInterface> {
+  async createProduct(params: { data: StripeProductPostDataDTO }): Promise<JsonApiSingleDocument> {
     const stripeProduct = await this.stripeProductApiService.createProduct({
       name: params.data.attributes.name,
       description: params.data.attributes.description,
@@ -134,7 +134,7 @@ export class StripeProductAdminService {
    * @returns JSON:API formatted updated product data
    * @throws {HttpException} NOT_FOUND if product not found
    */
-  async updateProduct(params: { data: StripeProductPutDataDTO }): Promise<JsonApiDataInterface> {
+  async updateProduct(params: { data: StripeProductPutDataDTO }): Promise<JsonApiSingleDocument> {
     const existingProduct = await this.stripeProductRepository.findById({ id: params.data.id });
 
     if (!existingProduct) {

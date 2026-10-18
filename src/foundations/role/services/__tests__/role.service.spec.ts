@@ -5,11 +5,6 @@ import { RoleService } from "../role.service";
 import { RoleRepository } from "../../repositories/role.repository";
 import { Role } from "../../entities/role";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
-import { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
-
-// RoleService declares Promise<JsonApiDataInterface>, but create/update return the
-// JSON:API document built by JsonApiService.buildSingle ({ data: ... }).
-type JsonApiDocument = { data: JsonApiDataInterface };
 
 describe("RoleService", () => {
   let service: RoleService;
@@ -273,7 +268,7 @@ describe("RoleService", () => {
       });
 
       // Act
-      const result = (await service.create({ data: createData as any })) as unknown as JsonApiDocument;
+      const result = await service.create({ data: createData as any });
 
       // Assert
       expect(roleRepository.findById).toHaveBeenCalledWith({ roleId: createData.id });
@@ -300,7 +295,7 @@ describe("RoleService", () => {
       });
 
       // Act
-      const result = (await service.update({ data: updateData as any })) as unknown as JsonApiDocument;
+      const result = await service.update({ data: updateData as any });
 
       // Assert
       expect(roleRepository.findByNameNotId).toHaveBeenCalledWith({

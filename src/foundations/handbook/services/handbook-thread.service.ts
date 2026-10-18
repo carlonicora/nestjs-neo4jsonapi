@@ -4,7 +4,6 @@ import { ClsService } from "nestjs-cls";
 import { ResponderService } from "../../../agents/responder/services/responder.service";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { HandbookThread, HandbookThreadDescriptor } from "../entities/handbook-thread";
@@ -19,6 +18,10 @@ import { HandbookPageRepository } from "../repositories/handbook-page.repository
 import { HandbookThreadMessageRepository } from "../repositories/handbook-thread-message.repository";
 import { HandbookThreadRepository } from "../repositories/handbook-thread.repository";
 import { HandbookThreadMessageService } from "./handbook-thread-message.service";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /** How many prior turns are replayed to the responder as history. */
 export const HANDBOOK_MAX_MESSAGES_TO_LLM = 20;
@@ -77,7 +80,7 @@ export class HandbookThreadService extends AbstractService<
     question: string;
     /** Optional: scopes retrieval to one page. See `runTurn`. */
     handbookPageId?: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const threadId = randomUUID();
 
     await this.createFromDTO({
@@ -129,7 +132,7 @@ export class HandbookThreadService extends AbstractService<
     question: string;
     /** Optional: scopes retrieval to one page. See `runTurn`. */
     handbookPageId?: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     // Owner gate: `findById` applies `buildUserHasAccess`, so another user's
     // thread is a 403 and an unknown id is a 404 — before anything is written.
     await this.readOwnedThread({ threadId: params.threadId });
@@ -184,7 +187,7 @@ export class HandbookThreadService extends AbstractService<
    * call. They are sorted here because a Cypher `OPTIONAL MATCH` collects
    * related nodes in no particular order.
    */
-  async findThreadWithMessages(params: { threadId: string }): Promise<JsonApiDataInterface> {
+  async findThreadWithMessages(params: { threadId: string }): Promise<JsonApiSingleDocument> {
     const thread = await this.readOwnedThread({ threadId: params.threadId });
     thread.messages = this.byPosition(thread.messages ?? []);
     return this.jsonApiService.buildSingle(HandbookThreadDescriptor.model, thread);
@@ -197,7 +200,7 @@ export class HandbookThreadService extends AbstractService<
    * applies `buildUserHasAccess`. Without the read below, one administrator
    * could rename another's thread and merely be refused the response.
    */
-  async patch(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+  async patch(params: { id: string; [key: string]: any }): Promise<JsonApiSingleDocument> {
     await this.readOwnedThread({ threadId: params.id });
     return super.patch(params);
   }

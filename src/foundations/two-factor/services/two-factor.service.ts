@@ -11,6 +11,7 @@ import { TwoFactorConfigRepository } from "../repositories/two-factor-config.rep
 import { BackupCodeService } from "./backup-code.service";
 import { PasskeyService } from "./passkey.service";
 import { TotpService } from "./totp.service";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 export type TwoFactorMethod = "totp" | "passkey" | "backup";
 
@@ -77,7 +78,7 @@ export class TwoFactorService {
    * @param userId - The user's ID
    * @returns JSON:API response with 2FA status
    */
-  async getStatus(userId: string): Promise<any> {
+  async getStatus(userId: string): Promise<JsonApiSingleDocument> {
     const config = await this.twoFactorConfigRepository.findByUserId({ userId });
 
     // Check method availability in parallel
@@ -111,7 +112,7 @@ export class TwoFactorService {
    * @throws BadRequestException if no 2FA methods are configured
    * @returns JSON:API response with the 2FA config
    */
-  async enable(userId: string, preferredMethod: TwoFactorMethod = "totp"): Promise<any> {
+  async enable(userId: string, preferredMethod: TwoFactorMethod = "totp"): Promise<JsonApiSingleDocument> {
     // Check that at least one method is available
     const [hasTotp, hasPasskey] = await Promise.all([
       this.totpService.hasVerifiedAuthenticator({ userId }),
@@ -265,7 +266,7 @@ export class TwoFactorService {
    * @param code - The 6-digit TOTP code
    * @returns JSON:API response with verification result
    */
-  async verifyTotp(pendingId: string, code: string): Promise<any> {
+  async verifyTotp(pendingId: string, code: string): Promise<JsonApiSingleDocument> {
     const pendingData = await this.validateAndGetPending(pendingId, "login");
 
     // Check attempt count
@@ -308,7 +309,7 @@ export class TwoFactorService {
   async verifyPasskey(
     pendingId: string,
     response: Parameters<typeof PasskeyService.prototype.verifyAuthentication>[0]["response"],
-  ): Promise<any> {
+  ): Promise<JsonApiSingleDocument> {
     const pendingData = await this.validateAndGetPending(pendingId, "login");
 
     // Check attempt count
@@ -365,7 +366,7 @@ export class TwoFactorService {
    * @param code - The backup code
    * @returns JSON:API response with verification result
    */
-  async verifyBackupCode(pendingId: string, code: string): Promise<any> {
+  async verifyBackupCode(pendingId: string, code: string): Promise<JsonApiSingleDocument> {
     const pendingData = await this.validateAndGetPending(pendingId, "login");
 
     // Check attempt count

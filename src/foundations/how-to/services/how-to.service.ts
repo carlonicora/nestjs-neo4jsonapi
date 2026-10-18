@@ -21,6 +21,10 @@ import { ChunkerService } from "../../chunker/services/chunker.service";
 import { HowTo, HowToDescriptor } from "../entities/how-to";
 import { howToMeta } from "../entities/how-to.meta";
 import { HowToRepository } from "../repositories/how-to.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.relationships> {
@@ -119,13 +123,13 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
     }
   }
 
-  async findPublishedList(params: { query: any; howToType?: string }): Promise<any> {
+  async findPublishedList(params: { query: any; howToType?: string }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
     const data = await this.howToRepository.findPublished({ howToType: params.howToType });
     return this.jsonApiService.buildList(HowToDescriptor.model, data, paginator);
   }
 
-  async findPublishedArticle(params: { howToType: string; slug: string }): Promise<any> {
+  async findPublishedArticle(params: { howToType: string; slug: string }): Promise<JsonApiSingleDocument> {
     const data = await this.howToRepository.findPublishedByTypeAndSlug(params);
     if (!data) {
       throw new NotFoundException(`HowTo ${params.howToType}/${params.slug} not found`);
@@ -133,7 +137,7 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
     return this.jsonApiService.buildSingle(HowToDescriptor.model, data);
   }
 
-  async findRelatedList(params: { howToType: string; slug: string; query: any }): Promise<any> {
+  async findRelatedList(params: { howToType: string; slug: string; query: any }): Promise<JsonApiListDocument> {
     const article = await this.howToRepository.findPublishedByTypeAndSlug({
       howToType: params.howToType,
       slug: params.slug,
@@ -146,7 +150,7 @@ export class HowToService extends AbstractService<HowTo, typeof HowToDescriptor.
     return this.jsonApiService.buildList(HowToDescriptor.model, data, paginator);
   }
 
-  async addRelated(params: { howToId: string; relatedId: string }): Promise<any> {
+  async addRelated(params: { howToId: string; relatedId: string }): Promise<JsonApiSingleDocument> {
     await this.howToRepository.addRelated(params);
     return this.findById({ id: params.howToId });
   }

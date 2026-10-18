@@ -1,7 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 
-import type { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
-
 // Mock guards before imports
 vi.mock("../../../common/guards/jwt.auth.guard", () => ({
   JwtAuthGuard: class MockJwtAuthGuard {
@@ -33,6 +31,7 @@ import { ClsService } from "nestjs-cls";
 import { ChunkController } from "../controllers/chunk.controller";
 import { ChunkService } from "../services/chunk.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("ChunkController", () => {
   let controller: ChunkController;
@@ -71,7 +70,7 @@ describe("ChunkController", () => {
 
   describe("GET /chunks/:chunkId (findById)", () => {
     it("should return chunk by id", async () => {
-      const mockChunk = {
+      const mockChunk: JsonApiSingleDocument = {
         data: {
           type: "chunks",
           id: TEST_IDS.chunkId,
@@ -81,8 +80,7 @@ describe("ChunkController", () => {
           },
         },
       };
-      // ChunkService.findById declares JsonApiDataInterface but resolves a full JSON:API document.
-      chunkService.findById.mockResolvedValue(mockChunk as unknown as JsonApiDataInterface);
+      chunkService.findById.mockResolvedValue(mockChunk);
 
       const result = await controller.findById(TEST_IDS.chunkId);
 

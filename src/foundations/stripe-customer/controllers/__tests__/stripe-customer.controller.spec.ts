@@ -38,8 +38,8 @@ import { StripeCustomerAdminService } from "../../services/stripe-customer-admin
 import { StripeCustomerApiService } from "../../services/stripe-customer-api.service";
 import { StripeCustomerRepository } from "../../repositories/stripe-customer.repository";
 import { JsonApiService } from "../../../../core/jsonapi";
-import { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
+import { JsonApiSingleDocument } from "../../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("StripeCustomerController", () => {
   let controller: StripeCustomerController;
@@ -71,8 +71,7 @@ describe("StripeCustomerController", () => {
     updatedAt: new Date(),
   };
 
-  // StripeCustomerAdminService declares Promise<JsonApiDataInterface>, but returns a JSON:API document ({ data: ... }).
-  const MOCK_CUSTOMER_RESPONSE = {
+  const MOCK_CUSTOMER_RESPONSE: JsonApiSingleDocument = {
     data: {
       type: "stripe-customers",
       id: TEST_IDS.customerId,
@@ -85,7 +84,7 @@ describe("StripeCustomerController", () => {
         delinquent: false,
       },
     },
-  } as unknown as JsonApiDataInterface;
+  };
 
   const MOCK_PAYMENT_METHODS_RESPONSE = {
     data: [

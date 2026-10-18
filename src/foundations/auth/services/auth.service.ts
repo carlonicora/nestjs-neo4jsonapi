@@ -11,7 +11,6 @@ import { AuthPostLoginDataDTO } from "../../auth/dtos/auth.post.login.dto";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface, ConfigAuthInterface } from "../../../config/interfaces";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
@@ -33,6 +32,10 @@ import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/registration-hook.interface";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Every method here is a bespoke, non-CRUD auth flow (login, register,
@@ -123,7 +126,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     return this.authConfig.emailLocale ?? "en";
   }
 
-  async findCurrentAuth(): Promise<JsonApiDataInterface> {
+  async findCurrentAuth(): Promise<JsonApiSingleDocument> {
     const token = this.clsService.get("token");
 
     const auth: Auth = await this.authRepository.findByToken({
@@ -171,7 +174,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     return auth;
   }
 
-  async createToken(params: { user: User; refreshToken?: string }): Promise<JsonApiDataInterface> {
+  async createToken(params: { user: User; refreshToken?: string }): Promise<JsonApiSingleDocument> {
     const auth = await this.createAuth({ user: params.user, refreshToken: params.refreshToken });
 
     if (auth.user.company?.id) {
@@ -195,7 +198,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     return await this.authRepository.findByCode({ code: params.authCodeId });
   }
 
-  async refreshToken(params: { refreshToken: string }): Promise<any> {
+  async refreshToken(params: { refreshToken: string }): Promise<JsonApiSingleDocument> {
     let auth: Auth = await this.authRepository.findByRefreshToken({
       authId: params.refreshToken,
     });
@@ -243,7 +246,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     return this.jsonApiService.buildSingle(this.descriptor.model, newAuth);
   }
 
-  async login(params: { data: AuthPostLoginDataDTO }): Promise<any> {
+  async login(params: { data: AuthPostLoginDataDTO }): Promise<JsonApiSingleDocument> {
     const user: User = await this.users.findByEmail({
       email: params.data.attributes.email,
     });
@@ -318,7 +321,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
    * The companies the authenticated (or company-selection scoped) user may act
    * for. Backs the selection screen and the company switcher.
    */
-  async findCompanies(): Promise<JsonApiDataInterface> {
+  async findCompanies(): Promise<JsonApiListDocument> {
     const userId = this.clsService.get<string>("userId");
 
     const companies = await this.authRepository.findUserCompanies({ userId: userId });
@@ -330,7 +333,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
    * Exchanges a company-selection (or full) token for a session scoped to
    * `companyId`, carrying that company's roles.
    */
-  async selectCompany(params: { companyId: string }): Promise<JsonApiDataInterface> {
+  async selectCompany(params: { companyId: string }): Promise<JsonApiSingleDocument> {
     const userId = this.clsService.get<string>("userId");
 
     const user: User = await this.authRepository.findUserById({
@@ -351,7 +354,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
    * @param userId - The user's ID (extracted from pending session)
    * @returns Full auth token response
    */
-  async completeTwoFactorLogin(userId: string): Promise<JsonApiDataInterface> {
+  async completeTwoFactorLogin(userId: string): Promise<JsonApiSingleDocument> {
     // Use findForTwoFactorLogin - doesn't require companyId in CLS, retrieves user with roles/company/features
     const user: User = await this.users.findForTwoFactorLogin({ userId });
 
@@ -489,7 +492,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     }
   }
 
-  async findAuthByCode(params: { code: string }): Promise<JsonApiDataInterface> {
+  async findAuthByCode(params: { code: string }): Promise<JsonApiSingleDocument> {
     const authCode: AuthCode = await this.authRepository.findByCode({
       code: params.code,
     });

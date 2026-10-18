@@ -5,7 +5,6 @@ import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
 import { EmailService } from "../../../core/email/services/email.service";
 import { ResponseLanguageService } from "../../user/services/response-language.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
@@ -13,6 +12,10 @@ import { UserRepository } from "../../user/repositories/user.repository";
 import { WaitlistPostDataDTO } from "../dtos/waitlist.post.dto";
 import { Waitlist, WaitlistDescriptor, WaitlistStatus } from "../entities/waitlist";
 import { WaitlistRepository } from "../repositories/waitlist.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDescriptor.relationships> {
@@ -39,7 +42,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
    * Create a new waitlist entry with typed DTO.
    * Handles: duplicate check, confirmation code generation, email sending.
    */
-  async createEntry(params: { data: WaitlistPostDataDTO }): Promise<JsonApiDataInterface> {
+  async createEntry(params: { data: WaitlistPostDataDTO }): Promise<JsonApiSingleDocument> {
     const { id, attributes } = params.data;
     const email = attributes.email.toLowerCase();
 
@@ -90,7 +93,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
   /**
    * Find entries with optional status filter.
    */
-  async findAllByStatus(params: { query: any; status?: WaitlistStatus }): Promise<JsonApiDataInterface> {
+  async findAllByStatus(params: { query: any; status?: WaitlistStatus }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
     return this.jsonApiService.buildList(
       WaitlistDescriptor.model,
@@ -105,7 +108,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
   /**
    * Confirm a waitlist entry via confirmation code.
    */
-  async confirm(params: { code: string }): Promise<JsonApiDataInterface> {
+  async confirm(params: { code: string }): Promise<JsonApiSingleDocument> {
     const entry = await this.waitlistRepository.findByConfirmationCode({ code: params.code });
 
     if (!entry) {
@@ -138,7 +141,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
   /**
    * Invite a confirmed waitlist entry.
    */
-  async invite(params: { id: string }): Promise<JsonApiDataInterface> {
+  async invite(params: { id: string }): Promise<JsonApiSingleDocument> {
     const entry = await this.repository.findById({ id: params.id });
 
     if (!entry) {
@@ -215,7 +218,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
   /**
    * Mark entry as registered after user creates account.
    */
-  async markAsRegistered(params: { inviteCode: string; userId: string }): Promise<JsonApiDataInterface> {
+  async markAsRegistered(params: { inviteCode: string; userId: string }): Promise<JsonApiSingleDocument> {
     const entry = await this.waitlistRepository.findByInviteCode({ code: params.inviteCode });
     if (!entry) {
       throw new HttpException("Invalid invite code", HttpStatus.NOT_FOUND);

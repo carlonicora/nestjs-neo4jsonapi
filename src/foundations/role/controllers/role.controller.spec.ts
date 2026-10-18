@@ -33,11 +33,14 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { CacheService } from "../../../core/cache/services/cache.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { AuditService } from "../../audit/services/audit.service";
 import { RolePostDTO } from "../dtos/role.post.dto";
 import { RoleService } from "../services/role.service";
 import { RoleController } from "./role.controller";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("RoleController", () => {
   let controller: RoleController;
@@ -47,20 +50,21 @@ describe("RoleController", () => {
   const MOCK_ROLE_ID = "550e8400-e29b-41d4-a716-446655440000";
   const MOCK_ROLE_ID_2 = "550e8400-e29b-41d4-a716-446655440001";
 
-  const mockServiceResponse: JsonApiDataInterface = {
-    type: "roles",
-    id: MOCK_ROLE_ID,
-    attributes: {
-      name: "Administrator",
-      description: "Full system access",
+  const mockServiceResponse: JsonApiSingleDocument = {
+    data: {
+      type: "roles",
+      id: MOCK_ROLE_ID,
+      attributes: {
+        name: "Administrator",
+        description: "Full system access",
+      },
     },
   };
 
-  // RoleService.find declares Promise<JsonApiDataInterface> but returns a JSON:API list document.
-  const mockListResponse = {
-    data: [mockServiceResponse],
+  const mockListResponse: JsonApiListDocument = {
+    data: [mockServiceResponse.data],
     meta: { total: 1 },
-  } as unknown as JsonApiDataInterface;
+  };
 
   beforeEach(async () => {
     const mockRoleService = {
@@ -232,14 +236,16 @@ describe("RoleController", () => {
     } as any;
 
     it("should update a role", async () => {
-      roleService.update.mockResolvedValue({ ...mockServiceResponse, attributes: { name: "Updated Role" } });
+      roleService.update.mockResolvedValue({
+        data: { ...mockServiceResponse.data, attributes: { name: "Updated Role" } },
+      });
 
       const result = await controller.update(updateDto, MOCK_ROLE_ID);
 
       expect(roleService.update).toHaveBeenCalledWith({
         data: updateDto.data,
       });
-      expect(result.attributes.name).toBe("Updated Role");
+      expect(result.data.attributes.name).toBe("Updated Role");
     });
 
     it("should throw PRECONDITION_FAILED when IDs do not match", async () => {

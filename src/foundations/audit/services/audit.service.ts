@@ -8,6 +8,7 @@ import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.pagi
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { auditLogModel } from "../entities/audit.model";
 import { AuditRepository } from "../repositories/audit.repository";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 interface AuditChange {
   fieldName: string;
@@ -152,7 +153,7 @@ export class AuditService {
     });
   }
 
-  async findByEntity(params: { entityType: string; entityId: string; query: any }): Promise<any> {
+  async findByEntity(params: { entityType: string; entityId: string; query: any }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -167,7 +168,7 @@ export class AuditService {
     );
   }
 
-  async findByUser(params: { query: any; userId: string }): Promise<any> {
+  async findByUser(params: { query: any; userId: string }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(

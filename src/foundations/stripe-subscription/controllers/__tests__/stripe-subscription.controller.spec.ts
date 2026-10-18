@@ -38,7 +38,10 @@ import { StripeSubscriptionController } from "../stripe-subscription.controller"
 import { StripeSubscriptionAdminService } from "../../services/stripe-subscription-admin.service";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 import type { StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
-import type { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import type {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("StripeSubscriptionController", () => {
   let controller: StripeSubscriptionController;
@@ -52,7 +55,7 @@ describe("StripeSubscriptionController", () => {
     priceId: "price_test123",
   };
 
-  const MOCK_SUBSCRIPTION_RESPONSE = {
+  const MOCK_SUBSCRIPTION_RESPONSE: JsonApiSingleDocument = {
     data: {
       type: "subscriptions",
       id: TEST_IDS.subscriptionId,
@@ -62,12 +65,6 @@ describe("StripeSubscriptionController", () => {
       },
     },
   };
-
-  // StripeSubscriptionAdminService declares Promise<JsonApiDataInterface>, but at runtime it
-  // returns the JSON:API document built by JsonApiService ({ data: ... }). The fixtures mirror
-  // the runtime shape; this helper bridges them to the declared return type.
-  const asServiceResult = (document: { data: JsonApiDataInterface | JsonApiDataInterface[] }): JsonApiDataInterface =>
-    document as unknown as JsonApiDataInterface;
 
   // Create a mock authenticated request
   const createMockRequest = (companyId: string = TEST_IDS.companyId): AuthenticatedRequest => {
@@ -126,8 +123,8 @@ describe("StripeSubscriptionController", () => {
     it("should list all subscriptions without status filter", async () => {
       const req = createMockRequest();
       const mockQuery = { page: { size: 10, number: 1 } };
-      const mockSubscriptions = { data: [MOCK_SUBSCRIPTION_RESPONSE.data] };
-      subscriptionService.listSubscriptions.mockResolvedValue(asServiceResult(mockSubscriptions));
+      const mockSubscriptions: JsonApiListDocument = { data: [MOCK_SUBSCRIPTION_RESPONSE.data] };
+      subscriptionService.listSubscriptions.mockResolvedValue(mockSubscriptions);
 
       await controller.listSubscriptions(req, mockReply, mockQuery, undefined);
 
@@ -142,8 +139,8 @@ describe("StripeSubscriptionController", () => {
     it("should list subscriptions with status filter", async () => {
       const req = createMockRequest();
       const mockQuery = { page: { size: 10, number: 1 } };
-      const mockSubscriptions = { data: [MOCK_SUBSCRIPTION_RESPONSE.data] };
-      subscriptionService.listSubscriptions.mockResolvedValue(asServiceResult(mockSubscriptions));
+      const mockSubscriptions: JsonApiListDocument = { data: [MOCK_SUBSCRIPTION_RESPONSE.data] };
+      subscriptionService.listSubscriptions.mockResolvedValue(mockSubscriptions);
 
       await controller.listSubscriptions(req, mockReply, mockQuery, "active");
 
@@ -158,7 +155,7 @@ describe("StripeSubscriptionController", () => {
     it("should pass query object from query params", async () => {
       const req = createMockRequest();
       const customQuery = { filter: { active: true }, page: { size: 20 } };
-      subscriptionService.listSubscriptions.mockResolvedValue(asServiceResult({ data: [] }));
+      subscriptionService.listSubscriptions.mockResolvedValue({ data: [] });
 
       await controller.listSubscriptions(req, mockReply, customQuery, undefined);
 
@@ -173,7 +170,7 @@ describe("StripeSubscriptionController", () => {
   describe("GET /subscriptions/:subscriptionId", () => {
     it("should get subscription by id successfully", async () => {
       const req = createMockRequest();
-      subscriptionService.getSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.getSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.getSubscription(req, mockReply, TEST_IDS.subscriptionId);
 
@@ -187,7 +184,7 @@ describe("StripeSubscriptionController", () => {
     it("should extract subscriptionId from path params", async () => {
       const req = createMockRequest();
       const customSubscriptionId = "sub_custom_789";
-      subscriptionService.getSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.getSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.getSubscription(req, mockReply, customSubscriptionId);
 
@@ -227,7 +224,7 @@ describe("StripeSubscriptionController", () => {
         },
       };
       const mockServiceResponse = {
-        data: asServiceResult(MOCK_SUBSCRIPTION_RESPONSE),
+        data: MOCK_SUBSCRIPTION_RESPONSE,
         clientSecret: "pi_secret",
         paymentIntentId: "pi_123",
         requiresAction: false,
@@ -268,7 +265,7 @@ describe("StripeSubscriptionController", () => {
         },
       };
       const mockServiceResponse = {
-        data: asServiceResult(MOCK_SUBSCRIPTION_RESPONSE),
+        data: MOCK_SUBSCRIPTION_RESPONSE,
         clientSecret: "pi_secret",
         paymentIntentId: "pi_123",
         requiresAction: false,
@@ -299,7 +296,7 @@ describe("StripeSubscriptionController", () => {
           },
         },
       };
-      subscriptionService.cancelSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.cancelSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.cancelSubscription(req, mockReply, TEST_IDS.subscriptionId, body as any);
 
@@ -322,7 +319,7 @@ describe("StripeSubscriptionController", () => {
           },
         },
       };
-      subscriptionService.cancelSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.cancelSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.cancelSubscription(req, mockReply, TEST_IDS.subscriptionId, body as any);
 
@@ -343,7 +340,7 @@ describe("StripeSubscriptionController", () => {
           attributes: {},
         },
       };
-      subscriptionService.cancelSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.cancelSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.cancelSubscription(req, mockReply, customSubscriptionId, body as any);
 
@@ -358,7 +355,7 @@ describe("StripeSubscriptionController", () => {
   describe("POST /subscriptions/:subscriptionId/pause", () => {
     it("should pause subscription successfully", async () => {
       const req = createMockRequest();
-      subscriptionService.pauseSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.pauseSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.pauseSubscription(req, mockReply, TEST_IDS.subscriptionId);
 
@@ -372,7 +369,7 @@ describe("StripeSubscriptionController", () => {
     it("should extract subscriptionId from path params", async () => {
       const req = createMockRequest();
       const customSubscriptionId = "sub_pause_789";
-      subscriptionService.pauseSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.pauseSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.pauseSubscription(req, mockReply, customSubscriptionId);
 
@@ -386,7 +383,7 @@ describe("StripeSubscriptionController", () => {
   describe("POST /subscriptions/:subscriptionId/resume", () => {
     it("should resume subscription successfully", async () => {
       const req = createMockRequest();
-      subscriptionService.resumeSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.resumeSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.resumeSubscription(req, mockReply, TEST_IDS.subscriptionId);
 
@@ -400,7 +397,7 @@ describe("StripeSubscriptionController", () => {
     it("should extract subscriptionId from path params", async () => {
       const req = createMockRequest();
       const customSubscriptionId = "sub_resume_789";
-      subscriptionService.resumeSubscription.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.resumeSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.resumeSubscription(req, mockReply, customSubscriptionId);
 
@@ -424,7 +421,7 @@ describe("StripeSubscriptionController", () => {
           },
         },
       };
-      subscriptionService.changePlan.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.changePlan.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.changePlan(req, mockReply, TEST_IDS.subscriptionId, body as any);
 
@@ -503,7 +500,7 @@ describe("StripeSubscriptionController", () => {
           },
         },
       };
-      subscriptionService.changePlan.mockResolvedValue(asServiceResult(MOCK_SUBSCRIPTION_RESPONSE));
+      subscriptionService.changePlan.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
 
       await controller.changePlan(req, mockReply, customSubscriptionId, body as any);
 

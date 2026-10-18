@@ -16,6 +16,7 @@ import { ReferralCodeDescriptor } from "../entities/referral-code";
 import { ReferralStatsDescriptor } from "../entities/referral-stats";
 import { REFERRAL_CONFIG, ReferralModuleConfig } from "../interfaces/referral.config.interface";
 import { ReferralCompletionHandler } from "../../stripe-webhook/interfaces/referral-completion-handler.interface";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Referral statistics returned by getStats
@@ -302,7 +303,7 @@ export class ReferralService implements ReferralCompletionHandler {
    * Creates a new code if one doesn't exist.
    * @returns JSON:API formatted referral code response
    */
-  async getMyCodeJsonApi(): Promise<any> {
+  async getMyCodeJsonApi(): Promise<JsonApiSingleDocument> {
     const companyId = this.clsService.get("companyId") as string;
     const referralCode = await this.getOrCreateReferralCode();
 
@@ -316,7 +317,7 @@ export class ReferralService implements ReferralCompletionHandler {
    * Get referral statistics as JSON:API response.
    * @returns JSON:API formatted referral stats response
    */
-  async getStatsJsonApi(): Promise<any> {
+  async getStatsJsonApi(): Promise<JsonApiSingleDocument> {
     const companyId = this.clsService.get("companyId") as string;
     const stats = await this.getStats();
 

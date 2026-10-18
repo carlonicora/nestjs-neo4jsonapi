@@ -328,16 +328,15 @@ describe("Assistant lifecycle (integration, scripted agent)", () => {
 
   it("inherited find() returns the user's assistant threads via JsonApiService.buildList", async () => {
     const response = await service.find({ query: {} });
-    if (!("data" in response)) throw new Error("find did not return a JSON:API document");
     expect(response.data).toBeDefined();
-    expect(Array.isArray((response as any).data)).toBe(true);
-    expect((response as any).data.length).toBe(1);
+    expect(Array.isArray(response.data)).toBe(true);
+    expect(response.data.length).toBe(1);
   });
 
   it("inherited findById() returns the assistant thread as a JSON:API document", async () => {
     const [id] = Array.from(assistantStorage.keys());
     const response = await service.findById({ id });
-    expect((response as any).data).toMatchObject({ type: "assistants", id });
+    expect(response.data).toMatchObject({ type: "assistants", id });
   });
 
   it("inherited patch() renames via patchFromDTO envelope", async () => {

@@ -8,6 +8,7 @@ import { TokenUsageReportBreakdownDescriptor } from "../entities/tokenusage-repo
 import { TokenUsageReportSummaryDescriptor } from "../entities/tokenusage-report-summary";
 import { TokenUsageReportTimelineDescriptor } from "../entities/tokenusage-report-timeline";
 import { TokenUsageReportRepository } from "../repositories/tokenusage.report.repository";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Serialises the self-service reporting rollups as JSON:API documents.
@@ -34,7 +35,7 @@ export class TokenUsageReportService extends AbstractService<TokenUsage, typeof 
     super(jsonApiService, tokenUsageReportRepository, clsService, TokenUsageDescriptor.model);
   }
 
-  async getSummary(params: { from: string; to: string }): Promise<any> {
+  async getSummary(params: { from: string; to: string }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageReportRepository.findSummary({ from: params.from, to: params.to });
 
     return this.jsonApiService.buildList(TokenUsageReportSummaryDescriptor.model, rows);
@@ -45,7 +46,7 @@ export class TokenUsageReportService extends AbstractService<TokenUsage, typeof 
     to: string;
     granularity: "day" | "week" | "month";
     stackBy: "type";
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageReportRepository.findTimeline({
       from: params.from,
       to: params.to,
@@ -63,7 +64,7 @@ export class TokenUsageReportService extends AbstractService<TokenUsage, typeof 
     targetLabel?: string;
     metric: TokenUsageReportMetric;
     limit: number;
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageReportRepository.findBreakdown({
       from: params.from,
       to: params.to,

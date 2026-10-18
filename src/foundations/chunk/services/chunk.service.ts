@@ -13,7 +13,6 @@ import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigEmbeddingContextInterface } from "../../../config/interfaces/config.embedding.context.interface";
 import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { TracingService } from "../../../core/tracing/services/tracing.service";
@@ -27,6 +26,7 @@ import {
 } from "../../chunk/services/embedding-context";
 import { KeyConceptRepository } from "../../keyconcept/repositories/keyconcept.repository";
 import { KeyConceptService } from "../../keyconcept/services/keyconcept.service";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class ChunkService {
@@ -141,7 +141,7 @@ export class ChunkService {
     return this.createEmptyChunkAnalysis();
   }
 
-  async findById(params: { chunkId: string }): Promise<JsonApiDataInterface> {
+  async findById(params: { chunkId: string }): Promise<JsonApiSingleDocument> {
     const chunk = await this.chunkRepository.findChunkById({
       chunkId: params.chunkId,
     });

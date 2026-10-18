@@ -35,15 +35,17 @@ import { FastifyReply } from "fastify";
 import { StripeInvoiceController } from "../stripe-invoice.controller";
 import { StripeInvoiceAdminService } from "../../services/stripe-invoice-admin.service";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
-import type { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("StripeInvoiceController", () => {
   let controller: StripeInvoiceController;
   let adminService: Mocked<StripeInvoiceAdminService>;
   let mockReply: Mocked<FastifyReply>;
 
-  // Test data constants. StripeInvoiceAdminService.listInvoices/getInvoice declare
-  // JsonApiDataInterface but resolve a full JSON:API document, hence the casts below.
+  // Test data constants
   const TEST_IDS = {
     companyId: "660e8400-e29b-41d4-a716-446655440001",
     userId: "550e8400-e29b-41d4-a716-446655440001",
@@ -52,7 +54,7 @@ describe("StripeInvoiceController", () => {
     subscriptionId: "aa0e8400-e29b-41d4-a716-446655440001",
   };
 
-  const MOCK_INVOICE_RESPONSE = {
+  const MOCK_INVOICE_RESPONSE: JsonApiSingleDocument = {
     data: {
       type: "stripe-invoices",
       id: TEST_IDS.invoiceId,
@@ -67,7 +69,7 @@ describe("StripeInvoiceController", () => {
     },
   };
 
-  const MOCK_INVOICES_LIST_RESPONSE = {
+  const MOCK_INVOICES_LIST_RESPONSE: JsonApiListDocument = {
     data: [MOCK_INVOICE_RESPONSE.data],
     meta: {
       total: 1,
@@ -146,7 +148,7 @@ describe("StripeInvoiceController", () => {
     it("should list invoices without status filter", async () => {
       const req = createMockRequest();
       const mockQuery = { page: { size: 10, number: 1 } };
-      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE as unknown as JsonApiDataInterface);
+      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE);
 
       await controller.listInvoices(req, mockReply, mockQuery, undefined);
 
@@ -161,7 +163,7 @@ describe("StripeInvoiceController", () => {
     it("should list invoices with status filter", async () => {
       const req = createMockRequest();
       const mockQuery = { page: { size: 10, number: 1 } };
-      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE as unknown as JsonApiDataInterface);
+      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE);
 
       await controller.listInvoices(req, mockReply, mockQuery, "paid");
 
@@ -176,7 +178,7 @@ describe("StripeInvoiceController", () => {
     it("should pass query object from query params", async () => {
       const req = createMockRequest();
       const customQuery = { filter: { paid: true }, page: { size: 20 } };
-      adminService.listInvoices.mockResolvedValue({ data: [] } as unknown as JsonApiDataInterface);
+      adminService.listInvoices.mockResolvedValue({ data: [] });
 
       await controller.listInvoices(req, mockReply, customQuery, undefined);
 
@@ -190,7 +192,7 @@ describe("StripeInvoiceController", () => {
     it("should filter by different invoice statuses", async () => {
       const req = createMockRequest();
       const mockQuery = {};
-      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE as unknown as JsonApiDataInterface);
+      adminService.listInvoices.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE);
 
       // Test with 'open' status
       await controller.listInvoices(req, mockReply, mockQuery, "open");
@@ -263,7 +265,7 @@ describe("StripeInvoiceController", () => {
   describe("GET /stripe-invoices/:invoiceId", () => {
     it("should get invoice by id successfully", async () => {
       const req = createMockRequest();
-      adminService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE as unknown as JsonApiDataInterface);
+      adminService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE);
 
       await controller.getInvoice(req, mockReply, TEST_IDS.invoiceId);
 
@@ -277,7 +279,7 @@ describe("StripeInvoiceController", () => {
     it("should extract invoiceId from path params", async () => {
       const req = createMockRequest();
       const customInvoiceId = "invoice_custom_789";
-      adminService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE as unknown as JsonApiDataInterface);
+      adminService.getInvoice.mockResolvedValue(MOCK_INVOICE_RESPONSE);
 
       await controller.getInvoice(req, mockReply, customInvoiceId);
 

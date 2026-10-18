@@ -2,21 +2,8 @@ import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Redis } from "ioredis";
 import { BaseConfigInterface, ConfigCacheInterface, ConfigRedisInterface } from "../../../config/interfaces";
+import { JsonApiDocument, JsonApiResourceObject } from "../../jsonapi/interfaces/jsonapi.document.interface";
 import { AppLoggingService } from "../../logging/services/logging.service";
-
-interface JsonApiResource {
-  type: string;
-  id: string;
-  attributes?: any;
-  relationships?: any;
-}
-
-interface JsonApiResponse {
-  data: JsonApiResource | JsonApiResource[];
-  included?: JsonApiResource[];
-  meta?: any;
-  links?: any;
-}
 
 @Injectable()
 export class CacheService implements OnModuleDestroy {
@@ -97,7 +84,7 @@ export class CacheService implements OnModuleDestroy {
       return;
     }
 
-    const elements = this.extractJsonApiElements(data as JsonApiResponse);
+    const elements = this.extractJsonApiElements(data as JsonApiDocument);
     const pipeline = this.redis.pipeline();
 
     for (const element of elements) {
@@ -120,8 +107,8 @@ export class CacheService implements OnModuleDestroy {
     );
   }
 
-  private extractJsonApiElements(response: JsonApiResponse): JsonApiResource[] {
-    const elements: JsonApiResource[] = [];
+  private extractJsonApiElements(response: JsonApiDocument): JsonApiResourceObject[] {
+    const elements: JsonApiResourceObject[] = [];
 
     if (Array.isArray(response.data)) {
       elements.push(...response.data);

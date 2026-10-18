@@ -37,7 +37,9 @@ describe("BackupCodeService", () => {
     requestedRounds.length = 0;
 
     mockJsonApiService = {
-      buildSingle: vi.fn().mockImplementation((model, data) => ({ data })),
+      buildSingle: vi.fn().mockImplementation((model, data) => ({
+        data: { type: model.type, id: data.id, attributes: data },
+      })),
       buildList: vi.fn().mockImplementation((model, data) => ({ data })),
     } as any;
 
@@ -69,15 +71,15 @@ describe("BackupCodeService", () => {
     it("should generate 10 backup codes", async () => {
       const result = await service.generateCodes({ userId: TEST_IDS.userId });
 
-      expect(result.data).toHaveProperty("codes");
-      expect(result.data.codes).toHaveLength(10);
-      expect(result.data).toHaveProperty("count", 10);
+      expect(result.data.attributes).toHaveProperty("codes");
+      expect(result.data.attributes.codes).toHaveLength(10);
+      expect(result.data.attributes).toHaveProperty("count", 10);
     });
 
     it("should generate codes in correct format (8 hex characters)", async () => {
       const result = await service.generateCodes({ userId: TEST_IDS.userId });
 
-      for (const code of result.data.codes) {
+      for (const code of result.data.attributes.codes) {
         expect(code).toMatch(/^[0-9A-F]{8}$/);
       }
     });
@@ -85,7 +87,7 @@ describe("BackupCodeService", () => {
     it("should generate unique codes", async () => {
       const result = await service.generateCodes({ userId: TEST_IDS.userId });
 
-      const uniqueCodes = new Set(result.data.codes);
+      const uniqueCodes = new Set(result.data.attributes.codes);
       expect(uniqueCodes.size).toBe(10);
     });
 
@@ -111,7 +113,7 @@ describe("BackupCodeService", () => {
     it("should return true for valid backup code", async () => {
       // First generate codes to get a valid one
       const generateResult = await service.generateCodes({ userId: TEST_IDS.userId });
-      const validCode = generateResult.data.codes[0];
+      const validCode = generateResult.data.attributes.codes[0];
 
       // Get the hash that was stored
       const storedHash = mockBackupCodeRepository.createForUser.mock.calls[0][0].codeHash;
@@ -155,7 +157,7 @@ describe("BackupCodeService", () => {
 
     it("should normalize code (uppercase, remove dashes/spaces)", async () => {
       const generateResult = await service.generateCodes({ userId: TEST_IDS.userId });
-      const validCode = generateResult.data.codes[0];
+      const validCode = generateResult.data.attributes.codes[0];
       const storedHash = mockBackupCodeRepository.createForUser.mock.calls[0][0].codeHash;
 
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
@@ -189,7 +191,7 @@ describe("BackupCodeService", () => {
 
       const result = await service.getUnusedCount({ userId: TEST_IDS.userId });
 
-      expect(result.data).toHaveProperty("count", 7);
+      expect(result.data.attributes).toHaveProperty("count", 7);
     });
 
     it("should return 0 when user has no backup codes", async () => {
@@ -197,7 +199,7 @@ describe("BackupCodeService", () => {
 
       const result = await service.getUnusedCount({ userId: TEST_IDS.userId });
 
-      expect(result.data).toHaveProperty("count", 0);
+      expect(result.data.attributes).toHaveProperty("count", 0);
     });
   });
 
@@ -216,8 +218,8 @@ describe("BackupCodeService", () => {
       const result = await service.regenerateCodes({ userId: TEST_IDS.userId });
 
       expect(mockBackupCodeRepository.deleteAllByUserId).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
-      expect(result.data).toHaveProperty("codes");
-      expect(result.data.codes).toHaveLength(10);
+      expect(result.data.attributes).toHaveProperty("codes");
+      expect(result.data.attributes.codes).toHaveLength(10);
     });
 
     it("should allow regeneration even when codes exist", async () => {
@@ -226,7 +228,7 @@ describe("BackupCodeService", () => {
 
       const result = await service.regenerateCodes({ userId: TEST_IDS.userId });
 
-      expect(result.data).toHaveProperty("codes");
+      expect(result.data.attributes).toHaveProperty("codes");
     });
   });
 
@@ -262,7 +264,7 @@ describe("BackupCodeService", () => {
   describe("single-use enforcement", () => {
     it("should mark code as used after validation", async () => {
       const generateResult = await service.generateCodes({ userId: TEST_IDS.userId });
-      const validCode = generateResult.data.codes[0];
+      const validCode = generateResult.data.attributes.codes[0];
       const storedHash = mockBackupCodeRepository.createForUser.mock.calls[0][0].codeHash;
 
       mockBackupCodeRepository.findUnusedByUserId.mockResolvedValue([
@@ -295,7 +297,7 @@ describe("BackupCodeService", () => {
     it("should generate codes with exactly 8 hex characters", async () => {
       const result = await service.generateCodes({ userId: TEST_IDS.userId });
 
-      for (const code of result.data.codes) {
+      for (const code of result.data.attributes.codes) {
         expect(code.length).toBe(8);
         expect(code).toMatch(/^[0-9A-F]+$/);
       }
@@ -304,7 +306,7 @@ describe("BackupCodeService", () => {
     it("should generate codes in uppercase", async () => {
       const result = await service.generateCodes({ userId: TEST_IDS.userId });
 
-      for (const code of result.data.codes) {
+      for (const code of result.data.attributes.codes) {
         expect(code).toBe(code.toUpperCase());
       }
     });

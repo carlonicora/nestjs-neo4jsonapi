@@ -41,10 +41,10 @@ vi.mock("../../../core/security/services/security.service", () => ({
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { RoleService } from "../services/role.service";
 import { RoleUserController } from "./role.user.controller";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("RoleUserController", () => {
   let controller: RoleUserController;
@@ -53,8 +53,7 @@ describe("RoleUserController", () => {
   // Test data constants
   const MOCK_USER_ID = "550e8400-e29b-41d4-a716-446655440000";
 
-  // RoleService.findForUser/findNotInUser declare Promise<JsonApiDataInterface> but return a JSON:API list document.
-  const mockRolesResponse = {
+  const mockRolesResponse: JsonApiListDocument = {
     data: [
       {
         type: "roles",
@@ -74,7 +73,7 @@ describe("RoleUserController", () => {
       },
     ],
     meta: { total: 2 },
-  } as unknown as JsonApiDataInterface;
+  };
 
   const mockRequest = { user: { id: MOCK_USER_ID } };
 
@@ -158,7 +157,7 @@ describe("RoleUserController", () => {
       });
 
       it("should handle empty results", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
+        const emptyResponse: JsonApiListDocument = { data: [], meta: { total: 0 } };
         roleService.findForUser.mockResolvedValue(emptyResponse);
 
         const result = await controller.findBySearch(mockRequest, mockQuery, MOCK_USER_ID);
@@ -205,7 +204,7 @@ describe("RoleUserController", () => {
       });
 
       it("should handle empty results", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
+        const emptyResponse: JsonApiListDocument = { data: [], meta: { total: 0 } };
         roleService.findNotInUser.mockResolvedValue(emptyResponse);
 
         const result = await controller.findBySearch(mockRequest, mockQuery, MOCK_USER_ID, undefined, true);

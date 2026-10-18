@@ -6,6 +6,7 @@ import { DataModelInterface, JsonApiSerialiserFactory } from "../factories/jsona
 import { JsonApiDataInterface } from "../interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../serialisers/jsonapi.paginator";
 import { JsonApiIncludedFields } from "../types/JsonApiIncludedFields";
+import { JsonApiDocument } from "../interfaces/jsonapi.document.interface";
 
 export interface LoggingService {
   error(message: string, ...args: any[]): void;
@@ -84,7 +85,7 @@ export class JsonApiService {
     builder: R,
     url: string,
     paginator?: JsonApiPaginator,
-  ): Promise<JsonApiDataInterface> {
+  ): Promise<JsonApiDocument> {
     const response: any = {
       links: {
         self: url,

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { JsonApiDataInterface, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiService, JsonApiSingleDocument } from "../../../core/jsonapi";
 import {
   StripeCustomer,
   StripeCustomerApiService,
@@ -106,7 +106,7 @@ export class BillingService {
     name: string;
     email: string;
     currency: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const existingCustomer = await this.stripeCustomerRepository.findByCompanyId({
       companyId: params.companyId,
     });
@@ -147,7 +147,7 @@ export class BillingService {
    * });
    * ```
    */
-  async getCustomer(params: { companyId: string }): Promise<JsonApiDataInterface> {
+  async getCustomer(params: { companyId: string }): Promise<JsonApiSingleDocument> {
     const customer = await this.getCustomerOrFail({ companyId: params.companyId });
 
     return this.jsonApiService.buildSingle(StripeCustomerModel, customer);

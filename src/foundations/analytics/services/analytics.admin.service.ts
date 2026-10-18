@@ -12,6 +12,7 @@ import { ANALYTICS_CONFIG, AnalyticsModuleConfig } from "../interfaces/analytics
 import { AnalyticsPageViewRepository } from "../repositories/analytics-page-view.repository";
 import { AnalyticsSessionRepository } from "../repositories/analytics-session.repository";
 import { AnalyticsAdminRepository, Dimension, Granularity, Section } from "../repositories/analytics.admin.repository";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Serialises the platform-wide web analytics reports as JSON:API documents.
@@ -43,7 +44,7 @@ export class AnalyticsAdminService extends AbstractService<
     super(jsonApiService, analyticsSessionRepository, clsService, AnalyticsSessionDescriptor.model);
   }
 
-  async getSummary(params: { from: string; to: string; section: Section }): Promise<any> {
+  async getSummary(params: { from: string; to: string; section: Section }): Promise<JsonApiListDocument> {
     const rows = await this.analyticsAdminRepository.findSummary({
       from: params.from,
       to: params.to,
@@ -54,7 +55,12 @@ export class AnalyticsAdminService extends AbstractService<
     return this.jsonApiService.buildList(AnalyticsSummaryDescriptor.model, rows);
   }
 
-  async getTimeline(params: { from: string; to: string; section: Section; granularity: Granularity }): Promise<any> {
+  async getTimeline(params: {
+    from: string;
+    to: string;
+    section: Section;
+    granularity: Granularity;
+  }): Promise<JsonApiListDocument> {
     const rows = await this.analyticsAdminRepository.findTimeline({
       from: params.from,
       to: params.to,
@@ -72,7 +78,7 @@ export class AnalyticsAdminService extends AbstractService<
     section: Section;
     dimension: Dimension;
     limit: number;
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const rows = await this.analyticsAdminRepository.findBreakdown({
       from: params.from,
       to: params.to,
@@ -92,7 +98,7 @@ export class AnalyticsAdminService extends AbstractService<
     section: Section;
     visitorId?: string;
     userId?: string;
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const rows = await this.analyticsSessionRepository.findForAdmin({
@@ -107,7 +113,7 @@ export class AnalyticsAdminService extends AbstractService<
     return this.jsonApiService.buildList(AnalyticsSessionDescriptor.model, rows, paginator);
   }
 
-  async getSessionPageViews(params: { sessionId: string }): Promise<any> {
+  async getSessionPageViews(params: { sessionId: string }): Promise<JsonApiListDocument> {
     // Throws NotFoundException for an unknown session, so a missing session is
     // a 404 rather than an empty list.
     await this.analyticsSessionRepository.findById({ id: params.sessionId });

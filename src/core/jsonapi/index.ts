@@ -25,6 +25,7 @@ export * from "./serialisers/descriptor.based.serialiser";
 // Interfaces
 export * from "./interfaces/jsonapi.service.interface";
 export * from "./interfaces/jsonapi.data.interface";
+export * from "./interfaces/jsonapi.document.interface";
 export * from "./interfaces/jsonapi.pagination.interface";
 export * from "./interfaces/jsonapi.cursor.interface";
 export * from "./interfaces/jsonapi.relationship.builder.interface";

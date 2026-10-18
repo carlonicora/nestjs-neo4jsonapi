@@ -44,7 +44,6 @@ import { BaseConfigInterface } from "../../../config/interfaces/base.config.inte
 import { ConfigAssistantInterface } from "../../../config/interfaces/config.assistant.interface";
 import { ConfigOperatorInterface } from "../../../config/interfaces/config.operator.interface";
 import { BlockNoteService } from "../../../core/blocknote/services/blocknote.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
@@ -61,6 +60,7 @@ import { assistantMeta } from "../entities/assistant.meta";
 import { modelRegistry } from "../../../common/registries/registry";
 import { AssistantRepository } from "../repositories/assistant.repository";
 import { AssistantMentionExtractor, ExtractedMention } from "./assistant-mention.extractor";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Maximum number of prior messages (turns) passed to the LLM on each turn.
@@ -783,7 +783,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    * relationship — the BOUND_TO traversal already exists, so there is no new
    * Cypher here and company/owner RBAC still comes from the repository.
    */
-  async findByBoundContent(params: { boundType: string; boundId: string; query: any }): Promise<JsonApiDataInterface> {
+  async findByBoundContent(params: { boundType: string; boundId: string; query: any }): Promise<JsonApiListDocument> {
     const model = modelRegistry.getByType(params.boundType);
     if (!model) {
       throw new BadRequestException(`Unknown resource type "${params.boundType}" for boundType.`);

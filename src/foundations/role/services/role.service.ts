@@ -1,11 +1,14 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { RolePostDataDTO } from "../../role/dtos/role.post.dto";
 import { RoleDescriptor } from "../../role/entities/role";
 import { RoleRepository } from "../repositories/role.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class RoleService {
@@ -20,7 +23,7 @@ export class RoleService {
     if (role) throw new HttpException("A role with the given name already exists", HttpStatus.CONFLICT);
   }
 
-  async findById(params: { roleId: string }): Promise<JsonApiDataInterface> {
+  async findById(params: { roleId: string }): Promise<JsonApiSingleDocument> {
     return this.builder.buildSingle(
       RoleDescriptor.model,
       await this.roleRepository.findById({
@@ -29,7 +32,7 @@ export class RoleService {
     );
   }
 
-  async find(params: { term?: string; query: any }): Promise<JsonApiDataInterface> {
+  async find(params: { term?: string; query: any }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -42,7 +45,7 @@ export class RoleService {
     );
   }
 
-  async findForUser(params: { userId: string; term: string; query: any }): Promise<JsonApiDataInterface> {
+  async findForUser(params: { userId: string; term: string; query: any }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -56,7 +59,7 @@ export class RoleService {
     );
   }
 
-  async findNotInUser(params: { userId: string; term: string; query: any }): Promise<JsonApiDataInterface> {
+  async findNotInUser(params: { userId: string; term: string; query: any }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -70,7 +73,7 @@ export class RoleService {
     );
   }
 
-  async create(params: { data: RolePostDataDTO }): Promise<JsonApiDataInterface> {
+  async create(params: { data: RolePostDataDTO }): Promise<JsonApiSingleDocument> {
     await this.roleRepository.create({
       id: params.data.id,
       name: params.data.attributes.name,
@@ -80,7 +83,7 @@ export class RoleService {
     return this.findById({ roleId: params.data.id });
   }
 
-  async update(params: { data: RolePostDataDTO }): Promise<JsonApiDataInterface> {
+  async update(params: { data: RolePostDataDTO }): Promise<JsonApiSingleDocument> {
     const role = await this.roleRepository.findByNameNotId({
       roleId: params.data.id,
       name: params.data.attributes.name,

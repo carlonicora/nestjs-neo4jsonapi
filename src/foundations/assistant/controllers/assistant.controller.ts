@@ -35,6 +35,10 @@ import { assistantMeta } from "../entities/assistant.meta";
 import { AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
 import { assistantMessageMeta } from "../../assistant-message/entities/assistant-message.meta";
 import { AssistantService } from "../services/assistant.service";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Merge two JSON:API `included` lists for the `create()` response.
@@ -112,7 +116,7 @@ export class AssistantController {
    * a round-trip to render the initial thread).
    */
   @Post(assistantMeta.endpoint)
-  async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
+  async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<JsonApiSingleDocument> {
     if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
@@ -136,22 +140,19 @@ export class AssistantController {
       limitToHandbookPageId,
       boundContent,
     });
-    const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
-    const messagesDoc = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+    const document: JsonApiSingleDocument = await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant);
+    const messagesDoc: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
       userMessage,
       assistantMessage,
-    ])) as Record<string, any>;
+    ]);
     // `messagesDoc.data` is the two serialised messages (rich form, replacing
     // the slim traversal copies in `document.included`).
     // `messagesDoc.included` is every *nested* resource the messages referenced
     // — e.g. the polymorphic Order / Account / Person entities surfaced by
     // AssistantMessage.references. Dropping it leaves the client with bare
     // {type,id} refs and nothing to render. Merge both sources.
-    const additions: unknown[] = [
-      ...(((messagesDoc as any).data as unknown[] | undefined) ?? []),
-      ...(((messagesDoc as any).included as unknown[] | undefined) ?? []),
-    ];
-    document.included = mergeIncluded(document.included as unknown[] | undefined, additions, {
+    const additions: unknown[] = [...(messagesDoc.data ?? []), ...(messagesDoc.included ?? [])];
+    document.included = mergeIncluded(document.included, additions, {
       type: assistantMeta.type,
       id: assistant.id,
     });
@@ -170,7 +171,7 @@ export class AssistantController {
     @Param("assistantId") assistantId: string,
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<any> {
+  ): Promise<JsonApiListDocument> {
     if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
@@ -190,10 +191,10 @@ export class AssistantController {
       limitToHandbookPageId,
     });
 
-    const document = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+    const document: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
       userMessage,
       assistantMessage,
-    ])) as Record<string, any>;
+    ]);
     document.meta = { ...(document.meta ?? {}), toolCalls };
     return document;
   }

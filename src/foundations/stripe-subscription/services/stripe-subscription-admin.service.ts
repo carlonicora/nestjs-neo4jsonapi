@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
-import { JsonApiDataInterface, JsonApiPaginator, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiListDocument, JsonApiPaginator, JsonApiService, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.entity";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeCustomerApiService } from "../../stripe-customer/services/stripe-customer-api.service";
@@ -13,7 +13,7 @@ import { StripeSubscriptionRepository } from "../repositories/stripe-subscriptio
 import { StripeSubscriptionApiService } from "./stripe-subscription-api.service";
 
 export interface CreateSubscriptionResult {
-  data: JsonApiDataInterface;
+  data: JsonApiSingleDocument;
   clientSecret: string | null;
   paymentIntentId: string | null;
   requiresAction: boolean;
@@ -72,7 +72,7 @@ export class StripeSubscriptionAdminService {
     companyId: string;
     query: any;
     status?: StripeSubscriptionStatus;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
@@ -98,7 +98,7 @@ export class StripeSubscriptionAdminService {
    * @throws {HttpException} NOT_FOUND if subscription not found
    * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
    */
-  async getSubscription(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
+  async getSubscription(params: { id: string; companyId: string }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
     if (!subscription) {
@@ -280,7 +280,7 @@ export class StripeSubscriptionAdminService {
     id: string;
     companyId: string;
     cancelImmediately?: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
     if (!subscription) {
@@ -318,7 +318,7 @@ export class StripeSubscriptionAdminService {
    * @throws {HttpException} NOT_FOUND if subscription not found
    * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
    */
-  async pauseSubscription(params: { id: string; companyId: string; resumeAt?: Date }): Promise<JsonApiDataInterface> {
+  async pauseSubscription(params: { id: string; companyId: string; resumeAt?: Date }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
     if (!subscription) {
@@ -354,7 +354,7 @@ export class StripeSubscriptionAdminService {
    * @throws {HttpException} NOT_FOUND if subscription not found
    * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
    */
-  async resumeSubscription(params: { id: string; companyId: string }): Promise<JsonApiDataInterface> {
+  async resumeSubscription(params: { id: string; companyId: string }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
     if (!subscription) {
@@ -406,7 +406,7 @@ export class StripeSubscriptionAdminService {
     companyId: string;
     newPriceId: string;
     promotionCode?: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const subscription = await this.subscriptionRepository.findById({ id: params.id });
 
     if (!subscription) {

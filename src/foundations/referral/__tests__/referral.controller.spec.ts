@@ -126,7 +126,7 @@ describe("ReferralController", () => {
       });
 
       it("should not throw when enabled", async () => {
-        mockReferralService.getMyCodeJsonApi.mockResolvedValue({ data: {} });
+        mockReferralService.getMyCodeJsonApi.mockResolvedValue({ data: { type: "referral-codes", id: "company-123" } });
 
         await expect(controller.getMyCode(mockReply as any)).resolves.not.toThrow();
       });
@@ -180,7 +180,7 @@ describe("ReferralController", () => {
       });
 
       it("should not throw when enabled", async () => {
-        mockReferralService.getStatsJsonApi.mockResolvedValue({ data: {} });
+        mockReferralService.getStatsJsonApi.mockResolvedValue({ data: { type: "referral-stats", id: "company-123" } });
 
         await expect(controller.getStats(mockReply as any)).resolves.not.toThrow();
       });
@@ -265,7 +265,7 @@ describe("ReferralController", () => {
 
     it("should work when enabled is explicitly true", async () => {
       mockConfig = { ...DEFAULT_REFERRAL_CONFIG, enabled: true };
-      mockReferralService.getMyCodeJsonApi.mockResolvedValue({ data: {} });
+      mockReferralService.getMyCodeJsonApi.mockResolvedValue({ data: { type: "referral-codes", id: "company-123" } });
 
       const module: TestingModule = await Test.createTestingModule({
         controllers: [ReferralController],

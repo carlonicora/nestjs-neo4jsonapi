@@ -39,7 +39,9 @@ describe("TwoFactorService", () => {
     vi.clearAllMocks();
 
     mockJsonApiService = {
-      buildSingle: vi.fn().mockImplementation((model, data) => ({ data })),
+      buildSingle: vi.fn().mockImplementation((model, data) => ({
+        data: { type: model.type, id: data.id, attributes: data },
+      })),
       buildList: vi.fn().mockImplementation((model, data) => ({ data })),
     } as any;
 
@@ -138,7 +140,7 @@ describe("TwoFactorService", () => {
 
       const result = await service.getStatus(TEST_IDS.userId);
 
-      expect(result.data).toMatchObject({
+      expect(result.data.attributes).toMatchObject({
         id: TEST_IDS.userId,
         isEnabled: true,
         preferredMethod: "totp",
@@ -156,7 +158,7 @@ describe("TwoFactorService", () => {
 
       const result = await service.getStatus(TEST_IDS.userId);
 
-      expect(result.data.isEnabled).toBe(false);
+      expect(result.data.attributes.isEnabled).toBe(false);
     });
   });
 
@@ -347,8 +349,8 @@ describe("TwoFactorService", () => {
 
       const result = await service.verifyTotp(TEST_IDS.pendingId, "123456");
 
-      expect(result.data.success).toBe(true);
-      expect(result.data.userId).toBe(TEST_IDS.userId);
+      expect(result.data.attributes.success).toBe(true);
+      expect(result.data.attributes.userId).toBe(TEST_IDS.userId);
       expect(mockPendingTwoFactorRepository.deletePending).toHaveBeenCalled();
     });
 
@@ -357,7 +359,7 @@ describe("TwoFactorService", () => {
 
       const result = await service.verifyTotp(TEST_IDS.pendingId, "000000");
 
-      expect(result.data.success).toBe(false);
+      expect(result.data.attributes.success).toBe(false);
     });
 
     it("should throw BadRequestException after max attempts", async () => {
@@ -407,7 +409,7 @@ describe("TwoFactorService", () => {
 
       const result = await service.verifyBackupCode(TEST_IDS.pendingId, "ABCD1234");
 
-      expect(result.data.success).toBe(true);
+      expect(result.data.attributes.success).toBe(true);
       expect(mockPendingTwoFactorRepository.deletePending).toHaveBeenCalled();
     });
 
@@ -416,7 +418,7 @@ describe("TwoFactorService", () => {
 
       const result = await service.verifyBackupCode(TEST_IDS.pendingId, "INVALID1");
 
-      expect(result.data.success).toBe(false);
+      expect(result.data.attributes.success).toBe(false);
     });
 
     it("should throw BadRequestException after max attempts", async () => {

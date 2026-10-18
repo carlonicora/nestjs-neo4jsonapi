@@ -3,11 +3,11 @@ import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { EntityDescriptor, FieldDef, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
 import { AuditService } from "../../../foundations/audit/services/audit.service";
-import { JsonApiDataInterface } from "../../jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
 import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
 import { AbstractRepository } from "./abstract.repository";
+import { JsonApiListDocument, JsonApiSingleDocument } from "../../jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * JSON:API relationship item with optional per-item meta for edge properties
@@ -86,7 +86,7 @@ export abstract class AbstractService<
     term?: string;
     fetchAll?: boolean;
     orderBy?: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const data = await this.repository.find({
@@ -170,7 +170,7 @@ export abstract class AbstractService<
   /**
    * Find entity by ID
    */
-  async findById(params: { id: string }): Promise<JsonApiDataInterface> {
+  async findById(params: { id: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(this.model, await this.repository.findById({ id: params.id }));
   }
 
@@ -196,7 +196,7 @@ export abstract class AbstractService<
    *   may use this to create related entities in the same transaction.
    *   The abstract implementation ignores it.
    */
-  async create(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiDataInterface> {
+  async create(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiSingleDocument> {
     await this.repository.create(params);
 
     if (this.auditService) {
@@ -218,7 +218,7 @@ export abstract class AbstractService<
    *   may use this to update related entities in the same transaction.
    *   The abstract implementation ignores it.
    */
-  async put(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiDataInterface> {
+  async put(params: { id: string; [key: string]: any }, _included?: unknown[]): Promise<JsonApiSingleDocument> {
     const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
 
     await this.repository.put(params);
@@ -240,7 +240,7 @@ export abstract class AbstractService<
    * Partial update - only updates fields that are explicitly passed
    * Override this method to map DTO fields to repository patch params
    */
-  async patch(params: { id: string; [key: string]: any }): Promise<JsonApiDataInterface> {
+  async patch(params: { id: string; [key: string]: any }): Promise<JsonApiSingleDocument> {
     const before = this.auditService ? await this.repository.findById({ id: params.id }) : null;
 
     await this.repository.patch(params);
@@ -399,7 +399,7 @@ export abstract class AbstractService<
    *   verbatim to {@link create}. Subclass overrides of `create` may consume them;
    *   the abstract path silently ignores them.
    */
-  async createFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiDataInterface> {
+  async createFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiSingleDocument> {
     const repoParams = this.mapDTOToParams(params.data);
     return this.create(repoParams, params.included);
   }
@@ -413,7 +413,7 @@ export abstract class AbstractService<
    *   verbatim to {@link put}. Subclass overrides of `put` may consume them;
    *   the abstract path silently ignores them.
    */
-  async putFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiDataInterface> {
+  async putFromDTO(params: { data: JsonApiDTOData; included?: unknown[] }): Promise<JsonApiSingleDocument> {
     const repoParams = this.mapDTOToParams(params.data, "put");
     return this.put(repoParams, params.included);
   }
@@ -422,7 +422,7 @@ export abstract class AbstractService<
    * Partial update from JSON:API DTO
    * Only updates fields that are explicitly present in the DTO
    */
-  async patchFromDTO(params: { data: JsonApiDTOData }): Promise<JsonApiDataInterface> {
+  async patchFromDTO(params: { data: JsonApiDTOData }): Promise<JsonApiSingleDocument> {
     const repoParams = this.mapDTOToPatchParams(params.data);
     return this.patch(repoParams);
   }
@@ -537,7 +537,7 @@ export abstract class AbstractService<
     fetchAll?: boolean;
     orderBy?: string;
     filters?: FilterCriterion[];
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
     const data = await this.repository.findByRelated({
@@ -573,7 +573,7 @@ export abstract class AbstractService<
     id: string;
     relationship: keyof R & string;
     data: JsonApiDTORelationshipItem | JsonApiDTORelationshipItem[];
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const relationshipDef = this.descriptor.relationships[params.relationship];
 
     if (!relationshipDef) {
@@ -634,7 +634,7 @@ export abstract class AbstractService<
     id: string;
     relationship: keyof R & string;
     data: { id: string; type: string }[];
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     const relationshipDef = this.descriptor.relationships[params.relationship];
 
     if (!relationshipDef) {

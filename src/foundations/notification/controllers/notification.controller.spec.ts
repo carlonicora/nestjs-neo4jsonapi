@@ -30,10 +30,13 @@ vi.mock("../services/notification.service", () => ({
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { CacheService } from "../../../core/cache/services/cache.service";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { NotificationPatchListDTO } from "../dtos/notification.patch.dto";
 import { NotificationServices } from "../services/notification.service";
 import { NotificationController } from "./notification.controller";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("NotificationController", () => {
   let controller: NotificationController;
@@ -51,19 +54,21 @@ describe("NotificationController", () => {
 
   const mockRequest = { user: mockUser };
 
-  const mockServiceResponse: JsonApiDataInterface = {
-    type: "notifications",
-    id: MOCK_NOTIFICATION_ID,
-    attributes: {
-      title: "Test Notification",
-      message: "A test notification message",
-      isRead: false,
-      isArchived: false,
+  const mockServiceResponse: JsonApiSingleDocument = {
+    data: {
+      type: "notifications",
+      id: MOCK_NOTIFICATION_ID,
+      attributes: {
+        title: "Test Notification",
+        message: "A test notification message",
+        isRead: false,
+        isArchived: false,
+      },
     },
   };
 
-  const mockListResponse = {
-    data: [mockServiceResponse],
+  const mockListResponse: JsonApiListDocument = {
+    data: [mockServiceResponse.data],
     meta: { total: 1 },
   };
 

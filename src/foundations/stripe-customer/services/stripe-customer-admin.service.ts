@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
-import { JsonApiDataInterface, JsonApiService } from "../../../core/jsonapi";
+import { JsonApiService, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { CompanyRepository } from "../../company/repositories/company.repository";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { StripeCustomerRepository } from "../repositories/stripe-customer.repository";
@@ -34,7 +34,7 @@ export class StripeCustomerAdminService {
    * @param companyId - The company ID
    * @returns JSON:API formatted customer or null if not found
    */
-  async getCustomerByCompanyId(companyId: string): Promise<JsonApiDataInterface | null> {
+  async getCustomerByCompanyId(companyId: string): Promise<JsonApiSingleDocument | null> {
     const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId });
     if (!customer) {
       return null;
@@ -48,7 +48,7 @@ export class StripeCustomerAdminService {
    * @param id - The internal customer ID
    * @returns JSON:API formatted customer or null if not found
    */
-  async getCustomerById(id: string): Promise<JsonApiDataInterface | null> {
+  async getCustomerById(id: string): Promise<JsonApiSingleDocument | null> {
     const customer = await this.stripeCustomerRepository.findById({ id });
     if (!customer) {
       return null;
@@ -62,7 +62,7 @@ export class StripeCustomerAdminService {
    * @param stripeCustomerId - The Stripe customer ID
    * @returns JSON:API formatted customer or null if not found
    */
-  async getCustomerByStripeId(stripeCustomerId: string): Promise<JsonApiDataInterface | null> {
+  async getCustomerByStripeId(stripeCustomerId: string): Promise<JsonApiSingleDocument | null> {
     const customer = await this.stripeCustomerRepository.findByStripeCustomerId({ stripeCustomerId });
     if (!customer) {
       return null;
@@ -81,7 +81,7 @@ export class StripeCustomerAdminService {
    * @param dto - The JSON:API formatted customer creation data (optional)
    * @returns JSON:API formatted created customer
    */
-  async createCustomer(companyId: string, userId: string, dto?: StripeCustomerPostDTO): Promise<JsonApiDataInterface> {
+  async createCustomer(companyId: string, userId: string, dto?: StripeCustomerPostDTO): Promise<JsonApiSingleDocument> {
     // Extract attributes from DTO if provided
     let name = dto?.data?.attributes?.name;
     let email = dto?.data?.attributes?.email;
@@ -136,7 +136,7 @@ export class StripeCustomerAdminService {
    * @param dto - The JSON:API formatted customer update data
    * @returns JSON:API formatted updated customer
    */
-  async updateCustomer(id: string, dto: StripeCustomerPutDTO): Promise<JsonApiDataInterface | null> {
+  async updateCustomer(id: string, dto: StripeCustomerPutDTO): Promise<JsonApiSingleDocument | null> {
     const existingCustomer = await this.stripeCustomerRepository.findById({ id });
     if (!existingCustomer) {
       return null;
@@ -183,7 +183,7 @@ export class StripeCustomerAdminService {
       balance?: number;
       delinquent?: boolean;
     },
-  ): Promise<JsonApiDataInterface | null> {
+  ): Promise<JsonApiSingleDocument | null> {
     const existingCustomer = await this.stripeCustomerRepository.findByStripeCustomerId({ stripeCustomerId });
     if (!existingCustomer) {
       return null;

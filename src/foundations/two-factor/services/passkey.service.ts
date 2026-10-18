@@ -19,6 +19,10 @@ import { PasskeyAuthenticationOptionsDescriptor } from "../entities/passkey-auth
 import { PasskeyRegistrationOptionsDescriptor } from "../entities/passkey-registration-options";
 import { PasskeyRepository } from "../repositories/passkey.repository";
 import { PendingTwoFactorRepository } from "../repositories/pending-two-factor.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 export interface PasskeyRegistrationOptions {
   pendingId: string;
@@ -77,7 +81,7 @@ export class PasskeyService {
     userId: string;
     userName: string;
     userDisplayName: string;
-  }): Promise<any> {
+  }): Promise<JsonApiSingleDocument> {
     const { rpId, rpName } = this.getRpConfig();
 
     // Get existing passkeys to exclude them from registration
@@ -140,7 +144,7 @@ export class PasskeyService {
     pendingId: string;
     name: string;
     response: RegistrationResponseJSON;
-  }): Promise<any> {
+  }): Promise<JsonApiSingleDocument> {
     const { rpId, origin } = this.getRpConfig();
 
     // Get the pending challenge
@@ -211,7 +215,7 @@ export class PasskeyService {
    * @param params.userId - The user's ID
    * @returns JSON:API response with authentication options
    */
-  async generateAuthenticationOptions(params: { userId: string }): Promise<any> {
+  async generateAuthenticationOptions(params: { userId: string }): Promise<JsonApiSingleDocument> {
     const { rpId } = this.getRpConfig();
 
     // Get user's passkeys
@@ -341,7 +345,7 @@ export class PasskeyService {
    * @param params.userId - The user's ID
    * @returns JSON:API response with list of passkeys
    */
-  async listPasskeys(params: { userId: string }): Promise<any> {
+  async listPasskeys(params: { userId: string }): Promise<JsonApiListDocument> {
     const passkeys = await this.passkeyRepository.findByUserId({
       userId: params.userId,
     });

@@ -1,10 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { Feature, FeatureDescriptor } from "../entities/feature";
 import { FeatureRepository } from "../repositories/feature.repository";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class FeatureService extends AbstractService<Feature, typeof FeatureDescriptor.relationships> {
@@ -28,7 +28,7 @@ export class FeatureService extends AbstractService<Feature, typeof FeatureDescr
     term?: string;
     fetchAll?: boolean;
     orderBy?: string;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     return super.find({ ...params, orderBy: params.orderBy ?? "name ASC" });
   }
 
@@ -36,7 +36,7 @@ export class FeatureService extends AbstractService<Feature, typeof FeatureDescr
    * findByCompany wraps a repository query that is not a declared descriptor
    * relationship (Feature.isCompanyScoped is false) — kept with its original name.
    */
-  async findByCompany(params: { companyId: string }): Promise<JsonApiDataInterface> {
+  async findByCompany(params: { companyId: string }): Promise<JsonApiListDocument> {
     return this.jsonApiService.buildList(
       FeatureDescriptor.model,
       await this.featureRepository.findByCompany({

@@ -26,6 +26,10 @@ import { assistantMeta } from "../../../foundations/assistant/entities/assistant
 import { mergeIncluded } from "../../../foundations/assistant/controllers/assistant.controller";
 import { AssistantService } from "../../../foundations/assistant/services/assistant.service";
 import { operatorMeta } from "../entities/operator.meta";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Standalone HTTP surface for the checkpointed operator engine.
@@ -70,7 +74,7 @@ export class OperatorController {
    * approval card immediately.
    */
   @Post(operatorMeta.endpoint)
-  async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<any> {
+  async create(@Body() body: AssistantPostDto, @Req() req: AuthenticatedRequest): Promise<JsonApiSingleDocument> {
     if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
@@ -98,23 +102,17 @@ export class OperatorController {
         limitToHowToId,
         boundContent,
       });
-    const document = (await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant)) as Record<string, any>;
-    const messagesDoc = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+    const document: JsonApiSingleDocument = await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant);
+    const messagesDoc: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
       userMessage,
       assistantMessage,
-    ])) as Record<string, any>;
-    const additions: unknown[] = [
-      ...(((messagesDoc as any).data as unknown[] | undefined) ?? []),
-      ...(((messagesDoc as any).included as unknown[] | undefined) ?? []),
-    ];
+    ]);
+    const additions: unknown[] = [...(messagesDoc.data ?? []), ...(messagesDoc.included ?? [])];
     if (action) {
-      const actionDoc = (await this.jsonApi.buildSingle(AssistantActionDescriptor.model, action)) as Record<
-        string,
-        any
-      >;
+      const actionDoc: JsonApiSingleDocument = await this.jsonApi.buildSingle(AssistantActionDescriptor.model, action);
       additions.push(actionDoc.data);
     }
-    document.included = mergeIncluded(document.included as unknown[] | undefined, additions, {
+    document.included = mergeIncluded(document.included, additions, {
       type: assistantMeta.type,
       id: assistant.id,
     });
@@ -133,7 +131,7 @@ export class OperatorController {
     @Param("assistantId") assistantId: string,
     @Body() body: AssistantAppendDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<any> {
+  ): Promise<JsonApiListDocument> {
     if (req.user?.companyId && !(await isAiEnabledVia(this.gate, { companyId: req.user.companyId }))) {
       throw new NotFoundException();
     }
@@ -151,18 +149,15 @@ export class OperatorController {
       limitToHowToId,
     });
 
-    const document = (await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
+    const document: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
       userMessage,
       assistantMessage,
-    ])) as Record<string, any>;
+    ]);
     if (action) {
-      const actionDoc = (await this.jsonApi.buildSingle(AssistantActionDescriptor.model, action)) as Record<
-        string,
-        any
-      >;
+      const actionDoc: JsonApiSingleDocument = await this.jsonApi.buildSingle(AssistantActionDescriptor.model, action);
       // Same dedupe/strip-backrefs merge as `create()` so the
       // `assistant-actions` resource renders identically from both endpoints.
-      document.included = mergeIncluded(document.included as unknown[] | undefined, [actionDoc.data], {
+      document.included = mergeIncluded(document.included, [actionDoc.data], {
         type: assistantMeta.type,
         id: assistantId,
       });

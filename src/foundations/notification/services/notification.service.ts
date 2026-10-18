@@ -5,6 +5,10 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { Notification, NotificationDescriptor } from "../../notification/entities/notification";
 import { NotificationRepository } from "../../notification/repositories/notification.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * `find`/`findById` are named `findForUser`/`findByIdForUser` — their required
@@ -31,7 +35,7 @@ export class NotificationServices extends AbstractService<Notification, typeof N
     super(builder, notificationRepository, clsService, NotificationDescriptor.model);
   }
 
-  async findForUser(params: { query: any; userId: string; isArchived?: boolean }) {
+  async findForUser(params: { query: any; userId: string; isArchived?: boolean }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -45,7 +49,7 @@ export class NotificationServices extends AbstractService<Notification, typeof N
     );
   }
 
-  async findByIdForUser(params: { notificationId: string; userId: string }) {
+  async findByIdForUser(params: { notificationId: string; userId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.descriptor.model,
       await this.notificationRepository.findByIdForUser(params),

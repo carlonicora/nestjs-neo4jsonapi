@@ -8,6 +8,7 @@ import { TokenUsageAdminBreakdownDescriptor } from "../entities/tokenusage-admin
 import { TokenUsageAdminSummaryDescriptor } from "../entities/tokenusage-admin-summary";
 import { TokenUsageAdminTimelineDescriptor } from "../entities/tokenusage-admin-timeline";
 import { TokenUsageAdminRepository } from "../repositories/tokenusage.admin.repository";
+import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Serialises the cross-tenant reporting rollups as JSON:API documents.
@@ -40,7 +41,7 @@ export class TokenUsageAdminService extends AbstractService<TokenUsage, typeof T
     super(jsonApiService, tokenUsageAdminRepository, clsService, TokenUsageDescriptor.model);
   }
 
-  async getSummary(params: { from: string; to: string; companyId?: string }): Promise<any> {
+  async getSummary(params: { from: string; to: string; companyId?: string }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageAdminRepository.findSummary({
       from: params.from,
       to: params.to,
@@ -56,7 +57,7 @@ export class TokenUsageAdminService extends AbstractService<TokenUsage, typeof T
     granularity: "day" | "week" | "month";
     stackBy: "scope" | "type" | "company";
     companyId?: string;
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageAdminRepository.findTimeline({
       from: params.from,
       to: params.to,
@@ -76,7 +77,7 @@ export class TokenUsageAdminService extends AbstractService<TokenUsage, typeof T
     scope: "customer" | "platform";
     companyId?: string;
     limit: number;
-  }): Promise<any> {
+  }): Promise<JsonApiListDocument> {
     const rows = await this.tokenUsageAdminRepository.findBreakdown({
       from: params.from,
       to: params.to,

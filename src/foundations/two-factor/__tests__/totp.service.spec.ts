@@ -28,7 +28,9 @@ describe("TotpService", () => {
     vi.clearAllMocks();
 
     mockJsonApiService = {
-      buildSingle: vi.fn().mockImplementation((model, data) => ({ data })),
+      buildSingle: vi.fn().mockImplementation((model, data) => ({
+        data: { type: model.type, id: data.id, attributes: data },
+      })),
       buildList: vi.fn().mockImplementation((model, data) => ({ data })),
     } as any;
 
@@ -80,12 +82,12 @@ describe("TotpService", () => {
       const result = await service.generateSecret(params);
 
       expect(result).toBeDefined();
-      expect(result.data).toHaveProperty("id");
-      expect(result.data).toHaveProperty("secret");
-      expect(result.data).toHaveProperty("qrCodeUri");
-      expect(result.data).toHaveProperty("qrCodeDataUrl");
-      expect(result.data.qrCodeUri).toContain("otpauth://totp/");
-      expect(result.data.qrCodeDataUrl).toContain("data:image/png;base64,");
+      expect(result.data.attributes).toHaveProperty("id");
+      expect(result.data.attributes).toHaveProperty("secret");
+      expect(result.data.attributes).toHaveProperty("qrCodeUri");
+      expect(result.data.attributes).toHaveProperty("qrCodeDataUrl");
+      expect(result.data.attributes.qrCodeUri).toContain("otpauth://totp/");
+      expect(result.data.attributes.qrCodeDataUrl).toContain("data:image/png;base64,");
     });
 
     it("should create authenticator in unverified state", async () => {

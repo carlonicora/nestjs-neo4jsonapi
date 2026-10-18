@@ -36,9 +36,10 @@ import { FastifyReply } from "fastify";
 import { StripeUsageController } from "../stripe-usage.controller";
 import { StripeUsageAdminService } from "../../services/stripe-usage-admin.service";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
-// The admin service returns JSON:API documents but declares `Promise<JsonApiDataInterface>`
-// (a single resource); the casts below bridge that declared type.
-import type { JsonApiDataInterface } from "../../../../core/jsonapi/interfaces/jsonapi.data.interface";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("StripeUsageController", () => {
   let controller: StripeUsageController;
@@ -78,7 +79,7 @@ describe("StripeUsageController", () => {
     ],
   };
 
-  const MOCK_USAGE_RECORD_RESPONSE = {
+  const MOCK_USAGE_RECORD_RESPONSE: JsonApiSingleDocument = {
     data: {
       type: "stripe-usage-records",
       id: TEST_IDS.usageRecordId,
@@ -90,7 +91,7 @@ describe("StripeUsageController", () => {
     },
   };
 
-  const MOCK_USAGE_RECORDS_LIST_RESPONSE = {
+  const MOCK_USAGE_RECORDS_LIST_RESPONSE: JsonApiListDocument = {
     data: [MOCK_USAGE_RECORD_RESPONSE.data],
     meta: { total: 1 },
   };
@@ -245,7 +246,7 @@ describe("StripeUsageController", () => {
           },
         },
       };
-      usageService.reportUsage.mockResolvedValue(MOCK_USAGE_RECORD_RESPONSE as unknown as JsonApiDataInterface);
+      usageService.reportUsage.mockResolvedValue(MOCK_USAGE_RECORD_RESPONSE);
 
       await controller.reportUsage(req, mockReply, body as any);
 
@@ -281,7 +282,7 @@ describe("StripeUsageController", () => {
           },
         },
       };
-      usageService.reportUsage.mockResolvedValue(MOCK_USAGE_RECORD_RESPONSE as unknown as JsonApiDataInterface);
+      usageService.reportUsage.mockResolvedValue(MOCK_USAGE_RECORD_RESPONSE);
 
       await controller.reportUsage(req, mockReply, body as any);
 
@@ -326,9 +327,7 @@ describe("StripeUsageController", () => {
     it("should list usage records with required subscription filter", async () => {
       const req = createMockRequest();
       const mockQuery = { page: { size: 10, number: 1 } };
-      usageService.listUsageRecords.mockResolvedValue(
-        MOCK_USAGE_RECORDS_LIST_RESPONSE as unknown as JsonApiDataInterface,
-      );
+      usageService.listUsageRecords.mockResolvedValue(MOCK_USAGE_RECORDS_LIST_RESPONSE);
 
       await controller.listUsageRecords(req, mockReply, mockQuery, TEST_IDS.subscriptionId, undefined, undefined);
 
@@ -347,9 +346,7 @@ describe("StripeUsageController", () => {
       const mockQuery = {};
       const startTime = "2024-01-01T00:00:00.000Z";
       const endTime = "2024-01-31T23:59:59.999Z";
-      usageService.listUsageRecords.mockResolvedValue(
-        MOCK_USAGE_RECORDS_LIST_RESPONSE as unknown as JsonApiDataInterface,
-      );
+      usageService.listUsageRecords.mockResolvedValue(MOCK_USAGE_RECORDS_LIST_RESPONSE);
 
       await controller.listUsageRecords(req, mockReply, mockQuery, TEST_IDS.subscriptionId, startTime, endTime);
 

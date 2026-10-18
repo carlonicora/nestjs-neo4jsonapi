@@ -18,7 +18,6 @@ import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { BaseConfigInterface, ConfigApiInterface, ConfigS3Interface } from "../../../config/interfaces";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { S3Model } from "../../s3/entities/s3.model";
@@ -31,6 +30,7 @@ import {
   isEncryptedObjectMetadata,
 } from "../cipher/s3-cipher.core";
 import { S3CipherService } from "./s3-cipher.service";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 @Injectable()
 export class S3Service {
@@ -248,7 +248,7 @@ export class S3Service {
     isPublic: boolean;
     /** Per-token upload limit; the object route enforces the smaller of it and the global cap. */
     maxBytes?: number;
-  }): Promise<string> {
+  }): Promise<JsonApiSingleDocument | null> {
     await this._loadConfiguration();
 
     if (!this._endpoint) return null;
@@ -400,7 +400,7 @@ export class S3Service {
     return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
   }
 
-  async findSignedUrl(params: { key: string; isPublic?: boolean; filename?: string }): Promise<JsonApiDataInterface> {
+  async findSignedUrl(params: { key: string; isPublic?: boolean; filename?: string }): Promise<JsonApiSingleDocument> {
     await this._loadConfiguration();
     const signedUrl = await this.generateSignedUrl(params);
 

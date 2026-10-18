@@ -57,7 +57,7 @@
     "build": "tsc && tsc -p tools/migrate-entity/tsconfig.json && tsc -p tools/generate-rbac-paths/tsconfig.json && tsc -p scripts/generate-module/tsconfig.json && cp -R src/core/email/templates dist/core/email/",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "lint": "eslint \"src/**/*.ts\" \"tools/**/*.spec.ts\" --fix",
+    "lint": "eslint \"src/**/*.ts\" \"tools/**/*.spec.ts\" --fix && tsc -p tsconfig.spec.json",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",

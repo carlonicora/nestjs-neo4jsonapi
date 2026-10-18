@@ -189,7 +189,7 @@ export class StripeSubscriptionController {
     });
 
     // Extract stripeSubscriptionId from the response
-    const stripeSubscriptionId = (subscription as any).data?.attributes?.stripeSubscriptionId;
+    const stripeSubscriptionId = subscription.data?.attributes?.stripeSubscriptionId;
     if (!stripeSubscriptionId) {
       reply.status(HttpStatus.BAD_REQUEST).send({ error: "Subscription has no Stripe ID" });
       return;

@@ -81,12 +81,15 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { getContentModel } from "../entities/content";
 import { ContentCypherService } from "../services/content.cypher.service";
 import { ContentService } from "../services/content.service";
 import { RelevancyService } from "../../relevancy/services/relevancy.service";
 import { ContentController } from "./content.controller";
+import {
+  JsonApiSingleDocument,
+  JsonApiListDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("ContentController", () => {
   let controller: ContentController;
@@ -110,22 +113,22 @@ describe("ContentController", () => {
     language: "en",
   };
 
-  const mockServiceResponse: JsonApiDataInterface = {
-    type: "contents",
-    id: MOCK_CONTENT_ID,
-    attributes: {
-      title: "Test Content",
-      description: "A test content item",
+  const mockServiceResponse: JsonApiSingleDocument = {
+    data: {
+      type: "contents",
+      id: MOCK_CONTENT_ID,
+      attributes: {
+        title: "Test Content",
+        description: "A test content item",
+      },
     },
   };
+  const mockServiceResponseList: JsonApiListDocument = { data: [mockServiceResponse.data] };
 
-  // The services return the JSON:API document buildList produces, but declare
-  // `Promise<JsonApiDataInterface>` (a single resource). The cast bridges that
-  // declared type, not the fixture shape.
-  const mockListResponse = {
-    data: [mockServiceResponse],
+  const mockListResponse: JsonApiListDocument = {
+    data: [mockServiceResponse.data],
     meta: { total: 1 },
-  } as unknown as JsonApiDataInterface;
+  };
 
   beforeEach(async () => {
     const mockContentService = {
@@ -185,7 +188,7 @@ describe("ContentController", () => {
       });
 
       it("should handle single contentId", async () => {
-        contentService.findByIds.mockResolvedValue(mockServiceResponse);
+        contentService.findByIds.mockResolvedValue(mockServiceResponseList);
 
         await controller.findContents(
           mockRequest,
@@ -200,7 +203,7 @@ describe("ContentController", () => {
         expect(contentService.findByIds).toHaveBeenCalledWith({
           contentIds: [MOCK_CONTENT_ID],
         });
-        expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponse);
+        expect(mockReply.send).toHaveBeenCalledWith(mockServiceResponseList);
       });
     });
 
@@ -503,10 +506,10 @@ describe("ContentController", () => {
 
   describe("findContentsRelevantForContent", () => {
     const mockQuery = { page: { number: 1, size: 10 } };
-    const mockRelevantContents = {
-      data: [mockServiceResponse],
+    const mockRelevantContents: JsonApiListDocument = {
+      data: [mockServiceResponse.data],
       meta: { total: 1 },
-    } as unknown as JsonApiDataInterface;
+    };
 
     it("should find relevant contents for a content ID", async () => {
       relevancyService.findRelevant.mockResolvedValue(mockRelevantContents);
@@ -549,7 +552,7 @@ describe("ContentController", () => {
     });
 
     it("should return empty results when no relevant content found", async () => {
-      const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
+      const emptyResponse: JsonApiListDocument = { data: [], meta: { total: 0 } };
       relevancyService.findRelevant.mockResolvedValue(emptyResponse);
 
       const result = await controller.findContentsRelevantForContent(mockQuery, MOCK_CONTENT_ID);
@@ -579,7 +582,7 @@ describe("ContentController", () => {
 
       it("should handle special characters in content ID", async () => {
         const specialCharId = "content-with-dashes-123";
-        contentService.findByIds.mockResolvedValue(mockServiceResponse);
+        contentService.findByIds.mockResolvedValue(mockServiceResponseList);
 
         await controller.findContents(
           mockRequest,
@@ -619,7 +622,7 @@ describe("ContentController", () => {
       });
 
       it("should handle empty array response", async () => {
-        const emptyResponse = { data: [], meta: { total: 0 } } as unknown as JsonApiDataInterface;
+        const emptyResponse: JsonApiListDocument = { data: [], meta: { total: 0 } };
         contentService.find.mockResolvedValue(emptyResponse);
 
         await controller.findContents(mockRequest, mockReply, mockQuery);

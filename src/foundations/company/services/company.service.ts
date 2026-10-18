@@ -8,7 +8,6 @@ import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigCreditsInterface } from "../../../config/interfaces";
 import { QueueId } from "../../../config/enums/queue.id";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
@@ -22,6 +21,10 @@ import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
 import { COMPANY_AI_DISABLED_EVENT, CompanyAiDisabledPayload } from "../events/company.events";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * Company service.
@@ -249,7 +252,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
    *
    * RENAMED from `create` to `createCompanyFromDTO` (TS2416): the inherited
    * `AbstractService.create()` takes descriptor-driven params and returns
-   * `Promise<JsonApiDataInterface>`, so this DTO-shaped creator cannot override it.
+   * `Promise<JsonApiSingleDocument>`, so this DTO-shaped creator cannot override it.
    * The name mirrors the shipped a360ai reference implementation.
    */
   async createCompanyFromDTO(params: { data: CompanyPostDataDTO }): Promise<Company> {
@@ -274,7 +277,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     });
   }
 
-  async createForController(params: { data: CompanyPostDataDTO }): Promise<JsonApiDataInterface> {
+  async createForController(params: { data: CompanyPostDataDTO }): Promise<JsonApiSingleDocument> {
     await this.companyRepository.createCompanyNode({
       companyId: params.data.id,
       name: params.data.attributes.name,
@@ -302,7 +305,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     );
   }
 
-  async update(params: { data: CompanyPutDataDTO }): Promise<JsonApiDataInterface> {
+  async update(params: { data: CompanyPutDataDTO }): Promise<JsonApiSingleDocument> {
     await this.companyRepository.update({
       companyId: params.data.id,
       name: params.data.attributes.name,
@@ -331,7 +334,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     );
   }
 
-  async updateConfigurations(params: { data: CompanyConfigurationsPutDataDTO }): Promise<JsonApiDataInterface> {
+  async updateConfigurations(params: { data: CompanyConfigurationsPutDataDTO }): Promise<JsonApiSingleDocument> {
     await this.companyRepository.updateConfigurations({
       companyId: params.data.id,
       configurations: params.data.attributes.configurations,
@@ -343,7 +346,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     );
   }
 
-  async find(params: { term?: string; query: any }): Promise<JsonApiDataInterface> {
+  async find(params: { term?: string; query: any }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -353,7 +356,7 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     );
   }
 
-  async findOne(params: { companyId: string }): Promise<JsonApiDataInterface> {
+  async findOne(params: { companyId: string }): Promise<JsonApiSingleDocument> {
     return this.builder.buildSingle(
       CompanyDescriptor.model,
       await this.companyRepository.findByCompanyId({ companyId: params.companyId }),

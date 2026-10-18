@@ -11,8 +11,8 @@ import { HttpException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { AuthController } from "../controllers/auth.controller";
 import { AuthService } from "../services/auth.service";
-import type { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 describe("AuthController", () => {
   let controller: AuthController;
@@ -59,7 +59,7 @@ describe("AuthController", () => {
 
   describe("POST /auth (findAuth)", () => {
     it("should find auth by code", async () => {
-      const mockResponse: JsonApiDataInterface = { type: "auths", id: "auth-123", attributes: {} };
+      const mockResponse: JsonApiSingleDocument = { data: { type: "auths", id: "auth-123", attributes: {} } };
       authService.findAuthByCode.mockResolvedValue(mockResponse);
 
       const result = await controller.findAuth(TEST_CODES.authCode);

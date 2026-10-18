@@ -6,16 +6,14 @@ import { ClsService } from "nestjs-cls";
 import { JsonApiService } from "../jsonapi.service";
 import { JsonApiSerialiserFactory } from "../../factories/jsonapi.serialiser.factory";
 import { JsonApiPaginator } from "../../serialisers/jsonapi.paginator";
-import { JsonApiDataInterface } from "../../interfaces/jsonapi.data.interface";
+import { JsonApiDocument } from "../../interfaces/jsonapi.document.interface";
 
 /**
- * `serialise` is declared to return `JsonApiDataInterface`, but at runtime it
- * returns a JSON:API document carrying `data` and, when present, `included`.
- * This guard narrows the declared type to the document shape the tests read.
+ * `serialise` returns a single or a list document depending on its input, so
+ * its declared `data` is the union of both. The tests read whichever shape the
+ * input produces; this guard checks a document came back and lets them.
  */
-type SerialisedDocument = JsonApiDataInterface & { data: any; included?: any[] };
-
-const asDocument = (result: JsonApiDataInterface): SerialisedDocument => {
+const asDocument = (result: JsonApiDocument): JsonApiDocument<any> => {
   if (!("data" in result)) throw new Error("serialise did not return a JSON:API document");
   return result;
 };

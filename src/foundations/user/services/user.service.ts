@@ -10,7 +10,6 @@ import { UserPutDataDTO } from "../../user/dtos/user.put.dto";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface, ConfigI18nInterface } from "../../../config/interfaces";
-import { JsonApiDataInterface } from "../../../core/jsonapi/interfaces/jsonapi.data.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
@@ -19,6 +18,10 @@ import { UserPatchLanguageDataDTO } from "../../user/dtos/user.patch.language.dt
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
+import {
+  JsonApiListDocument,
+  JsonApiSingleDocument,
+} from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
  * User service.
@@ -76,7 +79,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term?: string;
     userIds?: string[];
     includeDeleted?: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -95,7 +98,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     query: any;
     term?: string;
     includeDeleted?: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -116,7 +119,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term?: string;
     userIds?: string[];
     includeDeleted?: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -137,7 +140,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term: string;
     query: any;
     isAdmin: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -156,7 +159,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term: string;
     query: any;
     isAdmin: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -170,21 +173,21 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     );
   }
 
-  async findByUserId(params: { userId: string }): Promise<JsonApiDataInterface> {
+  async findByUserId(params: { userId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.model,
       await this.userRepository.findByUserId({ userId: params.userId }),
     );
   }
 
-  async findOneForAdmin(params: { userId: string }): Promise<JsonApiDataInterface> {
+  async findOneForAdmin(params: { userId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.model,
       await this.userRepository.findOneForAdmin({ userId: params.userId }),
     );
   }
 
-  async findByUserIdCompanyId(params: { userId: string; companyId: string }): Promise<JsonApiDataInterface> {
+  async findByUserIdCompanyId(params: { userId: string; companyId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.model,
       await this.userRepository.findByUserId({ userId: params.userId, companyId: params.companyId }),
@@ -195,7 +198,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     data: UserPutDataDTO;
     isAdmin: boolean;
     isCurrentUser: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     if (params.data.attributes?.password || params.data.attributes?.name) {
       if (params.data.attributes.password)
         params.data.attributes.password = await hashPassword(params.data.attributes.password);
@@ -232,14 +235,14 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async findFullUser(params: { userId: string }): Promise<JsonApiDataInterface> {
+  async findFullUser(params: { userId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.model,
       await this.userRepository.findFullUser({ userId: params.userId }),
     );
   }
 
-  async reactivate(params: { userId: string }): Promise<JsonApiDataInterface> {
+  async reactivate(params: { userId: string }): Promise<JsonApiSingleDocument> {
     await this.userRepository.reactivate({
       userId: params.userId,
     });
@@ -249,7 +252,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async patchAvatar(params: { data: UserPatchAvatarDataDTO }): Promise<JsonApiDataInterface> {
+  async patchAvatar(params: { data: UserPatchAvatarDataDTO }): Promise<JsonApiSingleDocument> {
     await this.userRepository.patchAvatar({
       userId: params.data.id,
       avatar: params.data.attributes.avatar,
@@ -264,7 +267,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
    * Saves the user's language and returns the user. A platform administrator
    * belongs to no company, so `isAdmin` reloads them the way GET users/:id does.
    */
-  async patchLanguage(params: { data: UserPatchLanguageDataDTO; isAdmin?: boolean }): Promise<JsonApiDataInterface> {
+  async patchLanguage(params: { data: UserPatchLanguageDataDTO; isAdmin?: boolean }): Promise<JsonApiSingleDocument> {
     const supportedLanguages = this.configService.get<ConfigI18nInterface>("i18n")?.supportedLanguages ?? ["en"];
     const language = params.data.attributes?.language;
 
@@ -283,7 +286,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async patchRate(params: { data: UserPatchRateDataDTO }): Promise<JsonApiDataInterface> {
+  async patchRate(params: { data: UserPatchRateDataDTO }): Promise<JsonApiSingleDocument> {
     await this.userRepository.patchRate({
       userId: params.data.id,
       rate: params.data.attributes.rate,
@@ -314,7 +317,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     );
   }
 
-  async findByEmail(params: { email: string }): Promise<JsonApiDataInterface> {
+  async findByEmail(params: { email: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(this.model, await this.userRepository.findByEmail({ email: params.email }));
   }
 
@@ -322,7 +325,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     data: UserPostDataDTO;
     forceCompanyAdmin?: boolean;
     language: string;
-  }): Promise<JsonApiDataInterface | void> {
+  }): Promise<JsonApiSingleDocument | void> {
     const password = params.data.attributes.password
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
@@ -371,7 +374,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     companyId: string;
     data: UserPostDataDTO;
     language: string;
-  }): Promise<JsonApiDataInterface | void> {
+  }): Promise<JsonApiSingleDocument | void> {
     const password = params.data.attributes.password
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
@@ -413,7 +416,11 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     await this.userRepository.deleteUser({ userId: params.userId });
   }
 
-  async addUserToRole(params: { userId: string; roleId: string; returnsFull: boolean }): Promise<JsonApiDataInterface> {
+  async addUserToRole(params: {
+    userId: string;
+    roleId: string;
+    returnsFull: boolean;
+  }): Promise<JsonApiSingleDocument> {
     await this.userRepository.addUserToRole({ userId: params.userId, roleId: params.roleId });
 
     return this.findByUserId({ userId: params.userId });
@@ -423,7 +430,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     roleId: string;
     userId: string;
     returnsFull: boolean;
-  }): Promise<JsonApiDataInterface> {
+  }): Promise<JsonApiSingleDocument> {
     await this.userRepository.removeUserFromRole({
       roleId: params.roleId,
       userId: params.userId,
