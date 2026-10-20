@@ -21,6 +21,11 @@ export interface ToolFieldsResult {
    * entirely when empty or when stage is "detail".
    */
   availableOnRead?: string[];
+  /**
+   * The entity's `generatedFields` (AI-written) present in `fields`, in
+   * declaration order. Omitted entirely when none is present.
+   */
+  generated?: string[];
 }
 
 /**
@@ -36,6 +41,15 @@ export function formatMoneyField(value: unknown, kind: FieldKind): string | null
   if (minor === 0) return String(Math.trunc(value));
   const factor = 10 ** minor;
   return (value / factor).toFixed(minor);
+}
+
+/**
+ * The entity's AI-written fields (`chat.generatedFields`) present in an output
+ * `fields` map, in declaration order. `?? []` because a catalog entity built
+ * outside GraphCatalogService (test fixtures) may omit the list.
+ */
+export function generatedFieldsIn(entity: CatalogEntity, fields: Record<string, unknown>): string[] {
+  return (entity.generatedFields ?? []).filter((name) => Object.prototype.hasOwnProperty.call(fields, name));
 }
 
 /**
@@ -90,7 +104,13 @@ export class ToolFieldFormatterService {
         if (formatted !== null) fields[`${name}_formatted`] = formatted;
       }
     }
-    return withheld.length ? { fields, availableOnRead: withheld } : { fields };
+    // 4. AI-written fields actually emitted.
+    const generated = generatedFieldsIn(entity, fields);
+    return {
+      fields,
+      ...(withheld.length ? { availableOnRead: withheld } : {}),
+      ...(generated.length ? { generated } : {}),
+    };
   }
 
   /**

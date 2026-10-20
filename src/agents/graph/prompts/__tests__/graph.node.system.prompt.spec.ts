@@ -171,6 +171,14 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(searchBlock).toMatch(/resolve_entity/);
   });
 
+  it("describes the search_entities reply with applied, not matchMode", () => {
+    const out = renderGraphNodeSystemPrompt("any");
+    const searchIdx = out.indexOf("- `search_entities");
+    const searchBlock = out.substring(searchIdx, out.indexOf("\n\n", searchIdx));
+    expect(searchBlock).toContain("carries applied ({ filters, sort, limit })");
+    expect(searchBlock).toContain("carries no matchMode");
+  });
+
   it("Tools preamble makes resolve_entity the first step for user-named entities", () => {
     const out = renderGraphNodeSystemPrompt("any");
     const toolsIdx = out.indexOf("## Tools");

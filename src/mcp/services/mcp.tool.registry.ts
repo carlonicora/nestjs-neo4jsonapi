@@ -23,6 +23,7 @@ import { McpPromotedToolsFactory } from "./mcp.promoted.tools.factory";
  * (`INTERACTIVE_CREDIT_VALIDATOR`, else `CREDIT_VALIDATOR`): AI off returns the
  * flat error `ai_disabled`, an empty balance (402) returns `no_credits`, any
  * other validator error propagates. With no validator bound nothing is gated.
+ * A tool flagged `gateFree` (ping) is never gated.
  * `build()` (tools/list) is never gated, so a client still sees what exists.
  */
 @Injectable()
@@ -69,6 +70,10 @@ export class McpToolRegistry {
         content: [{ type: "text", text: JSON.stringify({ code: "unknown_type", message: `Unknown tool: ${name}` }) }],
       };
     }
+
+    // A gate-free tool (ping) spends no AI credit: it answers even with AI off
+    // or an empty balance, which is exactly when a client needs it.
+    if (tool.gateFree) return tool.execute(input, ctx);
 
     const validator = pickInteractiveValidator(this.interactiveCreditValidator, this.creditValidator);
     if (!(await isAiEnabledVia(validator, { companyId: ctx.companyId }))) {

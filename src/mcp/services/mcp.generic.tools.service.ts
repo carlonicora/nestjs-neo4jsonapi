@@ -1,5 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { z } from "zod";
+import { GraphCatalogService } from "../../agents/graph/services/graph.catalog.service";
+import { ConfigMcpInterface } from "../../config/interfaces/config.mcp.interface";
 import { DescribeEntityTool, describeEntityInputSchema } from "../../agents/graph/tools/describe-entity.tool";
 import { ReadEntityTool, readEntityInputSchema } from "../../agents/graph/tools/read-entity.tool";
 import { ResolveEntityTool, resolveEntityInputSchema } from "../../agents/graph/tools/resolve-entity.tool";
@@ -14,8 +19,14 @@ import {
   traverseInputSchema,
 } from "../../agents/graph/tools/traverse.tool";
 import { SearchDocumentsTool, searchDocumentsInputSchema } from "../../agents/operator/tools/search-documents.tool";
-import { McpToolDefinition, McpToolResult, McpUserContext } from "../interfaces/mcp.tool.interface";
-import { mcpError, mcpFlatError } from "./mcp.errors";
+import {
+  MCP_STATUS,
+  McpStatusContribution,
+  McpToolDefinition,
+  McpToolResult,
+  McpUserContext,
+} from "../interfaces/mcp.tool.interface";
+import { mcpError, mcpFlatError, mcpToolResult } from "./mcp.errors";
 import { McpEntityWriteService } from "./mcp.entity.write.service";
 
 // Descriptions copied verbatim from each tool's build() (single source is the
@@ -32,6 +43,28 @@ const TRAVERSE_DESCRIPTION =
 const SEARCH_DOCS_DESCRIPTION =
   "Search the company's documents (GraphRAG) for information relevant to a question. Returns the retrieved passages, each prefixed by its chunkId.";
 
+const PING_DESCRIPTION =
+  "Check the connection: returns the server name and version, the current time, the signed-in user and company, how many record types are visible, and the status the application reports (e.g. corpus coverage, queues). Read only, spends no credits.";
+
+const pingInputSchema = z.object({}).strict();
+
+let packageVersion: string | undefined;
+
+/**
+ * This package's own version, read once from its package.json. The path is the
+ * same from `src/mcp/services` and `dist/mcp/services`: three levels up is the
+ * package root.
+ */
+function readPackageVersion(): string {
+  if (packageVersion === undefined) {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "package.json"), "utf8")) as {
+      version?: string;
+    };
+    packageVersion = pkg.version ?? "unknown";
+  }
+  return packageVersion;
+}
+
 /**
  * The JSON Schema of a list tool's input with the explicit `filters` and
  * `sort` shapes. The Zod schemas type both as `z.any()` (the coercion owns the
@@ -44,7 +77,7 @@ function withFilterSchemas(schema: z.ZodType): Record<string, unknown> {
 
 /**
  * Builds the generic MCP tool set for one authenticated request:
- * the five graph read tools, the document-retrieval tool, and the four
+ * the five graph read tools, the document-retrieval tool, `ping`, and the four
  * entity write tools contributed by McpEntityWriteService.
  */
 @Injectable()
@@ -57,7 +90,26 @@ export class McpGenericToolsService {
     private readonly traverseTool: TraverseTool,
     private readonly searchDocumentsTool: SearchDocumentsTool,
     private readonly writeService: McpEntityWriteService,
+    private readonly catalog: GraphCatalogService,
+    private readonly configService: ConfigService,
+    @Optional() @Inject(MCP_STATUS) private readonly statusContributions: McpStatusContribution[] = [],
   ) {}
+
+  /**
+   * The `ping` reply: identity of the server and the caller, the visible
+   * catalog size, and every app status contribution merged at the top level.
+   */
+  async ping(ctx: McpUserContext): Promise<Record<string, unknown>> {
+    const contributed = await Promise.all((this.statusContributions ?? []).map((c) => c.status(ctx)));
+    return {
+      server: this.configService.get<ConfigMcpInterface>("mcp")?.serverName ?? "neural-erp",
+      version: readPackageVersion(),
+      now: new Date().toISOString(),
+      user: { userId: ctx.userId, companyId: ctx.companyId },
+      catalog: { types: this.catalog.getAccessibleTypes(ctx.userModuleIds).length },
+      ...Object.assign({}, ...contributed),
+    };
+  }
 
   /** Builds the per-request generic tool definitions (read tools + write tools). */
   build(ctx: McpUserContext): McpToolDefinition[] {
@@ -104,10 +156,8 @@ export class McpGenericToolsService {
             }
           }
           if (seedType) seedDescribe(seedType(parsed));
-          const result = await invoke(parsed);
-          return {
-            content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }],
-          };
+          // A tool-level `{ error }` value is a failed call: isError, never success.
+          return mcpToolResult(await invoke(parsed));
         } catch (e) {
           return mcpError(e);
         }
@@ -149,6 +199,21 @@ export class McpGenericToolsService {
         // and messages to [] — the documented fallback.
         this.searchDocumentsTool.invoke(i, { ...ctx, dataLimits: {}, messages: [] }, recorder),
       ),
+      {
+        name: "ping",
+        description: PING_DESCRIPTION,
+        inputSchema: z.toJSONSchema(pingInputSchema) as Record<string, unknown>,
+        readOnly: true,
+        gateFree: true,
+        execute: async (input): Promise<McpToolResult> => {
+          try {
+            pingInputSchema.parse(input ?? {});
+            return { content: [{ type: "text", text: JSON.stringify(await this.ping(ctx)) }] };
+          } catch (e) {
+            return mcpError(e);
+          }
+        },
+      },
       ...this.writeService.buildTools(ctx),
     ];
   }

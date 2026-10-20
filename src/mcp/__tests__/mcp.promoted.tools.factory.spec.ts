@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { NotFoundException } from "@nestjs/common";
 import { McpPromotedToolsFactory, descriptorFieldToJsonSchema } from "../services/mcp.promoted.tools.factory";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
@@ -97,6 +98,28 @@ describe("McpPromotedToolsFactory", () => {
       expect.any(Array),
     );
     expect(get.readOnly).toBe(true);
+  });
+
+  it("get_orders maps a tool-level { error } to validation_failed with isError", async () => {
+    readTool.invoke.mockResolvedValueOnce({ error: 'Relationship "x" is not available on orders.' });
+    const get = factory.build(ctx).find((t) => t.name === "get_orders")!;
+    const out = await get.execute({ id: "o1", include: ["x"] }, ctx);
+    expect(out.isError).toBe(true);
+    expect(JSON.parse((out.content[0] as { text: string }).text)).toEqual({
+      code: "validation_failed",
+      message: 'Relationship "x" is not available on orders.',
+    });
+  });
+
+  it("get_orders maps a thrown NotFoundException to not_found, like the generic tools", async () => {
+    readTool.invoke.mockRejectedValueOnce(new NotFoundException("Order o-missing not found"));
+    const get = factory.build(ctx).find((t) => t.name === "get_orders")!;
+    const out = await get.execute({ id: "o-missing" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(JSON.parse((out.content[0] as { text: string }).text)).toEqual({
+      code: "not_found",
+      message: "Order o-missing not found",
+    });
   });
 
   it("pre-seeds the recorder with describe_entity records so the graph tools' describe-first guard passes", async () => {

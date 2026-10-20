@@ -366,6 +366,16 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
     related?: boolean;
     /** Fields present only on read_entity, filled by the service's DetailFieldsSource. Never filterable, sortable, searchable or listed. */
     detailFields?: Record<string, DetailFieldDef>;
+    /**
+     * Personal communication (emails, messages, chats): resolve_entity skips this
+     * type unless the caller lists it in `types`. The reply names the skipped types.
+     */
+    personal?: boolean;
+    /**
+     * Fields written by an AI model rather than by a person. The tool formatter
+     * emits the ones present in a record's output as `generated`.
+     */
+    generatedFields?: string[];
   };
 
   /**
@@ -488,6 +498,16 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
     related?: boolean;
     /** Fields present only on read_entity, filled by the service's DetailFieldsSource. Never filterable, sortable, searchable or listed. */
     detailFields?: Record<string, DetailFieldDef>;
+    /**
+     * Personal communication (emails, messages, chats): resolve_entity skips this
+     * type unless the caller lists it in `types`. The reply names the skipped types.
+     */
+    personal?: boolean;
+    /**
+     * Fields written by an AI model rather than by a person. The tool formatter
+     * emits the ones present in a record's output as `generated`.
+     */
+    generatedFields?: string[];
   };
 
   /** See EntitySchemaInput.bridge. */

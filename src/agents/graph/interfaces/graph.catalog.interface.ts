@@ -148,4 +148,8 @@ export interface CatalogEntity {
    * the type's DetailFieldsSource. Never filterable or sortable. Absent when none are declared.
    */
   detailFields?: CatalogField[];
+  /** Mirrors chat.personal — resolve_entity skips this type unless the caller lists it in `types`. */
+  personal: boolean;
+  /** Mirrors chat.generatedFields — AI-written fields, emitted as `generated` by the tool formatter. `[]` when none. */
+  generatedFields: string[];
 }

@@ -3,12 +3,9 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { isFieldWritable, isRelationshipWritable } from "../services/writable.rules";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
-import { TYPE_TO_OP_ALLOWED } from "./traverse.tool";
+import { allowedFilterOperators, serviceFilterCapabilities } from "./traverse.tool";
 import type { CatalogField } from "../interfaces/graph.catalog.interface";
-import type {
-  ExternalEntitySource,
-  ExternalFilterCapability,
-} from "../../../common/interfaces/external.entity.source.interface";
+import type { ExternalFilterCapability } from "../../../common/interfaces/external.entity.source.interface";
 
 const inputSchema = z.object({
   type: z.string().describe("Entity type name from the graph map."),
@@ -17,16 +14,13 @@ const inputSchema = z.object({
 export { inputSchema as describeEntityInputSchema };
 
 /**
- * The filter operators a field accepts: those of its type, narrowed to the
- * service's declared capabilities when it declares any. A field that is not
- * filterable, or that the service does not list, accepts none.
+ * The filter operators a field accepts. When the service declares capabilities
+ * they win: exactly the operators listed for the field (none when it is not
+ * listed). Otherwise those of its type, and none for a non-filterable field.
  */
 function filterOperators(field: CatalogField, capabilities: ExternalFilterCapability[] | undefined): string[] {
-  if (!field.filterable) return [];
-  const byType = Array.from(TYPE_TO_OP_ALLOWED[field.type] ?? []);
-  if (!capabilities) return byType;
-  const supported = capabilities.find((c) => c.field === field.name)?.operators ?? [];
-  return byType.filter((op) => supported.includes(op));
+  if (!capabilities && !field.filterable) return [];
+  return allowedFilterOperators(field, capabilities);
 }
 
 @Injectable()
@@ -57,27 +51,32 @@ export class DescribeEntityTool {
         const writable = entity.writable === true;
         // A service whose records live outside the app database may support
         // fewer filters than the field types allow; advertise only those.
-        const svc = this.factory.resolveService(entity.type) as Partial<ExternalEntitySource> | undefined;
-        const capabilities = typeof svc?.filterCapabilities === "function" ? svc.filterCapabilities() : undefined;
+        // When it declares capabilities, a field is filterable only if it has operators.
+        const capabilities = serviceFilterCapabilities(this.factory.resolveService(entity.type));
         return {
           type: entity.type,
           description: entity.description,
-          fields: entity.fields.map((f) => ({
-            name: f.name,
-            type: f.type,
-            description: f.description,
-            filterable: f.filterable,
-            sortable: f.sortable,
-            operators: filterOperators(f, capabilities),
-            ...(f.kind ? { kind: f.kind } : {}),
-            // A richtext field is READ as markdown (the tool layer renders the
-            // stored BlockNote document), so it must be WRITTEN as markdown too —
-            // the write tools convert it back. Without saying so the model has no
-            // way to know the two directions match.
-            ...(f.kind?.type === "richtext" ? { format: "markdown" } : {}),
-            ...(entity.list ? { stage: entity.list.includes(f.name) ? "list" : "detail" } : {}),
-            ...(writable ? { writable: isFieldWritable(entity, f.name) } : {}),
-          })),
+          fields: entity.fields.map((f) => {
+            const operators = filterOperators(f, capabilities);
+            const values = capabilities?.find((c) => c.field === f.name)?.values;
+            return {
+              name: f.name,
+              type: f.type,
+              description: f.description,
+              filterable: capabilities ? operators.length > 0 : f.filterable,
+              sortable: f.sortable,
+              operators,
+              ...(values?.length ? { values: [...values] } : {}),
+              ...(f.kind ? { kind: f.kind } : {}),
+              // A richtext field is READ as markdown (the tool layer renders the
+              // stored BlockNote document), so it must be WRITTEN as markdown too —
+              // the write tools convert it back. Without saying so the model has no
+              // way to know the two directions match.
+              ...(f.kind?.type === "richtext" ? { format: "markdown" } : {}),
+              ...(entity.list ? { stage: entity.list.includes(f.name) ? "list" : "detail" } : {}),
+              ...(writable ? { writable: isFieldWritable(entity, f.name) } : {}),
+            };
+          }),
           relationships: entity.relationships.map((r) => ({
             name: r.name,
             targetType: r.targetType,

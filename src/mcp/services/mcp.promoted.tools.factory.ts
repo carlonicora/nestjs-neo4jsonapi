@@ -8,6 +8,7 @@ import type { ToolCallRecord } from "../../agents/graph/tools/tool.factory";
 import type { ConfigMcpInterface } from "../../config/interfaces/config.mcp.interface";
 import type { McpToolDefinition, McpToolResult, McpUserContext } from "../interfaces/mcp.tool.interface";
 import { McpEntityWriteService } from "./mcp.entity.write.service";
+import { mcpError, mcpToolResult } from "./mcp.errors";
 
 /**
  * Maps an entity-descriptor field (as exposed by the graph catalog) to a JSON
@@ -269,11 +270,11 @@ export class McpPromotedToolsFactory {
   }
 
   private textResult(result: unknown): McpToolResult {
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    return mcpToolResult(result);
   }
 
+  /** Same exception mapping as the generic tools: 404 → not_found, 400 → validation_failed, … */
   private internalError(e: unknown): McpToolResult {
-    const message = e instanceof Error ? e.message : "Unexpected error";
-    return { isError: true, content: [{ type: "text", text: JSON.stringify({ code: "internal", message }) }] };
+    return mcpError(e);
   }
 }

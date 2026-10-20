@@ -170,6 +170,28 @@ describe("McpToolRegistry", () => {
       expect(interactive.isAiEnabled).not.toHaveBeenCalled();
     });
 
+    it("ping skips the credit gate", async () => {
+      const ping = {
+        name: "ping",
+        description: "p",
+        inputSchema: { type: "object" },
+        readOnly: true,
+        gateFree: true,
+        execute: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "pong" }] }),
+      };
+      const generic = { build: vi.fn().mockReturnValue([ping]) };
+      const interactive = {
+        validateCredits: vi.fn().mockRejectedValue(new HttpException("NO_CREDITS", 402)),
+        isAiEnabled: vi.fn().mockResolvedValue(false),
+      };
+      const registry = new McpToolRegistry(generic as any, { build: () => [] } as any, undefined, interactive);
+      const res = await registry.call("ping", {}, ctx);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toBe("pong");
+      expect(interactive.isAiEnabled).not.toHaveBeenCalled();
+      expect(interactive.validateCredits).not.toHaveBeenCalled();
+    });
+
     it("call() propagates a non-402 validator error", async () => {
       const interactive = {
         validateCredits: vi.fn().mockRejectedValue(new Error("neo4j down")),

@@ -109,6 +109,43 @@ describe("DescribeEntityTool", () => {
       expect(ops.notes).toEqual([]);
     });
 
+    it("describe_entity prints capability values and filterable:false for a field with no operators", async () => {
+      const opsFactory: any = {
+        resolveEntity: () => ({
+          type: "judgements",
+          moduleId: "m",
+          description: "A judgement.",
+          fields: [
+            { name: "source", type: "string", description: "Source.", filterable: true, sortable: true },
+            { name: "year", type: "string", description: "Year.", filterable: true, sortable: true },
+            { name: "decisionDate", type: "date", description: "Decision date.", filterable: true, sortable: true },
+          ],
+          relationships: [],
+          nodeName: "judgement",
+          labelName: "Judgement",
+        }),
+        resolveService: () => ({
+          filterCapabilities: () => [
+            { field: "source", operators: ["eq"], values: ["SNCASS", "EURLEX"] },
+            // Capabilities win over the type table: a string field may take range operators.
+            { field: "year", operators: ["eq", "gt", "gte", "lt", "lte"] },
+            { field: "decisionDate", operators: [] },
+          ],
+        }),
+        capture: factory.capture,
+      };
+      const out: any = await new DescribeEntityTool(opsFactory).invoke(
+        { type: "judgements" },
+        { companyId: "c", userId: "u", userModuleIds: ["m"] },
+        [],
+      );
+      const byName = Object.fromEntries(out.fields.map((f: any) => [f.name, f]));
+      expect(byName.source).toMatchObject({ filterable: true, operators: ["eq"], values: ["SNCASS", "EURLEX"] });
+      expect(byName.year).toMatchObject({ filterable: true, operators: ["eq", "gt", "gte", "lt", "lte"] });
+      expect(byName.year).not.toHaveProperty("values");
+      expect(byName.decisionDate).toMatchObject({ filterable: false, operators: [] });
+    });
+
     it("lists no operator for a filterable field the service does not support", async () => {
       const ops = await describeWith({ filterCapabilities: () => [{ field: "name", operators: ["eq"] }] });
       expect(ops.name).toEqual(["eq"]);

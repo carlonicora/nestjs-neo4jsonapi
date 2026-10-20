@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
-import { ToolFieldFormatterService } from "../services/field-formatting";
+import { generatedFieldsIn, ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
@@ -153,6 +153,11 @@ export class ReadEntityTool {
           }
         }
 
+        // AI-written fields in the output, computed after the detail fields land so
+        // a generated detail field is marked too.
+        const generated = generatedFieldsIn(entity, baseFields);
+        const generatedMarker = generated.length ? { generated } : {};
+
         // Bridge fanout: if this entity is a bridge, replace the bare payload with
         // the materialised one. The existing `include` block (if any) stacks on top
         // as a sibling `related` map — it carries summary refs, while the bridge
@@ -172,7 +177,9 @@ export class ReadEntityTool {
           });
           // Armed only on a successful read (spec § "3b. read_entity dedup").
           readIds?.add(dedupKey);
-          return input.include?.length ? { ...materialised, related } : materialised;
+          return input.include?.length
+            ? { ...materialised, ...generatedMarker, related }
+            : { ...materialised, ...generatedMarker };
         }
 
         // Armed only on a successful read (spec § "3b. read_entity dedup").
@@ -181,6 +188,7 @@ export class ReadEntityTool {
           id: record.id,
           type: entity.type,
           fields: baseFields,
+          ...generatedMarker,
           ...(input.include?.length ? { related } : {}),
         };
       },

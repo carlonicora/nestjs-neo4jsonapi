@@ -43,7 +43,7 @@ describe("GraphNodeService — assistant:status", () => {
         items: [{ type: "npcs", id: "npc-1", summary: "Fabio", score: 9 }],
       }),
       buildTool("describe_entity", { fields: [], relationships: [] }),
-      buildTool("search_entities", { matchMode: "none", items: [] }),
+      buildTool("search_entities", { applied: { filters: [], sort: [], limit: 10 }, items: [] }),
       buildTool("read_entity", { id: "npc-1", type: "npcs", fields: { name: "Fabio" } }),
       buildTool("traverse", { items: [] }),
       { get: vi.fn(() => undefined) } as any,

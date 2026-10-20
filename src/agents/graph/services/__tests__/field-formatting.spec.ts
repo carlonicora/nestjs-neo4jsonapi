@@ -10,6 +10,8 @@ const entity = (over: Partial<CatalogEntity> = {}): CatalogEntity => ({
   nodeName: "thing",
   labelName: "Thing",
   relationships: [],
+  personal: false,
+  generatedFields: [],
   fields: [
     { name: "name", type: "string", description: "d", filterable: true, sortable: true },
     { name: "notes", type: "string", description: "d", filterable: true, sortable: true, kind: { type: "richtext" } },
@@ -323,5 +325,40 @@ describe("12-session traverse payload", () => {
     // Uncatalogued bookkeeping never reaches the model, in either bucket.
     expect(result.fields.recapStatus).toBeUndefined();
     expect(result.availableOnRead).not.toContain("recapStatus");
+  });
+  it("emits generated for AI fields present in the output", () => {
+    const result = service().build({
+      entity: entity({
+        generatedFields: ["abstract", "tldr"],
+        fields: [
+          { name: "name", type: "string", description: "d", filterable: true, sortable: true },
+          { name: "abstract", type: "string", description: "d", filterable: true, sortable: true },
+          { name: "tldr", type: "string", description: "d", filterable: true, sortable: true },
+        ],
+      }),
+      record: { name: "Cass. 14345/2024", abstract: "The court held." },
+      stage: "detail",
+    });
+    expect(result.fields).toEqual({ name: "Cass. 14345/2024", abstract: "The court held." });
+    expect(result.generated).toEqual(["abstract"]);
+  });
+
+  it("omits generated when none is present", () => {
+    const result = service().build({
+      entity: entity({ generatedFields: ["blurb"] }),
+      record: { name: "Plain" },
+      stage: "detail",
+    });
+    expect(result).not.toHaveProperty("generated");
+  });
+
+  it("does not mark a generated field withheld from a list projection", () => {
+    const result = service().build({
+      entity: entity({ generatedFields: ["blurb"] }),
+      record: { name: "Plain", blurb: "z".repeat(LIST_FIELD_MAX_CHARS + 1) },
+      stage: "list",
+    });
+    expect(result.availableOnRead).toEqual(["blurb"]);
+    expect(result).not.toHaveProperty("generated");
   });
 });

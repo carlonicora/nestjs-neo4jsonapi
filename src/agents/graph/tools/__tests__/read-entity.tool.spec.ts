@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 import { ReadEntityTool } from "../read-entity.tool";
+import { ToolFieldFormatterService } from "../../services/field-formatting";
+import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 
 describe("ReadEntityTool", () => {
   const accounts = {
@@ -56,6 +58,50 @@ describe("ReadEntityTool", () => {
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
     expect(out).toMatchObject({ id: "a1", type: "accounts", fields: { name: "Acme" } });
+  });
+
+  it("read_entity carries generated", async () => {
+    const judgements = {
+      type: "judgements",
+      moduleId: "11111111-1111-1111-1111-111111111111",
+      description: "A judgement.",
+      fields: [
+        { name: "name", type: "string", description: "n", filterable: true, sortable: true },
+        { name: "abstract", type: "string", description: "a", filterable: true, sortable: true },
+        { name: "tldr", type: "string", description: "t", filterable: true, sortable: true },
+      ],
+      relationships: [],
+      nodeName: "judgement",
+      labelName: "Judgement",
+      generatedFields: ["abstract", "tldr"],
+    };
+    const judgementFactory: any = {
+      ...factory,
+      resolveEntity: () => judgements,
+      resolveService: () => ({
+        findRecordById: vi.fn(async () => ({ id: "j1", name: "Cass. 1/2024", abstract: "Held." })),
+      }),
+    };
+    const tool = new ReadEntityTool(
+      judgementFactory,
+      {} as any,
+      {} as any,
+      undefined as any,
+      new ToolFieldFormatterService(new BlockNoteService()),
+    );
+    const out: any = await tool.invoke({ type: "judgements", id: "j1" }, ctx, [
+      { tool: "describe_entity", input: { type: "judgements" }, durationMs: 0 },
+    ]);
+    expect(out).toMatchObject({ id: "j1", fields: { name: "Cass. 1/2024", abstract: "Held." } });
+    expect(out.generated).toEqual(["abstract"]);
+  });
+
+  it("read_entity omits generated when the entity declares none", async () => {
+    const tool = new ReadEntityTool(factory, {} as any, {} as any, undefined as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out).not.toHaveProperty("generated");
   });
 
   it("rejects include for undescribed relationship", async () => {

@@ -62,3 +62,38 @@ function isTimeoutError(e: unknown): e is { name: string; message: string } {
 export function mcpFlatError(code: string, message: string, meta: Record<string, unknown> = {}): McpToolResult {
   return { isError: true, content: [{ type: "text", text: JSON.stringify({ code, message, ...meta }) }] };
 }
+
+/**
+ * The ToolFactory's unknown-type error (`ToolFactory.resolveEntity`) always
+ * starts `Entity type "<type>" is not available.`
+ */
+const UNKNOWN_TYPE_ERROR = /^Entity type "[^"]*" is not available\./;
+/** `read_entity`'s missing-record error: `No <type> with id <id>.` */
+const NOT_FOUND_ERROR = /^No \S+ with id \S+\.$/;
+/** A catalog type whose service is not registered: a server defect, not a client error. */
+const SERVICE_UNAVAILABLE_ERROR = /^Service not available for "[^"]*"\./;
+
+function toolErrorCode(error: string): McpErrorCode {
+  if (UNKNOWN_TYPE_ERROR.test(error)) return "unknown_type";
+  if (NOT_FOUND_ERROR.test(error)) return "not_found";
+  if (SERVICE_UNAVAILABLE_ERROR.test(error)) return "internal";
+  return "validation_failed";
+}
+
+/**
+ * Turns a graph tool's return value into an MCP result. The graph tools report
+ * a client error as a value, `{ error, ...extras }`, so the LangGraph operator
+ * can hand the message to the model; over MCP that value is a failed call and
+ * must reach the client with `isError: true`, never as a success payload.
+ * The ToolFactory's unknown-type error maps to `unknown_type`, a missing record
+ * to `not_found`, an unregistered service to `internal`, every other tool-level
+ * error to `validation_failed`; the extras (e.g. `schema`, `suggestion`) stay
+ * on the payload.
+ */
+export function mcpToolResult(result: unknown): McpToolResult {
+  if (typeof result === "object" && result !== null && typeof (result as { error?: unknown }).error === "string") {
+    const { error, ...extras } = result as { error: string } & Record<string, unknown>;
+    return mcpFlatError(toolErrorCode(error), error, extras);
+  }
+  return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] };
+}

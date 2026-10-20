@@ -409,6 +409,85 @@ describe("GraphSearchService.resolveEntity", () => {
     expect(queried).not.toContain("article_chat_fulltext");
   });
 
+  describe("listed types in a scoped run", () => {
+    const moduleId = "11111111-1111-1111-1111-111111111111";
+    const scoped = () => {
+      const proceeding = makeEntity("proceedings", "Proceeding", moduleId, (d) => d.name);
+      proceeding.scope = { rootType: "proceedings", rootLabel: "Proceeding", path: [] };
+      const law = makeEntity("laws", "Law", moduleId, (d) => d.name);
+      law.scopeShared = true;
+      // Visible, but neither chained to the scope root nor scopeShared.
+      const article = makeEntity("articles", "Article", moduleId, (d) => d.name);
+      return [proceeding, law, article];
+    };
+
+    it("throws when a listed type is outside the run's scope", async () => {
+      catalog.getAllChatEnabledEntities.mockReturnValue(scoped());
+      const neo4j = { read: vi.fn() };
+      const svc = new GraphSearchService(
+        neo4j as any,
+        { vectoriseText: vi.fn() } as any,
+        indexNames as any,
+        catalog,
+        { buildMatchClause: vi.fn(() => ({ cypher: "", params: {} })) } as any,
+        allowAll as any,
+      );
+
+      await expect(
+        svc.resolveEntity({
+          text: "Art. 2043",
+          companyId: "co1",
+          userModuleIds: [moduleId],
+          scopeId: "p-1",
+          scopeType: "proceedings",
+          types: ["articles"],
+        }),
+      ).rejects.toThrow(
+        'Type "articles" is not reachable in the current scope (proceedings). Types reachable here: [proceedings, laws].',
+      );
+      expect(neo4j.read).not.toHaveBeenCalled();
+    });
+
+    it("searches a listed scopeShared type in a scoped run", async () => {
+      catalog.getAllChatEnabledEntities.mockReturnValue(scoped());
+      const queried: string[] = [];
+      const neo4j: any = {
+        read: vi.fn().mockImplementation(async (_cypher: string, params: any) => {
+          if (params?.indexName) queried.push(params.indexName);
+          if (params?.indexName === "law_chat_fulltext" && String(params.term).startsWith("*")) {
+            return {
+              records: [
+                { get: (k: string) => (({ id: "l1", properties: { name: "Codice civile" }, score: 9 }) as any)[k] },
+              ],
+            };
+          }
+          return { records: [] };
+        }),
+      };
+      const svc = new GraphSearchService(
+        neo4j as any,
+        { vectoriseText: vi.fn() } as any,
+        indexNames as any,
+        catalog,
+        { buildMatchClause: vi.fn(() => ({ cypher: "", params: {} })) } as any,
+        allowAll as any,
+      );
+
+      const out = await svc.resolveEntity({
+        text: "Codice civile",
+        companyId: "co1",
+        userModuleIds: [moduleId],
+        scopeId: "p-1",
+        scopeType: "proceedings",
+        types: ["laws"],
+      });
+
+      expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 1 }]);
+      expect(queried).toContain("law_chat_fulltext");
+      expect(queried).not.toContain("proceeding_chat_fulltext");
+    });
+  });
+
   it("filters entities by userModuleIds (never queries types outside user's modules)", async () => {
     const neo4j = { read: vi.fn() };
     const embedder = { vectoriseText: vi.fn() };
@@ -934,5 +1013,100 @@ describe("buildResolveRecommendation — summary ties", () => {
       { type: "judgements", id: "b", summary: "14345/2024", score: 0.5 },
     ];
     expect(buildResolveRecommendation(tied, "14345/2024", "exact")).toBeUndefined();
+  });
+});
+
+describe("GraphSearchService.resolveEntity — types and personal exclusion", () => {
+  const MODULE = "11111111-1111-1111-1111-111111111111";
+  const account = makeEntity("accounts", "Account", MODULE, (d) => d.name);
+  const person = makeEntity("persons", "Person", MODULE, (d) => d.name);
+  const email = { ...makeEntity("emails", "Email", MODULE, (d) => d.name), personal: true };
+
+  const row = (id: string, name: string, score: number) => ({
+    get: (k: string) => (({ id, properties: { name }, score }) as any)[k],
+  });
+
+  const neo4jFor = (byIndex: Record<string, any[]>) => {
+    const queried: string[] = [];
+    const neo4j: any = {
+      read: vi.fn().mockImplementation(async (_cypher: string, params: any) => {
+        if (params?.indexName) queried.push(params.indexName);
+        if (params?.indexName && String(params.term).startsWith("*")) {
+          return { records: byIndex[params.indexName] ?? [] };
+        }
+        return { records: [] };
+      }),
+    };
+    return { neo4j, queried };
+  };
+
+  const build = (neo4j: any) =>
+    new GraphSearchService(
+      neo4j,
+      { vectoriseText: vi.fn().mockResolvedValue([0.1]) } as any,
+      indexNames as any,
+      { getAllChatEnabledEntities: vi.fn(() => [account, person, email]) } as any,
+      undefined as any,
+      allowAll as any,
+    );
+
+  it("excludes personal types by default", async () => {
+    const { neo4j, queried } = neo4jFor({
+      account_chat_fulltext: [row("a1", "Rossi", 5)],
+      email_chat_fulltext: [row("e1", "Rossi", 9)],
+    });
+    const out = await build(neo4j).resolveEntity({ text: "Rossi", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(queried.some((name) => name.startsWith("email_"))).toBe(false);
+    expect(out.items.map((i) => i.type)).toEqual(["accounts"]);
+    expect(out.excludedTypes).toEqual(["emails"]);
+    expect(out.excludedTypesNote).toContain("pass types to include them");
+  });
+
+  it("names the excluded types on an empty result too", async () => {
+    const { neo4j } = neo4jFor({});
+    const out = await build(neo4j).resolveEntity({ text: "nobody", companyId: "co1", userModuleIds: [MODULE] });
+    expect(out).toMatchObject({ matchMode: "none", items: [], excludedTypes: ["emails"] });
+  });
+
+  it("includes a personal type when listed in types", async () => {
+    const { neo4j, queried } = neo4jFor({ email_chat_fulltext: [row("e1", "Rossi", 9)] });
+    const out = await build(neo4j).resolveEntity({
+      text: "Rossi",
+      companyId: "co1",
+      userModuleIds: [MODULE],
+      types: ["emails"],
+    });
+
+    expect(queried).toContain("email_chat_fulltext");
+    expect(out.items.map((i) => i.id)).toEqual(["e1"]);
+    expect(out).not.toHaveProperty("excludedTypes");
+    expect(out).not.toHaveProperty("excludedTypesNote");
+  });
+
+  it("limits the search to the listed types", async () => {
+    const { neo4j, queried } = neo4jFor({
+      account_chat_fulltext: [row("a1", "Rossi", 5)],
+      person_chat_fulltext: [row("p1", "Rossi", 5)],
+    });
+    const out = await build(neo4j).resolveEntity({
+      text: "Rossi",
+      companyId: "co1",
+      userModuleIds: [MODULE],
+      types: ["persons"],
+    });
+
+    expect(queried.some((name) => name.startsWith("account_"))).toBe(false);
+    expect(queried.some((name) => name.startsWith("email_"))).toBe(false);
+    expect(out.items.map((i) => i.id)).toEqual(["p1"]);
+  });
+
+  it("rejects an unknown type name", async () => {
+    const { neo4j } = neo4jFor({});
+    const svc = build(neo4j);
+    await expect(
+      svc.resolveEntity({ text: "Rossi", companyId: "co1", userModuleIds: [MODULE], types: ["accounts", "x"] }),
+    ).rejects.toThrow('Unknown type "x". Visible types: [accounts, persons, emails].');
+    expect(neo4j.read).not.toHaveBeenCalled();
   });
 });

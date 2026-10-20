@@ -786,3 +786,113 @@ describe("TraverseTool — polymorphic related traversal", () => {
     expect(out.items[0]).toMatchObject({ id: "a1", type: "alphas" });
   });
 });
+
+describe("TraverseTool — filter capabilities and generated", () => {
+  const formatter = new ToolFieldFormatterService(new BlockNoteService());
+  const ctx = { companyId: "c", userId: "u", userModuleIds: ["m"] };
+  const laws: any = {
+    type: "laws",
+    moduleId: "m",
+    description: "A law.",
+    fields: [{ name: "name", type: "string", filterable: true, sortable: true }],
+    relationships: [
+      {
+        name: "judgements",
+        targetType: "judgements",
+        cardinality: "many",
+        description: "Judgements citing it.",
+        cypherDirection: "in",
+        cypherLabel: "CITES",
+        isReverse: false,
+        sourceType: "laws",
+      },
+    ],
+    nodeName: "law",
+    labelName: "Law",
+  };
+  const judgements: any = {
+    type: "judgements",
+    moduleId: "m",
+    description: "A judgement.",
+    fields: [
+      { name: "year", type: "string", filterable: true, sortable: true },
+      { name: "abstract", type: "string", filterable: true, sortable: false },
+    ],
+    relationships: [],
+    nodeName: "judgement",
+    labelName: "Judgement",
+    generatedFields: ["abstract", "tldr"],
+  };
+  const described = [{ tool: "describe_entity", input: { type: "laws" }, durationMs: 0 }];
+  const build = (targetSvc: unknown) =>
+    new TraverseTool(
+      {
+        resolveEntity: (t: string) => (t === "laws" ? laws : judgements),
+        resolveService: (t: string) => (t === "judgements" ? targetSvc : undefined),
+        capture: async (_r: any, fn: any, rec: any[]) => {
+          const v = await fn();
+          rec.push({});
+          return v;
+        },
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      formatter,
+      {} as any,
+    );
+
+  it("traverse validates operators against the target service capabilities when present", async () => {
+    const targetSvc = {
+      filterCapabilities: () => [{ field: "year", operators: ["eq", "gt", "gte", "lt", "lte"] }],
+      findRelatedRecordsByEdge: vi.fn(async () => []),
+    };
+    const tool = build(targetSvc);
+
+    const accepted: any = await tool.invoke(
+      {
+        fromType: "laws",
+        fromId: "l1",
+        relationship: "judgements",
+        filters: [{ field: "year", op: "lte", value: "2024" }],
+      },
+      ctx,
+      described,
+    );
+    expect(accepted.error).toBeUndefined();
+    expect(targetSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: [{ field: "year", op: "lte", value: "2024" }] }),
+    );
+
+    targetSvc.findRelatedRecordsByEdge.mockClear();
+    const rejected: any = await tool.invoke(
+      {
+        fromType: "laws",
+        fromId: "l1",
+        relationship: "judgements",
+        filters: [{ field: "year", op: "in", value: ["2023"] }],
+      },
+      ctx,
+      described,
+    );
+    expect(rejected.error).toContain('Operator "in" is not valid for field "year"');
+    expect(rejected.error).toContain("[eq, gt, gte, lt, lte]");
+    expect(targetSvc.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+  });
+
+  it("traverse items carry generated for AI fields present in the output", async () => {
+    const targetSvc = {
+      findRelatedRecordsByEdge: vi.fn(async () => [
+        { id: "j1", year: "2024", abstract: "Short abstract." },
+        { id: "j2", year: "2023" },
+      ]),
+    };
+    const out: any = await build(targetSvc).invoke(
+      { fromType: "laws", fromId: "l1", relationship: "judgements" },
+      ctx,
+      described,
+    );
+    expect(out.items[0].generated).toEqual(["abstract"]);
+    expect(out.items[1]).not.toHaveProperty("generated");
+  });
+});

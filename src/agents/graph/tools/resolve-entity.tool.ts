@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
@@ -6,6 +6,12 @@ import { GraphSearchService } from "../services/graph.search.service";
 
 const inputSchema = z.object({
   text: z.string().min(1).describe("The user's literal phrase. Pass 'Faby and Carlo' verbatim, not split."),
+  types: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Catalog type names to search, e.g. ["accounts"]. Omitted: every visible type except personal communication (emails, messages, chats), which the reply lists in excludedTypes.',
+    ),
 });
 
 export { inputSchema as resolveEntityInputSchema };
@@ -23,7 +29,17 @@ export class ResolveEntityTool {
       description:
         "Resolve a user-named entity across every visible type. Returns ranked candidates from the highest-confidence tier that yielded any match anywhere. Use this before search_entities / read_entity / traverse whenever the user refers to a named record.",
       schema: inputSchema,
-      func: async (input) => JSON.stringify(await this.invoke(input, ctx, recorder)),
+      // An unknown `types` entry throws a BadRequestException (validation_failed
+      // over MCP); the LangGraph path hands the model the message instead, so
+      // it can retry with a visible type rather than abort the turn.
+      func: async (input) => {
+        try {
+          return JSON.stringify(await this.invoke(input, ctx, recorder));
+        } catch (e) {
+          if (e instanceof BadRequestException) return JSON.stringify({ error: e.message });
+          throw e;
+        }
+      },
     });
   }
 
@@ -41,6 +57,7 @@ export class ResolveEntityTool {
           userModuleIds: ctx.userModuleIds,
           scopeId: ctx.scopeId,
           scopeType: ctx.scopeType,
+          types: input.types,
         }),
       recorder,
     );

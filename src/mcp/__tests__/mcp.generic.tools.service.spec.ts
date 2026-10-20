@@ -1,5 +1,9 @@
+import { BadRequestException } from "@nestjs/common";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { McpGenericToolsService } from "../services/mcp.generic.tools.service";
+import { ResolveEntityTool } from "../../agents/graph/tools/resolve-entity.tool";
 import { FILTER_OPERATORS, filtersJsonSchema, sortJsonSchema } from "../../agents/graph/tools/traverse.tool";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
@@ -30,6 +34,8 @@ describe("McpGenericToolsService describe-first seeding", () => {
       traverseTool as any,
       searchDocsTool as any,
       writeService as any,
+      {} as any,
+      {} as any,
     );
   });
 
@@ -83,6 +89,8 @@ describe("McpGenericToolsService filter contract", () => {
       traverseTool as any,
       idle as any,
       writeService as any,
+      {} as any,
+      {} as any,
     );
   });
 
@@ -165,5 +173,171 @@ describe("McpGenericToolsService filter contract", () => {
     const item = variants.find((v: any) => v.type === "object" && v.properties?.field);
     expect(item.properties.direction.enum).toEqual(["asc", "desc"]);
     expect(variants.some((v: any) => v.type === "object" && v.additionalProperties?.enum)).toBe(true);
+  });
+});
+
+describe("McpGenericToolsService ping", () => {
+  const idle = { invoke: vi.fn().mockResolvedValue({}) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+  const catalog = { getAccessibleTypes: vi.fn().mockReturnValue(["orders", "accounts", "judgements"]) };
+  const configService = { get: vi.fn().mockReturnValue({ serverName: "studio" }) };
+
+  const build = (contributions?: unknown[]) =>
+    new McpGenericToolsService(
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      writeService as any,
+      catalog as any,
+      configService as any,
+      contributions as any,
+    );
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("ping is read-only and merges status contributions", async () => {
+    const corpus = { status: vi.fn().mockResolvedValue({ corpus: { sources: [{ source: "SNCASS", total: 3 }] } }) };
+    const queues = { status: vi.fn().mockResolvedValue({ queues: { legalResearch: "ok" } }) };
+    const tool = build([corpus, queues])
+      .build(ctx)
+      .find((t) => t.name === "ping")!;
+
+    expect(tool.readOnly).toBe(true);
+    expect(tool.gateFree).toBe(true);
+
+    const out = await tool.execute({}, ctx);
+    expect(out.isError).toBeUndefined();
+    const reply = JSON.parse(out.content[0].text);
+    const { version } = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "package.json"), "utf8"));
+    expect(reply).toEqual({
+      server: "studio",
+      version,
+      now: expect.any(String),
+      user: { userId: "u1", companyId: "c1" },
+      catalog: { types: 3 },
+      corpus: { sources: [{ source: "SNCASS", total: 3 }] },
+      queues: { legalResearch: "ok" },
+    });
+    expect(new Date(reply.now).toISOString()).toBe(reply.now);
+    expect(catalog.getAccessibleTypes).toHaveBeenCalledWith(["mod-orders"]);
+    expect(corpus.status).toHaveBeenCalledWith(ctx);
+    expect(queues.status).toHaveBeenCalledWith(ctx);
+  });
+
+  it("ping answers without status contributions", async () => {
+    const tool = build(undefined)
+      .build(ctx)
+      .find((t) => t.name === "ping")!;
+    const reply = JSON.parse((await tool.execute({}, ctx)).content[0].text);
+    expect(Object.keys(reply).sort()).toEqual(["catalog", "now", "server", "user", "version"]);
+  });
+});
+
+/**
+ * The graph tools report a client error as a value, `{ error, ...extras }`.
+ * Over MCP that value is a failed call: the client must see isError, never a
+ * success payload carrying an error message.
+ */
+describe("McpGenericToolsService tool-level errors", () => {
+  const searchTool = { invoke: vi.fn() };
+  const describeTool = { invoke: vi.fn() };
+  const idle = { invoke: vi.fn().mockResolvedValue({}) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+
+  const build = (resolveTool: unknown = idle) =>
+    new McpGenericToolsService(
+      resolveTool as any,
+      describeTool as any,
+      searchTool as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      writeService as any,
+      {} as any,
+      {} as any,
+    ).build(ctx);
+
+  const payloadOf = (out: { content: Array<{ text?: string }> }) => JSON.parse(out.content[0].text as string);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("maps a tool-level filter error to validation_failed with isError", async () => {
+    const message = 'Operator "lte" is not valid for field "name" on orders.';
+    searchTool.invoke.mockResolvedValue({ error: message });
+    const out = await build()
+      .find((t) => t.name === "search_entities")!
+      .execute({ type: "orders" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({ code: "validation_failed", message });
+  });
+
+  it("maps an unknown type to unknown_type", async () => {
+    const message = 'Entity type "ordes" is not available. Retry this call now with type "orders".';
+    describeTool.invoke.mockResolvedValue({ error: message, suggestion: "orders" });
+    const out = await build()
+      .find((t) => t.name === "describe_entity")!
+      .execute({ type: "ordes" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({ code: "unknown_type", message, suggestion: "orders" });
+  });
+
+  it("maps a missing record to not_found", async () => {
+    const message = "No orders with id o-missing.";
+    idle.invoke.mockResolvedValueOnce({ error: message });
+    const out = await build()
+      .find((t) => t.name === "read_entity")!
+      .execute({ type: "orders", id: "o-missing" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({ code: "not_found", message });
+  });
+
+  it("maps an unregistered service to internal", async () => {
+    const message = 'Service not available for "orders".';
+    idle.invoke.mockResolvedValueOnce({ error: message });
+    const out = await build()
+      .find((t) => t.name === "read_entity")!
+      .execute({ type: "orders", id: "o1" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({ code: "internal", message });
+  });
+
+  it("keeps a normal result as success", async () => {
+    searchTool.invoke.mockResolvedValue({ items: [{ id: "o1" }] });
+    const out = await build()
+      .find((t) => t.name === "search_entities")!
+      .execute({ type: "orders" }, ctx);
+    expect(out.isError).toBeUndefined();
+    expect(payloadOf(out)).toEqual({ items: [{ id: "o1" }] });
+  });
+
+  it("keeps extras (schema) on the error payload", async () => {
+    const schema = { type: "orders", fields: [{ name: "name" }], relationships: [] };
+    searchTool.invoke.mockResolvedValue({ error: "You must call describe_entity first.", schema });
+    const out = await build()
+      .find((t) => t.name === "search_entities")!
+      .execute({ type: "orders" }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({
+      code: "validation_failed",
+      message: "You must call describe_entity first.",
+      schema,
+    });
+  });
+
+  it("resolve_entity with an out-of-scope type is validation_failed", async () => {
+    const message =
+      'Type "articles" is not reachable in the current scope (proceedings). Types reachable here: [proceedings, laws].';
+    const factory = { capture: (_record: unknown, fn: () => Promise<unknown>) => fn() };
+    const search = { resolveEntity: vi.fn().mockRejectedValue(new BadRequestException(message)) };
+    const out = await build(new ResolveEntityTool(factory as any, search as any))
+      .find((t) => t.name === "resolve_entity")!
+      .execute({ text: "Art. 2043", types: ["articles"] }, ctx);
+    expect(out.isError).toBe(true);
+    expect(payloadOf(out)).toEqual({ code: "validation_failed", message });
   });
 });

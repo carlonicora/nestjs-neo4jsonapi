@@ -20,6 +20,11 @@ export interface McpToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   readOnly: boolean;
+  /**
+   * True for a tool that spends no AI credit (e.g. `ping`): McpToolRegistry.call
+   * skips the AI-enabled and credit checks for it.
+   */
+  gateFree?: boolean;
   execute(input: Record<string, unknown>, ctx: McpUserContext): Promise<McpToolResult>;
 }
 
@@ -35,3 +40,21 @@ export interface McpToolContribution {
 
 /** Multi-provider DI token: consuming apps contribute McpToolContribution factories. */
 export const MCP_TOOLS = Symbol("MCP_TOOLS");
+
+/**
+ * One app-contributed part of the `ping` tool's reply. `status()` returns a
+ * top-level object (e.g. `{ corpus: {...} }`) merged into the reply; it should
+ * report its own failures in the object rather than throw, since a throw fails
+ * the whole ping.
+ */
+export interface McpStatusContribution {
+  status(ctx: McpUserContext): Promise<Record<string, unknown>>;
+}
+
+/**
+ * DI token for app status contributions, same pattern as MCP_TOOLS: Nest has no
+ * multi-providers, so an app binds ONE array provider
+ * (`{ provide: MCP_STATUS, useFactory: (a, b) => [a, b], inject: [A, B] }`)
+ * exported from a `@Global()` module so McpModule can resolve it.
+ */
+export const MCP_STATUS = Symbol("MCP_STATUS");

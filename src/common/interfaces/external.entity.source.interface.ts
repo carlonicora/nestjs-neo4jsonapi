@@ -32,6 +32,8 @@ export interface ExternalRelatedId {
 export interface ExternalFilterCapability {
   field: string;
   operators: string[];
+  /** The only values the source accepts on this field (for example a source code list). Printed by describe_entity. */
+  values?: string[];
 }
 
 /** Optional capabilities an AbstractService subclass implements when its records live outside the app database. */
@@ -43,9 +45,11 @@ export interface ExternalEntitySource {
   /** Polymorphic traverse for edges that do not exist in the app database. */
   findRelatedIds?(params: { id: string; cypherLabel: string; limit: number }): Promise<ExternalRelatedId[]>;
   /**
-   * The filters this source can actually apply. describe_entity narrows each
-   * field's operators to this list; a filterable field missing from it gets
-   * none. Without this hook every field keeps the operators of its type.
+   * The filters this source can actually apply. When present it wins over the
+   * operator table of the field types: describe_entity advertises exactly these
+   * operators (a field missing from the list, or listed with none, is
+   * `filterable: false`), and search_entities / traverse accept exactly these.
+   * Without this hook every field keeps the operators of its type.
    */
   filterCapabilities?(): ExternalFilterCapability[];
 }

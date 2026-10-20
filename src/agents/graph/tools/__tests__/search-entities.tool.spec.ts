@@ -1,4 +1,4 @@
-import { vi, describe, it, expect } from "vitest";
+import { vi, beforeEach, describe, it, expect } from "vitest";
 import { SearchEntitiesTool } from "../search-entities.tool";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
@@ -26,6 +26,9 @@ describe("SearchEntitiesTool", () => {
         : null,
   };
   const registryGet = vi.fn();
+  // The service is resolved before filter validation (its capabilities decide
+  // the operators), so each test starts from an unused registry.
+  beforeEach(() => registryGet.mockReset());
   const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] };
   const factory: any = {
     resolveEntity: (t: string) => catalog.getEntityDetail(t) ?? { error: "nope" },
@@ -135,7 +138,7 @@ describe("SearchEntitiesTool", () => {
     ]);
     expect(svc.findRecords).toHaveBeenCalledWith(expect.objectContaining({ limit: 3 }));
     expect(out.items).toHaveLength(2);
-    expect(out.matchMode).toBe("none");
+    expect(out).not.toHaveProperty("matchMode");
     expect(out.hasMore).toBe(true);
     expect(out.note).toBe(
       'Only the first 2 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
@@ -196,7 +199,7 @@ describe("SearchEntitiesTool", () => {
     expect("note" in out).toBe(false);
   });
 
-  it("returns matchMode='none' and per-item score=null for filter-only queries", async () => {
+  it("returns per-item score=null and no matchMode for filter-only queries", async () => {
     const svc = { findRecords: vi.fn().mockResolvedValue([{ id: "a1", name: "foo", status: "active" }]) };
     registryGet.mockReturnValue(svc);
     const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
@@ -204,7 +207,7 @@ describe("SearchEntitiesTool", () => {
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
 
-    expect(out.matchMode).toBe("none");
+    expect(out).not.toHaveProperty("matchMode");
     expect(out.items[0].score).toBeNull();
   });
 
@@ -293,7 +296,7 @@ describe("SearchEntitiesTool", () => {
       { tool: "describe_entity", input: { type: "bom-entries" }, durationMs: 0 },
     ]);
 
-    expect(out.matchMode).toBe("none");
+    expect(out).not.toHaveProperty("matchMode");
     expect(out.items).toHaveLength(2);
     expect(out.items[0]).toMatchObject({
       id: "be-1",
@@ -342,5 +345,136 @@ describe("SearchEntitiesTool", () => {
     expect(out.items[0].fields.name).toBe("Short");
     expect(out.items[0].fields.bio).toBeUndefined();
     expect(out.items[0].availableOnRead).toEqual(["bio"]);
+  });
+  it("search_entities envelope carries applied and no matchMode", async () => {
+    const svc = { findRecords: vi.fn(async () => [{ id: "a1", name: "Acme", status: "open" }]) };
+    registryGet.mockReturnValue(svc);
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke(
+      { type: "accounts", filters: { name: "Acme", status: ["open", "won"] }, sort: "name desc", limit: 7 },
+      ctx,
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
+    );
+    expect(out).not.toHaveProperty("matchMode");
+    expect(out.applied).toEqual({
+      filters: [
+        { field: "name", op: "eq", value: "Acme" },
+        { field: "status", op: "in", value: ["open", "won"] },
+      ],
+      sort: [{ field: "name", direction: "desc" }],
+      limit: 7,
+    });
+    expect(svc.findRecords).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: out.applied.filters, orderByFields: out.applied.sort, limit: 8 }),
+    );
+    expect(out.items).toHaveLength(1);
+  });
+
+  it("applied carries the clamped limit", async () => {
+    registryGet.mockReturnValue({ findRecords: vi.fn(async () => []) });
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts", limit: 5000 }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.applied).toEqual({ filters: [], sort: [], limit: 50 });
+  });
+
+  describe("filter capabilities", () => {
+    const judgements = {
+      type: "judgements",
+      moduleId: "m",
+      description: "A judgement.",
+      fields: [
+        { name: "year", type: "string", filterable: true, sortable: true },
+        { name: "name", type: "string", filterable: true, sortable: true },
+      ],
+      relationships: [],
+      nodeName: "judgement",
+      labelName: "Judgement",
+    };
+    const capabilitySvc = () => ({
+      filterCapabilities: () => [{ field: "year", operators: ["eq", "gt", "gte", "lt", "lte"] }],
+      findRecords: vi.fn(async () => []),
+    });
+    const capabilityFactory = (svc: unknown): any => ({
+      resolveEntity: () => judgements,
+      resolveService: () => svc,
+      capture: factory.capture,
+    });
+    const described = [{ tool: "describe_entity", input: { type: "judgements" }, durationMs: 0 }];
+
+    it("search_entities validates operators against the service capabilities when present", async () => {
+      const svc = capabilitySvc();
+      const tool = new SearchEntitiesTool(
+        capabilityFactory(svc),
+        unusedSearch,
+        {} as any,
+        {} as any,
+        {} as any,
+        formatter,
+      );
+
+      // `lte` is not in the string type table, but the source supports it: capabilities win.
+      const accepted: any = await tool.invoke(
+        { type: "judgements", filters: [{ field: "year", op: "lte", value: "2024" }] },
+        ctx,
+        described,
+      );
+      expect(accepted.error).toBeUndefined();
+      expect(svc.findRecords).toHaveBeenCalledWith(
+        expect.objectContaining({ filters: [{ field: "year", op: "lte", value: "2024" }] }),
+      );
+
+      // `in` is in the string type table, but the source does not support it.
+      svc.findRecords.mockClear();
+      const rejected: any = await tool.invoke(
+        { type: "judgements", filters: [{ field: "year", op: "in", value: ["2023", "2024"] }] },
+        ctx,
+        described,
+      );
+      expect(rejected.error).toContain('Operator "in" is not valid for field "year"');
+      expect(rejected.error).toContain("[eq, gt, gte, lt, lte]");
+      expect(rejected.error).not.toContain("like");
+      expect(svc.findRecords).not.toHaveBeenCalled();
+    });
+
+    it("rejects a filter on a field the capabilities do not list", async () => {
+      const svc = capabilitySvc();
+      const tool = new SearchEntitiesTool(
+        capabilityFactory(svc),
+        unusedSearch,
+        {} as any,
+        {} as any,
+        {} as any,
+        formatter,
+      );
+      const out: any = await tool.invoke(
+        { type: "judgements", filters: [{ field: "name", op: "eq", value: "x" }] },
+        ctx,
+        described,
+      );
+      expect(out.error).toContain('Field "name" cannot be filtered on judgements');
+      expect(out.error).toContain("Filterable fields on judgements: [year]");
+      expect(svc.findRecords).not.toHaveBeenCalled();
+    });
+  });
+
+  it("search_entities items carry generated for AI fields present in the output", async () => {
+    registryGet.mockReturnValue({
+      findRecords: vi.fn(async () => [
+        { id: "a1", name: "Acme", status: "open" },
+        { id: "a2", name: "Beta" },
+      ]),
+    });
+    const generatedFactory: any = {
+      ...factory,
+      resolveEntity: () => ({ ...catalog.getEntityDetail("accounts"), generatedFields: ["status"] }),
+    };
+    const tool = new SearchEntitiesTool(generatedFactory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, [
+      { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
+    ]);
+    expect(out.items[0].generated).toEqual(["status"]);
+    expect(out.items[1]).not.toHaveProperty("generated");
   });
 });

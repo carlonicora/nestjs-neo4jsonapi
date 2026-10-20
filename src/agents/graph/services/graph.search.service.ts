@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { EmbedderService } from "../../../core/llm/services/embedder.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { buildEmbedderAttribution } from "../../common/usage-attribution";
@@ -57,7 +57,16 @@ export interface ResolveEntityParams {
   scopeId?: string;
   /** JSON:API type of the scope root, e.g. "campaigns". Present iff scopeId is. */
   scopeType?: string;
+  /**
+   * Catalog type names to search. When omitted, every visible type except the
+   * personal ones (`chat.personal`) is searched. A listed personal type is
+   * searched. A name that is not a visible type is a validation error.
+   */
+  types?: string[];
 }
+
+/** The sentence that accompanies `excludedTypes` on a resolve_entity reply. */
+export const EXCLUDED_TYPES_NOTE = "Personal communication types were not searched: pass types to include them.";
 
 export interface ResolveEntityResult {
   matchMode: MatchMode;
@@ -76,6 +85,10 @@ export interface ResolveEntityResult {
    * then; this hint tells the caller which fields tell them apart.
    */
   disambiguation?: string;
+  /** Personal types skipped because the call did not list them in `types`. Absent when none was skipped. */
+  excludedTypes?: string[];
+  /** {@link EXCLUDED_TYPES_NOTE}, present with `excludedTypes`. */
+  excludedTypesNote?: string;
 }
 
 const normaliseSummary = (value: string): string => value.trim().toLowerCase();
@@ -228,20 +241,53 @@ export class GraphSearchService {
     return this.existingIndexesPromise;
   }
 
+  /**
+   * Throws `BadRequestException` (MCP `validation_failed`) when `types` names a
+   * type the user cannot see: a misspelt type must never silently search nothing.
+   */
   async resolveEntity(params: ResolveEntityParams): Promise<ResolveEntityResult> {
     const visible = this.catalog.getAllChatEnabledEntities().filter((e) => params.userModuleIds.includes(e.moduleId));
+
+    const listed = params.types?.length ? params.types : undefined;
+    if (listed) {
+      const visibleTypes = visible.map((e) => e.type);
+      const unknown = listed.find((type) => !visibleTypes.includes(type));
+      if (unknown !== undefined) {
+        throw new BadRequestException(`Unknown type "${unknown}". Visible types: [${visibleTypes.join(", ")}].`);
+      }
+    }
 
     // Fail closed: in a scoped run, a type that cannot be chained to the run's
     // scope root is unreachable, so it never fans out a tier query at all.
     // Leaving it in would surface candidates from other scope roots.
     // A `scopeShared` type is reference data, visible in every scoped run.
-    const entities =
+    const inScope =
       params.scopeId && params.scopeType
         ? visible.filter((e) => e.scope?.rootType === params.scopeType || e.scopeShared)
         : visible;
 
+    // A listed type the scope filter dropped is a client error, not an empty
+    // result: the caller asked for it by name and must learn it was not searched.
+    if (listed) {
+      const inScopeTypes = inScope.map((e) => e.type);
+      const outOfScope = listed.find((type) => !inScopeTypes.includes(type));
+      if (outOfScope !== undefined) {
+        throw new BadRequestException(
+          `Type "${outOfScope}" is not reachable in the current scope (${params.scopeType}). Types reachable here: [${inScopeTypes.join(", ")}].`,
+        );
+      }
+    }
+
+    // Listed types: exactly those. Otherwise every type but the personal ones,
+    // which are named on the reply so the caller knows what was not searched.
+    const excludedTypes = listed ? [] : inScope.filter((e) => e.personal).map((e) => e.type);
+    const entities = listed ? inScope.filter((e) => listed.includes(e.type)) : inScope.filter((e) => !e.personal);
+    const exclusion: Pick<ResolveEntityResult, "excludedTypes" | "excludedTypesNote"> = excludedTypes.length
+      ? { excludedTypes, excludedTypesNote: EXCLUDED_TYPES_NOTE }
+      : {};
+
     if (!entities.length) {
-      return { matchMode: "none", items: [] };
+      return { matchMode: "none", items: [], ...exclusion };
     }
 
     const tiers: Array<["substring" | "fuzzy" | "semantic", MatchMode]> = [
@@ -287,11 +333,12 @@ export class GraphSearchService {
           items,
           ...(recommendation ? { recommendation } : {}),
           ...(disambiguation ? { disambiguation } : {}),
+          ...exclusion,
         };
       }
     }
 
-    return { matchMode: "none", items: [] };
+    return { matchMode: "none", items: [], ...exclusion };
   }
 
   /**

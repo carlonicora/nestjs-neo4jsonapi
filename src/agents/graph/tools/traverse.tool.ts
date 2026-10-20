@@ -5,11 +5,14 @@ import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
-import { CatalogEntity, CatalogRelationship } from "../interfaces/graph.catalog.interface";
+import { CatalogEntity, CatalogField, CatalogRelationship } from "../interfaces/graph.catalog.interface";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
 import { RelatedEdgesService } from "../services/related-edges.service";
-import type { ExternalEntitySource } from "../../../common/interfaces/external.entity.source.interface";
+import type {
+  ExternalEntitySource,
+  ExternalFilterCapability,
+} from "../../../common/interfaces/external.entity.source.interface";
 
 /** Every filter operator the graph tools accept, in the order they are advertised. */
 export const FILTER_OPERATORS = ["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"] as const;
@@ -25,6 +28,51 @@ export const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
   date: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
   datetime: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
 };
+
+/**
+ * The filter capabilities a type's service declares, or `undefined` when it
+ * declares none (records in the app database: the type table applies).
+ */
+export function serviceFilterCapabilities(svc: unknown): ExternalFilterCapability[] | undefined {
+  const hook = (svc as Partial<ExternalEntitySource> | undefined)?.filterCapabilities;
+  return typeof hook === "function" ? hook.call(svc) : undefined;
+}
+
+/**
+ * The operators a filter on `field` may use. When the service declares
+ * capabilities they win over the type table: exactly the operators listed for
+ * the field, none when it is not listed. Otherwise the operators of the field's type.
+ */
+export function allowedFilterOperators(
+  field: CatalogField,
+  capabilities: ExternalFilterCapability[] | undefined,
+): string[] {
+  if (capabilities) return [...(capabilities.find((c) => c.field === field.name)?.operators ?? [])];
+  return Array.from(TYPE_TO_OP_ALLOWED[field.type] ?? []);
+}
+
+/**
+ * The error for an operator a field does not accept, or `undefined` when it
+ * accepts it. The allowed list named is the one that decided: the source's
+ * capabilities when declared, the type table otherwise.
+ */
+export function filterOperatorError(params: {
+  field: CatalogField;
+  op: string;
+  entityType: string;
+  capabilities: ExternalFilterCapability[] | undefined;
+}): string | undefined {
+  const { field, op, entityType, capabilities } = params;
+  const allowed = allowedFilterOperators(field, capabilities);
+  if (allowed.includes(op)) return undefined;
+  if (capabilities) {
+    const filterable = capabilities.filter((c) => c.operators.length).map((c) => c.field);
+    return allowed.length
+      ? `Operator "${op}" is not valid for field "${field.name}" on ${entityType}. The source supports only: [${allowed.join(", ")}].`
+      : `Field "${field.name}" cannot be filtered on ${entityType}: the source supports no operator on it. Filterable fields on ${entityType}: [${filterable.join(", ") || "none"}].`;
+  }
+  return `Operator "${op}" is not valid for field "${field.name}" of type ${field.type}. Allowed operators: [${allowed.join(", ")}].`;
+}
 
 const FILTER_VALUE_JSON_SCHEMA = {
   anyOf: [
@@ -358,6 +406,11 @@ export class TraverseTool {
         const target = this.factory.resolveEntity(rel.targetType, ctx);
         if ("error" in target) return target;
 
+        // Resolved before validation: a service that declares filter
+        // capabilities decides which operators run (capabilities win).
+        const targetSvc = this.factory.resolveService(target.type);
+        const capabilities = serviceFilterCapabilities(targetSvc);
+
         const byName = new Map(target.fields.map((f) => [f.name, f]));
         const validFieldNames = target.fields.map((f) => f.name).join(", ");
         const sortableFieldNames = target.fields
@@ -371,12 +424,8 @@ export class TraverseTool {
               error: `Field "${f.field}" is not available on ${target.type}. Valid fields on ${target.type}: [${validFieldNames}].`,
             };
           }
-          const allowed = TYPE_TO_OP_ALLOWED[def.type] ?? new Set();
-          if (!allowed.has(f.op)) {
-            return {
-              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}. Allowed operators: [${Array.from(allowed).join(", ")}].`,
-            };
-          }
+          const opError = filterOperatorError({ field: def, op: f.op, entityType: target.type, capabilities });
+          if (opError) return { error: opError };
         }
         for (const s of sort ?? []) {
           const def = byName.get(s.field);
@@ -387,7 +436,6 @@ export class TraverseTool {
           }
         }
 
-        const targetSvc = this.factory.resolveService(target.type);
         if (!targetSvc) return { error: `Service not available for "${target.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
@@ -423,13 +471,18 @@ export class TraverseTool {
           : {};
 
         const baseItems = records.map((r) => {
-          const { fields, availableOnRead } = this.formatter.build({ entity: target, record: r, stage: "list" });
+          const { fields, availableOnRead, generated } = this.formatter.build({
+            entity: target,
+            record: r,
+            stage: "list",
+          });
           return {
             id: r.id,
             type: target.type,
             summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
             fields,
             ...(availableOnRead ? { availableOnRead } : {}),
+            ...(generated ? { generated } : {}),
           };
         });
 
@@ -451,7 +504,7 @@ export class TraverseTool {
                 formatter: this.formatter,
               },
               onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
-            }),
+            }).then((m) => (item.generated ? { ...m, generated: item.generated } : m)),
           ),
         );
         return { items, ...truncation };
@@ -566,13 +619,14 @@ export class TraverseTool {
         if (record) records.push(record);
       }
       for (const record of await this.filterInScope(type, records, ctx)) {
-        const { fields, availableOnRead } = this.formatter.build({ entity, record, stage: "list" });
+        const { fields, availableOnRead, generated } = this.formatter.build({ entity, record, stage: "list" });
         items.push({
           id: record.id,
           type,
           summary: entity.summary ? entity.summary(record) : String(record.name ?? record.id),
           fields,
           ...(availableOnRead ? { availableOnRead } : {}),
+          ...(generated ? { generated } : {}),
         });
       }
     }

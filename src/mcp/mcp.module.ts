@@ -17,6 +17,11 @@ import { McpToolRegistry } from "./services/mcp.tool.registry";
  * Mounted by the bootstrap gate (`BootstrapOptions.mcp === true`) and served
  * at `POST /mcp`, OAuth-authenticated and RBAC-gated. Exports McpToolRegistry
  * so consuming apps can contribute additional tools via the MCP_TOOLS token.
+ * The `ping` tool (McpGenericToolsService) merges the app's MCP_STATUS
+ * contributions into its reply. Both tokens are optional single array
+ * providers that McpModule resolves only from a `@Global()` app module's
+ * exports (Nest has no multi-providers): one provider per token, listing
+ * every contribution.
  *
  * Module wiring notes:
  * - `RbacPermissionModule` supplies RbacPermissionService (the RbacModule

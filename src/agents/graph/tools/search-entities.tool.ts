@@ -9,7 +9,23 @@ import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
-import { coerceFilters, coerceSort, MAX_LIST_LIMIT, truncationNote, TYPE_TO_OP_ALLOWED } from "./traverse.tool";
+import {
+  coerceFilters,
+  coerceSort,
+  filterOperatorError,
+  MAX_LIST_LIMIT,
+  NormalisedFilter,
+  NormalisedSort,
+  serviceFilterCapabilities,
+  truncationNote,
+} from "./traverse.tool";
+
+/** What a search_entities call actually ran: the coerced filters and sort and the clamped limit. */
+export interface SearchEntitiesApplied {
+  filters: NormalisedFilter[];
+  sort: NormalisedSort[];
+  limit: number;
+}
 
 const inputSchema = z
   .object({
@@ -78,6 +94,11 @@ export class SearchEntitiesTool {
           };
         }
 
+        // Resolved before validation: a service that declares filter
+        // capabilities decides which operators run (capabilities win).
+        const svc = this.factory.resolveService(entity.type);
+        const capabilities = serviceFilterCapabilities(svc);
+
         const byName = new Map<string, CatalogField>(entity.fields.map((f) => [f.name, f]));
         const validFieldNames = entity.fields.map((f) => f.name).join(", ");
         const relationshipNames = entity.relationships.map((r) => r.name).join(", ");
@@ -88,12 +109,8 @@ export class SearchEntitiesTool {
               error: `Field "${f.field}" is not available on ${entity.type}. Valid fields for filter/sort on ${entity.type}: [${validFieldNames}]. To reach records connected via a relationship, use the traverse tool — relationships on ${entity.type}: [${relationshipNames || "none"}]. Dotted paths like "account.name" are never valid here.`,
             };
           }
-          const allowed = TYPE_TO_OP_ALLOWED[def.type] ?? new Set();
-          if (!allowed.has(f.op)) {
-            return {
-              error: `Operator "${f.op}" is not valid for field "${f.field}" of type ${def.type}. Allowed operators: [${Array.from(allowed).join(", ")}].`,
-            };
-          }
+          const opError = filterOperatorError({ field: def, op: f.op, entityType: entity.type, capabilities });
+          if (opError) return { error: opError };
         }
         const sortableFieldNames = entity.fields
           .filter((f) => f.sortable)
@@ -108,7 +125,6 @@ export class SearchEntitiesTool {
           }
         }
 
-        const svc = this.factory.resolveService(entity.type);
         if (!svc) return { error: `Service not available for "${entity.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
@@ -145,7 +161,8 @@ export class SearchEntitiesTool {
         const hasMore = fetched.length > limit;
         const records = hasMore ? fetched.slice(0, limit) : fetched;
 
-        const output = await this.buildOutput(entity, records, ctx, localMaterialised);
+        const applied: SearchEntitiesApplied = { filters, sort, limit };
+        const output = await this.buildOutput(entity, records, ctx, localMaterialised, applied);
         return hasMore
           ? {
               ...output,
@@ -178,20 +195,22 @@ export class SearchEntitiesTool {
     records: any[],
     ctx: UserContext,
     localMaterialised: Array<{ relName: string; count: number }>,
+    applied: SearchEntitiesApplied,
   ) {
     const baseItems = records.map((r) => {
-      const { fields, availableOnRead } = this.formatter.build({ entity, record: r, stage: "list" });
+      const { fields, availableOnRead, generated } = this.formatter.build({ entity, record: r, stage: "list" });
       return {
         id: r.id,
         type: entity.type,
         summary: entity.summary ? entity.summary(r) : String(r.name ?? r.id),
         fields,
         ...(availableOnRead ? { availableOnRead } : {}),
+        ...(generated ? { generated } : {}),
         score: null as number | null,
       };
     });
 
-    if (!entity.bridge) return { matchMode: "none", items: baseItems };
+    if (!entity.bridge) return { applied, items: baseItems };
 
     // Bridge fanout: each item is materialised. The `score` field is preserved
     // on the envelope so the search_entities response shape doesn't drift.
@@ -208,9 +227,9 @@ export class SearchEntitiesTool {
             formatter: this.formatter,
           },
           onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
-        }).then((m) => ({ ...m, score })),
+        }).then((m) => ({ ...m, ...(item.generated ? { generated: item.generated } : {}), score })),
       ),
     );
-    return { matchMode: "none", items };
+    return { applied, items };
   }
 }

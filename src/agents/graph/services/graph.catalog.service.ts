@@ -78,6 +78,10 @@ export interface DescriptorSource {
       related?: boolean;
       /** Fields present only on read_entity, filled by the service's DetailFieldsSource. */
       detailFields?: Record<string, DetailFieldDef>;
+      /** Personal communication: resolve_entity skips the type unless listed in `types`. */
+      personal?: boolean;
+      /** AI-written fields, emitted as `generated` by the tool formatter. */
+      generatedFields?: string[];
     };
     bridge?: { materialiseTo: string[] };
   }>;
@@ -237,6 +241,8 @@ export class GraphCatalogService implements OnApplicationBootstrap {
         textSearchFields: d.chat?.textSearchFields,
         nodeName: d.model.nodeName,
         labelName: d.model.labelName,
+        personal: d.chat?.personal === true,
+        generatedFields: [...(d.chat?.generatedFields ?? [])],
         ...(ownerEntry
           ? {
               owner: {
