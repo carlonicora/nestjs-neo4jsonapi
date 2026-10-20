@@ -1,3 +1,9 @@
+## [6.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.2.0...v6.3.0) (2026-10-20)
+
+### 🚀 Features
+
+* **waitlist:** store sign-up source on waitlist entries and users, bind invites to the invited email ([5525de8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5525de830a942b692b08e299c28044e6e5dbcb52))
+
 ## [6.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.3...v6.2.0) (2026-10-20)
 
 ### 🚀 Features
