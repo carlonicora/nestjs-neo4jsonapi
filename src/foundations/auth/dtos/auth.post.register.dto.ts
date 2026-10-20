@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   ValidateNested,
 } from "class-validator";
 import { authMeta } from "../../auth/entities/auth.meta";
@@ -48,6 +49,36 @@ export class AuthPostRegisterAttributesDTO {
   @IsOptional()
   @IsString()
   referralCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceRef?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmSource?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmMedium?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmCampaign?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceReferrer?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceLandingPath?: string;
 }
 
 export class AuthPostRegisterDataDTO {

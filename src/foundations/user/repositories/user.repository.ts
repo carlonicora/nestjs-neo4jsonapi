@@ -21,6 +21,7 @@ import { User, UserDescriptor } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 import { buildFulltextTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
+import { sanitiseSignupSource, SignupSource } from "../../waitlist/utils/signup-source";
 
 /**
  * User repository.
@@ -631,6 +632,32 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     query.query = `
       MATCH (user:User {id: $userId})
       SET user.avatar = $avatar, user.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Stores the sign-up source on the user. Only the six source keys present in
+   * `source` are written, as one map parameter merged into the node.
+   */
+  async setSignupSource(params: { userId: string; source: SignupSource }): Promise<void> {
+    const source = sanitiseSignupSource(params.source);
+    if (!source) return;
+
+    const query = this.neo4j.initQuery();
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+      source,
+    };
+
+    // Assigned, not appended: a by-id write of a freshly created user must not
+    // depend on the request context bound by initQuery (same as updateAvatar).
+    query.query = `
+      MATCH (user:User {id: $userId})
+      SET user += $source
     `;
 
     await this.neo4j.writeOne(query);

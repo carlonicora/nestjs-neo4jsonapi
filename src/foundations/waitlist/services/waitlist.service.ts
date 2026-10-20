@@ -12,6 +12,7 @@ import { UserRepository } from "../../user/repositories/user.repository";
 import { WaitlistPostDataDTO } from "../dtos/waitlist.post.dto";
 import { Waitlist, WaitlistDescriptor, WaitlistStatus } from "../entities/waitlist";
 import { WaitlistRepository } from "../repositories/waitlist.repository";
+import { sanitiseSignupSource } from "../utils/signup-source";
 import {
   JsonApiListDocument,
   JsonApiSingleDocument,
@@ -70,6 +71,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
       confirmationCode,
       confirmationCodeExpiration: confirmationCodeExpiration.toISOString(),
       status: WaitlistStatus.Pending,
+      ...(sanitiseSignupSource(attributes) ?? {}),
     });
 
     // Send confirmation email. The recipient is not a user yet: use the requester's language.
@@ -217,12 +219,11 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
 
   /**
    * Mark entry as registered after user creates account.
+   * Returns the entry it marked, or null when the invite code is unknown.
    */
-  async markAsRegistered(params: { inviteCode: string; userId: string }): Promise<JsonApiSingleDocument> {
+  async markAsRegistered(params: { inviteCode: string; userId: string }): Promise<Waitlist | null> {
     const entry = await this.waitlistRepository.findByInviteCode({ code: params.inviteCode });
-    if (!entry) {
-      throw new HttpException("Invalid invite code", HttpStatus.NOT_FOUND);
-    }
+    if (!entry) return null;
 
     await this.waitlistRepository.markAsRegistered({
       id: entry.id,
@@ -230,7 +231,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
       registeredAt: new Date(),
     });
 
-    return this.findById({ id: entry.id });
+    return entry;
   }
 
   /**

@@ -28,7 +28,9 @@ import { TwoFactorService } from "../../two-factor/services/two-factor.service";
 import { User } from "../../user/entities/user";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { UserService } from "../../user/services/user.service";
+import { Waitlist } from "../../waitlist/entities/waitlist";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
+import { hasSignupSource, sanitiseSignupSource } from "../../waitlist/utils/signup-source";
 import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/registration-hook.interface";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
@@ -408,6 +410,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       if (!inviteValidation || !inviteValidation.valid) {
         throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
       }
+
+      // An invite registers only the email it was sent to
+      this.assertInviteEmail({ email: params.data.attributes.email, inviteEmail: inviteValidation.email });
     }
 
     await this.userService.expectNotExists({ email: params.data.attributes.email });
@@ -454,12 +459,16 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     // After successful registration, mark waitlist entry as registered.
     // `?.` only for the type checker: waitlist mode already threw above when the
     // service is absent, so this call always happens when it is reached.
+    let waitlistEntry: Waitlist | null = null;
     if (registrationMode === "waitlist" && params.data.attributes.inviteCode) {
-      await this.waitlistService?.markAsRegistered({
-        inviteCode: params.data.attributes.inviteCode,
-        userId: user.id,
-      });
+      waitlistEntry =
+        (await this.waitlistService?.markAsRegistered({
+          inviteCode: params.data.attributes.inviteCode,
+          userId: user.id,
+        })) ?? null;
     }
+
+    await this.applySignupSource({ userId: user.id, waitlistEntry, browserSource: params.data.attributes });
 
     // Delivery failure must not fail registration. By this point the company, the
     // user and its membership are already committed, so throwing here reports a
@@ -642,6 +651,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       if (!inviteValidation || !inviteValidation.valid) {
         throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
       }
+
+      // Defence in depth: the provider callback already redirected on a mismatch
+      this.assertInviteEmail({ email: pending.email, inviteEmail: inviteValidation.email });
     }
 
     // Generate IDs for new user and company
@@ -716,12 +728,16 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     // After successful OAuth registration, mark waitlist entry as registered.
     // `?.` only for the type checker - see register().
+    let waitlistEntry: Waitlist | null = null;
     if (registrationMode === "waitlist" && pending.inviteCode) {
-      await this.waitlistService?.markAsRegistered({
-        inviteCode: pending.inviteCode,
-        userId: userId,
-      });
+      waitlistEntry =
+        (await this.waitlistService?.markAsRegistered({
+          inviteCode: pending.inviteCode,
+          userId: userId,
+        })) ?? null;
     }
+
+    await this.applySignupSource({ userId, waitlistEntry, browserSource: pending.source });
 
     // Delete pending registration
     await this.pendingRegistrationService.delete(params.pendingId);
@@ -742,6 +758,40 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     });
 
     return { code: authCodeId };
+  }
+
+  /**
+   * An invite code registers only the email it was sent to. Case and
+   * surrounding spaces are ignored.
+   */
+  private assertInviteEmail(params: { email: string; inviteEmail: string }): void {
+    if ((params.email ?? "").trim().toLowerCase() !== (params.inviteEmail ?? "").trim().toLowerCase()) {
+      throw new HttpException("This invitation was sent to a different email address", HttpStatus.FORBIDDEN);
+    }
+  }
+
+  /**
+   * Stores the sign-up source on a new user. The waitlist entry is the earlier
+   * first touch, so when it carries any source field it wins over whatever the
+   * browser sent. Nothing is written when neither has a source. A failure is
+   * logged, never thrown: the account already exists at this point.
+   */
+  private async applySignupSource(params: {
+    userId: string;
+    waitlistEntry: Waitlist | null;
+    browserSource: unknown;
+  }): Promise<void> {
+    const source = hasSignupSource(params.waitlistEntry)
+      ? sanitiseSignupSource(params.waitlistEntry)
+      : sanitiseSignupSource(params.browserSource);
+
+    if (!source) return;
+
+    try {
+      await this.users.setSignupSource({ userId: params.userId, source });
+    } catch (error) {
+      this.logger.error(`Failed to store the sign-up source for user ${params.userId}:`, error);
+    }
   }
 
   /**

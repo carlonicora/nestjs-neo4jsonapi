@@ -11,6 +11,16 @@ export type { WaitlistDescriptorType } from "./entities/waitlist";
 // Meta
 export { waitlistMeta } from "./entities/waitlist.meta";
 
+// Signup source
+export {
+  SIGNUP_SOURCE_FIELDS,
+  SIGNUP_SOURCE_MAX_LENGTH,
+  hasSignupSource,
+  parseSignupSourceParam,
+  sanitiseSignupSource,
+} from "./utils/signup-source";
+export type { SignupSource } from "./utils/signup-source";
+
 // Repository (exported for testing)
 export { WaitlistRepository } from "./repositories/waitlist.repository";
 

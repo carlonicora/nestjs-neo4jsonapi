@@ -26,11 +26,12 @@ export class AuthGoogleController {
     @Res() reply: FastifyReply,
     @Query("invite") inviteCode?: string,
     @Query("referral") referralCode?: string,
+    @Query("source") source?: string,
   ) {
     if (!this.googleConfig.clientId || !this.googleConfig.clientSecret)
       throw new HttpException("Login with Google is not available", HttpStatus.NOT_IMPLEMENTED);
 
-    reply.redirect(this.authGoogleService.generateLoginUrl(inviteCode, referralCode), 302);
+    reply.redirect(this.authGoogleService.generateLoginUrl(inviteCode, referralCode, source), 302);
   }
 
   @Get(`${authMeta.endpoint}/callback/google`)
@@ -39,6 +40,7 @@ export class AuthGoogleController {
     const stateData = this.authGoogleService.parseStateData(state);
     const inviteCode = stateData?.invite;
     const referralCode = stateData?.referral;
+    const source = stateData?.source;
 
     const accessToken = await this.authGoogleService.exchangeCodeForToken(code);
     const userDetails = await this.authGoogleService.fetchUserDetails(accessToken);
@@ -47,6 +49,7 @@ export class AuthGoogleController {
       userDetails: userDetails as googleUser,
       inviteCode,
       referralCode,
+      source,
     });
 
     reply.redirect(redirectUrl, 302);

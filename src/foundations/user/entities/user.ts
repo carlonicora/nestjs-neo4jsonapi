@@ -30,6 +30,12 @@ export type User = Entity & {
   termsAcceptedAt?: Date;
   marketingConsent?: boolean;
   marketingConsentAt?: Date;
+  sourceRef?: string;
+  sourceUtmSource?: string;
+  sourceUtmMedium?: string;
+  sourceUtmCampaign?: string;
+  sourceReferrer?: string;
+  sourceLandingPath?: string;
 
   role?: Role[];
   company?: Company;
@@ -75,6 +81,13 @@ export const UserDescriptor = defineEntity<User>()({
     termsAcceptedAt: { type: "datetime", excludeFromJsonApi: true },
     marketingConsent: { type: "boolean", excludeFromJsonApi: true },
     marketingConsentAt: { type: "datetime", excludeFromJsonApi: true },
+    // Sign-up source (ref / UTM / referrer / landing path) — stored, never serialised
+    sourceRef: { type: "string", excludeFromJsonApi: true },
+    sourceUtmSource: { type: "string", excludeFromJsonApi: true },
+    sourceUtmMedium: { type: "string", excludeFromJsonApi: true },
+    sourceUtmCampaign: { type: "string", excludeFromJsonApi: true },
+    sourceReferrer: { type: "string", excludeFromJsonApi: true },
+    sourceLandingPath: { type: "string", excludeFromJsonApi: true },
   },
 
   // Virtual fields (output-only, not in entity type)

@@ -25,11 +25,12 @@ export class AuthDiscordController {
     @Res() reply: FastifyReply,
     @Query("invite") inviteCode?: string,
     @Query("referral") referralCode?: string,
+    @Query("source") source?: string,
   ) {
     if (!this.discordConfig.clientId || !this.discordConfig.clientSecret)
       throw new HttpException("Login with Discord is not available", HttpStatus.NOT_IMPLEMENTED);
 
-    reply.redirect(this.authDiscordService.generateLoginUrl(inviteCode, referralCode), 302);
+    reply.redirect(this.authDiscordService.generateLoginUrl(inviteCode, referralCode, source), 302);
   }
 
   @Get(`${authMeta.endpoint}/callback/discord`)
@@ -38,6 +39,7 @@ export class AuthDiscordController {
     const stateData = state ? this.authDiscordService.parseStateData(state) : undefined;
     const inviteCode = stateData?.invite;
     const referralCode = stateData?.referral;
+    const source = stateData?.source;
 
     const accessToken = await this.authDiscordService.exchangeCodeForToken(code);
     const userDetails = await this.authDiscordService.fetchUserDetails(accessToken);
@@ -46,6 +48,7 @@ export class AuthDiscordController {
       userDetails: userDetails as discordUser,
       inviteCode,
       referralCode,
+      source,
     });
 
     reply.redirect(redirectUrl, 302);

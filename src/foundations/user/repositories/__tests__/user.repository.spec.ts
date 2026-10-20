@@ -337,6 +337,34 @@ describe("UserRepository", () => {
     });
   });
 
+  describe("setSignupSource", () => {
+    it("merges only the provided keys as one map parameter, nothing interpolated", async () => {
+      await repository.setSignupSource({
+        userId: TEST_IDS.userId,
+        source: { sourceRef: "discord-embed", sourceUtmSource: "reddit" },
+      });
+
+      const written = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(written.query).toContain("MATCH (user:User {id: $userId})");
+      expect(written.query).toContain("SET user += $source");
+      expect(written.query).not.toContain("discord-embed");
+      expect(written.query).not.toContain("reddit");
+      expect(written.queryParams).toEqual({
+        userId: TEST_IDS.userId,
+        source: { sourceRef: "discord-embed", sourceUtmSource: "reddit" },
+      });
+    });
+
+    it("ignores keys outside the whitelist and writes nothing when no key is left", async () => {
+      await repository.setSignupSource({
+        userId: TEST_IDS.userId,
+        source: { "name = 'x'": "y" } as any,
+      });
+
+      expect(mockNeo4jService.writeOne).not.toHaveBeenCalled();
+    });
+  });
+
   describe("findForLanguage", () => {
     it("reads the bare user node by id through readOne", async () => {
       mockNeo4jService.readOne.mockResolvedValue({ id: TEST_IDS.userId, language: "it" });

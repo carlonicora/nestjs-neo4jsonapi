@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { Redis } from "ioredis";
 import { BaseConfigInterface, ConfigRedisInterface } from "../../../config/interfaces";
+import { SignupSource } from "../../waitlist/utils/signup-source";
 
 export interface PendingRegistration {
   id: string;
@@ -13,6 +14,7 @@ export interface PendingRegistration {
   avatar?: string;
   inviteCode?: string;
   referralCode?: string;
+  source?: SignupSource;
   createdAt: string;
 }
 

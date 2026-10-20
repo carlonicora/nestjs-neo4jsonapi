@@ -222,6 +222,44 @@ describe("AuthGoogleController", () => {
     });
   });
 
+  describe("signup source", () => {
+    it("`source` query param is forwarded to generateLoginUrl", async () => {
+      const source = JSON.stringify({ sourceRef: "discord-embed" });
+      authGoogleService.generateLoginUrl.mockReturnValue("https://provider.example.com/login");
+
+      await controller.loginWithGoogle(mockReply, "invite-code", "referral-code", source);
+
+      expect(authGoogleService.generateLoginUrl).toHaveBeenCalledWith("invite-code", "referral-code", source);
+      expect(mockReply.redirect).toHaveBeenCalledWith("https://provider.example.com/login", 302);
+    });
+
+    it("a malformed source does not throw", async () => {
+      authGoogleService.generateLoginUrl.mockReturnValue("https://provider.example.com/login");
+
+      await expect(
+        controller.loginWithGoogle(mockReply, undefined, undefined, "{not json" + "x".repeat(10240)),
+      ).resolves.toBeUndefined();
+      expect(mockReply.redirect).toHaveBeenCalledWith("https://provider.example.com/login", 302);
+    });
+
+    it("passes the state source to the callback handler", async () => {
+      const source = JSON.stringify({ sourceUtmSource: "reddit" });
+      authGoogleService.parseStateData.mockReturnValue({ invite: "inv-1", referral: undefined, source });
+      authGoogleService.exchangeCodeForToken.mockResolvedValue("access-token");
+      authGoogleService.fetchUserDetails.mockResolvedValue({
+        id: "provider-user-id",
+        email: "test@example.com",
+      } as any);
+      authGoogleService.handleGoogleLogin.mockResolvedValue("http://redirect.url");
+
+      await controller.callbackGoogle(mockReply, "auth-code", "encoded-state");
+
+      expect(authGoogleService.handleGoogleLogin).toHaveBeenCalledWith(
+        expect.objectContaining({ inviteCode: "inv-1", source }),
+      );
+    });
+  });
+
   describe("dependency injection", () => {
     it("should have authGoogleService injected", () => {
       expect(controller["authGoogleService"]).toBeDefined();

@@ -144,6 +144,7 @@ describe("AuthService", () => {
 
   const createMockUserRepository = () => ({
     createUser: vi.fn(),
+    setSignupSource: vi.fn(),
     findByEmail: vi.fn(),
     findByCode: vi.fn(),
     findByUserId: vi.fn(),
@@ -965,6 +966,176 @@ describe("AuthService", () => {
    * with a dependency deliberately absent — the package AuthModule still
    * provides all of them, so the default behaviour is unchanged.
    */
+  describe("invite binding and signup source", () => {
+    const INVITE_MISMATCH = "This invitation was sent to a different email address";
+
+    const registerData = (attributes: Record<string, any> = {}) =>
+      ({
+        type: "auth",
+        id: TEST_IDS.userId,
+        attributes: {
+          email: "gm@example.com",
+          password: "password123",
+          name: "Game Master",
+          termsAcceptedAt: "2026-10-21T00:00:00Z",
+          ...attributes,
+        },
+      }) as any;
+
+    const useRegistrationMode = (registrationMode: "open" | "waitlist") =>
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") return { allowRegistration: true, registrationMode };
+        if (key === "app") return MOCK_APP_CONFIG;
+        return undefined;
+      });
+
+    beforeEach(() => {
+      userService.expectNotExists.mockResolvedValue(undefined);
+      companyRepository.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "Test Company" } as any);
+      userRepository.createUser.mockResolvedValue(MOCK_USER);
+    });
+
+    describe("register", () => {
+      it("register in waitlist mode rejects an email that differs from the invite", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+
+        await expect(
+          service.register({ data: registerData({ email: "other@example.com", inviteCode: "invite-abc" }) }),
+        ).rejects.toThrow(new HttpException(INVITE_MISMATCH, HttpStatus.FORBIDDEN));
+
+        expect(userRepository.createUser).not.toHaveBeenCalled();
+      });
+
+      it("email match is case-insensitive and trimmed", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+
+        await expect(
+          service.register({ data: registerData({ email: " GM@Example.com ", inviteCode: "invite-abc" }) }),
+        ).resolves.toBeUndefined();
+
+        expect(userRepository.createUser).toHaveBeenCalled();
+      });
+
+      it("register stores the browser source when not invited", async () => {
+        useRegistrationMode("open");
+
+        await service.register({ data: registerData({ sourceRef: "discord-embed" }) });
+
+        expect(userRepository.setSignupSource).toHaveBeenCalledWith({
+          userId: MOCK_USER.id,
+          source: { sourceRef: "discord-embed" },
+        });
+      });
+
+      it("invited user takes the waitlist entry source", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", sourceUtmSource: "reddit" } as any);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc", sourceRef: "x" }) });
+
+        expect(userRepository.setSignupSource).toHaveBeenCalledWith({
+          userId: MOCK_USER.id,
+          source: { sourceUtmSource: "reddit" },
+        });
+      });
+
+      it("invited user keeps the browser source when the entry has none", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", email: "gm@example.com" } as any);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc", sourceRef: "x" }) });
+
+        expect(userRepository.setSignupSource).toHaveBeenCalledWith({
+          userId: MOCK_USER.id,
+          source: { sourceRef: "x" },
+        });
+      });
+
+      it("no source anywhere → setSignupSource not called", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", email: "gm@example.com" } as any);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc" }) });
+
+        expect(userRepository.setSignupSource).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("completeOAuthRegistration", () => {
+      const oauthParams = {
+        pendingId: "pending-123",
+        termsAcceptedAt: "2026-10-21T00:00:00Z",
+        marketingConsent: false,
+        marketingConsentAt: null,
+      };
+
+      const pendingGoogle = (overrides: Partial<PendingRegistration> = {}): PendingRegistration => ({
+        id: "pending-123",
+        provider: "google",
+        providerUserId: "google-123",
+        email: "gm@example.com",
+        name: "Game Master",
+        inviteCode: "invite-abc",
+        createdAt: "2026-10-21T00:00:00Z",
+        ...overrides,
+      });
+
+      beforeEach(() => {
+        useRegistrationMode("waitlist");
+        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        googleUserService.create.mockResolvedValue(undefined);
+        userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+        authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+        jsonApiService.buildSingle.mockResolvedValue({
+          data: { attributes: { refreshToken: TEST_IDS.authId } },
+        });
+      });
+
+      it("OAuth completion rejects a pending email that differs from the invite", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle({ email: "x@example.com" }));
+
+        await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(
+          new HttpException(INVITE_MISMATCH, HttpStatus.FORBIDDEN),
+        );
+
+        expect(googleUserService.create).not.toHaveBeenCalled();
+      });
+
+      it("OAuth completion applies pending.source when the entry has none", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle({ source: { sourceRef: "discord-embed" } }));
+        waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1" } as any);
+
+        await service.completeOAuthRegistration(oauthParams);
+
+        expect(userRepository.setSignupSource).toHaveBeenCalledWith({
+          userId: "mock-random-uuid",
+          source: { sourceRef: "discord-embed" },
+        });
+      });
+
+      it("OAuth completion applies the waitlist entry source over pending.source", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle({ source: { sourceRef: "discord-embed" } }));
+        waitlistService.markAsRegistered.mockResolvedValue({
+          id: "entry-1",
+          sourceUtmSource: "reddit",
+          sourceUtmCampaign: "r_rpg",
+        } as any);
+
+        await service.completeOAuthRegistration(oauthParams);
+
+        expect(userRepository.setSignupSource).toHaveBeenCalledWith({
+          userId: "mock-random-uuid",
+          source: { sourceUtmSource: "reddit", sourceUtmCampaign: "r_rpg" },
+        });
+      });
+    });
+  });
+
   describe("optional satellite dependencies", () => {
     const LOGIN_DATA = {
       attributes: {
@@ -1122,7 +1293,7 @@ describe("AuthService", () => {
       const scopedUsers = module.get(UserRepository) as any;
       const scopedCompanies = module.get(CompanyRepository) as any;
 
-      scopedWaitlist.validateInviteCode.mockResolvedValue({ valid: true });
+      scopedWaitlist.validateInviteCode.mockResolvedValue({ email: REGISTER_DATA.attributes.email, valid: true });
       scopedUserService.expectNotExists.mockResolvedValue(undefined);
       scopedCompanies.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "New Company" });
       scopedUsers.createUser.mockResolvedValue(MOCK_USER);

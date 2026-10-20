@@ -1,5 +1,15 @@
 import { Type } from "class-transformer";
-import { Equals, IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
+import {
+  Equals,
+  IsBoolean,
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  ValidateNested,
+} from "class-validator";
 import { waitlistMeta } from "../entities/waitlist.meta";
 
 export class WaitlistPostAttributesDTO {
@@ -16,6 +26,36 @@ export class WaitlistPostAttributesDTO {
   @IsString()
   @IsOptional()
   questionnaire?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceRef?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmSource?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmMedium?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceUtmCampaign?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceReferrer?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  sourceLandingPath?: string;
 }
 
 export class WaitlistPostDataDTO {

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import axios from "axios";
 import { randomUUID } from "crypto";
@@ -14,6 +14,8 @@ import { DiscordUser } from "../../discord-user/entities/discord-user";
 import { DiscordUserRepository } from "../../discord-user/repositories/discord-user.repository";
 import { discordUser } from "../../discord-user/types/discord.user.type";
 import { UserRepository } from "../../user";
+import { WaitlistService } from "../../waitlist/services/waitlist.service";
+import { parseSignupSourceParam } from "../../waitlist/utils/signup-source";
 import { PendingRegistrationService } from "./pending-registration.service";
 
 @Injectable()
@@ -26,6 +28,11 @@ export class AuthDiscordService {
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly clsService: ClsService,
     private readonly pendingRegistrationService: PendingRegistrationService,
+    // Optional for the same reason as in AuthService: an app may compose auth
+    // without WaitlistModule. The union type needs the explicit token.
+    @Optional()
+    @Inject(WaitlistService)
+    private readonly waitlistService: WaitlistService | undefined,
   ) {}
 
   private readonly _discordApiUrl = "https://discord.com/api/";
@@ -34,12 +41,13 @@ export class AuthDiscordService {
     return this.config.get<ConfigAuthInterface>("auth");
   }
 
-  generateLoginUrl(inviteCode?: string, referralCode?: string): string {
-    // Encode invite code AND referral code in state parameter
+  generateLoginUrl(inviteCode?: string, referralCode?: string, source?: string): string {
+    // Encode invite code, referral code AND sign-up source (raw JSON string) in state parameter
     const stateData = {
       nonce: randomUUID(),
       ...(inviteCode && { invite: inviteCode }),
       ...(referralCode && { referral: referralCode }),
+      ...(source && { source }),
     };
     const state = Buffer.from(JSON.stringify(stateData)).toString("base64url");
 
@@ -54,10 +62,14 @@ export class AuthDiscordService {
     return `${this._discordApiUrl}oauth2/authorize?${params.toString()}`;
   }
 
-  parseStateData(state: string): { invite?: string; referral?: string } | undefined {
+  parseStateData(state: string): { invite?: string; referral?: string; source?: string } | undefined {
     try {
       const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
-      return { invite: stateData.invite, referral: stateData.referral };
+      return {
+        invite: stateData.invite,
+        referral: stateData.referral,
+        source: typeof stateData.source === "string" ? stateData.source : undefined,
+      };
     } catch {
       return undefined;
     }
@@ -67,6 +79,7 @@ export class AuthDiscordService {
     userDetails: discordUser;
     inviteCode?: string;
     referralCode?: string;
+    source?: string;
   }): Promise<string> {
     const discordUser: DiscordUser = await this.discordUserRepository.findByDiscordId({
       discordId: params.userDetails.id,
@@ -108,6 +121,18 @@ export class AuthDiscordService {
       return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=waitlist_required`;
     }
 
+    // An invite registers only the email it was sent to. An invalid invite is
+    // left to completeOAuthRegistration, which rejects it.
+    if (registrationMode === "waitlist" && params.inviteCode && this.waitlistService) {
+      const inviteValidation = await this.waitlistService.validateInviteCode(params.inviteCode);
+      if (
+        inviteValidation?.valid &&
+        (params.userDetails.email ?? "").trim().toLowerCase() !== (inviteValidation.email ?? "").trim().toLowerCase()
+      ) {
+        return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=invite_email_mismatch&invite=${encodeURIComponent(params.inviteCode)}`;
+      }
+    }
+
     // Store pending registration in Redis (include invite code AND referral code if present)
     const pendingId = await this.pendingRegistrationService.create({
       provider: "discord",
@@ -117,6 +142,7 @@ export class AuthDiscordService {
       avatar: params.userDetails.avatar,
       inviteCode: params.inviteCode,
       referralCode: params.referralCode,
+      source: parseSignupSourceParam(params.source),
     });
 
     return `${this.config.get<ConfigAppInterface>("app").url}auth/consent?pending=${pendingId}`;

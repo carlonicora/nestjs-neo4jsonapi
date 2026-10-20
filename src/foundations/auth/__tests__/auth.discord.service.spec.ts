@@ -10,6 +10,14 @@ vi.mock("../services/auth.service", () => ({
   },
 }));
 
+// The real WaitlistService pulls in the waitlist repository chain; only
+// validateInviteCode is used here.
+vi.mock("../../waitlist/services/waitlist.service", () => ({
+  WaitlistService: class MockWaitlistService {
+    validateInviteCode = vi.fn();
+  },
+}));
+
 // Mock axios
 vi.mock("axios");
 
@@ -29,6 +37,7 @@ import { UserRepository } from "../../user";
 import { DiscordUserRepository } from "../../discord-user/repositories/discord-user.repository";
 import { DiscordUserService } from "../../discord-user";
 import { PendingRegistrationService } from "../services/pending-registration.service";
+import { WaitlistService } from "../../waitlist/services/waitlist.service";
 
 const mockedAxios = vi.mocked(axios);
 
@@ -47,6 +56,7 @@ describe("AuthDiscordService", () => {
   let configService: MockedObject<ConfigService>;
   let clsService: MockedObject<ClsService>;
   let pendingRegistrationService: MockedObject<PendingRegistrationService>;
+  let waitlistService: { validateInviteCode: ReturnType<typeof vi.fn> };
 
   const TEST_IDS = {
     userId: "user-123",
@@ -116,6 +126,10 @@ describe("AuthDiscordService", () => {
       get: vi.fn(),
     };
 
+    const mockWaitlistService = {
+      validateInviteCode: vi.fn(),
+    };
+
     const mockPendingRegistrationService = {
       create: vi.fn(),
     };
@@ -130,6 +144,7 @@ describe("AuthDiscordService", () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockClsService },
         { provide: PendingRegistrationService, useValue: mockPendingRegistrationService },
+        { provide: WaitlistService, useValue: mockWaitlistService },
       ],
     }).compile();
 
@@ -141,6 +156,7 @@ describe("AuthDiscordService", () => {
     configService = module.get(ConfigService);
     clsService = module.get(ClsService);
     pendingRegistrationService = module.get(PendingRegistrationService);
+    waitlistService = module.get(WaitlistService);
   });
 
   afterEach(() => {
@@ -217,6 +233,37 @@ describe("AuthDiscordService", () => {
       const stateData = JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
       expect(stateData.invite).toBe("invite-code");
       expect(stateData.referral).toBe("referral-code");
+    });
+  });
+
+  describe("signup source", () => {
+    const decodeState = (url: string) => {
+      const stateMatch = url.match(/state=([^&]+)/);
+      return JSON.parse(Buffer.from(stateMatch![1], "base64url").toString());
+    };
+
+    it("generateLoginUrl puts source into state", () => {
+      const source = JSON.stringify({ sourceRef: "discord-embed" });
+
+      const result = service.generateLoginUrl("invite-code", "referral-code", source);
+
+      const stateData = decodeState(result);
+      expect(stateData.source).toBe(source);
+      expect(stateData.invite).toBe("invite-code");
+      expect(stateData.referral).toBe("referral-code");
+    });
+
+    it("generateLoginUrl leaves source out of state when not provided", () => {
+      const stateData = decodeState(service.generateLoginUrl());
+
+      expect(stateData).not.toHaveProperty("source");
+    });
+
+    it("parseStateData returns source", () => {
+      const source = JSON.stringify({ sourceUtmSource: "reddit" });
+      const state = Buffer.from(JSON.stringify({ nonce: "abc", invite: "inv-1", source })).toString("base64url");
+
+      expect(service.parseStateData(state)).toEqual({ invite: "inv-1", referral: undefined, source });
     });
   });
 
@@ -455,6 +502,72 @@ describe("AuthDiscordService", () => {
         });
         expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
       });
+    });
+  });
+
+  describe("invite binding and signup source", () => {
+    const useWaitlistMode = () =>
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") {
+          return { allowRegistration: true, registrationMode: "waitlist" };
+        }
+        return mockConfig[key as keyof typeof mockConfig];
+      });
+
+    it("callback redirects to invite_email_mismatch when the provider email differs from the invite", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useWaitlistMode();
+      waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+
+      const result = await service.handleDiscordLogin({
+        userDetails: { ...mockDiscordUserDetails, email: "x@example.com" },
+        inviteCode: "invite-abc",
+      });
+
+      expect(waitlistService.validateInviteCode).toHaveBeenCalledWith("invite-abc");
+      expect(result).toBe("http://app.example.com/oauth/error?error=invite_email_mismatch&invite=invite-abc");
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("callback accepts the invited email regardless of case and surrounding spaces", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useWaitlistMode();
+      waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+      pendingRegistrationService.create.mockResolvedValue(TEST_IDS.pendingId);
+
+      const result = await service.handleDiscordLogin({
+        userDetails: { ...mockDiscordUserDetails, email: " GM@Example.com " },
+        inviteCode: "invite-abc",
+      });
+
+      expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
+    });
+
+    it("callback stores parseSignupSourceParam(source) on the pending registration", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      pendingRegistrationService.create.mockResolvedValue(TEST_IDS.pendingId);
+
+      await service.handleDiscordLogin({
+        userDetails: mockDiscordUserDetails,
+        source: JSON.stringify({ sourceRef: "discord-embed", unknown: "dropped" }),
+      });
+
+      expect(pendingRegistrationService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ source: { sourceRef: "discord-embed" } }),
+      );
+    });
+
+    it("callback ignores a malformed source", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      pendingRegistrationService.create.mockResolvedValue(TEST_IDS.pendingId);
+
+      const result = await service.handleDiscordLogin({
+        userDetails: mockDiscordUserDetails,
+        source: "{not json",
+      });
+
+      expect(pendingRegistrationService.create.mock.calls[0][0].source).toBeUndefined();
+      expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
     });
   });
 

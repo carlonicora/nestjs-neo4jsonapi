@@ -20,6 +20,12 @@ export type Waitlist = Entity & {
   invitedAt?: Date;
   registeredAt?: Date;
   userId?: string;
+  sourceRef?: string;
+  sourceUtmSource?: string;
+  sourceUtmMedium?: string;
+  sourceUtmCampaign?: string;
+  sourceReferrer?: string;
+  sourceLandingPath?: string;
 };
 
 export const WaitlistDescriptor = defineEntity<Waitlist>()({
@@ -47,6 +53,12 @@ export const WaitlistDescriptor = defineEntity<Waitlist>()({
     invitedAt: { type: "datetime" },
     registeredAt: { type: "datetime" },
     userId: { type: "string" },
+    sourceRef: { type: "string" },
+    sourceUtmSource: { type: "string" },
+    sourceUtmMedium: { type: "string" },
+    sourceUtmCampaign: { type: "string" },
+    sourceReferrer: { type: "string" },
+    sourceLandingPath: { type: "string" },
   },
 
   relationships: {},

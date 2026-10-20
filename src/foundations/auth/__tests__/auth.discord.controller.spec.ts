@@ -223,6 +223,44 @@ describe("AuthDiscordController", () => {
     });
   });
 
+  describe("signup source", () => {
+    it("`source` query param is forwarded to generateLoginUrl", async () => {
+      const source = JSON.stringify({ sourceRef: "discord-embed" });
+      authDiscordService.generateLoginUrl.mockReturnValue("https://provider.example.com/login");
+
+      await controller.loginWithDiscord(mockReply, "invite-code", "referral-code", source);
+
+      expect(authDiscordService.generateLoginUrl).toHaveBeenCalledWith("invite-code", "referral-code", source);
+      expect(mockReply.redirect).toHaveBeenCalledWith("https://provider.example.com/login", 302);
+    });
+
+    it("a malformed source does not throw", async () => {
+      authDiscordService.generateLoginUrl.mockReturnValue("https://provider.example.com/login");
+
+      await expect(
+        controller.loginWithDiscord(mockReply, undefined, undefined, "{not json" + "x".repeat(10240)),
+      ).resolves.toBeUndefined();
+      expect(mockReply.redirect).toHaveBeenCalledWith("https://provider.example.com/login", 302);
+    });
+
+    it("passes the state source to the callback handler", async () => {
+      const source = JSON.stringify({ sourceUtmSource: "reddit" });
+      authDiscordService.parseStateData.mockReturnValue({ invite: "inv-1", referral: undefined, source });
+      authDiscordService.exchangeCodeForToken.mockResolvedValue("access-token");
+      authDiscordService.fetchUserDetails.mockResolvedValue({
+        id: "provider-user-id",
+        email: "test@example.com",
+      } as any);
+      authDiscordService.handleDiscordLogin.mockResolvedValue("http://redirect.url");
+
+      await controller.callbackDiscord(mockReply, "auth-code", "encoded-state");
+
+      expect(authDiscordService.handleDiscordLogin).toHaveBeenCalledWith(
+        expect.objectContaining({ inviteCode: "inv-1", source }),
+      );
+    });
+  });
+
   describe("dependency injection", () => {
     it("should have authDiscordService injected", () => {
       expect(controller["authDiscordService"]).toBeDefined();
