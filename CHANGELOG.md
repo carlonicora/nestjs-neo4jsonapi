@@ -1,3 +1,9 @@
+## [6.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.3...v6.2.0) (2026-10-20)
+
+### 🚀 Features
+
+* **mcp:** external-source filter capabilities, resolve_entity types, ping tool, generated fields, tool errors as MCP errors ([a68b5f3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a68b5f3cfe4fab61edaf976a846684e126919ce8))
+
 ## [6.1.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.2...v6.1.3) (2026-10-20)
 
 ### 🐛 Bug Fixes
