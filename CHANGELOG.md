@@ -1,3 +1,9 @@
+## [6.1.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.2...v6.1.3) (2026-10-20)
+
+### 🐛 Bug Fixes
+
+* **stripe-price:** import stripeProductMeta directly, not via the stripe-product barrel ([43049a9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/43049a92387776cb404b798c3153962d9115bee2))
+
 ## [6.1.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.1.1...v6.1.2) (2026-10-18)
 
 ### 🐛 Bug Fixes
