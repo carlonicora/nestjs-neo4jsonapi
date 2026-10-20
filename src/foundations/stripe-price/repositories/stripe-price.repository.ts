@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
 import { updateRelationshipQuery } from "../../../core";
-import { stripeProductMeta } from "../../stripe-product";
+import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import {
   StripePrice,
