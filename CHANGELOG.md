@@ -1,3 +1,9 @@
+## [6.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.3.0...v6.4.0) (2026-10-21)
+
+### 🚀 Features
+
+* **email-automation:** trigger-driven email automations with hourly worker sender, one-click unsubscribe and opt-out ([8a27752](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8a27752cd50874204bf5d9b11baf338130b4da2a))
+
 ## [6.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.2.0...v6.3.0) (2026-10-20)
 
 ### 🚀 Features
