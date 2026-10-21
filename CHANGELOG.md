@@ -1,3 +1,9 @@
+## [6.5.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.0...v6.5.1) (2026-10-21)
+
+### 🐛 Bug Fixes
+
+* **security:** close authorization holes in users, roles, sessions, sockets and storage ([d159d3b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d159d3b261370ae31c2e00755b2796d0bb696b06))
+
 ## [6.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.4.0...v6.5.0) (2026-10-21)
 
 ### 🚀 Features
