@@ -1,3 +1,13 @@
+## [6.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.4.0...v6.5.0) (2026-10-21)
+
+### 🚀 Features
+
+* **auth:** carry the request language on the user-activated event ([4a80681](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4a80681c6fc66078755503ee2b80fca713e42bee))
+
+### 🐛 Bug Fixes
+
+* **search:** rank vector candidates over the company's own nodes ([cbd92d3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/cbd92d3000f6a6d261a8fc9939945c75dd93775f))
+
 ## [6.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.3.0...v6.4.0) (2026-10-21)
 
 ### 🚀 Features
