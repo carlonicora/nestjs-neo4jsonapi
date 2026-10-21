@@ -67,6 +67,7 @@ import * as Handlebars from "handlebars";
 import { join, sep } from "path";
 import { AppLoggingService } from "../../../logging/services/logging.service";
 import { EmailService } from "../email.service";
+import sendGridMail = require("@sendgrid/mail");
 
 describe("EmailService", () => {
   let service: EmailService;
@@ -668,7 +669,7 @@ describe("EmailService", () => {
 
       await service.sendRendered({ to: ["a@x.it", "b@x.it"], subject: "S", html: "<p>h</p>" });
 
-      expect(spy).toHaveBeenCalledWith(["a@x.it", "b@x.it"], "S", "<p>h</p>", undefined);
+      expect(spy).toHaveBeenCalledWith(["a@x.it", "b@x.it"], "S", "<p>h</p>", undefined, undefined, undefined);
     });
 
     it("rethrows a transport failure after logging it", async () => {
@@ -678,6 +679,65 @@ describe("EmailService", () => {
 
       await expect(service.sendRendered({ to: "c@x.it", subject: "S", html: "<p>h</p>" })).rejects.toThrow("boom");
       expect(mockLogger.error).toHaveBeenCalled();
+    });
+  });
+
+  describe("reply-to and headers", () => {
+    const replyTo = "a@b.c";
+    const headers = { "List-Unsubscribe": "<x>" };
+
+    it("passes replyTo and headers to the SMTP transport", async () => {
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "123" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+
+      await service.sendEmail("welcome", { to: "user@example.com", replyTo, headers }, "en");
+
+      expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({ replyTo: "a@b.c", headers }));
+    });
+
+    it("maps replyTo to an address object and passes headers on Brevo", async () => {
+      emailConfig.emailProvider = "brevo";
+      brevo.sendTransacEmail.mockResolvedValue({ messageId: "<123@brevo>" });
+
+      await service.sendEmail("welcome", { to: "user@example.com", replyTo, headers }, "en");
+
+      expect(brevo.sendTransacEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ replyTo: { email: "a@b.c", name: "a@b.c" }, headers }),
+      );
+    });
+
+    it("passes replyTo and headers to SendGrid", async () => {
+      emailConfig.emailProvider = "sendgrid";
+      const setApiKey = vi.spyOn(sendGridMail, "setApiKey").mockImplementation(() => undefined);
+      const send = vi.spyOn(sendGridMail, "send").mockResolvedValue([] as any);
+
+      await service.sendEmail("welcome", { to: "user@example.com", replyTo, headers }, "en");
+
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ replyTo: "a@b.c", headers }));
+      setApiKey.mockRestore();
+      send.mockRestore();
+    });
+
+    it("keeps replyTo and headers out of the template params", async () => {
+      const template = vi.fn().mockReturnValue("<html><head><title>T</title></head><body></body></html>");
+      vi.mocked(Handlebars.compile).mockReturnValue(template as any);
+
+      await service.sendEmail("welcome", { to: "user@example.com", replyTo, headers, name: "John" }, "en");
+
+      const templateParams = template.mock.calls[0][0];
+      expect(templateParams).toEqual(expect.objectContaining({ name: "John" }));
+      expect(templateParams).not.toHaveProperty("replyTo");
+      expect(templateParams).not.toHaveProperty("headers");
+    });
+
+    it("sends no replyTo or headers keys when none are given", async () => {
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "123" });
+      vi.mocked(nodemailer.createTransport).mockReturnValue({ sendMail: mockSendMail } as any);
+
+      await service.sendEmail("welcome", { to: "user@example.com" }, "en");
+
+      expect(mockSendMail.mock.calls[0][0]).not.toHaveProperty("replyTo");
+      expect(mockSendMail.mock.calls[0][0]).not.toHaveProperty("headers");
     });
   });
 });

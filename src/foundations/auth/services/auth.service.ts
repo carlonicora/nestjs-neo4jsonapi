@@ -1,6 +1,7 @@
 import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { randomUUID } from "crypto";
 import { RoleId } from "../../../common/constants/system.roles";
 import { EmailService } from "../../../core/email/services/email.service";
@@ -31,6 +32,7 @@ import { UserService } from "../../user/services/user.service";
 import { Waitlist } from "../../waitlist/entities/waitlist";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { hasSignupSource, sanitiseSignupSource } from "../../waitlist/utils/signup-source";
+import { USER_ACTIVATED_EVENT, UserActivatedEvent } from "../events/auth.events";
 import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/registration-hook.interface";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
@@ -93,6 +95,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     @Inject(forwardRef(() => TwoFactorService))
     private readonly twoFactorService: TwoFactorService | undefined,
     private readonly responseLanguage: ResponseLanguageService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     super(jsonApiService, authRepository, clsService, AuthDescriptor.model);
   }
@@ -609,6 +612,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     // Notify platform administrators (non-blocking)
     await this.notifyAdminsOfRegistration(user);
+
+    const event: UserActivatedEvent = { user };
+    this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
   }
 
   async completeOAuthRegistration(params: {
@@ -744,6 +750,10 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     // Get created user
     const user = await this.users.findByUserId({ userId });
+
+    // Emitted here rather than right after the registration hook: the created user is loaded only now.
+    const event: UserActivatedEvent = { user };
+    this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
 
     // Notify platform administrators (non-blocking)
     await this.notifyAdminsOfRegistration(user);

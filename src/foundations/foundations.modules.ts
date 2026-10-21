@@ -14,6 +14,8 @@ import { ContentExtensionConfig } from "./content/interfaces/content.extension.i
 import { ReferralModule } from "./referral/referral.module";
 import { ReferralModuleConfig } from "./referral/interfaces/referral.config.interface";
 import { DiscordUserModule } from "./discord-user/discord-user.module";
+import { EmailAutomationModule } from "./email-automation/email-automation.module";
+import { EmailAutomationModuleConfig } from "./email-automation/interfaces/email-automation.config.interface";
 import { FeatureModule } from "./feature/feature.module";
 import { HandbookModule } from "./handbook/handbook.module";
 import { HandbookModuleConfig } from "./handbook/interfaces/handbook.config.interface";
@@ -60,6 +62,8 @@ export interface FoundationsModuleConfig {
   handbook?: HandbookModuleConfig;
   /** Optional configuration for the how-to feature module (opt-in public routes) */
   howTo?: HowToModuleConfig;
+  /** Optional configuration for the email-automation feature module (the triggers the app declares) */
+  emailAutomation?: EmailAutomationModuleConfig;
   /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
   analytics?: AnalyticsModuleConfig;
   /**
@@ -74,7 +78,8 @@ export interface FoundationsModuleConfig {
 
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
- * UserActivityModule, ReferralModule, HandbookModule, HowToModule, AnalyticsModule) are
+ * UserActivityModule, ReferralModule, HandbookModule, HowToModule, EmailAutomationModule,
+ * AnalyticsModule) are
  * assembled inside forRoot().
  *
  * HowToModule is dynamic solely so an app can reach
@@ -176,6 +181,10 @@ export class FoundationsModule {
       { classRef: ReferralModule, factory: () => ReferralModule.forRoot(config?.referral) },
       { classRef: HandbookModule, factory: () => HandbookModule.forRoot(config?.handbook) },
       { classRef: HowToModule, factory: () => HowToModule.forRoot(config?.howTo) },
+      {
+        classRef: EmailAutomationModule,
+        factory: () => EmailAutomationModule.forRoot(config?.emailAutomation),
+      },
       { classRef: AnalyticsModule, factory: () => AnalyticsModule.forRoot(config?.analytics) },
     ].filter((entry) => !excluded.has(entry.classRef));
 

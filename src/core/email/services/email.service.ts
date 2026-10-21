@@ -22,6 +22,8 @@ export interface EmailParams {
   to: string | string[];
   subject?: string;
   attachments?: EmailAttachment[];
+  replyTo?: string;
+  headers?: Record<string, string>;
   [key: string]: any;
 }
 
@@ -137,8 +139,12 @@ export class EmailService {
     // Capture attachments before template compilation — Handlebars must not
     // see Buffer values. Clone to avoid mutating the caller's object.
     const attachments = emailParams.attachments;
+    const replyTo = emailParams.replyTo;
+    const headers = emailParams.headers;
     const templateParams = { ...emailParams };
     delete templateParams.attachments;
+    delete templateParams.replyTo;
+    delete templateParams.headers;
 
     const localePartials = this.loadLocalePartials(locale);
 
@@ -161,7 +167,7 @@ export class EmailService {
     const to = emailParams.to;
     const subject = emailParams.subject || extractedTitle;
 
-    await this.dispatch(to, subject, html, attachments);
+    await this.dispatch(to, subject, html, attachments, replyTo, headers);
   }
 
   /**
@@ -185,15 +191,17 @@ export class EmailService {
     subject: string,
     html: string,
     attachments?: EmailAttachment[],
+    replyTo?: string,
+    headers?: Record<string, string>,
   ): Promise<void> {
     try {
       const emailConfig = this.config.get<ConfigEmailInterface>("email");
       if (emailConfig.emailProvider === "brevo") {
-        await this.sendEmailWithBrevo(to, subject, html);
+        await this.sendEmailWithBrevo(to, subject, html, replyTo, headers);
       } else if (emailConfig.emailProvider === "sendgrid") {
-        await this.sendEmailWithSendGrid(to, subject, html, attachments);
+        await this.sendEmailWithSendGrid(to, subject, html, attachments, replyTo, headers);
       } else {
-        await this.sendEmailWithSmtp(to, subject, html, attachments);
+        await this.sendEmailWithSmtp(to, subject, html, attachments, replyTo, headers);
       }
     } catch (error) {
       this.logger.error("Error sending email", error, "EmailService");
@@ -201,7 +209,13 @@ export class EmailService {
     }
   }
 
-  private async sendEmailWithBrevo(to: string | string[], subject: string, html: string): Promise<void> {
+  private async sendEmailWithBrevo(
+    to: string | string[],
+    subject: string,
+    html: string,
+    replyTo?: string,
+    headers?: Record<string, string>,
+  ): Promise<void> {
     const emailConfig = this.config.get<ConfigEmailInterface>("email");
     const client = new BrevoClient({ apiKey: emailConfig.emailApiKey });
 
@@ -211,6 +225,8 @@ export class EmailService {
         htmlContent: html,
         sender: this.convertToEmailAddressArray(emailConfig.emailFrom)[0],
         to: this.convertToEmailAddressArray(to),
+        ...(replyTo ? { replyTo: this.convertToEmailAddressArray(replyTo)[0] } : {}),
+        ...(headers ? { headers } : {}),
       });
     } catch (error) {
       this.logger.error("Error sending email via Brevo", error, "EmailService", {
@@ -226,6 +242,8 @@ export class EmailService {
     subject: string,
     html: string,
     attachments?: EmailAttachment[],
+    replyTo?: string,
+    headers?: Record<string, string>,
   ): Promise<void> {
     const emailConfig = this.config.get<ConfigEmailInterface>("email");
     if (!emailConfig.emailApiKey) {
@@ -238,6 +256,8 @@ export class EmailService {
       subject: subject,
       text: html,
       html: html,
+      ...(replyTo ? { replyTo } : {}),
+      ...(headers ? { headers } : {}),
       ...(attachments && attachments.length > 0
         ? {
             attachments: attachments.map((a) => ({
@@ -291,6 +311,8 @@ export class EmailService {
     subject: string,
     html: string,
     attachments?: EmailAttachment[],
+    replyTo?: string,
+    headers?: Record<string, string>,
   ): Promise<void> {
     const emailConfig = this.config.get<ConfigEmailInterface>("email");
     const transporter = nodemailer.createTransport({
@@ -308,6 +330,8 @@ export class EmailService {
       to: to,
       subject: subject,
       html: html,
+      ...(replyTo ? { replyTo } : {}),
+      ...(headers ? { headers } : {}),
       ...(attachments && attachments.length > 0
         ? {
             attachments: attachments.map((a) => ({

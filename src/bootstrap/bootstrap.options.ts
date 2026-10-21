@@ -7,6 +7,7 @@ import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
 import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
 import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
+import { EmailAutomationModuleConfig } from "../foundations/email-automation/interfaces/email-automation.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
 import { AnalyticsModuleConfig } from "../foundations/analytics/interfaces/analytics.config.interface";
 
@@ -134,6 +135,26 @@ export interface BootstrapOptions {
    * ```
    */
   howTo?: HowToModuleConfig;
+
+  /**
+   * Configuration for the email-automation feature module.
+   * Forwarded to `FoundationsModule.forRoot({ emailAutomation })`, exactly like
+   * `contentExtension` / `referral` / `userActivity` / `handbook` / `howTo` above —
+   * without this seam a consuming app has no way to declare the triggers that
+   * enrol people into an automation.
+   *
+   * Omitted is inert: the admin and unsubscribe routes are mounted, but with no
+   * triggers nobody is ever enrolled. The library declares no trigger key; the
+   * app picks every key and label.
+   *
+   * @example
+   * ```typescript
+   * emailAutomation: {
+   *   triggers: [waitlistConfirmedTrigger("waitlist-confirmed"), userActivatedTrigger("registration-completed")],
+   * }
+   * ```
+   */
+  emailAutomation?: EmailAutomationModuleConfig;
 
   /**
    * Configuration for the first-party web analytics feature module.

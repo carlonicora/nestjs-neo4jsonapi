@@ -14,6 +14,8 @@ export { Auth, AuthDescriptor } from "./entities/auth";
 export { AuthCode, AuthCodeDescriptor } from "./entities/auth.code";
 export { authCodeMeta } from "./entities/auth.code.meta";
 export { authMeta } from "./entities/auth.meta";
+export { USER_ACTIVATED_EVENT } from "./events/auth.events";
+export type { UserActivatedEvent } from "./events/auth.events";
 export { PendingAuth, PendingAuthDescriptor } from "./entities/pending-auth";
 export { pendingAuthMeta } from "./entities/pending-auth.meta";
 export { REGISTRATION_HOOK, RegistrationHookInterface } from "./interfaces/registration-hook.interface";

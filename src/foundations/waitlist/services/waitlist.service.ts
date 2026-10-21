@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { BaseConfigInterface, ConfigAppInterface } from "../../../config/interfaces";
@@ -10,6 +11,7 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { WaitlistPostDataDTO } from "../dtos/waitlist.post.dto";
+import { WAITLIST_CONFIRMED_EVENT, WaitlistConfirmedEvent } from "../events/waitlist.events";
 import { Waitlist, WaitlistDescriptor, WaitlistStatus } from "../entities/waitlist";
 import { WaitlistRepository } from "../repositories/waitlist.repository";
 import { sanitiseSignupSource } from "../utils/signup-source";
@@ -31,6 +33,7 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
     private readonly configService: ConfigService<BaseConfigInterface>,
     private readonly userRepository: UserRepository,
     private readonly responseLanguage: ResponseLanguageService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     super(jsonApiService, waitlistRepository, clsService, WaitlistDescriptor.model);
   }
@@ -75,19 +78,31 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
     });
 
     // Send confirmation email. The recipient is not a user yet: use the requester's language.
+    // Without this email the entry can never be confirmed, so a failed send removes the
+    // entry again and tells the requester, instead of leaving a ghost that blocks a retry
+    // with "already registered".
     const locale = (await this.responseLanguage.resolve()) ?? "en";
     const confirmationLink = `${this.appConfig.url}${locale}/waitlist/confirm/${confirmationCode}`;
-    await this.emailService.sendEmail(
-      "waitlistConfirmation",
-      {
-        to: email,
-        confirmationLink,
-        expirationDate: confirmationCodeExpiration.toDateString(),
-        expirationTime: confirmationCodeExpiration.toTimeString(),
-        expiresAt: confirmationCodeExpiration.toISOString(),
-      },
-      locale,
-    );
+    try {
+      await this.emailService.sendEmail(
+        "waitlistConfirmation",
+        {
+          to: email,
+          confirmationLink,
+          expirationDate: confirmationCodeExpiration.toDateString(),
+          expirationTime: confirmationCodeExpiration.toTimeString(),
+          expiresAt: confirmationCodeExpiration.toISOString(),
+        },
+        locale,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to send waitlist confirmation to ${email}:`, error);
+      await this.repository.delete({ id });
+      throw new HttpException(
+        "We could not send the confirmation email, so your sign-up was not saved. Please try again in a few minutes.",
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
 
     return this.findById({ id });
   }
@@ -130,12 +145,12 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
       confirmedAt,
     });
 
+    const confirmedEntry: Waitlist = { ...entry, confirmedAt, status: WaitlistStatus.Confirmed };
+    const event: WaitlistConfirmedEvent = { waitlist: confirmedEntry };
+    this.eventEmitter.emit(WAITLIST_CONFIRMED_EVENT, event);
+
     // Notify platform administrators (non-blocking)
-    await this.notifyAdminsOfConfirmation({
-      ...entry,
-      confirmedAt,
-      status: WaitlistStatus.Confirmed,
-    });
+    await this.notifyAdminsOfConfirmation(confirmedEntry);
 
     return this.findById({ id: entry.id });
   }

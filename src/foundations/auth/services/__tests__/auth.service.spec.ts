@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { ClsService } from "nestjs-cls";
 import { AuthService } from "../auth.service";
 import { AuthRepository } from "../../repositories/auth.repository";
@@ -24,6 +25,7 @@ import { Auth, AuthDescriptor } from "../../entities/auth";
 import { AuthCode } from "../../entities/auth.code";
 import { PendingAuthDescriptor } from "../../entities/pending-auth";
 import { User } from "../../../user/entities/user";
+import { USER_ACTIVATED_EVENT } from "../../events/auth.events";
 
 // Mock crypto
 vi.mock("crypto", async () => {
@@ -65,6 +67,7 @@ describe("AuthService", () => {
   let googleUserService: MockedObject<GoogleUserService>;
   let trialQueueService: MockedObject<TrialQueueService>;
   let waitlistService: MockedObject<WaitlistService>;
+  let eventEmitter: MockedObject<EventEmitter2>;
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440000",
@@ -244,6 +247,7 @@ describe("AuthService", () => {
         { provide: WaitlistService, useValue: createMockWaitlistService() },
         { provide: TwoFactorService, useValue: createMockTwoFactorService() },
         { provide: ResponseLanguageService, useValue: createMockResponseLanguageService() },
+        { provide: EventEmitter2, useValue: { emit: vi.fn() } },
       ],
     }).compile();
 
@@ -264,6 +268,7 @@ describe("AuthService", () => {
     googleUserService = module.get(GoogleUserService) as MockedObject<GoogleUserService>;
     trialQueueService = module.get(TrialQueueService) as MockedObject<TrialQueueService>;
     waitlistService = module.get(WaitlistService) as MockedObject<WaitlistService>;
+    eventEmitter = module.get(EventEmitter2) as MockedObject<EventEmitter2>;
   });
 
   afterEach(() => {
@@ -749,6 +754,7 @@ describe("AuthService", () => {
         userId: MOCK_USER.id,
         password: "hashed-password",
       });
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it("should throw NOT_FOUND when code is invalid", async () => {
@@ -789,6 +795,7 @@ describe("AuthService", () => {
         companyId: TEST_IDS.companyId,
         userId: MOCK_USER.id,
       });
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER });
     });
 
     it("should throw NOT_FOUND when code is invalid", async () => {
@@ -887,6 +894,7 @@ describe("AuthService", () => {
       expect(trialQueueService.queueTrialCreation).toHaveBeenCalled();
       expect(pendingRegistrationService.delete).toHaveBeenCalledWith(oauthParams.pendingId);
       expect(result).toHaveProperty("code");
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER });
     });
 
     it("should complete OAuth registration for Google user", async () => {
@@ -1178,6 +1186,7 @@ describe("AuthService", () => {
         { provide: TrialQueueService, useValue: createMockTrialQueueService() },
         { provide: WaitlistService, useValue: createMockWaitlistService() },
         { provide: ResponseLanguageService, useValue: createMockResponseLanguageService() },
+        { provide: EventEmitter2, useValue: { emit: vi.fn() } },
       ];
 
       const omit = params?.omit ?? [];

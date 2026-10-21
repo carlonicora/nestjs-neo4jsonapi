@@ -11,6 +11,10 @@ export type { WaitlistDescriptorType } from "./entities/waitlist";
 // Meta
 export { waitlistMeta } from "./entities/waitlist.meta";
 
+// Events
+export { WAITLIST_CONFIRMED_EVENT } from "./events/waitlist.events";
+export type { WaitlistConfirmedEvent } from "./events/waitlist.events";
+
 // Signup source
 export {
   SIGNUP_SOURCE_FIELDS,

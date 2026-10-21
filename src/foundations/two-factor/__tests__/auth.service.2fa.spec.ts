@@ -4,6 +4,7 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { ClsService } from "nestjs-cls";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { AuthService } from "../../auth/services/auth.service";
 import { AuthRepository } from "../../auth/repositories/auth.repository";
 import { UserRepository } from "../../user/repositories/user.repository";
@@ -226,6 +227,7 @@ describe("AuthService - 2FA Integration", () => {
         { provide: TrialQueueService, useValue: mockTrialQueueService },
         { provide: WaitlistService, useValue: mockWaitlistService },
         { provide: TwoFactorService, useValue: mockTwoFactorService },
+        { provide: EventEmitter2, useValue: { emit: vi.fn() } },
         {
           provide: ResponseLanguageService,
           useValue: {

@@ -20,6 +20,7 @@ export * from "./community";
 export * from "./content";
 export * from "./discord";
 export * from "./discord-user";
+export * from "./email-automation";
 export * from "./feature";
 export * from "./google-user";
 export * from "./handbook";
