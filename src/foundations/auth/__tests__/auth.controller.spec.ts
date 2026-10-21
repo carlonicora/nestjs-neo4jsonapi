@@ -226,7 +226,7 @@ describe("AuthController", () => {
 
       await controller.activateAccount(TEST_CODES.activationCode);
 
-      expect(authService.activateAccount).toHaveBeenCalledWith(TEST_CODES.activationCode);
+      expect(authService.activateAccount).toHaveBeenCalledWith(TEST_CODES.activationCode, undefined);
     });
 
     it("should handle already activated account", async () => {
@@ -248,7 +248,7 @@ describe("AuthController", () => {
 
       const result = await controller.completeOAuthRegistration(oauthBody);
 
-      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody);
+      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody, undefined);
       expect(result).toEqual({ code: "oauth-complete-code" });
     });
 
@@ -263,7 +263,7 @@ describe("AuthController", () => {
 
       const result = await controller.completeOAuthRegistration(oauthBody);
 
-      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody);
+      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody, undefined);
       expect(result.code).toBeDefined();
     });
   });

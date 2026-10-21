@@ -831,6 +831,32 @@ describe("AuthService", () => {
       // Assert
       expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
     });
+
+    it("emits USER_ACTIVATED_EVENT with the language passed to activateAccount", async () => {
+      userRepository.findByCode.mockResolvedValue(MOCK_USER);
+      authRepository.activateAccount.mockResolvedValue(undefined);
+      trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+
+      await service.activateAccount("code-1", "it");
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, {
+        user: expect.objectContaining({ id: MOCK_USER.id }),
+        language: "it",
+      });
+    });
+
+    it("emits USER_ACTIVATED_EVENT without a language when none was passed", async () => {
+      userRepository.findByCode.mockResolvedValue(MOCK_USER);
+      authRepository.activateAccount.mockResolvedValue(undefined);
+      trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+
+      await service.activateAccount("code-1");
+
+      const call = eventEmitter.emit.mock.calls.find(([name]) => name === USER_ACTIVATED_EVENT);
+      expect(call).toBeDefined();
+      expect(call?.[1]).toMatchObject({ user: expect.objectContaining({ id: MOCK_USER.id }) });
+      expect((call?.[1] as { language?: string }).language).toBeUndefined();
+    });
   });
 
   describe("completeOAuthRegistration", () => {
@@ -927,6 +953,28 @@ describe("AuthService", () => {
         }),
       );
       expect(result).toHaveProperty("code");
+    });
+
+    it("emits USER_ACTIVATED_EVENT with the language passed to completeOAuthRegistration", async () => {
+      pendingRegistrationService.get.mockResolvedValue(mockPendingGoogle);
+      googleUserService.create.mockResolvedValue(undefined);
+      trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+      pendingRegistrationService.delete.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      authRepository.setLastLogin.mockResolvedValue(undefined);
+      authRepository.createCode.mockResolvedValue(undefined);
+      authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
+      jsonApiService.buildSingle.mockResolvedValue({
+        data: { attributes: { refreshToken: TEST_IDS.authId } },
+      });
+
+      await service.completeOAuthRegistration(oauthParams, "it");
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, {
+        user: expect.objectContaining({ id: MOCK_USER.id }),
+        language: "it",
+      });
     });
 
     it("should throw NOT_FOUND when pending registration not found", async () => {

@@ -592,7 +592,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     });
   }
 
-  async activateAccount(code: string): Promise<any> {
+  async activateAccount(code: string, language?: string): Promise<any> {
     const user: User = await this.users.findByCode({ code: code });
 
     if (!user) throw new HttpException("The code provided is invalid", HttpStatus.NOT_FOUND);
@@ -613,16 +613,19 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     // Notify platform administrators (non-blocking)
     await this.notifyAdminsOfRegistration(user);
 
-    const event: UserActivatedEvent = { user };
+    const event: UserActivatedEvent = { user, language };
     this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
   }
 
-  async completeOAuthRegistration(params: {
-    pendingId: string;
-    termsAcceptedAt: string;
-    marketingConsent: boolean;
-    marketingConsentAt: string | null;
-  }): Promise<{ code: string }> {
+  async completeOAuthRegistration(
+    params: {
+      pendingId: string;
+      termsAcceptedAt: string;
+      marketingConsent: boolean;
+      marketingConsentAt: string | null;
+    },
+    language?: string,
+  ): Promise<{ code: string }> {
     // Get pending registration from Redis
     const pending = await this.pendingRegistrationService.get(params.pendingId);
     if (!pending) {
@@ -752,7 +755,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     const user = await this.users.findByUserId({ userId });
 
     // Emitted here rather than right after the registration hook: the created user is loaded only now.
-    const event: UserActivatedEvent = { user };
+    const event: UserActivatedEvent = { user, language };
     this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
 
     // Notify platform administrators (non-blocking)

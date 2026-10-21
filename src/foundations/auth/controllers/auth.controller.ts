@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -104,8 +105,8 @@ export class AuthController {
 
   @Post("activate/:code")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async activateAccount(@Param("code") code: string) {
-    await this.service.activateAccount(code);
+  async activateAccount(@Param("code") code: string, @Headers("x-language") language?: string) {
+    await this.service.activateAccount(code, language);
   }
 
   @Post("oauth/complete")
@@ -117,7 +118,8 @@ export class AuthController {
       marketingConsent: boolean;
       marketingConsentAt: string | null;
     },
+    @Headers("x-language") language?: string,
   ): Promise<{ code: string }> {
-    return this.service.completeOAuthRegistration(body);
+    return this.service.completeOAuthRegistration(body, language);
   }
 }
