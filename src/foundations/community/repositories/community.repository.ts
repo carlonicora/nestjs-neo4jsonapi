@@ -7,6 +7,13 @@ import { SecurityService } from "../../../core/security/services/security.servic
 import { Community } from "../entities/community.entity";
 import { CommunityModel } from "../entities/community.model";
 
+/**
+ * Up to this many company/scope communities, `findByVector` ranks them by
+ * exact cosine (no recall cliff). Above it, it falls back to the vector-index
+ * over-fetch, which ranks globally and filters afterwards.
+ */
+export const COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES = 5000;
+
 @Injectable()
 export class CommunityRepository implements OnModuleInit {
   constructor(
@@ -312,16 +319,7 @@ export class CommunityRepository implements OnModuleInit {
    * is therefore assumed to mix roots.
    */
   async findByVector(params: { embedding: number[]; topK: number; level?: number }): Promise<Community[]> {
-    const query = this.neo4j.initQuery({ serialiser: CommunityModel });
     const scope = this.agentScope.current();
-
-    query.queryParams = {
-      ...query.queryParams,
-      embedding: params.embedding,
-      topK: params.topK,
-      level: params.level,
-      ...(scope ? { agentScopeId: scope.id } : {}),
-    };
 
     let whereClause = "WHERE community.embedding IS NOT NULL AND community.isStale = false";
     if (params.level !== undefined) {
@@ -329,6 +327,44 @@ export class CommunityRepository implements OnModuleInit {
     }
     if (scope) {
       whereClause += ` AND EXISTS { MATCH (community)-[:SCOPED_TO]->(:${scope.label} { id: $agentScopeId }) }`;
+    }
+
+    const filterParams = {
+      embedding: params.embedding,
+      topK: params.topK,
+      level: params.level,
+      ...(scope ? { agentScopeId: scope.id } : {}),
+    };
+
+    // How large is the company's (and scope's) set? The vector index ranks
+    // ALL companies first and filters afterwards, so identical content in
+    // other companies can push this company's communities out of the
+    // candidates. Small sets are ranked by exact cosine; the index only above
+    // the threshold (mirrors ChunkRepository.findPotentialChunks).
+    const countQuery = this.neo4j.initQuery();
+    countQuery.queryParams = { ...countQuery.queryParams, ...filterParams };
+    countQuery.query += `
+      MATCH (community:Community)-[:BELONGS_TO]->(company)
+      ${whereClause}
+      RETURN count(community) AS scopedCount
+    `;
+    const countResult = await this.neo4j.read(countQuery.query, countQuery.queryParams);
+    const scopedCount = Number(countResult?.records?.[0]?.get("scopedCount") ?? 0);
+    if (scopedCount === 0) return [];
+
+    const query = this.neo4j.initQuery({ serialiser: CommunityModel });
+    query.queryParams = { ...query.queryParams, ...filterParams };
+
+    if (scopedCount <= COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES) {
+      query.query += `
+      MATCH (community:Community)-[:BELONGS_TO]->(company)
+      ${whereClause}
+      WITH community, vector.similarity.cosine(community.embedding, $embedding) AS score
+      RETURN community, score
+      ORDER BY score DESC
+      LIMIT toInteger($topK)
+    `;
+      return this.neo4j.readMany(query);
     }
 
     query.query += `

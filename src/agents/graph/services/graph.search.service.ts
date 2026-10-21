@@ -19,6 +19,12 @@ export const GRAPH_SEMANTIC_MAX_RESULTS = 5;
 export const GRAPH_RESOLVE_MAX_RESULTS = 10;
 export const GRAPH_SEMANTIC_MIN_SCORE = 0.6;
 const GRAPH_VECTOR_OVERFETCH = 50;
+/**
+ * Up to this many company/scope nodes of one label, the semantic tier ranks
+ * them by exact cosine (no recall cliff). Above it, it falls back to the
+ * vector-index over-fetch, which ranks globally and filters afterwards.
+ */
+export const GRAPH_EXACT_SCAN_MAX_SCOPED_NODES = 5000;
 
 /**
  * `exact`: the top candidate's summary (or id) equals the text, or an external
@@ -581,8 +587,52 @@ export class GraphSearchService {
     // replacement. Every value stays parameterised.
     const scopeClause = this.scopeClauseFor(params);
 
-    const result = await this.neo4j.read(
+    // The label is interpolated from the catalog entity, exactly as the index
+    // name is; every value stays parameterised.
+    const scopedMatch = `
+      MATCH (node:\`${params.entity.labelName}\`)
+      WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
+        AND node.name_embedding IS NOT NULL
+        ${scopeClause?.cypher ?? ""}
+    `;
+
+    // How large is the company's (and scope's) set? The vector index ranks
+    // ALL companies first and filters afterwards, so identical content in
+    // other companies can push this company's matches out of the candidates.
+    // Small sets are ranked by exact cosine; the index only above the threshold.
+    const countResult = await this.neo4j.read(
       `
+      ${scopedMatch}
+      RETURN count(node) AS scopedCount
+      `,
+      { companyId: params.companyId, ...(scopeClause?.params ?? {}) },
+    );
+    const scopedCount = Number((countResult as any)?.records?.[0]?.get("scopedCount") ?? 0);
+    if (scopedCount === 0) return { matchMode: "none", items: [] };
+
+    const limit = Math.min(params.limit, GRAPH_SEMANTIC_MAX_RESULTS);
+
+    const result =
+      scopedCount <= GRAPH_EXACT_SCAN_MAX_SCOPED_NODES
+        ? await this.neo4j.read(
+            `
+      ${scopedMatch}
+      WITH node, vector.similarity.cosine(node.name_embedding, $queryEmbedding) AS score
+      WHERE score >= $minScore
+      RETURN node.id AS id, properties(node) AS properties, score
+      ORDER BY score DESC
+      LIMIT toInteger($limit)
+      `,
+            {
+              queryEmbedding,
+              companyId: params.companyId,
+              minScore: GRAPH_SEMANTIC_MIN_SCORE,
+              limit,
+              ...(scopeClause?.params ?? {}),
+            },
+          )
+        : await this.neo4j.read(
+            `
       CALL db.index.vector.queryNodes($indexName, toInteger($overFetch), $queryEmbedding)
       YIELD node, score
       WHERE (node)-[:BELONGS_TO]->(:Company { id: $companyId })
@@ -592,16 +642,16 @@ export class GraphSearchService {
       ORDER BY score DESC
       LIMIT toInteger($limit)
       `,
-      {
-        indexName,
-        overFetch: GRAPH_VECTOR_OVERFETCH,
-        queryEmbedding,
-        companyId: params.companyId,
-        minScore: GRAPH_SEMANTIC_MIN_SCORE,
-        limit: Math.min(params.limit, GRAPH_SEMANTIC_MAX_RESULTS),
-        ...(scopeClause?.params ?? {}),
-      },
-    );
+            {
+              indexName,
+              overFetch: GRAPH_VECTOR_OVERFETCH,
+              queryEmbedding,
+              companyId: params.companyId,
+              minScore: GRAPH_SEMANTIC_MIN_SCORE,
+              limit,
+              ...(scopeClause?.params ?? {}),
+            },
+          );
 
     const items: InternalTierItem[] = (result as any).records.map((r: any) => ({
       id: r.get("id"),

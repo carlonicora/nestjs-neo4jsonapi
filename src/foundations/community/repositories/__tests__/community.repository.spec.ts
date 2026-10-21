@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
-import { CommunityRepository } from "../community.repository";
+import { COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES, CommunityRepository } from "../community.repository";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
 import { ModelService } from "../../../../core/llm/services/model.service";
@@ -378,10 +378,21 @@ describe("CommunityRepository", () => {
   });
 
   describe("findByVector", () => {
-    it("should find communities by vector similarity", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
+    // findByVector first counts the company's (and scope's) communities, then
+    // ranks them: two initQuery() calls, one count read, one readMany.
+    const arrange = (scopedCount: number) => {
+      const countQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValueOnce(countQuery).mockReturnValueOnce(mockQuery);
+      neo4jService.read.mockResolvedValue({
+        records: [{ get: (key: string) => (key === "scopedCount" ? scopedCount : undefined) }],
+      });
       neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+      return { countQuery, mockQuery };
+    };
+
+    it("should find communities by vector similarity", async () => {
+      const { mockQuery } = arrange(10);
 
       const result = await repository.findByVector({
         embedding: MOCK_EMBEDDING,
@@ -390,15 +401,63 @@ describe("CommunityRepository", () => {
 
       expect(mockQuery.queryParams.embedding).toEqual(MOCK_EMBEDDING);
       expect(mockQuery.queryParams.topK).toBe(5);
-      expect(mockQuery.query).toContain("db.index.vector.queryNodes");
       expect(mockQuery.query).toContain("ORDER BY score DESC");
       expect(result).toEqual([MOCK_COMMUNITY]);
     });
 
+    it("ranks the company's communities by exact cosine when the scoped set is small", async () => {
+      const { countQuery, mockQuery } = arrange(10);
+
+      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
+
+      expect(countQuery.query).toContain("(community:Community)-[:BELONGS_TO]->(company)");
+      expect(countQuery.query).toContain("count(community) AS scopedCount");
+      expect(mockQuery.query).toContain("vector.similarity.cosine(community.embedding, $embedding)");
+      expect(mockQuery.query).toContain("(community:Community)-[:BELONGS_TO]->(company)");
+      expect(mockQuery.query.indexOf("(community:Community)-[:BELONGS_TO]->(company)")).toBeLessThan(
+        mockQuery.query.indexOf("vector.similarity.cosine"),
+      );
+      expect(mockQuery.query).toContain("community.isStale = false");
+      expect(mockQuery.query).toContain("LIMIT toInteger($topK)");
+      expect(mockQuery.query).not.toContain("db.index.vector.queryNodes");
+    });
+
+    it("falls back to the vector index over-fetch above COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES", async () => {
+      const { mockQuery } = arrange(COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES + 1);
+
+      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
+
+      expect(mockQuery.query).toContain("db.index.vector.queryNodes");
+      expect(mockQuery.query).not.toContain("vector.similarity.cosine");
+    });
+
+    it("returns nothing and skips ranking when the company has no embedded communities", async () => {
+      arrange(0);
+
+      const result = await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
+
+      expect(result).toEqual([]);
+      expect(neo4jService.readMany).not.toHaveBeenCalled();
+    });
+
+    it("keeps the SCOPED_TO filter and level filter in the exact scan", async () => {
+      agentScopeFilter.current.mockReturnValue({ id: "campaign-1", label: "Campaign" });
+      const { countQuery, mockQuery } = arrange(10);
+
+      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5, level: 1 });
+
+      const scopedTo = "EXISTS { MATCH (community)-[:SCOPED_TO]->(:Campaign { id: $agentScopeId }) }";
+      for (const query of [countQuery, mockQuery]) {
+        expect(query.query).toContain(scopedTo);
+        expect(query.query).toContain("community.level = $level");
+        expect(query.queryParams.agentScopeId).toBe("campaign-1");
+        expect(query.queryParams.level).toBe(1);
+      }
+      expect(mockQuery.query).toContain("vector.similarity.cosine(community.embedding, $embedding)");
+    });
+
     it("should filter by level when provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+      const { mockQuery } = arrange(10);
 
       await repository.findByVector({
         embedding: MOCK_EMBEDDING,
@@ -411,9 +470,7 @@ describe("CommunityRepository", () => {
     });
 
     it("should not filter by level when not provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+      const { mockQuery } = arrange(10);
 
       await repository.findByVector({
         embedding: MOCK_EMBEDDING,

@@ -219,9 +219,13 @@ describe("GraphSearchService.resolveEntity", () => {
 
   it("falls through to semantic when both fulltext tiers return nothing", async () => {
     const neo4j: any = {
-      read: vi.fn().mockImplementation(async (cypher: string, params: any) => {
-        const isVector = cypher.includes("db.index.vector.queryNodes");
-        if (isVector && params.indexName === "account_chat_embedding") {
+      read: vi.fn().mockImplementation(async (cypher: string) => {
+        // Semantic tier: a count of the company's embedded nodes, then exact cosine over them.
+        if (cypher.includes("AS scopedCount") && cypher.includes("`Account`")) {
+          return { records: [{ get: (k: string) => (k === "scopedCount" ? 1 : undefined) }] };
+        }
+        const isExactScan = cypher.includes("vector.similarity.cosine") && cypher.includes("`Account`");
+        if (isExactScan) {
           return {
             records: [{ get: (k: string) => (({ id: "a3", properties: { name: "ACME" }, score: 0.82 }) as any)[k] }],
           };
