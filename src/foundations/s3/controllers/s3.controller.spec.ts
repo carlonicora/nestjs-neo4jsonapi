@@ -50,6 +50,7 @@ import { ClsService } from "nestjs-cls";
 import { Readable } from "stream";
 import { S3CipherKeyMissingError, S3ObjectTokenError } from "../cipher/s3-cipher.core";
 import { S3CipherService } from "../services/s3-cipher.service";
+import { S3ClientKeyService } from "../services/s3-client-key.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { S3_KEY_ACCESS_POLICY, S3KeyAccessPolicy } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { S3Service } from "../services/s3.service";
@@ -122,6 +123,7 @@ describe("S3Controller", () => {
       providers: [
         { provide: S3Service, useValue: mockS3Service },
         { provide: ClsService, useValue: mockClsService },
+        S3ClientKeyService,
         { provide: S3CipherService, useValue: cipher },
         { provide: ConfigService, useValue: mockConfigService },
       ],
@@ -311,6 +313,7 @@ describe("S3Controller", () => {
             useValue: { generatePresignedUrl: vi.fn(), findSignedUrl: vi.fn(), deleteFileFromS3: vi.fn() },
           },
           { provide: ClsService, useValue: mockClsService },
+          S3ClientKeyService,
           { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken: vi.fn() } },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: S3_KEY_ACCESS_POLICY, useValue: policy as S3KeyAccessPolicy },
@@ -402,6 +405,7 @@ describe("S3Controller", () => {
         providers: [
           { provide: S3Service, useValue: service },
           { provide: ClsService, useValue: mockClsService },
+          S3ClientKeyService,
           { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken } },
           { provide: ConfigService, useValue: mockConfigService },
           ...(policy ? [{ provide: S3_KEY_ACCESS_POLICY, useValue: policy }] : []),
@@ -496,6 +500,7 @@ describe("S3Controller", () => {
         providers: [
           { provide: S3Service, useValue: service },
           { provide: ClsService, useValue: mockClsService },
+          S3ClientKeyService,
           { provide: S3CipherService, useValue: { uploadMaxBytes: 1024, verifyObjectToken } },
           { provide: ConfigService, useValue: mockConfigService },
           { provide: S3_KEY_ACCESS_POLICY, useValue: policy },
@@ -787,6 +792,7 @@ describe("S3Controller", () => {
           providers: [
             { provide: S3Service, useValue: s3Service },
             { provide: ClsService, useValue: mockClsService },
+            S3ClientKeyService,
             { provide: S3CipherService, useValue: cipher },
             { provide: ConfigService, useValue: mockConfigService },
             { provide: TRUSTED_ORIGINS_RESOLVER, useValue: resolver },

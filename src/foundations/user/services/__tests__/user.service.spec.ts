@@ -1,13 +1,14 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
-import { BadRequestException, HttpException, HttpStatus } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, NotFoundException } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { UserService } from "../user.service";
 import { UserRepository } from "../../repositories/user.repository";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
 import { EmailService } from "../../../../core/email/services/email.service";
 import { ResponseLanguageService } from "../response-language.service";
+import { S3ClientKeyService } from "../../../s3/services/s3-client-key.service";
 import { User, UserDescriptor } from "../../entities/user";
 import { userMeta } from "../../entities/user.meta";
 import { Company } from "../../../company/entities/company";
@@ -101,6 +102,7 @@ describe("UserService", () => {
     deleteUser: vi.fn(),
     reactivate: vi.fn(),
     patchRate: vi.fn(),
+    patchAvatar: vi.fn(),
     patchLanguage: vi.fn(),
     resetCode: vi.fn(),
     addUserToRole: vi.fn(),
@@ -184,6 +186,48 @@ describe("UserService", () => {
   describe("constructor", () => {
     it("should create the service", () => {
       expect(service).toBeDefined();
+    });
+  });
+
+  describe("findByEmailInCompany", () => {
+    it("returns a user of the given company", async () => {
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+
+      await expect(
+        service.findByEmailInCompany({ email: "test@example.com", companyId: MOCK_COMPANY.id }),
+      ).resolves.toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("answers 404 for a user of another company, as for a missing one", async () => {
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+
+      await expect(
+        service.findByEmailInCompany({ email: "test@example.com", companyId: "another-company" }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(jsonApiService.buildSingle).not.toHaveBeenCalled();
+
+      userRepository.findByEmail.mockResolvedValue(null);
+      await expect(
+        service.findByEmailInCompany({ email: "missing@example.com", companyId: MOCK_COMPANY.id }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("answers 404 for a user with no company when a company is required", async () => {
+      userRepository.findByEmail.mockResolvedValue({ ...MOCK_USER, company: undefined } as any);
+
+      await expect(
+        service.findByEmailInCompany({ email: "test@example.com", companyId: MOCK_COMPANY.id }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("looks up across companies when no company is given (platform administrator)", async () => {
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+      jsonApiService.buildSingle.mockReturnValue(MOCK_JSON_API_RESPONSE as any);
+
+      await expect(service.findByEmailInCompany({ email: "test@example.com" })).resolves.toEqual(
+        MOCK_JSON_API_RESPONSE,
+      );
     });
   });
 
@@ -568,6 +612,33 @@ describe("UserService", () => {
       expect(userRepository.reactivate).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
     });
+
+    it("passes the platform-administrator flag to the repository", async () => {
+      userRepository.reactivate.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+
+      await service.reactivate({ userId: TEST_IDS.userId, isPlatformAdmin: true });
+
+      expect(userRepository.reactivate).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: true });
+    });
+  });
+
+  describe("patchAvatar", () => {
+    it("writes body.data.id and passes isSelf to the repository", async () => {
+      userRepository.patchAvatar.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+
+      await service.patchAvatar({
+        data: { id: TEST_IDS.userId, type: "users", attributes: { avatar: "a.png" } } as any,
+        isSelf: false,
+      });
+
+      expect(userRepository.patchAvatar).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        avatar: "a.png",
+        isSelf: false,
+      });
+    });
   });
 
   describe("patchRate", () => {
@@ -589,6 +660,7 @@ describe("UserService", () => {
       expect(userRepository.patchRate).toHaveBeenCalledWith({
         userId: TEST_IDS.userId,
         rate: 150,
+        isPlatformAdmin: undefined,
       });
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
     });
@@ -891,6 +963,14 @@ describe("UserService", () => {
 
       expect(userRepository.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
     });
+
+    it("passes the platform-administrator flag to the repository", async () => {
+      userRepository.deleteUser.mockResolvedValue(undefined);
+
+      await service.deleteUser({ userId: TEST_IDS.userId, isPlatformAdmin: false });
+
+      expect(userRepository.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: false });
+    });
   });
 
   describe("addUserToRole", () => {
@@ -999,6 +1079,87 @@ describe("UserService", () => {
       emailService.sendEmail.mockRejectedValue(new Error("Email service error"));
 
       await expect(service.sendInvitationEmail({ userId: TEST_IDS.userId })).rejects.toThrow("Email service error");
+    });
+  });
+
+  describe("client-supplied avatar key", () => {
+    const OTHER_KEY = "companies/other-company/users/u1/u1.1.png";
+    let guarded: UserService;
+    let clientKeys: { assertClientKey: ReturnType<typeof vi.fn> };
+
+    beforeEach(async () => {
+      clientKeys = {
+        assertClientKey: vi.fn(async (params: { key?: string | null }) => {
+          if (params.key === OTHER_KEY) throw new ForbiddenException("You cannot reference this file.");
+        }),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          UserService,
+          { provide: UserRepository, useValue: userRepository },
+          { provide: JsonApiService, useValue: jsonApiService },
+          { provide: EmailService, useValue: emailService },
+          { provide: ConfigService, useValue: configService },
+          { provide: ClsService, useValue: createMockClsService() },
+          { provide: ResponseLanguageService, useValue: responseLanguage },
+          { provide: S3ClientKeyService, useValue: clientKeys },
+        ],
+      }).compile();
+
+      guarded = module.get<UserService>(UserService);
+    });
+
+    it("patchAvatar refuses another company's key before writing", async () => {
+      await expect(
+        guarded.patchAvatar({
+          data: { id: TEST_IDS.userId, type: "users", attributes: { avatar: OTHER_KEY } } as any,
+          isSelf: true,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(clientKeys.assertClientKey).toHaveBeenCalledWith({ key: OTHER_KEY, folder: "users" });
+      expect(userRepository.patchAvatar).not.toHaveBeenCalled();
+    });
+
+    it("putUser refuses another company's key before writing", async () => {
+      await expect(
+        guarded.putUser({
+          data: { id: TEST_IDS.userId, type: "users", attributes: { name: "N", avatar: OTHER_KEY } } as any,
+          isAdmin: false,
+          isCurrentUser: true,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(userRepository.putUser).not.toHaveBeenCalled();
+    });
+
+    it("createUser refuses another company's key before writing", async () => {
+      await expect(
+        guarded.createUser({
+          data: {
+            id: TEST_IDS.userId,
+            type: "users",
+            attributes: { name: "N", email: "n@example.com", avatar: OTHER_KEY },
+            relationships: { company: { data: { id: TEST_IDS.companyId } } },
+          } as any,
+          language: "en",
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(userRepository.createUser).not.toHaveBeenCalled();
+    });
+
+    it("createForCompany refuses another company's key before writing", async () => {
+      await expect(
+        guarded.createForCompany({
+          companyId: TEST_IDS.companyId,
+          data: {
+            id: TEST_IDS.userId,
+            type: "users",
+            attributes: { name: "N", email: "n@example.com", avatar: OTHER_KEY },
+          } as any,
+          language: "en",
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(userRepository.createUser).not.toHaveBeenCalled();
     });
   });
 });

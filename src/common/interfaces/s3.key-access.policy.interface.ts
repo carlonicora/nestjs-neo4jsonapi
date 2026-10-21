@@ -3,7 +3,12 @@
  * caller may act on a client-supplied object key through the `/s3` routes.
  *
  * The token is optional. When unbound, the `/s3` routes accept every
- * well-formed key, as before. Bind it from a `@Global()` application module so
+ * well-formed key, as before.
+ *
+ * `S3ClientKeyService.assertClientKey` runs the same policy on keys that arrive
+ * in request BODIES (user avatar, company logo, app entities that store an
+ * uploaded key) before they are stored or read server-side. When unbound, it
+ * accepts every value, as before. Bind it from a `@Global()` application module so
  * the package `S3Module`, which imports no app modules, can resolve it.
  */
 

@@ -32,6 +32,7 @@ const createMockNeo4jService = () => ({
   readMany: vi.fn(),
   read: vi.fn(),
   initQuery: vi.fn(),
+  executeInTransaction: vi.fn(),
 });
 
 const createMockSecurityService = () => ({
@@ -206,6 +207,34 @@ describe("AuthRepository", () => {
     });
   });
 
+  describe("consumeCode", () => {
+    const records = (authId?: string) => ({
+      records: authId ? [{ get: (key: string) => (key === "authId" ? authId : undefined) }] : [],
+    });
+
+    it("locks, deletes the code whatever its expiry, and returns the auth only while valid", async () => {
+      neo4jService.executeInTransaction.mockResolvedValue([records(TEST_IDS.authId)]);
+
+      await expect(repository.consumeCode({ code: TEST_IDS.authCodeId })).resolves.toBe(TEST_IDS.authId);
+
+      const [[queries]] = neo4jService.executeInTransaction.mock.calls;
+      const cypher = (queries[0].query as string).replace(/\s+/g, " ");
+      expect(queries[0].params).toEqual({ authCodeId: TEST_IDS.authCodeId });
+      expect(cypher).toContain("MATCH (authcode:AuthCode {id: $authCodeId})<-[:HAS_AUTH_CODE]-(authcode_auth:Auth)");
+      // The SET takes the write lock before the expiry is read and the node deleted.
+      expect(cypher.indexOf("SET authcode.consumedAt")).toBeLessThan(
+        cypher.indexOf("authcode.expiration > datetime()"),
+      );
+      expect(cypher.indexOf("DETACH DELETE authcode")).toBeLessThan(cypher.indexOf("WHERE valid"));
+    });
+
+    it("returns null for an unknown, used or expired code", async () => {
+      neo4jService.executeInTransaction.mockResolvedValue([records()]);
+
+      await expect(repository.consumeCode({ code: "used" })).resolves.toBeNull();
+    });
+  });
+
   describe("findAuthById", () => {
     it("should find auth by ID with all relationships", async () => {
       const firstQuery = createMockQuery();
@@ -232,12 +261,25 @@ describe("AuthRepository", () => {
       expect(result).toBeDefined();
     });
 
-    it("should return null when auth not found", async () => {
+    it("should return null when auth not found (missing or expired)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readOne.mockResolvedValue(null);
 
-      await expect(repository.findAuthById({ authId: "nonexistent" })).rejects.toThrow();
+      await expect(repository.findAuthById({ authId: "nonexistent" })).resolves.toBeNull();
+      expect(neo4jService.readMany).not.toHaveBeenCalled();
+    });
+
+    it("should only match an Auth that has not expired", async () => {
+      const firstQuery = createMockQuery();
+      const secondQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValueOnce(firstQuery).mockReturnValueOnce(secondQuery);
+      neo4jService.readOne.mockResolvedValue(MOCK_AUTH);
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAuthById({ authId: TEST_IDS.authId });
+
+      expect(firstQuery.query).toMatch(/MATCH \(auth:Auth \{id: \$authId\}\)\s+WHERE auth\.expiration > datetime\(\)/);
     });
   });
 
@@ -321,6 +363,20 @@ describe("AuthRepository", () => {
       expect(mockQuery.query).toContain("auth.expiration = datetime($expiration)");
       expect(result).toEqual(MOCK_AUTH);
     });
+
+    it("should never extend an Auth that has already expired", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(null);
+
+      const result = await repository.refreshToken({ authId: TEST_IDS.authId, token: "new-token" });
+
+      // The guard sits BEFORE the SET, so an expired Auth matches nothing and is not written.
+      const whereIndex = mockQuery.query.indexOf("WHERE auth.expiration > datetime()");
+      expect(whereIndex).toBeGreaterThan(-1);
+      expect(whereIndex).toBeLessThan(mockQuery.query.indexOf("SET auth.token"));
+      expect(result).toBeNull();
+    });
   });
 
   describe("findByRefreshToken", () => {
@@ -336,6 +392,17 @@ describe("AuthRepository", () => {
       });
       expect(mockQuery.query).toContain("MATCH (auth:Auth {id: $authId})<-[:HAS_AUTH]-(auth_user:User)");
       expect(result).toEqual(MOCK_AUTH);
+    });
+
+    it("should only match an Auth whose expiration is in the future", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readOne.mockResolvedValue(null);
+
+      const result = await repository.findByRefreshToken({ authId: TEST_IDS.authId });
+
+      expect(mockQuery.query).toContain("WHERE auth.expiration > datetime()");
+      expect(result).toBeNull();
     });
   });
 

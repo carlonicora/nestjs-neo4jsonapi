@@ -17,6 +17,7 @@ import { CompanyPostDataDTO } from "../../company/dtos/company.post.dto";
 import { CompanyPutDataDTO } from "../../company/dtos/company.put.dto";
 import { CompanyDescriptor, Company } from "../../company/entities/company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
+import { S3ClientKeyService } from "../../s3/services/s3-client-key.service";
 import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.put.dto";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
@@ -64,6 +65,10 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     // not registered it fails soft (no events) rather than failing to boot.
     @Optional()
     private readonly eventEmitter?: EventEmitter2,
+    // APPENDED and optional for the same reason as `eventEmitter`. Absent (a
+    // subclass that does not pass it), the logo key is stored unchecked, as before.
+    @Optional()
+    private readonly s3ClientKeys?: S3ClientKeyService,
   ) {
     super(builder, companyRepository, cls, CompanyDescriptor.model);
   }
@@ -306,6 +311,9 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
   }
 
   async update(params: { data: CompanyPutDataDTO }): Promise<JsonApiSingleDocument> {
+    // The stored logo key is signed for every reader of the company: refuse a key the caller may not read.
+    await this.s3ClientKeys?.assertClientKey({ key: params.data.attributes.logo, folder: "companies" });
+
     await this.companyRepository.update({
       companyId: params.data.id,
       name: params.data.attributes.name,

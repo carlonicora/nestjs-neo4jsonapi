@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { ClsService } from "nestjs-cls";
@@ -81,6 +81,10 @@ export class SecurityService {
     return configurations?.hasRole(SystemRoles.CompanyAdministrator) ?? false;
   }
 
+  /**
+   * Throws 403 unless the user holds Administrator or CompanyAdministrator.
+   * A plain Error here used to surface as a 500.
+   */
   validateAdmin(params: { user: any }): void {
     if (
       !this.isUserInRoles({
@@ -88,7 +92,7 @@ export class SecurityService {
         roles: [SystemRoles.Administrator, SystemRoles.CompanyAdministrator],
       })
     )
-      throw new Error("User is not an admin");
+      throw new ForbiddenException("User is not an admin");
   }
 
   isUserInRoles(params: { user: any; roles: string[] }): boolean {

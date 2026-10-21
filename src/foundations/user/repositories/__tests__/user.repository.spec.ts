@@ -8,6 +8,9 @@ import { UserCypherService } from "../../services/user.cypher.service";
 import { User, UserDescriptor } from "../../entities/user";
 import { RoleId } from "../../../../common/constants/system.roles";
 
+const SCOPED_USER_MATCH =
+  /MATCH \(company:Company \{id: \$companyId\}\)\s*MATCH \(user:User \{id: \$userId\}\)-\[:BELONGS_TO\]->\(company\)/;
+
 describe("UserRepository", () => {
   let repository: UserRepository;
   let mockNeo4jService: Mocked<Neo4jService>;
@@ -309,6 +312,18 @@ describe("UserRepository", () => {
       expect(writtenQuery()).toContain("MATCH (company:Company {id: $companyId})");
     });
 
+    it("ties another user to the company through BELONGS_TO (no cross-tenant takeover)", async () => {
+      // Matching the company alone left `user` free: a CompanyAdministrator could
+      // rewrite the email/password of a user in any other company by id.
+      mockNeo4jService.initQuery.mockReturnValue({ query: "", queryParams: { companyId: TEST_IDS.companyId } } as any);
+
+      await repository.putUser({ ...putParams, isSelf: false });
+
+      const query = writtenQuery();
+      expect(query).toMatch(SCOPED_USER_MATCH);
+      expect(query).not.toMatch(/MATCH \(user:User \{id: \$userId\}\)\s*SET/);
+    });
+
     it("drops the company match for a self-edit with no company, so the SET actually runs", async () => {
       // A user can have no company (the seeded Administrator has none). With a
       // null $companyId the company match resolves to zero rows, so the SET
@@ -322,6 +337,95 @@ describe("UserRepository", () => {
       // Roles are company-scoped: without a matched `company` the role block
       // would reference an undefined variable.
       expect(query).not.toContain("IN_COMPANY");
+    });
+  });
+
+  describe("company-scoped writes by id", () => {
+    function written(): { query: string; queryParams: Record<string, unknown> } {
+      const { query, queryParams } = mockNeo4jService.writeOne.mock.calls[0][0];
+      return { query: query ?? "", queryParams };
+    }
+
+    beforeEach(() => {
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "PREAMBLE",
+        queryParams: { companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.adminUserId },
+      } as any);
+    });
+
+    it("deleteUser binds the user to $companyId, not to any company", async () => {
+      await repository.deleteUser({ userId: TEST_IDS.userId });
+
+      const { query, queryParams } = written();
+      expect(query).toMatch(SCOPED_USER_MATCH);
+      expect(query).not.toMatch(/MATCH \(company:Company\)\s/);
+      expect(query).toContain("SET user.isDeleted = true");
+      expect(queryParams).toMatchObject({ userId: TEST_IDS.userId, companyId: TEST_IDS.companyId });
+    });
+
+    it("deleteUser reaches any user only for a platform administrator", async () => {
+      await repository.deleteUser({ userId: TEST_IDS.userId, isPlatformAdmin: true });
+
+      const { query } = written();
+      expect(query).toContain("MATCH (user:User {id: $userId})");
+      expect(query).not.toContain("BELONGS_TO");
+    });
+
+    it("reactivate is company-scoped unless the caller is a platform administrator", async () => {
+      await repository.reactivate({ userId: TEST_IDS.userId });
+      expect(written().query).toMatch(SCOPED_USER_MATCH);
+
+      mockNeo4jService.writeOne.mockClear();
+      await repository.reactivate({ userId: TEST_IDS.userId, isPlatformAdmin: true });
+      expect(written().query).not.toContain("BELONGS_TO");
+    });
+
+    it("patchRate is company-scoped unless the caller is a platform administrator", async () => {
+      await repository.patchRate({ userId: TEST_IDS.userId, rate: 10 });
+      expect(written().query).toMatch(SCOPED_USER_MATCH);
+
+      mockNeo4jService.writeOne.mockClear();
+      await repository.patchRate({ userId: TEST_IDS.userId, rate: 10, isPlatformAdmin: true });
+      expect(written().query).not.toContain("BELONGS_TO");
+    });
+
+    it("patchAvatar is company-scoped for another user and by id for self", async () => {
+      await repository.patchAvatar({ userId: TEST_IDS.userId, avatar: "a.png" });
+      expect(written().query).toMatch(SCOPED_USER_MATCH);
+
+      mockNeo4jService.writeOne.mockClear();
+      await repository.patchAvatar({ userId: TEST_IDS.userId, avatar: "a.png", isSelf: true });
+      expect(written().query).toContain("MATCH (user:User {id: $userId})");
+      expect(written().query).not.toContain("BELONGS_TO");
+    });
+
+    it("assigns the query (no initQuery preamble), so the explicit company match is the only scope", async () => {
+      // The preamble also requires the caller to BELONG_TO the company, which a
+      // platform administrator acting through x-companyid does not.
+      await repository.deleteUser({ userId: TEST_IDS.userId });
+      expect(written().query).not.toContain("PREAMBLE");
+    });
+
+    it("with no company in context the scoped match binds $companyId = null and reaches no user", async () => {
+      mockNeo4jService.initQuery.mockReturnValue({ query: "", queryParams: { companyId: null } } as any);
+
+      await repository.deleteUser({ userId: TEST_IDS.userId });
+
+      const { query, queryParams } = written();
+      expect(query).toContain("MATCH (company:Company {id: $companyId})");
+      expect(queryParams.companyId).toBeNull();
+    });
+  });
+
+  describe("removeUserFromRole", () => {
+    it("removes a company role only from a user who BELONGS_TO the request company", async () => {
+      await repository.removeUserFromRole({ userId: TEST_IDS.userId, roleId: "role-1" });
+
+      const { query, queryParams } = mockNeo4jService.writeOne.mock.calls[0][0];
+      expect(query).toContain("(user)-[:BELONGS_TO]->(:Company {id: $companyId})");
+      expect(query).toContain("(rm_ms)-[:IN_COMPANY]->(:Company {id: $companyId})");
+      expect(query).toContain("$roleId = $administratorRoleId AND NOT (rm_ms)-[:IN_COMPANY]->(:Company)");
+      expect(queryParams).toMatchObject({ roleId: "role-1", administratorRoleId: RoleId.Administrator });
     });
   });
 

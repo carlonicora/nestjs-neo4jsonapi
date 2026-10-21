@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, type Mocked } from "vitest";
-import { HttpException, HttpStatus } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Test, TestingModule } from "@nestjs/testing";
 import { getQueueToken } from "@nestjs/bullmq";
@@ -15,6 +15,7 @@ import { ClsService } from "nestjs-cls";
 import { Queue } from "bullmq";
 import { CompanyService } from "./company.service";
 import { CompanyRepository } from "../repositories/company.repository";
+import { S3ClientKeyService } from "../../s3/services/s3-client-key.service";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { VersionService } from "../../../core/version/services/version.service";
@@ -573,6 +574,36 @@ describe("CompanyService", () => {
   });
 
   describe("update", () => {
+    it("refuses a logo key the caller may not reference, before writing", async () => {
+      const clientKeys = {
+        assertClientKey: vi.fn().mockRejectedValue(new ForbiddenException("You cannot reference this file.")),
+      };
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          CompanyService,
+          { provide: CompanyRepository, useValue: mockRepository },
+          { provide: JsonApiService, useValue: mockJsonApiService },
+          { provide: getQueueToken(QueueId.COMPANY), useValue: mockQueue },
+          { provide: ClsService, useValue: mockClsService },
+          { provide: Neo4jService, useValue: mockNeo4jService },
+          { provide: VersionService, useValue: mockVersionService },
+          { provide: ModuleRef, useValue: mockModuleRef },
+          { provide: WebSocketService, useValue: mockWebSocketService },
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+          { provide: S3ClientKeyService, useValue: clientKeys },
+        ],
+      }).compile();
+      const guarded = module.get<CompanyService>(CompanyService);
+      const logo = "companies/other-company/companies/other-company/other-company.1.png";
+
+      await expect(
+        guarded.update({ data: { id: MOCK_COMPANY_ID, attributes: { name: "N", logo } } as any }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(clientKeys.assertClientKey).toHaveBeenCalledWith({ key: logo, folder: "companies" });
+      expect(mockRepository.update).not.toHaveBeenCalled();
+    });
+
     it("should update company and return JSON:API response", async () => {
       const putData = {
         id: MOCK_COMPANY_ID,

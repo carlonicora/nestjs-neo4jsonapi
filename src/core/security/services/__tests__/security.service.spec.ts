@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
+import { ForbiddenException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
 import { ClsService } from "nestjs-cls";
@@ -299,6 +300,10 @@ describe("SecurityService", () => {
 
     it("should throw when user is undefined", () => {
       expect(() => service.validateAdmin({ user: undefined })).toThrow("User is not an admin");
+    });
+
+    it("throws a 403 ForbiddenException, not a plain Error (which would surface as 500)", () => {
+      expect(() => service.validateAdmin({ user: { roles: ["some-other-role"] } })).toThrow(ForbiddenException);
     });
   });
 

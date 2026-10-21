@@ -120,6 +120,33 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
     return this.neo4j.readOne(query);
   }
 
+  /**
+   * Uses an auth code up and returns the id of its Auth, or null when the code
+   * is unknown, already used or expired. A code is single-use: it is deleted
+   * by the exchange, expired or not, so a replay finds nothing. The SET takes
+   * the node's write lock before anything is read, so two concurrent exchanges
+   * of one code cannot both succeed: the second waits, then fails on the
+   * deleted node.
+   */
+  async consumeCode(params: { code: string }): Promise<string | null> {
+    const [result] = await this.neo4j.executeInTransaction([
+      {
+        query: `
+          MATCH (authcode:AuthCode {id: $authCodeId})<-[:HAS_AUTH_CODE]-(authcode_auth:Auth)
+          SET authcode.consumedAt = datetime()
+          WITH authcode, authcode_auth, authcode.expiration > datetime() AS valid
+          DETACH DELETE authcode
+          WITH authcode_auth, valid
+          WHERE valid
+          RETURN authcode_auth.id AS authId
+        `,
+        params: { authCodeId: params.code },
+      },
+    ]);
+
+    return result?.records?.[0]?.get("authId") ?? null;
+  }
+
   async findAuthById(params: { authId: string }): Promise<Auth> {
     let query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
 
@@ -136,8 +163,11 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
     // (feature.module.query.ts) and keeps the returned roles consistent with the
     // company returned on the very same row. Platform memberships (no IN_COMPANY
     // edge) are still included, so the global Administrator keeps its roles.
+    // The auth-code exchange hands this Auth (and its id, the refresh token) to an
+    // unauthenticated caller: an expired Auth must not be returned.
     query.query = `
       MATCH (auth:Auth {id: $authId})
+      WHERE auth.expiration > datetime()
       MATCH (auth)<-[:HAS_AUTH]-(auth_user:User)
       OPTIONAL MATCH (auth_user)-[:BELONGS_TO]->(auth_user_company:Company)
       OPTIONAL MATCH (auth_user)-[:HAS_MEMBERSHIP]->(auth_user_role_ms:Membership)
@@ -150,6 +180,7 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
     `;
 
     const auth = await this.neo4j.readOne(query);
+    if (!auth) return null;
 
     query = this.neo4j.initQuery({ serialiser: ModuleModel });
     // Spread first: initQuery() keeps the prefix MATCH on `$currentUserId` whenever CLS
@@ -235,8 +266,11 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
       expiration: this.securityService.refreshTokenExpiration.toISOString(),
     };
 
+    // The expiry guard is repeated here (not only in findByRefreshToken) so an
+    // Auth that expires between the read and this write is never extended.
     query.query = `
       MATCH (auth:Auth {id: $authId})
+      WHERE auth.expiration > datetime()
       SET auth.token = $token,
       auth.expiration = datetime($expiration)
       RETURN auth
@@ -252,8 +286,12 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
       authId: params.authId,
     };
 
+    // The refresh endpoint is unauthenticated and the Auth id IS the credential:
+    // an expired Auth must never match, or a refresh token would be valid forever
+    // (each refresh pushes the expiration out again).
     query.query = `
       MATCH (auth:Auth {id: $authId})<-[:HAS_AUTH]-(auth_user:User)
+      WHERE auth.expiration > datetime()
       RETURN auth, auth_user
     `;
 

@@ -7,6 +7,22 @@ import { RedisClientStorageService } from "../../redis/services/redis.client.sto
 import { NotificationMessage, RedisMessagingService } from "../../redis/services/redis.messaging.service";
 
 /**
+ * Prefix under which client `message` frames are re-emitted on the in-process event bus.
+ *
+ * A socket client controls `message.type`, so it must never be emitted verbatim: that
+ * would let any connected user fire internal events ("redis.notification", trigger
+ * events, cache-invalidation events, ...). Listeners for client messages subscribe to
+ * `${WS_CLIENT_MESSAGE_EVENT_PREFIX}<type>`, e.g. `@OnEvent("ws:message:chat")`.
+ */
+export const WS_CLIENT_MESSAGE_EVENT_PREFIX = "ws:message:";
+
+/** Allowed shape of a client-supplied message type (no wildcards, no whitespace, bounded). */
+export const WS_CLIENT_MESSAGE_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/;
+
+/** Socket event carrying presence changes. Sent to the user's company only, never broadcast. */
+export const WS_PRESENCE_EVENT = "user:presence";
+
+/**
  * WebSocket Service
  *
  * Manages WebSocket connections and message broadcasting
@@ -145,8 +161,28 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  handleIncomingMessage(companyId: string, userId: string, message: { type: string; message: any }) {
-    this.eventEmitter.emit(message.type, { companyId, userId, message });
+  /**
+   * Presence of a user goes to the sockets of that user's company only. Without a
+   * company there is nobody entitled to see it, so nothing is sent.
+   */
+  async sendPresenceToCompany(companyId: string | null | undefined, data: any) {
+    if (!companyId) return;
+    await this.sendMessageToCompany(companyId, WS_PRESENCE_EVENT, data);
+  }
+
+  /**
+   * Re-emits a client `message` frame under the reserved `ws:message:` namespace.
+   * Returns false (and emits nothing) when the type is missing or malformed.
+   */
+  handleIncomingMessage(companyId: string, userId: string, message: { type: string; message: any }): boolean {
+    const type = message?.type;
+    if (typeof type !== "string" || !WS_CLIENT_MESSAGE_TYPE_PATTERN.test(type)) {
+      this.logger.warn(`Rejected websocket message with invalid type from user ${userId}`, WebSocketService.name);
+      return false;
+    }
+
+    this.eventEmitter.emit(`${WS_CLIENT_MESSAGE_EVENT_PREFIX}${type}`, { companyId, userId, message });
+    return true;
   }
 
   handleIncomingGoogleMeetPart(meetId: string, speakerName: string, timestamp: Date, message: any) {

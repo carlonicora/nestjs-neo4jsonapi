@@ -1,4 +1,11 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { RoleId } from "../../../common/constants/system.roles";
 import { EmailService } from "../../../core/email/services/email.service";
@@ -18,6 +25,7 @@ import { UserPatchLanguageDataDTO } from "../../user/dtos/user.patch.language.dt
 import { UserPatchRateDataDTO } from "../../user/dtos/user.patch.rate.dto";
 import { User, UserDescriptor } from "../../user/entities/user";
 import { UserRepository } from "../repositories/user.repository";
+import { S3ClientKeyService } from "../../s3/services/s3-client-key.service";
 import {
   JsonApiListDocument,
   JsonApiSingleDocument,
@@ -48,6 +56,11 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     protected readonly configService: ConfigService<BaseConfigInterface>,
     clsService: ClsService,
     protected readonly responseLanguage: ResponseLanguageService,
+    // APPENDED and optional: a subclass passes its dependencies to `super()`
+    // positionally, so a required parameter would break it on upgrade. Absent,
+    // the avatar key is stored unchecked, as before.
+    @Optional()
+    protected readonly s3ClientKeys?: S3ClientKeyService,
   ) {
     super(jsonApiService, userRepository, clsService, UserDescriptor.model);
   }
@@ -199,6 +212,9 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     isAdmin: boolean;
     isCurrentUser: boolean;
   }): Promise<JsonApiSingleDocument> {
+    // The stored avatar key is signed for every reader of the user: refuse a key the caller may not read.
+    await this.s3ClientKeys?.assertClientKey({ key: params.data.attributes?.avatar, folder: "users" });
+
     if (params.data.attributes?.password || params.data.attributes?.name) {
       if (params.data.attributes.password)
         params.data.attributes.password = await hashPassword(params.data.attributes.password);
@@ -242,9 +258,11 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     );
   }
 
-  async reactivate(params: { userId: string }): Promise<JsonApiSingleDocument> {
+  /** `isPlatformAdmin` lifts the company scope (see UserRepository.reactivate). */
+  async reactivate(params: { userId: string; isPlatformAdmin?: boolean }): Promise<JsonApiSingleDocument> {
     await this.userRepository.reactivate({
       userId: params.userId,
+      isPlatformAdmin: params.isPlatformAdmin,
     });
 
     return this.findByUserId({
@@ -252,10 +270,15 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async patchAvatar(params: { data: UserPatchAvatarDataDTO }): Promise<JsonApiSingleDocument> {
+  /** `isSelf` lifts the company scope (see UserRepository.patchAvatar). */
+  async patchAvatar(params: { data: UserPatchAvatarDataDTO; isSelf?: boolean }): Promise<JsonApiSingleDocument> {
+    // The stored avatar key is signed for every reader of the user: refuse a key the caller may not read.
+    await this.s3ClientKeys?.assertClientKey({ key: params.data.attributes?.avatar, folder: "users" });
+
     await this.userRepository.patchAvatar({
       userId: params.data.id,
       avatar: params.data.attributes.avatar,
+      isSelf: params.isSelf,
     });
 
     return this.findByUserId({
@@ -286,10 +309,12 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async patchRate(params: { data: UserPatchRateDataDTO }): Promise<JsonApiSingleDocument> {
+  /** `isPlatformAdmin` lifts the company scope (see UserRepository.patchRate). */
+  async patchRate(params: { data: UserPatchRateDataDTO; isPlatformAdmin?: boolean }): Promise<JsonApiSingleDocument> {
     await this.userRepository.patchRate({
       userId: params.data.id,
       rate: params.data.attributes.rate,
+      isPlatformAdmin: params.isPlatformAdmin,
     });
 
     return this.findByUserId({
@@ -321,11 +346,28 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     return this.jsonApiService.buildSingle(this.model, await this.userRepository.findByEmail({ email: params.email }));
   }
 
+  /**
+   * The user with this email, only when they belong to `companyId`. Without
+   * the company bound, any caller could read any user on the platform (company
+   * and roles included). A user of another company answers 404, exactly as a
+   * missing one. `companyId` undefined is the platform administrator's lookup.
+   */
+  async findByEmailInCompany(params: { email: string; companyId?: string }): Promise<JsonApiSingleDocument> {
+    const user = await this.userRepository.findByEmail({ email: params.email });
+    if (!user || (params.companyId !== undefined && user.company?.id !== params.companyId))
+      throw new NotFoundException("User not found");
+
+    return this.jsonApiService.buildSingle(this.model, user);
+  }
+
   async createUser(params: {
     data: UserPostDataDTO;
     forceCompanyAdmin?: boolean;
     language: string;
   }): Promise<JsonApiSingleDocument | void> {
+    // The stored avatar key is signed for every reader of the user: refuse a key the caller may not read.
+    await this.s3ClientKeys?.assertClientKey({ key: params.data.attributes.avatar, folder: "users" });
+
     const password = params.data.attributes.password
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
@@ -375,6 +417,9 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     data: UserPostDataDTO;
     language: string;
   }): Promise<JsonApiSingleDocument | void> {
+    // The stored avatar key is signed for every reader of the user: refuse a key the caller may not read.
+    await this.s3ClientKeys?.assertClientKey({ key: params.data.attributes.avatar, folder: "users" });
+
     const password = params.data.attributes.password
       ? await hashPassword(params.data.attributes.password)
       : randomUUID();
@@ -412,8 +457,9 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     });
   }
 
-  async deleteUser(params: { userId: string }): Promise<void> {
-    await this.userRepository.deleteUser({ userId: params.userId });
+  /** `isPlatformAdmin` lifts the company scope (see UserRepository.deleteUser). */
+  async deleteUser(params: { userId: string; isPlatformAdmin?: boolean }): Promise<void> {
+    await this.userRepository.deleteUser({ userId: params.userId, isPlatformAdmin: params.isPlatformAdmin });
   }
 
   async addUserToRole(params: {

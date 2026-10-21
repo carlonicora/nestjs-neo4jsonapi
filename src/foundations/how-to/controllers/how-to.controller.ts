@@ -14,7 +14,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { FastifyReply } from "fastify";
+import { RoleId } from "../../../common/constants/system.roles";
 import { Audit } from "../../../common/decorators/audit.decorator";
+import { Roles } from "../../../common/decorators/roles.decorator";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
 import { ValidateId } from "../../../common/decorators/validate-id.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
@@ -56,7 +58,12 @@ export class HowToController {
    * chunked (or lost its chunks) has no route back into the index.
    *
    * Declared before the `:howToId` routes so "reindex" is never read as an id.
+   *
+   * HowTo is global (not company-scoped), so every write is Administrator only.
+   * `@Roles` sits above `@CacheInvalidate` / `@ValidateId` on each write: both
+   * replace the method, and metadata set below them would never be enforced.
    */
+  @Roles(RoleId.Administrator)
   @Post(`${howToMeta.endpoint}/reindex`)
   @HttpCode(HttpStatus.NO_CONTENT)
   async reindex(@Res() reply: FastifyReply) {
@@ -70,6 +77,7 @@ export class HowToController {
     return this.crud.findById(reply, howToId);
   }
 
+  @Roles(RoleId.Administrator)
   @Post(howToMeta.endpoint)
   @CacheInvalidate(howToMeta)
   async create(@Res() reply: FastifyReply, @Body() body: HowToPostDTO) {
@@ -84,6 +92,7 @@ export class HowToController {
     return response;
   }
 
+  @Roles(RoleId.Administrator)
   @Put(`${howToMeta.endpoint}/:howToId`)
   @ValidateId("howToId")
   @CacheInvalidate(howToMeta, "howToId")
@@ -99,6 +108,7 @@ export class HowToController {
     return response;
   }
 
+  @Roles(RoleId.Administrator)
   @Delete(`${howToMeta.endpoint}/:howToId`)
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(howToMeta, "howToId")
@@ -106,6 +116,7 @@ export class HowToController {
     return this.crud.delete(reply, howToId);
   }
 
+  @Roles(RoleId.Administrator)
   @Post(`${howToMeta.endpoint}/:howToId/related/:relatedId`)
   @CacheInvalidate(howToMeta, "howToId")
   async addRelated(
@@ -118,6 +129,7 @@ export class HowToController {
     reply.send(response);
   }
 
+  @Roles(RoleId.Administrator)
   @Delete(`${howToMeta.endpoint}/:howToId/related/:relatedId`)
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(howToMeta, "howToId")

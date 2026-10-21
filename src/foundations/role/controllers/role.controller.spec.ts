@@ -31,6 +31,7 @@ vi.mock("../services/role.service", () => ({
 
 import { HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { RoleId } from "../../../common/constants/system.roles";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
@@ -284,6 +285,24 @@ describe("RoleController", () => {
       roleService.delete.mockRejectedValue(new Error("Role not found"));
 
       await expect(controller.delete("non-existent-id")).rejects.toThrow("Role not found");
+    });
+  });
+
+  describe("authorisation metadata", () => {
+    // JwtAuthGuard._validateRoles reads `roles` from the handler Nest calls,
+    // which is the method AFTER @CacheInvalidate replaced it.
+    const rolesOf = (method: keyof RoleController) =>
+      Reflect.getMetadata("roles", RoleController.prototype[method] as any) as string[] | undefined;
+
+    it("restricts create, update and delete to the platform Administrator", () => {
+      expect(rolesOf("create")).toEqual([RoleId.Administrator]);
+      expect(rolesOf("update")).toEqual([RoleId.Administrator]);
+      expect(rolesOf("delete")).toEqual([RoleId.Administrator]);
+    });
+
+    it("leaves the reads open to any authenticated user", () => {
+      expect(rolesOf("find")).toBeUndefined();
+      expect(rolesOf("findById")).toBeUndefined();
     });
   });
 

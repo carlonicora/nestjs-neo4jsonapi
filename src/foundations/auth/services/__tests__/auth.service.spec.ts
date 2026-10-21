@@ -129,6 +129,7 @@ describe("AuthService", () => {
     findByRefreshToken: vi.fn(),
     findAuthById: vi.fn(),
     findByCode: vi.fn(),
+    consumeCode: vi.fn(),
     findUserById: vi.fn(),
     createCode: vi.fn(),
     setLastLogin: vi.fn(),
@@ -491,6 +492,32 @@ describe("AuthService", () => {
       );
     });
 
+    it("should throw UNAUTHORIZED and mint nothing when the refresh token has expired", async () => {
+      // Arrange: the repository filters expired Auths out, so an expired token reads as null
+      authRepository.findByRefreshToken.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(service.refreshToken({ refreshToken: TEST_IDS.authId })).rejects.toThrow(
+        new HttpException("Invalid refresh token", HttpStatus.UNAUTHORIZED),
+      );
+      expect(securityService.signJwt).not.toHaveBeenCalled();
+      expect(authRepository.refreshToken).not.toHaveBeenCalled();
+    });
+
+    it("should throw UNAUTHORIZED when the Auth expires between the read and the extension", async () => {
+      // Arrange
+      authRepository.findByRefreshToken.mockResolvedValue(MOCK_AUTH);
+      authRepository.findUserById.mockResolvedValue(MOCK_USER);
+      authRepository.refreshToken.mockResolvedValue(null);
+
+      // Act & Assert
+      await expect(service.refreshToken({ refreshToken: TEST_IDS.authId })).rejects.toThrow(
+        new HttpException("Invalid refresh token", HttpStatus.UNAUTHORIZED),
+      );
+      expect(authRepository.deleteExpiredAuths).not.toHaveBeenCalled();
+      expect(jsonApiService.buildSingle).not.toHaveBeenCalled();
+    });
+
     it("should throw error when user not found", async () => {
       // Arrange
       authRepository.findByRefreshToken.mockResolvedValue(MOCK_AUTH);
@@ -649,45 +676,40 @@ describe("AuthService", () => {
   });
 
   describe("findAuthByCode", () => {
-    it("should find auth by code successfully", async () => {
-      // Arrange
-      authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
+    it("uses the code up and returns its auth", async () => {
+      authRepository.consumeCode.mockResolvedValue(MOCK_AUTH.id);
       authRepository.findAuthById.mockResolvedValue(MOCK_AUTH);
       jsonApiService.buildSingle.mockResolvedValue({ data: { type: "auths" } });
 
-      // Act
       const result = await service.findAuthByCode({ code: "valid-code" });
 
-      // Assert
-      expect(authRepository.findByCode).toHaveBeenCalledWith({ code: "valid-code" });
+      expect(authRepository.consumeCode).toHaveBeenCalledWith({ code: "valid-code" });
+      expect(authRepository.findByCode).not.toHaveBeenCalled();
       expect(authRepository.findAuthById).toHaveBeenCalledWith({ authId: MOCK_AUTH.id });
       expect(result).toEqual({ data: { type: "auths" } });
     });
 
-    it("should throw NOT_FOUND when code is invalid", async () => {
-      // Arrange
-      authRepository.findByCode.mockResolvedValue(null);
+    it("refuses a code that is unknown, already used or expired", async () => {
+      authRepository.consumeCode.mockResolvedValue(null);
 
-      // Act & Assert
-      await expect(service.findAuthByCode({ code: "invalid" })).rejects.toThrow(
+      await expect(service.findAuthByCode({ code: "used" })).rejects.toThrow(
         new HttpException("Invalid code", HttpStatus.NOT_FOUND),
       );
+      expect(authRepository.findAuthById).not.toHaveBeenCalled();
     });
 
-    it("should throw NOT_FOUND when code is expired", async () => {
-      // Arrange
-      const expiredCode = { ...MOCK_AUTH_CODE, expiration: new Date(Date.now() - 1000) };
-      authRepository.findByCode.mockResolvedValue(expiredCode as AuthCode);
+    it("refuses the losing side of two concurrent exchanges of one code", async () => {
+      authRepository.consumeCode.mockRejectedValue(new Error("Transaction failed: node deleted"));
 
-      // Act & Assert
-      await expect(service.findAuthByCode({ code: "expired" })).rejects.toThrow(
-        new HttpException("Code has expired", HttpStatus.NOT_FOUND),
+      await expect(service.findAuthByCode({ code: "raced" })).rejects.toThrow(
+        new HttpException("Invalid code", HttpStatus.NOT_FOUND),
       );
+      expect(authRepository.findAuthById).not.toHaveBeenCalled();
     });
 
     it("should throw NOT_FOUND when auth not found", async () => {
       // Arrange
-      authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
+      authRepository.consumeCode.mockResolvedValue(MOCK_AUTH.id);
       authRepository.findAuthById.mockResolvedValue(null);
 
       // Act & Assert

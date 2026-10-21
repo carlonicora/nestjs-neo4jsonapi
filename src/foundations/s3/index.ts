@@ -2,6 +2,7 @@ export * from "./s3.module";
 export * from "./s3.service.module";
 export * from "./services/s3.service";
 export * from "./services/s3-cipher.service";
+export * from "./services/s3-client-key.service";
 export * from "./cipher";
 export * from "./serialisers/s3.serialiser";
 export * from "./controllers/s3.controller";

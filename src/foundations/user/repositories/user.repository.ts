@@ -52,6 +52,23 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
   }
 
   /**
+   * Binds `user` to `$userId` ONLY when that user belongs to the request
+   * company (`$companyId`, from CLS). With no company in context
+   * `$companyId` is null and the fragment matches nothing, so a by-id write
+   * can never reach a user of another tenant.
+   *
+   * Used with `query.query =` (assigned, not appended): the initQuery
+   * preamble also requires the CALLER to belong to the company, which a
+   * platform administrator acting through the x-companyid header does not.
+   */
+  protected companyScopedUserMatch(): string {
+    return `
+      MATCH (company:Company {id: $companyId})
+      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
+    `;
+  }
+
+  /**
    * `AbstractRepository.onModuleInit` creates the constraints and indexes
    * declared by the descriptor. `defineEntity` only ever emits the `id` UNIQUE
    * constraint, so the User-specific `email` UNIQUE constraint is added here.
@@ -592,11 +609,22 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     // anyone else's user this match is what confines a CompanyAdministrator to
     // their own company. Roles are company-scoped, so the role block below stays
     // gated on the company being matched.
+    //
+    // When the caller edits SOMEONE ELSE the user must also BELONG_TO that
+    // company: matching the company alone left `user` unbound to it, so a
+    // CompanyAdministrator could rewrite the email/password of any user on the
+    // platform by id.
     const scopeToCompany = !!query.queryParams.companyId || !params.isSelf;
 
     query.query = `
-      ${scopeToCompany ? `MATCH (company:Company {id: $companyId})` : ``}
-      MATCH (user:User {id: $userId})
+      ${
+        !params.isSelf
+          ? this.companyScopedUserMatch()
+          : `
+            ${scopeToCompany ? `MATCH (company:Company {id: $companyId})` : ``}
+            MATCH (user:User {id: $userId})
+          `
+      }
       SET ${setClauses.join(", ")}
 
       ${
@@ -663,7 +691,11 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     await this.neo4j.writeOne(query);
   }
 
-  async reactivate(params: { userId: string }): Promise<void> {
+  /**
+   * `isPlatformAdmin` reaches any user by id; otherwise only a user belonging
+   * to the request company is reactivated (see `companyScopedUserMatch`).
+   */
+  async reactivate(params: { userId: string; isPlatformAdmin?: boolean }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -671,15 +703,19 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       userId: params.userId,
     };
 
-    query.query += `
-      MATCH (user:User {id: $userId})
+    query.query = `
+      ${params.isPlatformAdmin ? `MATCH (user:User {id: $userId})` : this.companyScopedUserMatch()}
       SET user.isDeleted = false
     `;
 
     await this.neo4j.writeOne(query);
   }
 
-  async patchRate(params: { userId: string; rate: number }): Promise<void> {
+  /**
+   * `isPlatformAdmin` reaches any user by id; otherwise only a user belonging
+   * to the request company is updated (see `companyScopedUserMatch`).
+   */
+  async patchRate(params: { userId: string; rate: number; isPlatformAdmin?: boolean }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -688,8 +724,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       rate: params.rate,
     };
 
-    query.query += `
-      MATCH (user:User {id: $userId})
+    query.query = `
+      ${params.isPlatformAdmin ? `MATCH (user:User {id: $userId})` : this.companyScopedUserMatch()}
       SET user.rate = $rate,
           user.updatedAt = datetime()
     `;
@@ -746,7 +782,13 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     return (await this.neo4j.readOne(query)) ?? undefined;
   }
 
-  async patchAvatar(params: { userId: string; avatar: string }): Promise<void> {
+  /**
+   * `isSelf` (the controller has checked the caller IS `userId`) matches the
+   * user by id, so a platform administrator without a company can still set
+   * their own avatar. Anyone else's avatar is reachable only inside the
+   * request company (see `companyScopedUserMatch`).
+   */
+  async patchAvatar(params: { userId: string; avatar: string; isSelf?: boolean }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -755,8 +797,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       avatar: params.avatar,
     };
 
-    query.query += `
-      MATCH (user:User {id: $userId})
+    query.query = `
+      ${params.isSelf ? `MATCH (user:User {id: $userId})` : this.companyScopedUserMatch()}
       SET user.avatar = $avatar,
           user.updatedAt = datetime()
     `;
@@ -764,7 +806,13 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     await this.neo4j.writeOne(query);
   }
 
-  async deleteUser(params: { userId: string }): Promise<void> {
+  /**
+   * Soft-deletes a user. `isPlatformAdmin` reaches any user by id; otherwise
+   * only a user belonging to the request company (`$companyId`) is deleted.
+   * The previous unbound `MATCH (company:Company)` matched every company, so
+   * any caller could soft-delete any user on the platform.
+   */
+  async deleteUser(params: { userId: string; isPlatformAdmin?: boolean }): Promise<void> {
     const query = this.neo4j.initQuery();
 
     query.queryParams = {
@@ -773,10 +821,9 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     };
 
     query.query = `
-      MATCH (company:Company)
-      MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
-        SET user.isDeleted = true
-      `;
+      ${params.isPlatformAdmin ? `MATCH (user:User {id: $userId})` : this.companyScopedUserMatch()}
+      SET user.isDeleted = true
+    `;
 
     await this.neo4j.writeOne(query);
   }
@@ -819,9 +866,12 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       administratorRoleId: RoleId.Administrator,
     };
 
+    // A company role is removed only from a user who BELONGS_TO the request
+    // company, mirroring the grant in addUserToRole. Administrator lives on the
+    // platform membership (no IN_COMPANY) and needs no company.
     query.query += `
       MATCH (user:User {id: $userId})-[:HAS_MEMBERSHIP]->(rm_ms:Membership)
-      WHERE (rm_ms)-[:IN_COMPANY]->(:Company {id: $companyId})
+      WHERE ((user)-[:BELONGS_TO]->(:Company {id: $companyId}) AND (rm_ms)-[:IN_COMPANY]->(:Company {id: $companyId}))
          OR ($roleId = $administratorRoleId AND NOT (rm_ms)-[:IN_COMPANY]->(:Company))
       MATCH (rm_ms)-[rel:HAS_ROLE]->(:Role {id: $roleId})
       DELETE rel

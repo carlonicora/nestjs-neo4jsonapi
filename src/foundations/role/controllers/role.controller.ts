@@ -13,7 +13,9 @@ import {
   UseGuards,
 } from "@nestjs/common";
 
+import { RoleId } from "../../../common/constants/system.roles";
 import { Audit, CacheInvalidate } from "../../../common/decorators";
+import { Roles } from "../../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
@@ -44,7 +46,11 @@ export class RoleController {
     return await this.roleService.findById({ roleId: roleId });
   }
 
+  // Roles are global (not company-scoped): writing them is a platform operation.
+  // @Roles sits above @CacheInvalidate, which replaces the method: metadata set
+  // below it would land on the discarded original and never be enforced.
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator)
   @Post()
   @CacheInvalidate(roleMeta)
   async create(@Body() body: RolePostDTO) {
@@ -58,6 +64,7 @@ export class RoleController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator)
   @Put(":roleId")
   @CacheInvalidate(roleMeta, "roleId")
   async update(@Body() body: RolePostDTO, @Param("roleId") roleId: string) {
@@ -70,6 +77,7 @@ export class RoleController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(":roleId")
   @CacheInvalidate(roleMeta, "roleId")

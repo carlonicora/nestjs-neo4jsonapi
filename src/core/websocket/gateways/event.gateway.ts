@@ -20,6 +20,15 @@ import { WebSocketService } from "../services/websocket.service";
 
 const WS_BUILTIN_EVENTS = new Set(["message", "heartbeat"]);
 
+/**
+ * Raw client events are re-emitted as `ws:<event>`. A raw event named `message:<x>`
+ * would land in the `ws:message:` namespace reserved for `message` frames (see
+ * WS_CLIENT_MESSAGE_EVENT_PREFIX), with a different payload shape, so it is dropped.
+ */
+function isReservedClientEvent(event: string): boolean {
+  return WS_BUILTIN_EVENTS.has(event) || event.startsWith("message:");
+}
+
 @WebSocketGateway({
   path: "/socket.io",
   cors: {
@@ -66,15 +75,15 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         // Set user as online
         await this.presenceService.setUserOnline(payload.userId, payload.userName || payload.name, client.id);
 
-        // Broadcast presence change
-        const broadcastPayload = {
+        // Presence goes to the user's company only, never to every socket.
+        const presencePayload = {
           userId: payload.userId,
           status: "online",
         };
-        await this.webSocketService.broadcast("user:presence", broadcastPayload);
+        await this.webSocketService.sendPresenceToCompany(payload.companyId, presencePayload);
 
         client.onAny((event: string, eventPayload: unknown) => {
-          if (WS_BUILTIN_EVENTS.has(event)) return;
+          if (typeof event !== "string" || isReservedClientEvent(event)) return;
           this.eventEmitter.emit(`ws:${event}`, { user: client.data.user, payload: eventPayload, client });
         });
       } catch (err: any) {
@@ -100,12 +109,12 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         const status = await this.presenceService.getUserStatus(user.userId);
 
         if (status.status === "offline") {
-          const broadcastPayload = {
+          const presencePayload = {
             userId: user.userId,
             status: "offline",
             lastSeen: status.lastActivity,
           };
-          await this.webSocketService.broadcast("user:presence", broadcastPayload);
+          await this.webSocketService.sendPresenceToCompany(user.companyId, presencePayload);
         }
       } catch (error: any) {
         // Redis might be disconnected during shutdown
@@ -133,10 +142,12 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     @ConnectedSocket() client: Socket,
   ): { event: string; data: any } {
     const user = client.data.user;
-    if (user && user.userId && user.companyId) {
+    // Client frames are re-emitted ONLY under the reserved `ws:message:<type>` namespace
+    // (WebSocketService.handleIncomingMessage); they can never reach an internal event.
+    const accepted =
+      !!(user && user.userId && user.companyId) &&
       this.webSocketService.handleIncomingMessage(user.companyId, user.userId, data);
-    }
-    return { event: "message", data: { status: "received" } };
+    return { event: "message", data: { status: accepted ? "received" : "rejected" } };
   }
 
   private extractTokenFromHandshake(client: Socket): string | null {

@@ -239,6 +239,10 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       token: token,
     });
 
+    // The repository refuses to extend an Auth that expired between the read above
+    // and this write, so a null here is the same "invalid refresh token" outcome.
+    if (!auth) throw new HttpException("Invalid refresh token", HttpStatus.UNAUTHORIZED);
+
     await this.authRepository.deleteExpiredAuths({ userId: user.id });
 
     const newAuth: any = {
@@ -505,17 +509,18 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
   }
 
   async findAuthByCode(params: { code: string }): Promise<JsonApiSingleDocument> {
-    const authCode: AuthCode = await this.authRepository.findByCode({
-      code: params.code,
-    });
+    // Single use: the exchange deletes the code, so it cannot be replayed.
+    let authId: string | null;
+    try {
+      authId = await this.authRepository.consumeCode({ code: params.code });
+    } catch {
+      // A concurrent exchange of the same code deleted it first.
+      authId = null;
+    }
 
-    if (!authCode) throw new HttpException("Invalid code", HttpStatus.NOT_FOUND);
+    if (!authId) throw new HttpException("Invalid code", HttpStatus.NOT_FOUND);
 
-    if (authCode.expiration < new Date()) throw new HttpException("Code has expired", HttpStatus.NOT_FOUND);
-
-    const auth: Auth = await this.authRepository.findAuthById({
-      authId: authCode.auth.id,
-    });
+    const auth: Auth = await this.authRepository.findAuthById({ authId: authId });
 
     if (!auth) throw new HttpException("Auth not found", HttpStatus.NOT_FOUND);
 

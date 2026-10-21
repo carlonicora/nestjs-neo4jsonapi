@@ -55,7 +55,8 @@ const createMockWebSocketService = () => ({
   addClient: vi.fn(),
   removeClient: vi.fn(),
   broadcast: vi.fn().mockResolvedValue(undefined),
-  handleIncomingMessage: vi.fn(),
+  sendPresenceToCompany: vi.fn().mockResolvedValue(undefined),
+  handleIncomingMessage: vi.fn().mockReturnValue(true),
 });
 
 const createMockPresenceService = () => ({
@@ -200,6 +201,20 @@ describe("EventsGateway", () => {
       expect(client.onAny).not.toHaveBeenCalled();
     });
 
+    it("does NOT forward raw 'message:*' events into the reserved ws:message: namespace", async () => {
+      const client = createMockClient("valid-token");
+      await gateway.handleConnection(client as unknown as Socket);
+
+      const onAnyCallback = (client.onAny as ReturnType<typeof vi.fn>).mock.calls[0][0] as (
+        event: string,
+        payload: unknown,
+      ) => void;
+
+      onAnyCallback("message:chat", { spoofed: true });
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
     it("does NOT register onAny when JWT verification fails", async () => {
       jwtService.verify.mockImplementation(() => {
         throw new Error("invalid token");
@@ -208,6 +223,92 @@ describe("EventsGateway", () => {
       await gateway.handleConnection(client as unknown as Socket);
 
       expect(client.onAny).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("handleMessage", () => {
+    const connect = async () => {
+      const client = createMockClient("valid-token");
+      await gateway.handleConnection(client as unknown as Socket);
+      return client;
+    };
+
+    it("hands an authenticated frame to WebSocketService and never emits it itself", async () => {
+      const client = await connect();
+      eventEmitter.emit.mockClear();
+      const frame = { type: "redis.notification", message: { type: "broadcast" } };
+
+      const result = gateway.handleMessage(frame, client as unknown as Socket);
+
+      expect(webSocketService.handleIncomingMessage).toHaveBeenCalledWith(TEST_IDS.companyId, TEST_IDS.userId, frame);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(result).toEqual({ event: "message", data: { status: "received" } });
+    });
+
+    it("reports 'rejected' when the service refuses the frame", async () => {
+      const client = await connect();
+      webSocketService.handleIncomingMessage.mockReturnValueOnce(false);
+
+      const result = gateway.handleMessage({ type: "**", message: {} }, client as unknown as Socket);
+
+      expect(result).toEqual({ event: "message", data: { status: "rejected" } });
+    });
+
+    it("drops frames from an unauthenticated socket", async () => {
+      const client = createMockClient(null);
+      await gateway.handleConnection(client as unknown as Socket);
+
+      const result = gateway.handleMessage({ type: "chat", message: {} }, client as unknown as Socket);
+
+      expect(webSocketService.handleIncomingMessage).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+      expect(result).toEqual({ event: "message", data: { status: "rejected" } });
+    });
+  });
+
+  describe("presence", () => {
+    it("sends 'online' presence to the user's company only, never as a global broadcast", async () => {
+      const client = createMockClient("valid-token");
+      await gateway.handleConnection(client as unknown as Socket);
+
+      expect(webSocketService.sendPresenceToCompany).toHaveBeenCalledWith(TEST_IDS.companyId, {
+        userId: TEST_IDS.userId,
+        status: "online",
+      });
+      expect(webSocketService.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("sends no presence at all for a socket without a token", async () => {
+      const client = createMockClient(null);
+      await gateway.handleConnection(client as unknown as Socket);
+
+      expect(webSocketService.sendPresenceToCompany).not.toHaveBeenCalled();
+      expect(webSocketService.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("sends no presence for a socket whose JWT fails verification", async () => {
+      jwtService.verify.mockImplementation(() => {
+        throw new Error("invalid token");
+      });
+      const client = createMockClient("bad-token");
+      await gateway.handleConnection(client as unknown as Socket);
+
+      expect(webSocketService.sendPresenceToCompany).not.toHaveBeenCalled();
+      expect(webSocketService.broadcast).not.toHaveBeenCalled();
+    });
+
+    it("sends 'offline' presence to the user's company only on the last disconnect", async () => {
+      const client = createMockClient("valid-token");
+      await gateway.handleConnection(client as unknown as Socket);
+      webSocketService.sendPresenceToCompany.mockClear();
+
+      await gateway.handleDisconnect(client as unknown as Socket);
+
+      expect(webSocketService.sendPresenceToCompany).toHaveBeenCalledWith(
+        TEST_IDS.companyId,
+        expect.objectContaining({ userId: TEST_IDS.userId, status: "offline" }),
+      );
+      expect(webSocketService.broadcast).not.toHaveBeenCalled();
     });
   });
 });

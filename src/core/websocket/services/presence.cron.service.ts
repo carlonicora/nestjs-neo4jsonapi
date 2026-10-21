@@ -27,11 +27,12 @@ export class PresenceCronService {
       if (changedUsers.length > 0) {
         this.logger.log(`Marked ${changedUsers.length} users as idle`);
 
-        // Broadcast status changes to all connected clients
+        // Presence changes go to each user's company only, never to every socket.
         for (const userId of changedUsers) {
           const status = await this.presenceService.getUserStatus(userId);
+          const companyId = await this.redisClientStorage.getUserCompany(userId);
 
-          await this.webSocketService.broadcast("user:presence", {
+          await this.webSocketService.sendPresenceToCompany(companyId, {
             userId,
             status: status.status,
             lastSeen: status.lastActivity,

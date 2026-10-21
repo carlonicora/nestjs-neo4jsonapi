@@ -57,6 +57,19 @@ export class UserController {
     private readonly cypherService: UserCypherService,
   ) {}
 
+  /** Platform administrator: the global Administrator role. */
+  private isPlatformAdmin(user: any): boolean {
+    return this.security.isUserInRoles({ user: user, roles: [RoleId.Administrator] });
+  }
+
+  /** Administrator OR CompanyAdministrator. */
+  private isAnyAdmin(user: any): boolean {
+    return this.security.isUserInRoles({
+      user: user,
+      roles: [RoleId.Administrator, RoleId.CompanyAdministrator],
+    });
+  }
+
   @Get(userMeta.endpoint)
   async findBySearch(
     @Req() request: AuthenticatedRequest,
@@ -109,9 +122,20 @@ export class UserController {
     reply.send(response);
   }
 
+  /**
+   * Admin lookup (the user editor's duplicate-email check). Bound to the
+   * caller's company: a user of another company answers 404, like a missing
+   * one. Only a platform administrator looks up across companies.
+   */
   @Get(`${userMeta.endpoint}/email/:email`)
-  async findOneByEmail(@Param("email") email: string) {
-    return this.users.findByEmail({ email: email });
+  @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
+  async findOneByEmail(@Req() request: AuthenticatedRequest, @Param("email") email: string) {
+    if (this.isPlatformAdmin(request.user)) return this.users.findByEmailInCompany({ email: email });
+
+    const companyId = request.user?.companyId;
+    if (!companyId) throw new ForbiddenException("No company in context");
+
+    return this.users.findByEmailInCompany({ email: email, companyId: companyId });
   }
 
   @Get(`${companyMeta.endpoint}/:companyId/${userMeta.endpoint}`)
@@ -124,6 +148,11 @@ export class UserController {
     @Query("includeDeleted") includeDeleted?: boolean,
     @Query("isDeleted") isDeleted?: boolean,
   ) {
+    // The URL company replaces the CLS company below, so only the caller's own
+    // company (or a platform administrator) may be listed.
+    if (request.user?.companyId !== companyId && !this.isPlatformAdmin(request.user))
+      throw new ForbiddenException("You cannot list the users of another company");
+
     this.clsService.set("companyId", companyId);
 
     const response = await this.users.findManyByCompany({
@@ -146,11 +175,9 @@ export class UserController {
     @Res() reply: FastifyReply,
     @Query("lng") lng?: string,
   ) {
-    try {
-      await this.users.expectNotExists({ email: body.data.attributes.email });
-    } catch {
-      return this.users.findByEmail({ email: body.data.attributes.email });
-    }
+    // 409 when the email is taken. It used to answer with that user's full
+    // record, whatever company they belonged to.
+    await this.users.expectNotExists({ email: body.data.attributes.email });
 
     let forceCompanyAdmin = false;
     if (!body.included?.length) {
@@ -159,6 +186,10 @@ export class UserController {
           "A new user needs a company relationship or an included company",
           HttpStatus.BAD_REQUEST,
         );
+      // A CompanyAdministrator creates users in their own company only: any
+      // other id would let them mint an account (with roles) in another tenant.
+      if (body.data.relationships.company.data.id !== request.user?.companyId && !this.isPlatformAdmin(request.user))
+        throw new ForbiddenException("You cannot create users in another company");
       await this.companyService.validate({
         companyId: body.data.relationships.company.data.id,
       });
@@ -179,6 +210,8 @@ export class UserController {
   }
 
   @Put(`${userMeta.endpoint}/:userId`)
+  // The service writes body.data.id: it must be the URL id (412 otherwise).
+  @ValidateId("userId")
   @CacheInvalidate(userMeta, "userId")
   async put(
     @Request() request: any,
@@ -186,17 +219,16 @@ export class UserController {
     @Body() body: UserPutDTO,
     @Res() reply: FastifyReply,
   ) {
-    if (request.user.userId !== userId) this.security.validateAdmin({ user: request.user });
+    const isCurrentUser = request.user.userId === userId;
+    const isAdmin = this.isAnyAdmin(request.user);
 
-    const isAdmin = this.security.isUserInRoles({
-      user: request.user,
-      roles: [RoleId.Administrator, RoleId.CompanyAdministrator],
-    });
+    if (!isCurrentUser && !isAdmin) throw new ForbiddenException("You are not allowed to edit this user");
 
+    // Not self: the repository only reaches a user BELONGING_TO the CLS company.
     const response = await this.users.putUser({
       data: body.data,
       isAdmin: isAdmin,
-      isCurrentUser: request.user.userId === userId,
+      isCurrentUser: isCurrentUser,
     });
     reply.send(response);
   }
@@ -206,11 +238,15 @@ export class UserController {
   async reactivateUser(@Request() request: any, @Param("userId") userId: string, @Res() reply: FastifyReply) {
     this.security.validateAdmin({ user: request.user });
 
-    const response = await this.users.reactivate({ userId: userId });
+    const response = await this.users.reactivate({
+      userId: userId,
+      isPlatformAdmin: this.isPlatformAdmin(request.user),
+    });
     reply.send(response);
   }
 
   @Patch(`${userMeta.endpoint}/:userId/avatar`)
+  @ValidateId("userId")
   @CacheInvalidate(userMeta, "userId")
   async updateUserAvatar(
     @Request() request: any,
@@ -218,7 +254,11 @@ export class UserController {
     @Body() body: UserPatchAvatarDTO,
     @Res() reply: FastifyReply,
   ) {
-    const response = await this.users.patchAvatar({ data: body.data });
+    const isSelf = request.user?.userId === userId;
+    if (!isSelf && !this.isAnyAdmin(request.user))
+      throw new ForbiddenException("You are not allowed to edit this user");
+
+    const response = await this.users.patchAvatar({ data: body.data, isSelf: isSelf });
     reply.send(response);
   }
 
@@ -246,6 +286,7 @@ export class UserController {
 
   @Patch(`${userMeta.endpoint}/:userId/rates`)
   @Roles(RoleId.CompanyAdministrator)
+  @ValidateId("userId")
   @CacheInvalidate(userMeta, "userId")
   async updateUserRates(
     @Request() request: any,
@@ -253,7 +294,10 @@ export class UserController {
     @Body() body: UserPatchRateDTO,
     @Res() reply: FastifyReply,
   ) {
-    const response = await this.users.patchRate({ data: body.data });
+    const response = await this.users.patchRate({
+      data: body.data,
+      isPlatformAdmin: this.isPlatformAdmin(request.user),
+    });
     reply.send(response);
   }
 
@@ -269,8 +313,12 @@ export class UserController {
   @Delete(`${userMeta.endpoint}/:userId`)
   @CacheInvalidate(userMeta, "userId")
   async delete(@Req() request: any, @Param("userId") userId: string) {
+    if (!this.isAnyAdmin(request.user)) throw new ForbiddenException("You are not allowed to delete this user");
+
+    // Non-platform callers only reach users BELONGING_TO their CLS company.
     await this.users.deleteUser({
       userId: userId,
+      isPlatformAdmin: this.isPlatformAdmin(request.user),
     });
   }
 
@@ -303,6 +351,27 @@ export class UserController {
     });
   }
 
+  /**
+   * Role grants are never self-service.
+   * - Administrator is a PLATFORM grant: only a platform administrator may
+   *   give or take it.
+   * - Any other role: Administrator or CompanyAdministrator. A
+   *   CompanyAdministrator acts inside their CLS company only; the repository
+   *   matches the target user through BELONGS_TO that company.
+   */
+  private assertCanManageRole(req: any, roleId: string): void {
+    if (roleId === RoleId.Administrator) {
+      if (!this.isPlatformAdmin(req.user))
+        throw new ForbiddenException("Only a platform administrator can manage the Administrator role");
+      return;
+    }
+
+    if (!this.isAnyAdmin(req.user)) throw new ForbiddenException("You are not allowed to manage roles");
+
+    if (!this.isPlatformAdmin(req.user) && !this.clsService.get("companyId"))
+      throw new ForbiddenException("You are not allowed to manage roles");
+  }
+
   @UseGuards(JwtAuthGuard)
   @Post(`${roleMeta.endpoint}/:roleId/${userMeta.endpoint}/:userId`)
   async addUserToRole(
@@ -311,18 +380,12 @@ export class UserController {
     @Param("userId") userId: string,
     @Res() reply: FastifyReply,
   ) {
-    const isAdmin = this.security.isUserInRoles({
-      user: req.user,
-      roles: [RoleId.Administrator, RoleId.CompanyAdministrator],
-    });
-
-    if (!isAdmin && req.user.userId !== userId)
-      throw new HttpException("You are not allowed to edit this user", HttpStatus.FORBIDDEN);
+    this.assertCanManageRole(req, roleId);
 
     const response = await this.users.addUserToRole({
       userId: userId,
       roleId: roleId,
-      returnsFull: isAdmin || req.user.userId === userId,
+      returnsFull: true,
     });
 
     reply.send(response);
@@ -333,18 +396,12 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   @Delete(`${roleMeta.endpoint}/:roleId/${userMeta.endpoint}/:userId`)
   async removeUserToRole(@Request() req: any, @Param("roleId") roleId: string, @Param("userId") userId: string) {
-    const isAdmin = this.security.isUserInRoles({
-      user: req.user,
-      roles: [RoleId.Administrator, RoleId.CompanyAdministrator],
-    });
-
-    if (!isAdmin && req.user.userId !== userId)
-      throw new HttpException("You are not allowed to edit this user", HttpStatus.FORBIDDEN);
+    this.assertCanManageRole(req, roleId);
 
     await this.users.removeUserFromRole({
       roleId: roleId,
       userId: userId,
-      returnsFull: isAdmin || req.user.userId === userId,
+      returnsFull: true,
     });
 
     await this.cacheService.invalidateByElement(userMeta.endpoint, userId);

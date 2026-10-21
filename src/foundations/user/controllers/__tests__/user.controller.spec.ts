@@ -34,7 +34,7 @@ vi.mock("../../../relevancy/services/relevancy.service", () => ({
   })),
 }));
 
-import { ForbiddenException, HttpException, PreconditionFailedException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, PreconditionFailedException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
 import { ClsService } from "nestjs-cls";
@@ -68,6 +68,7 @@ describe("UserController", () => {
     companyId: "660e8400-e29b-41d4-a716-446655440001",
     userId: "550e8400-e29b-41d4-a716-446655440001",
     adminUserId: "550e8400-e29b-41d4-a716-446655440003",
+    otherCompanyId: "660e8400-e29b-41d4-a716-446655440099",
     roleId: "770e8400-e29b-41d4-a716-446655440001",
     contentId: "880e8400-e29b-41d4-a716-446655440001",
   };
@@ -100,11 +101,22 @@ describe("UserController", () => {
       user: {
         userId,
         companyId,
-        roles: isAdmin ? [{ id: RoleId.Administrator, name: "Administrator" }] : [],
+        roles: isAdmin ? [RoleId.Administrator] : [],
       },
       params,
     } as unknown as AuthenticatedRequest;
   };
+
+  // A request from a caller holding exactly `roles` (JWT role ids).
+  const requestAs = (params: {
+    userId: string;
+    roles: string[];
+    companyId?: string;
+    routeParams?: Record<string, string>;
+  }): any => ({
+    user: { userId: params.userId, companyId: params.companyId ?? TEST_IDS.companyId, roles: params.roles },
+    params: params.routeParams ?? {},
+  });
 
   // Create a mock Fastify reply
   const createMockReply = (): Mocked<FastifyReply> => {
@@ -125,12 +137,14 @@ describe("UserController", () => {
       findOneForAdmin: vi.fn(),
       findFullUser: vi.fn(),
       findByEmail: vi.fn(),
+      findByEmailInCompany: vi.fn(),
       findManyByCompany: vi.fn(),
       expectNotExists: vi.fn(),
       createUser: vi.fn(),
       putUser: vi.fn(),
       reactivate: vi.fn(),
       patchRate: vi.fn(),
+      patchAvatar: vi.fn(),
       patchLanguage: vi.fn(),
       sendInvitationEmail: vi.fn(),
       deleteUser: vi.fn(),
@@ -189,6 +203,13 @@ describe("UserController", () => {
     cypherService = module.get(UserCypherService);
 
     mockReply = createMockReply();
+
+    // Real role semantics by default; individual legacy tests still override it
+    // with mockReturnValue.
+    securityService.isUserInRoles.mockImplementation(
+      ({ user, roles }: { user: any; roles: string[] }) =>
+        !!user?.roles && roles.some((role: string) => user.roles.includes(role)),
+    );
   });
 
   afterEach(() => {
@@ -293,14 +314,44 @@ describe("UserController", () => {
   });
 
   describe("GET /users/email/:email", () => {
-    it("should find user by email", async () => {
-      const email = "test@example.com";
-      userService.findByEmail.mockResolvedValue(MOCK_USER_RESPONSE);
+    const email = "test@example.com";
 
-      const result = await controller.findOneByEmail(email);
+    it("is restricted to administrators", () => {
+      expect(Reflect.getMetadata("roles", UserController.prototype.findOneByEmail)).toEqual([
+        RoleId.Administrator,
+        RoleId.CompanyAdministrator,
+      ]);
+    });
 
-      expect(userService.findByEmail).toHaveBeenCalledWith({ email });
+    it("binds a company administrator's lookup to their own company", async () => {
+      userService.findByEmailInCompany.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      const result = await controller.findOneByEmail(
+        requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] }),
+        email,
+      );
+
+      expect(userService.findByEmailInCompany).toHaveBeenCalledWith({ email, companyId: TEST_IDS.companyId });
       expect(result).toEqual(MOCK_USER_RESPONSE);
+    });
+
+    it("lets a platform administrator look up across companies", async () => {
+      userService.findByEmailInCompany.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.findOneByEmail(
+        requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] }),
+        email,
+      );
+
+      expect(userService.findByEmailInCompany).toHaveBeenCalledWith({ email });
+    });
+
+    it("refuses a company administrator with no company in context", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      req.user.companyId = undefined;
+
+      await expect(controller.findOneByEmail(req, email)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(userService.findByEmailInCompany).not.toHaveBeenCalled();
     });
   });
 
@@ -321,6 +372,27 @@ describe("UserController", () => {
         companyId: TEST_IDS.companyId,
       });
       expect(mockReply.send).toHaveBeenCalledWith(MOCK_USERS_LIST_RESPONSE);
+    });
+
+    it("refuses with 403 a company other than the caller's own", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+
+      await expect(
+        controller.findByCompany(req, mockReply, TEST_IDS.otherCompanyId, {}, undefined, false, false),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(clsService.set).not.toHaveBeenCalled();
+      expect(userService.findManyByCompany).not.toHaveBeenCalled();
+    });
+
+    it("lets a platform administrator list any company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] });
+      userService.findManyByCompany.mockResolvedValue(MOCK_USERS_LIST_RESPONSE);
+
+      await controller.findByCompany(req, mockReply, TEST_IDS.otherCompanyId, {}, undefined, false, false);
+
+      expect(clsService.set).toHaveBeenCalledWith("companyId", TEST_IDS.otherCompanyId);
+      expect(userService.findManyByCompany).toHaveBeenCalled();
     });
   });
 
@@ -406,15 +478,50 @@ describe("UserController", () => {
       expect(userService.createUser).not.toHaveBeenCalled();
     });
 
-    it("should return existing user if email already exists", async () => {
+    it("refuses with 403 a CompanyAdministrator creating a user in another company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      const body = {
+        ...createBody,
+        data: {
+          ...createBody.data,
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.otherCompanyId } } },
+        },
+      };
+      userService.expectNotExists.mockResolvedValue(undefined);
+
+      await expect(controller.createUser(req, body as any, mockReply, "en")).rejects.toThrow(ForbiddenException);
+      expect(companyService.validate).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
+    });
+
+    it("lets a platform administrator create a user in any company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] });
+      const body = {
+        ...createBody,
+        data: {
+          ...createBody.data,
+          relationships: { company: { data: { type: "companies", id: TEST_IDS.otherCompanyId } } },
+        },
+      };
+      userService.expectNotExists.mockResolvedValue(undefined);
+      userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.createUser(req, body as any, mockReply, "en");
+
+      expect(userService.createUser).toHaveBeenCalled();
+    });
+
+    it("rejects a taken email without returning the existing user", async () => {
       const req = createMockRequest();
-      userService.expectNotExists.mockRejectedValue(new Error("User exists"));
-      userService.findByEmail.mockResolvedValue(MOCK_USER_RESPONSE);
+      const conflict = new HttpException("A user with the given email already exists", HttpStatus.CONFLICT);
+      userService.expectNotExists.mockRejectedValue(conflict);
 
-      const result = await controller.createUser(req, createBody as any, mockReply, undefined);
+      await expect(controller.createUser(req, createBody as any, mockReply, undefined)).rejects.toBe(conflict);
 
-      expect(userService.findByEmail).toHaveBeenCalledWith({ email: "new@example.com" });
-      expect(result).toEqual(MOCK_USER_RESPONSE);
+      expect(userService.findByEmail).not.toHaveBeenCalled();
+      expect(userService.findByEmailInCompany).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
+      expect(mockReply.send).not.toHaveBeenCalled();
     });
   });
 
@@ -445,14 +552,45 @@ describe("UserController", () => {
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
     });
 
-    it("should require admin to update other users", async () => {
-      const req = createMockRequest(TEST_IDS.adminUserId);
-      securityService.isUserInRoles.mockReturnValue(true);
+    it("lets a CompanyAdministrator update another user (scoped to the company by the repository)", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
       userService.putUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.put(req, TEST_IDS.userId, updateBody as any, mockReply);
 
-      expect(securityService.validateAdmin).toHaveBeenCalledWith({ user: req.user });
+      expect(userService.putUser).toHaveBeenCalledWith({
+        data: updateBody.data,
+        isAdmin: true,
+        isCurrentUser: false,
+      });
+    });
+
+    it("refuses with 403 a non-admin updating another user", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [], routeParams: { userId: TEST_IDS.userId } });
+
+      await expect(controller.put(req, TEST_IDS.userId, updateBody as any, mockReply)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.putUser).not.toHaveBeenCalled();
+    });
+
+    it("refuses with 412 a body id that differs from the URL user", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.adminUserId },
+      });
+      const body = { data: { ...updateBody.data, id: TEST_IDS.userId } };
+
+      // URL is the caller's own id, body targets someone else: the takeover shape.
+      await expect(controller.put(req, TEST_IDS.adminUserId, body as any, mockReply)).rejects.toThrow(
+        PreconditionFailedException,
+      );
+      expect(userService.putUser).not.toHaveBeenCalled();
     });
   });
 
@@ -464,8 +602,68 @@ describe("UserController", () => {
       await controller.reactivateUser(req, TEST_IDS.userId, mockReply);
 
       expect(securityService.validateAdmin).toHaveBeenCalledWith({ user: req.user });
-      expect(userService.reactivate).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userService.reactivate).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: true });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
+    });
+
+    it("keeps a CompanyAdministrator's reactivation company-scoped", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
+      userService.reactivate.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.reactivateUser(req, TEST_IDS.userId, mockReply);
+
+      expect(userService.reactivate).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: false });
+    });
+  });
+
+  describe("PATCH /users/:userId/avatar", () => {
+    const avatarBody = (id: string) => ({ data: { type: "users", id, attributes: { avatar: "avatars/a.png" } } });
+
+    it("lets a user set their own avatar (self, unscoped)", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [], routeParams: { userId: TEST_IDS.userId } });
+      const body = avatarBody(TEST_IDS.userId);
+      userService.patchAvatar.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.updateUserAvatar(req, TEST_IDS.userId, body as any, mockReply);
+
+      expect(userService.patchAvatar).toHaveBeenCalledWith({ data: body.data, isSelf: true });
+      expect(mockReply.send).toHaveBeenCalledWith(MOCK_USER_RESPONSE);
+    });
+
+    it("lets a CompanyAdministrator set another user's avatar, company-scoped", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
+      const body = avatarBody(TEST_IDS.userId);
+      userService.patchAvatar.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.updateUserAvatar(req, TEST_IDS.userId, body as any, mockReply);
+
+      expect(userService.patchAvatar).toHaveBeenCalledWith({ data: body.data, isSelf: false });
+    });
+
+    it("refuses with 403 a non-admin setting another user's avatar", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [], routeParams: { userId: TEST_IDS.userId } });
+
+      await expect(
+        controller.updateUserAvatar(req, TEST_IDS.userId, avatarBody(TEST_IDS.userId) as any, mockReply),
+      ).rejects.toThrow(ForbiddenException);
+      expect(userService.patchAvatar).not.toHaveBeenCalled();
+    });
+
+    it("refuses with 412 a body id that differs from the URL user", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [], routeParams: { userId: TEST_IDS.userId } });
+
+      await expect(
+        controller.updateUserAvatar(req, TEST_IDS.userId, avatarBody(TEST_IDS.adminUserId) as any, mockReply),
+      ).rejects.toThrow(PreconditionFailedException);
+      expect(userService.patchAvatar).not.toHaveBeenCalled();
     });
   });
 
@@ -483,8 +681,22 @@ describe("UserController", () => {
 
       await controller.updateUserRates(req, TEST_IDS.userId, body as any, mockReply);
 
-      expect(userService.patchRate).toHaveBeenCalledWith({ data: body.data });
+      expect(userService.patchRate).toHaveBeenCalledWith({ data: body.data, isPlatformAdmin: false });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
+    });
+
+    it("refuses with 412 a body id that differs from the URL user", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
+      const body = { data: { type: "users", id: TEST_IDS.adminUserId, attributes: { rate: 1 } } };
+
+      await expect(controller.updateUserRates(req, TEST_IDS.userId, body as any, mockReply)).rejects.toThrow(
+        PreconditionFailedException,
+      );
+      expect(userService.patchRate).not.toHaveBeenCalled();
     });
   });
 
@@ -551,14 +763,37 @@ describe("UserController", () => {
   });
 
   describe("DELETE /users/:userId", () => {
-    it("should delete user", async () => {
-      const req = createMockRequest(TEST_IDS.userId, TEST_IDS.companyId, false, { userId: TEST_IDS.userId });
+    it("lets a CompanyAdministrator delete, scoped to their company", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.CompanyAdministrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
       userService.deleteUser.mockResolvedValue(undefined);
 
       await controller.delete(req, TEST_IDS.userId);
 
-      expect(userService.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userService.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: false });
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("users", TEST_IDS.userId);
+    });
+
+    it("lets a platform administrator delete any user", async () => {
+      const req = requestAs({
+        userId: TEST_IDS.adminUserId,
+        roles: [RoleId.Administrator],
+        routeParams: { userId: TEST_IDS.userId },
+      });
+
+      await controller.delete(req, TEST_IDS.userId);
+
+      expect(userService.deleteUser).toHaveBeenCalledWith({ userId: TEST_IDS.userId, isPlatformAdmin: true });
+    });
+
+    it("refuses with 403 a non-admin, even on their own user", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [], routeParams: { userId: TEST_IDS.userId } });
+
+      await expect(controller.delete(req, TEST_IDS.userId)).rejects.toThrow(ForbiddenException);
+      expect(userService.deleteUser).not.toHaveBeenCalled();
     });
   });
 
@@ -615,23 +850,66 @@ describe("UserController", () => {
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("roles", TEST_IDS.roleId);
     });
 
-    it("should allow user to add themselves to role", async () => {
-      const req = createMockRequest(TEST_IDS.userId);
-      securityService.isUserInRoles.mockReturnValue(false);
+    it("refuses with 403 a non-admin adding themselves to a role (no self-service)", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [] });
+
+      await expect(controller.addUserToRole(req, TEST_IDS.roleId, TEST_IDS.userId, mockReply)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.addUserToRole).not.toHaveBeenCalled();
+    });
+
+    it("refuses with 403 a non-admin adding themselves to Administrator", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [] });
+
+      await expect(controller.addUserToRole(req, RoleId.Administrator, TEST_IDS.userId, mockReply)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.addUserToRole).not.toHaveBeenCalled();
+    });
+
+    it("refuses with 403 a CompanyAdministrator granting the platform Administrator role", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+
+      await expect(controller.addUserToRole(req, RoleId.Administrator, TEST_IDS.userId, mockReply)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.addUserToRole).not.toHaveBeenCalled();
+    });
+
+    it("lets a platform administrator grant the Administrator role", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] });
+      userService.addUserToRole.mockResolvedValue(MOCK_USER_RESPONSE);
+
+      await controller.addUserToRole(req, RoleId.Administrator, TEST_IDS.userId, mockReply);
+
+      expect(userService.addUserToRole).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        roleId: RoleId.Administrator,
+        returnsFull: true,
+      });
+    });
+
+    it("lets a CompanyAdministrator grant a company role inside their CLS company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
       userService.addUserToRole.mockResolvedValue(MOCK_USER_RESPONSE);
 
       await controller.addUserToRole(req, TEST_IDS.roleId, TEST_IDS.userId, mockReply);
 
+      expect(clsService.get).toHaveBeenCalledWith("companyId");
       expect(userService.addUserToRole).toHaveBeenCalled();
     });
 
-    it("should reject non-admin trying to add another user", async () => {
-      const req = createMockRequest();
-      securityService.isUserInRoles.mockReturnValue(false);
+    it("refuses with 403 a CompanyAdministrator with no company in context", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      clsService.get.mockReturnValue(undefined);
 
-      await expect(
-        controller.addUserToRole(req, TEST_IDS.roleId, "550e8400-e29b-41d4-a716-446655440099", mockReply),
-      ).rejects.toThrow(HttpException);
+      await expect(controller.addUserToRole(req, TEST_IDS.roleId, TEST_IDS.userId, mockReply)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.addUserToRole).not.toHaveBeenCalled();
     });
   });
 
@@ -652,13 +930,36 @@ describe("UserController", () => {
       expect(cacheService.invalidateByElement).toHaveBeenCalledWith("roles", TEST_IDS.roleId);
     });
 
-    it("should reject non-admin trying to remove another user", async () => {
-      const req = createMockRequest();
-      securityService.isUserInRoles.mockReturnValue(false);
+    it("refuses with 403 a non-admin removing a role, even from themselves", async () => {
+      const req = requestAs({ userId: TEST_IDS.userId, roles: [] });
 
-      await expect(
-        controller.removeUserToRole(req, TEST_IDS.roleId, "550e8400-e29b-41d4-a716-446655440099"),
-      ).rejects.toThrow(HttpException);
+      await expect(controller.removeUserToRole(req, TEST_IDS.roleId, TEST_IDS.userId)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.removeUserFromRole).not.toHaveBeenCalled();
+    });
+
+    it("refuses with 403 a CompanyAdministrator removing the platform Administrator role", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+
+      await expect(controller.removeUserToRole(req, RoleId.Administrator, TEST_IDS.userId)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userService.removeUserFromRole).not.toHaveBeenCalled();
+    });
+
+    it("lets a CompanyAdministrator remove a company role inside their CLS company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+
+      await controller.removeUserToRole(req, TEST_IDS.roleId, TEST_IDS.userId);
+
+      expect(userService.removeUserFromRole).toHaveBeenCalledWith({
+        roleId: TEST_IDS.roleId,
+        userId: TEST_IDS.userId,
+        returnsFull: true,
+      });
     });
   });
 

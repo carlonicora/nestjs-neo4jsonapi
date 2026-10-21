@@ -2,7 +2,7 @@ import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vi
 import { Test, TestingModule } from "@nestjs/testing";
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { Server, Socket } from "socket.io";
-import { WebSocketService } from "../websocket.service";
+import { WebSocketService, WS_CLIENT_MESSAGE_EVENT_PREFIX, WS_PRESENCE_EVENT } from "../websocket.service";
 import { APP_MODE_TOKEN, AppMode, AppModeConfig } from "../../../../common/decorators/conditional-service.decorator";
 import { RedisClientStorageService } from "../../../redis/services/redis.client.storage.service";
 import { RedisMessagingService } from "../../../redis/services/redis.messaging.service";
@@ -350,16 +350,83 @@ describe("WebSocketService", () => {
   });
 
   describe("handleIncomingMessage", () => {
-    it("should emit event with message data", () => {
+    it("should re-emit the message under the reserved ws:message: namespace", () => {
       const message = { type: "chat", message: { text: "Hello" } };
 
-      service.handleIncomingMessage(TEST_IDS.companyId, TEST_IDS.userId, message);
+      const accepted = service.handleIncomingMessage(TEST_IDS.companyId, TEST_IDS.userId, message);
 
-      expect(eventEmitter.emit).toHaveBeenCalledWith("chat", {
+      expect(accepted).toBe(true);
+      expect(WS_CLIENT_MESSAGE_EVENT_PREFIX).toBe("ws:message:");
+      expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+      expect(eventEmitter.emit).toHaveBeenCalledWith("ws:message:chat", {
         companyId: TEST_IDS.companyId,
         userId: TEST_IDS.userId,
         message,
       });
+    });
+
+    it.each([
+      "redis.notification",
+      "company.ai.disabled",
+      "ai.connections.changed",
+      "token.usage.recorded",
+      "user.activated",
+    ])("should never emit the internal event %s verbatim", (internalEvent) => {
+      service.handleIncomingMessage(TEST_IDS.companyId, TEST_IDS.userId, { type: internalEvent, message: {} });
+
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(internalEvent, expect.anything());
+      expect(eventEmitter.emit).toHaveBeenCalledWith(`ws:message:${internalEvent}`, expect.anything());
+    });
+
+    it.each([
+      ["missing type", {}],
+      ["non-string type", { type: 42 }],
+      ["empty type", { type: "" }],
+      ["wildcard type", { type: "**" }],
+      ["whitespace in type", { type: "chat message" }],
+      ["overlong type", { type: "a".repeat(101) }],
+    ])("should reject a message with %s and emit nothing", (_label, message) => {
+      const accepted = service.handleIncomingMessage(TEST_IDS.companyId, TEST_IDS.userId, message as any);
+
+      expect(accepted).toBe(false);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("should reject a null message frame and emit nothing", () => {
+      const accepted = service.handleIncomingMessage(TEST_IDS.companyId, TEST_IDS.userId, null as any);
+
+      expect(accepted).toBe(false);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sendPresenceToCompany", () => {
+    it("should send presence only to the sockets of the given company", async () => {
+      const sameCompanySocket = createMockSocket(TEST_IDS.socketId, TEST_IDS.companyId);
+      const otherCompanySocket = createMockSocket(TEST_IDS.socketId2, "other-company");
+      await service.addClient(TEST_IDS.userId, sameCompanySocket);
+      await service.addClient(TEST_IDS.userId2, otherCompanySocket);
+      const server = createMockServer();
+      service.setServer(server);
+
+      redisClientStorage.getCompanyUsers.mockResolvedValue([TEST_IDS.userId]);
+
+      await service.sendPresenceToCompany(TEST_IDS.companyId, { userId: "u-x", status: "online" });
+
+      expect(redisClientStorage.getCompanyUsers).toHaveBeenCalledWith(TEST_IDS.companyId);
+      expect(sameCompanySocket.emit).toHaveBeenCalledWith(WS_PRESENCE_EVENT, { userId: "u-x", status: "online" });
+      expect(otherCompanySocket.emit).not.toHaveBeenCalled();
+      expect(server.emit).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, null, ""])("should send nothing when the company is %s", async (companyId) => {
+      const server = createMockServer();
+      service.setServer(server);
+
+      await service.sendPresenceToCompany(companyId as any, { userId: "u-x", status: "online" });
+
+      expect(redisClientStorage.getCompanyUsers).not.toHaveBeenCalled();
+      expect(server.emit).not.toHaveBeenCalled();
     });
   });
 

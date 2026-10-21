@@ -12,6 +12,7 @@ vi.mock("../../../common/guards/jwt.auth.guard", () => ({
   },
 }));
 
+import { RoleId } from "../../../common/constants/system.roles";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { howToMeta } from "../entities/how-to.meta";
@@ -60,6 +61,25 @@ describe("HowToController decorators", () => {
         data: { id: "other", type: howToMeta.endpoint, attributes: { name: "n", description: "[]" } },
       } as any),
     ).rejects.toBeInstanceOf(PreconditionFailedException);
+  });
+
+  describe("authorisation metadata", () => {
+    // HowTo is global: every write is Administrator only. JwtAuthGuard reads
+    // `roles` from the final handler (after @CacheInvalidate / @ValidateId).
+    const rolesOf = (method: keyof HowToController) =>
+      Reflect.getMetadata("roles", HowToController.prototype[method] as any) as string[] | undefined;
+
+    it.each(["reindex", "create", "update", "delete", "addRelated", "removeRelated"] as const)(
+      "restricts %s to the platform Administrator",
+      (method) => {
+        expect(rolesOf(method)).toEqual([RoleId.Administrator]);
+      },
+    );
+
+    it("leaves the reads open to any authenticated user", () => {
+      expect(rolesOf("findAll")).toBeUndefined();
+      expect(rolesOf("findById")).toBeUndefined();
+    });
   });
 
   it("invalidates the element cache on PUT and DELETE", async () => {
