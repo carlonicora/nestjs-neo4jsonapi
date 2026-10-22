@@ -1,3 +1,9 @@
+## [6.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.2...v6.6.0) (2026-10-22)
+
+### 🚀 Features
+
+* **security:** company check on every relationship write ([d947afe](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d947afe774507b049d777df150dc9f66b44b4f13))
+
 ## [6.5.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.1...v6.5.2) (2026-10-22)
 
 ### 🐛 Bug Fixes
