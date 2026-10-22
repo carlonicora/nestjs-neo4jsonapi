@@ -28,7 +28,7 @@ const base = {
 
 describe("defineEntity — linkScope and the label tenancy registry", () => {
   afterEach(() => {
-    for (const label of ["DleScoped", "DleVia", "DleViaShared", "DleGlobal", "DleShared"]) {
+    for (const label of ["DleScoped", "DleVia", "DleViaShared", "DleGlobal", "DleShared", "DleTwice"]) {
       entityTenancyRegistry.unregister(label);
     }
   });
@@ -113,6 +113,42 @@ describe("defineEntity — linkScope and the label tenancy registry", () => {
         relationships: {},
       }),
     ).toThrow('linkScope "own-or-platform" needs a company-scoped entity or tenancy { via }');
+  });
+
+  it("refuses a second descriptor that registers the same label with different tenancy", () => {
+    defineEntity<{ name: string }>()({ ...base, labelName: "DleTwice", relationships: {} });
+    expect(() =>
+      defineEntity<{ name: string }>()({
+        ...base,
+        type: "dle-twice-portal",
+        labelName: "DleTwice",
+        isCompanyScoped: false,
+        relationships: {},
+      }),
+    ).toThrow('label "DleTwice" is registered by "dle-things" and "dle-twice-portal" with different tenancy');
+    expect(relatedNodeRuleForLabel("DleTwice")).toEqual({ kind: "company" });
+  });
+
+  it("accepts a second descriptor of the same label with the same tenancy", () => {
+    defineEntity<{ name: string }>()({ ...base, labelName: "DleTwice", relationships: {} });
+    defineEntity<{ name: string }>()({ ...base, type: "dle-twice-copy", labelName: "DleTwice", relationships: {} });
+    expect(relatedNodeRuleForLabel("DleTwice")).toEqual({ kind: "company" });
+  });
+
+  it("a projection never sets the label's rule, whichever loads first", () => {
+    const projection = {
+      ...base,
+      type: "dle-twice-portal",
+      labelName: "DleTwice",
+      isCompanyScoped: false,
+      isProjection: true,
+      relationships: {},
+    };
+    defineEntity<{ name: string }>()(projection);
+    expect(relatedNodeRuleForLabel("DleTwice")).toEqual({ kind: "exists" });
+    defineEntity<{ name: string }>()({ ...base, labelName: "DleTwice", relationships: {} });
+    defineEntity<{ name: string }>()(projection);
+    expect(relatedNodeRuleForLabel("DleTwice")).toEqual({ kind: "company" });
   });
 
   it("relatedNodeRule: crossCompany and contextKey relationships are existence-only", () => {

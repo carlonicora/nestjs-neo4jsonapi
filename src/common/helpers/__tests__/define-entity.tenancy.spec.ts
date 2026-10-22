@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
+import { entityTenancyRegistry } from "../../registries/entity-tenancy.registry";
 import { defineEntity } from "../define-entity";
 
 const parentRel = {
@@ -23,6 +24,8 @@ const base = {
 };
 
 describe("defineEntity — tenancy", () => {
+  afterEach(() => entityTenancyRegistry.unregister(base.labelName));
+
   it("throws on unscoped described entity without tenancy", () => {
     expect(() =>
       defineEntity<{ content: string }>()({ ...base, isCompanyScoped: false, description: "A message." }),
@@ -57,6 +60,7 @@ describe("defineEntity — tenancy", () => {
         tenancy,
       });
       expect(descriptor.tenancy).toEqual(tenancy);
+      entityTenancyRegistry.unregister(base.labelName);
     }
   });
 

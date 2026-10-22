@@ -31,6 +31,8 @@ export type RelatedNodeRule =
 /** What the registry knows about the label of an entity defined with `defineEntity`. */
 export type EntityTenancyEntry = {
   labelName: string;
+  /** JSON:API type of the descriptor that registered the label (named in conflict errors). */
+  type?: string;
   isCompanyScoped: boolean;
   tenancy?: EntityTenancy;
   linkScope?: EntityLinkScope;
@@ -44,8 +46,11 @@ export type EntityTenancyEntry = {
  * The generic relationship writers read it to decide what a client-supplied target id must
  * satisfy (see `relatedNodeRule`). A label never passed to `defineEntity` (plain-model
  * entities such as StripePrice, OAuthClient, Module) is unknown and checked for existence only.
- * When two descriptors declare the same label, the one defined last wins (an app's extended
- * descriptor is imported after the library's).
+ * A label registered twice must declare the same tenancy both times: a conflicting second
+ * registration throws, because whichever descriptor loaded last would otherwise decide what
+ * every relationship write to that label is checked against. A descriptor that is another
+ * view of a label owned elsewhere (portal projection, count, OAuth row) declares
+ * `isProjection: true` and does not register.
  *
  * NOT @Injectable: populated before NestJS bootstraps, like `modelRegistry`.
  */
@@ -53,6 +58,13 @@ export class EntityTenancyRegistry {
   private readonly entries = new Map<string, EntityTenancyEntry>();
 
   register(entry: EntityTenancyEntry): void {
+    const existing = this.entries.get(entry.labelName);
+    if (existing && !sameTenancy(existing, entry)) {
+      throw new Error(
+        `entityTenancyRegistry: label "${entry.labelName}" is registered by "${existing.type ?? "?"}" and "${entry.type ?? "?"}" with different tenancy. ` +
+          `Mark the descriptor that is another view of the label with isProjection: true.`,
+      );
+    }
     this.entries.set(entry.labelName, entry);
   }
 
@@ -68,6 +80,12 @@ export class EntityTenancyRegistry {
 }
 
 export const entityTenancyRegistry = new EntityTenancyRegistry();
+
+const sameTenancy = (a: EntityTenancyEntry, b: EntityTenancyEntry): boolean =>
+  a.isCompanyScoped === b.isCompanyScoped &&
+  JSON.stringify(a.tenancy) === JSON.stringify(b.tenancy) &&
+  a.linkScope === b.linkScope &&
+  JSON.stringify(a.via) === JSON.stringify(b.via);
 
 /**
  * The rule a target of `label` must satisfy for the caller's company, from the registry:

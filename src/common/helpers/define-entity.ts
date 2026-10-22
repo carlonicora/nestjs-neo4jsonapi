@@ -213,6 +213,7 @@ export function defineEntity<T>() {
       bridge,
       tenancy,
       linkScope,
+      isProjection = false,
     } = schema;
 
     if (isCompanyScoped && tenancy) {
@@ -479,7 +480,10 @@ export function defineEntity<T>() {
 
     // Label → tenancy, read by the generic relationship writers to decide what a
     // client-supplied target id of this label must satisfy (see entity-tenancy.registry.ts).
-    entityTenancyRegistry.register({ labelName, isCompanyScoped, tenancy, linkScope, via: viaHop });
+    // A projection is another view of a label owned by a different descriptor: it never sets the rule.
+    if (!isProjection) {
+      entityTenancyRegistry.register({ labelName, type, isCompanyScoped, tenancy, linkScope, via: viaHop });
+    }
 
     return descriptor;
   };

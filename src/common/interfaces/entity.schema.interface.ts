@@ -328,6 +328,13 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
    * EntityLinkScope. Allowed on company-scoped and unscoped entities.
    */
   linkScope?: EntityLinkScope;
+  /**
+   * The descriptor is another view of a label owned by a different descriptor (a portal
+   * projection, a count, an OAuth row). It does not register the label's tenancy, so it never
+   * decides what a relationship write to that label is checked against. Two descriptors that
+   * register one label with different tenancy throw at import time (default: false).
+   */
+  isProjection?: boolean;
   /** Field definitions - keys must be valid entity properties */
   fields: { [K in keyof Partial<T>]?: FieldDef };
   /** Relationship definitions with named keys for autocomplete */
