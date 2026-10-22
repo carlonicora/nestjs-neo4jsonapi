@@ -1,6 +1,7 @@
 import { BadRequestException, HttpException, HttpStatus, OnModuleInit } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { EntityDescriptor, RelationshipDef } from "../../../common/interfaces/entity.schema.interface";
+import { relatedNodeRule, RelatedNodeRule } from "../../../common/registries/entity-tenancy.registry";
 import { modelRegistry } from "../../../common/registries/registry";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { SecurityService } from "../../security/services/security.service";
@@ -801,6 +802,73 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * True for the company BELONGS_TO edge of a company-scoped entity, which the framework writes
+   * itself and the generic writers never take from params.
+   */
+  private isManagedCompanyRelationship(rel: RelationshipDef): boolean {
+    return this.descriptor.isCompanyScoped && rel.relationship === "BELONGS_TO" && rel.model.labelName === "Company";
+  }
+
+  /**
+   * The relationships the generic writer for `mode` writes from params: never readOnly, never
+   * the managed company edge, and on PUT never immutable. assertRelatedInCompany() checks
+   * exactly this set.
+   */
+  private writtenRelationships(mode: "create" | "put" | "patch"): [string, RelationshipDef][] {
+    return Object.entries(this.descriptor.relationships).filter(
+      ([, rel]) => !rel.readOnly && !this.isManagedCompanyRelationship(rel) && !(mode === "put" && rel.immutable),
+    );
+  }
+
+  /**
+   * Refuses (400 "One or more related nodes do not exist.") a write whose related ids do not
+   * exist or point outside the caller's CLS company. Called by create / put / patch /
+   * addToRelationship BEFORE the write; a foreign id looks exactly like a missing one.
+   *
+   * Per target (see `relatedNodeRule` / `Neo4jService.validateRelatedNodes`):
+   * - company-scoped label: BELONGS_TO the CLS company (any edge, for multi-company users);
+   * - tenancy "self": the CLS company itself; tenancy { via }: its parent belongs to it;
+   * - linkScope "own-or-platform": also a platform row (no company edge);
+   * - tenancy "global" / "internal", unknown labels, `crossCompany` relationships and
+   *   server-filled `contextKey` values: existence only;
+   * - the CLS user's own id: existence only (owner / created-by = me, also for a platform
+   *   administrator working inside a customer company).
+   * With no CLS company (system jobs, workers) every target is existence-only.
+   *
+   * Override to tighten or relax the check for one repository.
+   */
+  protected async assertRelatedInCompany(input: {
+    params: Record<string, any>;
+    mode: "create" | "put" | "patch" | "add";
+    /** mode "add": the single relationship being added to. */
+    relationship?: string;
+  }): Promise<void> {
+    const callerId: string | undefined = this.clsService.get("userId") ?? undefined;
+
+    const relationships: [string, RelationshipDef][] =
+      input.mode === "add"
+        ? [[input.relationship!, this.descriptor.relationships[input.relationship!]]]
+        : this.writtenRelationships(input.mode);
+
+    const nodes: { id: string; label: string; rule: RelatedNodeRule }[] = [];
+    for (const [name, rel] of relationships) {
+      const value = input.params[name];
+      if (!value) continue;
+      const rule = relatedNodeRule(rel);
+      for (const id of Array.isArray(value) ? value : [value]) {
+        nodes.push({
+          id,
+          label: rel.model.labelName,
+          rule: callerId && id === callerId ? { kind: "exists" } : rule,
+        });
+      }
+    }
+
+    if (nodes.length === 0) return;
+    await this.neo4j.validateRelatedNodes({ nodes, companyId: this.clsService.get("companyId") ?? null });
+  }
+
+  /**
    * Create a new entity with relationships
    * Uses descriptor.fieldNames and descriptor.fieldDefaults for properties
    * Uses descriptor.relationships for creating relationships
@@ -811,22 +879,8 @@ export abstract class AbstractRepository<
     this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
-    // Validate related nodes exist
-    const nodesToValidate: Array<{ id: string; label: string }> = [];
-    for (const [name, rel] of Object.entries(relationships)) {
-      // Read-only relationships are serialisation-only and never written on create
-      if (rel.readOnly) continue;
-
-      const paramValue = params[name];
-      if (paramValue) {
-        const ids = Array.isArray(paramValue) ? paramValue : [paramValue];
-        nodesToValidate.push(...ids.map((id) => ({ id, label: rel.model.labelName })));
-      }
-    }
-
-    if (nodesToValidate.length > 0) {
-      await this.neo4j.validateExistingNodes({ nodes: nodesToValidate.filter(Boolean) });
-    }
+    // Every related id must exist and belong to the caller's company (see assertRelatedInCompany)
+    await this.assertRelatedInCompany({ params, mode: "create" });
 
     // Apply defaults for fields not provided in params
     const mergedParams = { ...fieldDefaults, ...params };
@@ -951,23 +1005,8 @@ export abstract class AbstractRepository<
     this.assertCompanyBindable();
     const query = this.neo4j.initQuery();
 
-    // Validate related nodes exist
-    const nodesToValidate: Array<{ id: string; label: string }> = [];
-    for (const [name, rel] of Object.entries(relationships)) {
-      if (rel.immutable) continue;
-      // Read-only relationships are serialisation-only and never written on PUT
-      if (rel.readOnly) continue;
-
-      const paramValue = params[name];
-      if (paramValue) {
-        const ids = Array.isArray(paramValue) ? paramValue : [paramValue];
-        nodesToValidate.push(...ids.map((id) => ({ id, label: rel.model.labelName })));
-      }
-    }
-
-    if (nodesToValidate.length > 0) {
-      await this.neo4j.validateExistingNodes({ nodes: nodesToValidate.filter(Boolean) });
-    }
+    // Every related id must exist and belong to the caller's company (see assertRelatedInCompany)
+    await this.assertRelatedInCompany({ params, mode: "put" });
 
     // Build query parameters
     query.queryParams = {
@@ -1080,26 +1119,10 @@ export abstract class AbstractRepository<
     // Read-only relationships are serialisation-only and never written by PATCH.
     // The company BELONGS_TO edge of a company-scoped entity is managed by the
     // framework and never rewritten (same rule as create/put).
-    const relationshipsToUpdate = Object.entries(relationships).filter(
-      ([name, rel]) =>
-        params[name] !== undefined &&
-        !rel.readOnly &&
-        !(this.descriptor.isCompanyScoped && rel.relationship === "BELONGS_TO" && rel.model.labelName === "Company"),
-    );
+    const relationshipsToUpdate = this.writtenRelationships("patch").filter(([name]) => params[name] !== undefined);
 
-    // Validate related nodes exist
-    const nodesToValidate: Array<{ id: string; label: string }> = [];
-    for (const [name, rel] of relationshipsToUpdate) {
-      const paramValue = params[name];
-      if (paramValue) {
-        const ids = Array.isArray(paramValue) ? paramValue : [paramValue];
-        nodesToValidate.push(...ids.map((id) => ({ id, label: rel.model.labelName })));
-      }
-    }
-
-    if (nodesToValidate.length > 0) {
-      await this.neo4j.validateExistingNodes({ nodes: nodesToValidate.filter(Boolean) });
-    }
+    // Every related id must exist and belong to the caller's company (see assertRelatedInCompany)
+    await this.assertRelatedInCompany({ params, mode: "patch" });
 
     // Build query parameters (only include fields that are being updated)
     query.queryParams = {
@@ -1266,6 +1289,16 @@ export abstract class AbstractRepository<
     }
 
     this.assertCompanyBindable();
+
+    // Every item must exist and belong to the caller's company (see assertRelatedInCompany).
+    // Runs before the write, so the MATCH below needs no company filter on the target -
+    // which also lets a global / platform target be linked.
+    await this.assertRelatedInCompany({
+      mode: "add",
+      relationship: params.relationship,
+      params: { [params.relationship]: params.items.map((item) => item.id) },
+    });
+
     const query = this.neo4j.initQuery();
 
     // Build items array with edge properties
@@ -1300,7 +1333,7 @@ export abstract class AbstractRepository<
     query.query += `
       ${matchClause}
       UNWIND $items AS item
-      MATCH (related:${rel.model.labelName} {id: item.id})${this.descriptor.isCompanyScoped ? "-[:BELONGS_TO]->(company)" : ""}
+      MATCH (related:${rel.model.labelName} {id: item.id})
       MERGE (parent)${relPattern}(related)
       ${setClause}
     `;

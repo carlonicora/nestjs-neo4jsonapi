@@ -11,8 +11,13 @@ export const updateRelationshipQuery = (params: {
    * Opt-in: only link target nodes that BELONG_TO the company in `$companyId`
    * (set by `Neo4jService.initQuery()`). For writes whose target ids come from
    * request input, so an id of another firm's node never gets an edge. Pair it
-   * with `Neo4jService.validateExistingNodes()` (per-node `companyId`) to
-   * refuse the request instead of silently skipping the foreign id.
+   * with `Neo4jService.validateRelatedNodes()` to refuse the request instead of
+   * silently skipping the foreign id.
+   *
+   * The linking runs inside a unit `CALL {}` subquery, so ids filtered out here
+   * never reduce the outer row count: clauses appended after this fragment
+   * (further relationships, SETs) still run once for `node`, even when every id
+   * was filtered out.
    */
   companyScoped?: boolean;
 }): string => {
@@ -69,27 +74,40 @@ export const updateRelationshipQuery = (params: {
     }
   }
 
+  const relPattern = `${params.relationshipToNode ? "-" : "<-"}[rel:${params.relationshipName}]${params.relationshipToNode ? "->" : "-"}`;
+  const setClause = relationshipProps
+    ? `SET ${relationshipProps}, rel.updatedAt = datetime()`
+    : `SET rel.updatedAt = datetime()`;
+
+  let linkClause = ``;
+  if (params.values && params.values.length > 0) {
+    linkClause = params.companyScoped
+      ? `
+        WITH ${params.node}
+        CALL {
+          WITH ${params.node}
+          UNWIND $${paramAlias} AS id
+          MATCH (new:${params.label} {id: id})
+          WHERE EXISTS { (new)-[:BELONGS_TO]->(:Company {id: $companyId}) }
+          MERGE (${params.node})${relPattern}(new)
+          ${setClause}
+        }
+        `
+      : `
+        WITH ${params.node}, $${paramAlias} AS ${paramAlias}
+        UNWIND ${paramAlias} AS id
+        MATCH (new:${params.label} {id: id})
+        MERGE (${params.node})${relPattern}(new)
+        ${setClause}
+        `;
+  }
+
   return `
     WITH ${params.node}
-    OPTIONAL MATCH (${params.node})${params.relationshipToNode ? "-" : "<-"}[rel:${params.relationshipName}]${params.relationshipToNode ? "->" : "-"}(existing:${params.label})
+    OPTIONAL MATCH (${params.node})${relPattern}(existing:${params.label})
     WHERE NOT existing.id IN $${paramAlias}
     DELETE rel
 
-    ${
-      params.values && params.values.length > 0
-        ? `
-        WITH ${params.node}, $${paramAlias} AS ${paramAlias}
-        UNWIND ${paramAlias} AS id
-        MATCH (new:${params.label} {id: id})${
-          params.companyScoped
-            ? `
-        WHERE EXISTS { (new)-[:BELONGS_TO]->(:Company {id: $companyId}) }`
-            : ``
-        }
-        MERGE (${params.node})${params.relationshipToNode ? "-" : "<-"}[rel:${params.relationshipName}]${params.relationshipToNode ? "->" : "-"}(new)
-        ${relationshipProps ? `SET ${relationshipProps}, rel.updatedAt = datetime()` : `SET rel.updatedAt = datetime()`}
-        `
-        : ``
-    }
+    ${linkClause}
     `;
 };

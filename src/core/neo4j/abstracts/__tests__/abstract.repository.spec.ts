@@ -137,7 +137,7 @@ const createMockNeo4jService = () => ({
   readMany: vi.fn(),
   read: vi.fn(),
   initQuery: vi.fn(),
-  validateExistingNodes: vi.fn(),
+  validateRelatedNodes: vi.fn(),
 });
 
 const createMockSecurityService = () => ({
@@ -495,7 +495,7 @@ describe("AbstractRepository", () => {
       // so the BELONGS_TO edge has a real node to attach to.
       const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId });
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.create({
@@ -504,7 +504,7 @@ describe("AbstractRepository", () => {
         author: TEST_IDS.relatedId,
       });
 
-      expect(neo4jService.validateExistingNodes).toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalled();
       expect(mockQuery.query).toContain("CREATE (testEntity:TestEntity");
       expect(mockQuery.query).toContain("CREATE (testEntity)-[:BELONGS_TO]->(company)");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
@@ -515,7 +515,7 @@ describe("AbstractRepository", () => {
       // so an unconditional CREATE ...->(company) would create a label-less node.
       const mockQuery = createMockQuery({ companyId: null, currentUserId: null });
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
       clsService.get.mockImplementation(() => undefined);
 
@@ -528,7 +528,7 @@ describe("AbstractRepository", () => {
     it("should apply field defaults", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.create({
@@ -543,7 +543,7 @@ describe("AbstractRepository", () => {
     it("should handle many-to-many relationships with edge properties", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.create({
@@ -569,7 +569,7 @@ describe("AbstractRepository", () => {
         name: "New Entity",
       });
 
-      expect(neo4jService.validateExistingNodes).not.toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).not.toHaveBeenCalled();
     });
   });
 
@@ -577,7 +577,7 @@ describe("AbstractRepository", () => {
     it("should perform full update", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.put({
@@ -677,7 +677,7 @@ describe("AbstractRepository", () => {
     it("should update only relationships that are provided", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repository.patch({
@@ -731,7 +731,7 @@ describe("AbstractRepository", () => {
 
       const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await repo.patch({ id: TEST_IDS.entityId, name: "Patched", company: "other-company-id" });
@@ -740,7 +740,7 @@ describe("AbstractRepository", () => {
       expect(mockQuery.queryParams.company).toBeUndefined();
       // Only the tenant MATCH mentions BELONGS_TO; no relationship rewrite follows.
       expect(mockQuery.query.match(/BELONGS_TO/g)).toHaveLength(1);
-      expect(neo4jService.validateExistingNodes).not.toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).not.toHaveBeenCalled();
     });
   });
 
@@ -931,13 +931,13 @@ describe("AbstractRepository", () => {
       expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
       expect(mockQuery.queryParams.members).toBeUndefined();
       // the readOnly relationship is not even validated - it is ignored entirely
-      expect(neo4jService.validateExistingNodes).not.toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).not.toHaveBeenCalled();
     });
 
     it("should still write non-readOnly relationships on create (default behaviour unchanged)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await readOnlyRepository.create({
@@ -949,15 +949,16 @@ describe("AbstractRepository", () => {
 
       expect(mockQuery.query).toContain("AUTHORED_BY");
       expect(mockQuery.query).not.toContain("HAS_MEMBERSHIP");
-      expect(neo4jService.validateExistingNodes).toHaveBeenCalledWith({
-        nodes: [{ id: TEST_IDS.relatedId, label: "RelatedEntity" }],
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [{ id: TEST_IDS.relatedId, label: "RelatedEntity", rule: { kind: "exists" } }],
+        companyId: TEST_IDS.companyId,
       });
     });
 
     it("should never write a readOnly relationship on put", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await readOnlyRepository.put({
@@ -975,7 +976,7 @@ describe("AbstractRepository", () => {
     it("should never write a readOnly relationship on patch", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
       neo4jService.writeOne.mockResolvedValue(undefined);
 
       await readOnlyRepository.patch({

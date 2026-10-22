@@ -5,6 +5,7 @@ import { BaseConfigInterface } from "../../config/interfaces";
 import { JsonApiSerialiserFactory } from "../../core/jsonapi/factories/jsonapi.serialiser.factory";
 import { DescriptorBasedSerialiser } from "../../core/jsonapi/serialisers/descriptor.based.serialiser";
 import { mapEntity } from "../abstracts/entity";
+import { entityTenancyRegistry, RelatedNodeHop } from "../registries/entity-tenancy.registry";
 import { DataModelInterface, RelationshipInfo } from "../interfaces/datamodel.interface";
 import {
   ComputedFieldDef,
@@ -211,6 +212,7 @@ export function defineEntity<T>() {
       chat,
       bridge,
       tenancy,
+      linkScope,
     } = schema;
 
     if (isCompanyScoped && tenancy) {
@@ -221,11 +223,22 @@ export function defineEntity<T>() {
         `defineEntity(${type}): an unscoped described entity must declare "tenancy" ("global" | "self" | "internal" | { via: "<relationship key>" }).`,
       );
     }
+    let viaHop: RelatedNodeHop | undefined;
     if (tenancy && typeof tenancy === "object") {
       const via = tenancy.via;
       if (!Object.prototype.hasOwnProperty.call(relationships ?? {}, via)) {
         throw new Error(`defineEntity(${type}): tenancy.via "${via}" is not a relationship on this descriptor.`);
       }
+      const viaRel = relationships[via];
+      viaHop = { relationship: viaRel.relationship, direction: viaRel.direction, label: viaRel.model.labelName };
+    }
+    if (linkScope !== undefined && linkScope !== "own-or-platform") {
+      throw new Error(`defineEntity(${type}): linkScope must be "own-or-platform".`);
+    }
+    if (linkScope && !isCompanyScoped && !viaHop) {
+      throw new Error(
+        `defineEntity(${type}): linkScope "own-or-platform" needs a company-scoped entity or tenancy { via }; any other target is already existence-only.`,
+      );
     }
 
     if (bridge) {
@@ -407,6 +420,7 @@ export function defineEntity<T>() {
       model: undefined as unknown as DataModelInterface<T>, // Will be set below
       isCompanyScoped,
       tenancy,
+      linkScope,
       relationships,
       relationshipKeys,
 
@@ -462,6 +476,10 @@ export function defineEntity<T>() {
 
     // Assign model to descriptor
     descriptor.model = model;
+
+    // Label → tenancy, read by the generic relationship writers to decide what a
+    // client-supplied target id of this label must satisfy (see entity-tenancy.registry.ts).
+    entityTenancyRegistry.register({ labelName, isCompanyScoped, tenancy, linkScope, via: viaHop });
 
     return descriptor;
   };

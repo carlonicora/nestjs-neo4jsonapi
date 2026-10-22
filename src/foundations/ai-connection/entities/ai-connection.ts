@@ -126,6 +126,9 @@ export const AiConnectionDescriptor = defineEntity<AiConnection>()({
       // Scope is chosen at creation and never moves (spec § Decisions "Scope
       // mutability") — immutable relationships are skipped on PUT.
       immutable: true,
+      // A platform administrator configures a chain for ANY company, not only the
+      // one in their CLS context: existence-only check on the target company.
+      crossCompany: true,
     },
   },
 });

@@ -160,6 +160,21 @@ describe("updateRelationshipQuery", () => {
       );
     });
 
+    it("links inside a unit CALL subquery, so filtered-out ids never empty the outer rows", () => {
+      const query = updateRelationshipQuery({ ...base, companyScoped: true });
+      const squashed = query.replace(/\s+/g, " ");
+
+      expect(squashed).toContain("WITH account CALL { WITH account UNWIND $userIds AS id MATCH (new:User {id: id})");
+      // the subquery has no RETURN: the outer row for `account` survives zero matches,
+      // so clauses appended after this fragment still run
+      expect(squashed).toMatch(/SET rel\.updatedAt = datetime\(\) \}\s*$/);
+      expect(squashed).not.toContain("RETURN");
+    });
+
+    it("keeps the unscoped fragment unchanged (no subquery)", () => {
+      expect(updateRelationshipQuery(base)).not.toContain("CALL {");
+    });
+
     it("keeps removing edges to ids no longer listed, whatever their company", () => {
       const query = updateRelationshipQuery({ ...base, companyScoped: true });
 

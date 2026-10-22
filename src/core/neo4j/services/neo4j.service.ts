@@ -3,10 +3,50 @@ import { ConfigService } from "@nestjs/config";
 import { auth, driver, Driver, Session } from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
+import { RelatedNodeRule, relatedNodeRuleForLabel } from "../../../common/registries/entity-tenancy.registry";
 import { baseConfig } from "../../../config/base.config";
 import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.interface";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { EntityFactory } from "../factories/entity.factory";
+
+const CYPHER_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Labels and relationship types are interpolated into Cypher: accept plain identifiers only. */
+const assertCypherIdentifier = (value: string): void => {
+  if (!CYPHER_IDENTIFIER.test(value)) throw new BadRequestException("Invalid related node label");
+};
+
+/**
+ * The WHERE predicate a related node bound to `alias` must satisfy for `$companyId`, or "" for
+ * existence only. See RelatedNodeRule.
+ */
+const relatedNodePredicate = (alias: string, rule: RelatedNodeRule): string => {
+  switch (rule.kind) {
+    case "exists":
+      return "";
+    case "self":
+      return `${alias}.id = $companyId`;
+    case "company": {
+      const own = `EXISTS { MATCH (${alias})-[:BELONGS_TO]->(:Company {id: $companyId}) }`;
+      if (!rule.allowPlatform) return own;
+      return `(NOT EXISTS { MATCH (${alias})-[:BELONGS_TO]->(:Company) } OR ${own})`;
+    }
+    case "via": {
+      const { relationship, direction, label } = rule.hop;
+      assertCypherIdentifier(relationship);
+      assertCypherIdentifier(label);
+      const edge = direction === "out" ? `-[:${relationship}]->` : `<-[:${relationship}]-`;
+      // A hop that ends at the Company itself is matched by id (a Company has no BELONGS_TO),
+      // mirroring AbstractRepository.buildDefaultMatch() for tenancy { via }.
+      const own =
+        label === "Company"
+          ? `EXISTS { MATCH (${alias})${edge}(:Company {id: $companyId}) }`
+          : `EXISTS { MATCH (${alias})${edge}(:${label})-[:BELONGS_TO]->(:Company {id: $companyId}) }`;
+      if (!rule.allowPlatform) return own;
+      return `(NOT EXISTS { MATCH (${alias})${edge}(:${label}) } OR ${own})`;
+    }
+  }
+};
 
 export type QueryType<T> = {
   query: string;
@@ -346,6 +386,71 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     );
 
     if (validationResult.records.length === 0) {
+      throw new BadRequestException("One or more related nodes do not exist.");
+    }
+  }
+
+  /**
+   * Throws `BadRequestException("One or more related nodes do not exist.")` unless every node
+   * exists AND satisfies its company rule for `companyId` (default: the CLS company). A node of
+   * another company fails exactly like a missing one, so a caller cannot probe foreign ids.
+   *
+   * `rule` defaults to the one the target label declares (`relatedNodeRuleForLabel`, filled by
+   * `defineEntity`). With no company (system jobs, workers) every rule is existence-only.
+   *
+   * One read query: nodes are grouped by label + rule, each group is one
+   * `UNWIND $ids MATCH ... WHERE <rule> RETURN count(DISTINCT t)` subquery, and the summed count
+   * must equal the number of distinct ids.
+   *
+   * Custom repositories that write client-supplied relationship ids with their own Cypher call
+   * this before the write. `AbstractRepository` calls it from create/put/patch/addToRelationship.
+   */
+  async validateRelatedNodes(params: {
+    nodes: { id: string; label: string; rule?: RelatedNodeRule }[];
+    companyId?: string | null;
+  }): Promise<void> {
+    if (params.nodes.length === 0) return;
+
+    const companyId =
+      params.companyId !== undefined ? params.companyId : this.cls.has("companyId") ? this.cls.get("companyId") : null;
+
+    const groups = new Map<string, { label: string; rule: RelatedNodeRule; ids: Set<string> }>();
+    for (const node of params.nodes) {
+      const rule: RelatedNodeRule = companyId ? (node.rule ?? relatedNodeRuleForLabel(node.label)) : { kind: "exists" };
+      const key = `${node.label}|${JSON.stringify(rule)}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { label: node.label, rule, ids: new Set() };
+        groups.set(key, group);
+      }
+      group.ids.add(node.id);
+    }
+
+    const queryParams: Record<string, any> = { companyId: companyId ?? null };
+    const subqueries: string[] = [];
+    const counts: string[] = [];
+    let expected = 0;
+
+    [...groups.values()].forEach((group, index) => {
+      assertCypherIdentifier(group.label);
+      const predicate = relatedNodePredicate("t", group.rule);
+      queryParams[`ids${index}`] = [...group.ids];
+      expected += group.ids.size;
+      subqueries.push(`
+        CALL {
+          UNWIND $ids${index} AS relatedId
+          MATCH (t:${group.label} {id: relatedId})
+          ${predicate ? `WHERE ${predicate}` : ""}
+          RETURN count(DISTINCT t) AS found${index}
+        }`);
+      counts.push(`found${index}`);
+    });
+
+    const result = await this.read(`${subqueries.join("\n")}\nRETURN ${counts.join(" + ")} AS found`, queryParams);
+
+    const raw = result?.records?.[0]?.get("found");
+    const found = typeof raw === "number" ? raw : (raw?.toNumber?.() ?? 0);
+    if (found !== expected) {
       throw new BadRequestException("One or more related nodes do not exist.");
     }
   }

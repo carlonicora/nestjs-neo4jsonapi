@@ -21,7 +21,7 @@ const createMockNeo4jService = () => ({
   readMany: vi.fn(),
   read: vi.fn(),
   initQuery: vi.fn(),
-  validateExistingNodes: vi.fn(),
+  validateRelatedNodes: vi.fn(),
 });
 
 const createMockSecurityService = () => ({
@@ -183,7 +183,7 @@ describe("GoogleUserRepository", () => {
         const mockQuery = createMockQuery();
         neo4jService.initQuery.mockReturnValue(mockQuery);
         neo4jService.writeOne.mockResolvedValue(undefined);
-        neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+        neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
 
         await repository.create({
           id: TEST_IDS.googleUserId,
@@ -264,7 +264,7 @@ describe("GoogleUserRepository", () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.writeOne.mockResolvedValue(undefined);
-      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.validateRelatedNodes.mockResolvedValue(undefined);
 
       const specialName = "User with 'quotes' and \"double quotes\"";
       await repository.create({

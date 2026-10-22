@@ -24,6 +24,19 @@ export type CypherType = CypherBaseType | CypherArrayType;
 export type EntityTenancy = "global" | "self" | "internal" | { via: string };
 
 /**
+ * Which rows of an entity a client-supplied relationship id may point at, when the entity is the
+ * TARGET of a generic relationship write (create / put / patch / addToRelationship).
+ *
+ * - omitted (default): the target must belong to the caller's company — through its `BELONGS_TO`
+ *   edge (company-scoped), `id = $companyId` (tenancy "self"), or its `tenancy.via` parent.
+ *   tenancy "global" / "internal" targets are checked for existence only.
+ * - `"own-or-platform"`: the entity mixes platform rows (no company edge at all) with
+ *   company-owned rows. A platform row or one of the caller's own rows may be linked, never
+ *   another company's. Valid on company-scoped and on `tenancy: { via }` entities.
+ */
+export type EntityLinkScope = "own-or-platform";
+
+/**
  * Transformer function for field serialisation
  * Receives the entity data and any injected services
  */
@@ -210,6 +223,13 @@ export interface RelationshipDef {
   /** If true, the relationship is never written by generic descriptor-driven paths (create/put/patch skip it; relationship handlers reject it). Serialisation-only. */
   readOnly?: boolean;
   /**
+   * If true, the generic writers (create / put / patch / addToRelationship) check only that each
+   * target of THIS relationship exists, instead of requiring it to belong to the caller's company.
+   * For edges that legitimately cross tenants (e.g. a player's character, in the player's
+   * company, joining a campaign owned by the GM's company). Default: false.
+   */
+  crossCompany?: true;
+  /**
    * If true, the related records live outside this database (e.g. an external
    * corpus): the local node is only a link target. Generic reads
    * (`buildReturnStatement()`, so find/findById/findByIds/findByRelated/
@@ -303,6 +323,11 @@ export interface EntitySchemaInput<T, R extends Record<string, RelationshipDef> 
    *   through it to the caller's company.
    */
   tenancy?: EntityTenancy;
+  /**
+   * Which rows of this entity a relationship write from ANOTHER entity may link to. See
+   * EntityLinkScope. Allowed on company-scoped and unscoped entities.
+   */
+  linkScope?: EntityLinkScope;
   /** Field definitions - keys must be valid entity properties */
   fields: { [K in keyof Partial<T>]?: FieldDef };
   /** Relationship definitions with named keys for autocomplete */
@@ -407,6 +432,9 @@ export interface EntityDescriptor<T, R extends Record<string, RelationshipDef> =
 
   /** Tenant rule for an unscoped entity. See EntitySchemaInput.tenancy. */
   tenancy?: EntityTenancy;
+
+  /** Which rows a relationship write may link to. See EntitySchemaInput.linkScope. */
+  linkScope?: EntityLinkScope;
 
   /** Named relationships with autocomplete support (e.g., descriptor.relationships.author) */
   relationships: R;

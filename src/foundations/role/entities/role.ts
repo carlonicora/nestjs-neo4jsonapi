@@ -22,6 +22,11 @@ export type Role = Entity & {
 export const RoleDescriptor = defineEntity<Role>()({
   ...roleMeta,
 
+  // The platform roles (Administrator, CompanyAdministrator, ...) carry no company
+  // edge: a relationship write may link a platform role or one of the caller's own
+  // company roles, never another company's.
+  linkScope: "own-or-platform",
+
   // Field definitions
   fields: {
     name: { type: "string", required: true },
