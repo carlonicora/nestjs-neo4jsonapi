@@ -1,3 +1,9 @@
+## [6.6.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.0...v6.6.1) (2026-10-22)
+
+### 🐛 Bug Fixes
+
+* **security:** a second descriptor can no longer loosen a label's relationship rule ([d236e6d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d236e6d29bd15f2a94afe142008729fbd0eb5f98))
+
 ## [6.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.2...v6.6.0) (2026-10-22)
 
 ### 🚀 Features
