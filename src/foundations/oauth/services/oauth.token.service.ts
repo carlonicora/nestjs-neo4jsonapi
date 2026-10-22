@@ -157,6 +157,17 @@ export class OAuthTokenService {
       return null;
     }
 
+    // The user must still be allowed in: a token outlives nothing it was issued
+    // for (deleted, deactivated, or removed from the token's company). The token
+    // is revoked so a later reinstatement does not revive it.
+    if (
+      storedToken.userId &&
+      !(await this.isSubjectAuthorised({ userId: storedToken.userId, companyId: storedToken.companyId }))
+    ) {
+      await this.oauthRepository.revokeAccessToken(tokenHash);
+      return null;
+    }
+
     return {
       tokenId: storedToken.id,
       clientId: storedToken.clientId,
@@ -200,6 +211,13 @@ export class OAuthTokenService {
       return null;
     }
 
+    // Same subject check as access tokens: a refresh never extends the access of
+    // a user who is deleted, deactivated or removed from the token's company.
+    if (!(await this.isSubjectAuthorised({ userId: storedToken.userId, companyId: storedToken.companyId }))) {
+      await this.oauthRepository.revokeRefreshToken(tokenHash);
+      return null;
+    }
+
     return {
       tokenId: storedToken.id,
       clientId: storedToken.clientId,
@@ -209,6 +227,15 @@ export class OAuthTokenService {
       rotationCounter: storedToken.rotationCounter,
       expiresAt: storedToken.expiresAt,
     };
+  }
+
+  /**
+   * Whether the user a token or code was issued to may still use it: the user
+   * exists, is not deleted, is active and still belongs to the token's company
+   * (when it has one).
+   */
+  async isSubjectAuthorised(params: { userId: string; companyId: string | null }): Promise<boolean> {
+    return this.oauthRepository.isTokenSubjectAuthorised(params);
   }
 
   /**

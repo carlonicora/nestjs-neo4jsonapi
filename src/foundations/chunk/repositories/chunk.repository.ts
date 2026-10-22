@@ -406,6 +406,25 @@ export class ChunkRepository implements OnModuleInit {
   }
 
   /**
+   * Company gate for the by-id reads. A chunk id is not a secret (the contextualiser
+   * passes model-chosen ids, the REST route takes one from the URL), so when a company
+   * is in context the chunk must hang off content that belongs to THAT company, or off
+   * global content that belongs to no company at all (HowTo and other non-company-scoped
+   * nodes, the same bypass the default AI source query grants). A chunk owned by another
+   * company is refused.
+   *
+   * No company in context (an internal job, the corpus service on its own database with
+   * `bindRequestContext: false`) returns `""` and leaves the read as it was: the gate
+   * applies "when a company is in context", never invents one.
+   */
+  private companyPredicate(query: { queryParams?: { companyId?: unknown } }): string {
+    if (this.neo4j.bindsRequestContext === false) return "";
+    if (!query.queryParams?.companyId) return "";
+
+    return `EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(chunkOwner) WHERE (chunkOwner)-[:BELONGS_TO]->(:Company {id: $companyId}) OR NOT (chunkOwner)-[:BELONGS_TO]->(:Company) }`;
+  }
+
+  /**
    * `dataLimits` is optional so existing callers keep working, but the
    * contextualiser MUST pass it: the ids reaching this method come from an LLM
    * choosing among the chunks it was shown. That is a soft constraint — the
@@ -423,9 +442,15 @@ export class ChunkRepository implements OnModuleInit {
       ...(scopePredicate?.params ?? {}),
     };
 
+    const companyPredicate = this.companyPredicate(query);
+    const predicates = [
+      scopePredicate ? `EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE ${scopePredicate.cypher} }` : "",
+      companyPredicate,
+    ].filter((predicate) => predicate.length > 0);
+
     query.query += `
       MATCH (chunk:Chunk {id: $chunkId})
-      ${scopePredicate ? `WHERE EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE ${scopePredicate.cypher} }` : ""}
+      ${predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : ""}
       RETURN chunk
     `;
 
@@ -470,10 +495,13 @@ export class ChunkRepository implements OnModuleInit {
       ...(scopePredicate?.params ?? {}),
     };
 
+    const companyPredicate = this.companyPredicate(query);
+
     query.query += `
       MATCH (chunk:Chunk)
       WHERE chunk.id IN $chunkIds
       ${scopePredicate ? `AND EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE ${scopePredicate.cypher} }` : ""}
+      ${companyPredicate ? `AND ${companyPredicate}` : ""}
       RETURN chunk
     `;
 

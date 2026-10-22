@@ -13,6 +13,7 @@ import {
 } from "@nestjs/websockets";
 import { ClsInterceptor, ClsService } from "nestjs-cls";
 import { Server, Socket } from "socket.io";
+import { isSessionPayload } from "../../../common/guards/session.token";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
 import { PresenceService } from "../services/presence.service";
@@ -67,13 +68,25 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       return;
     } else {
       try {
-        const payload = this.jwtService.verify(token);
+        const payload: Record<string, unknown> = this.jwtService.verify(token);
+
+        // Pending-2FA, selection and portal tokens verify with the same secret but are
+        // not sessions: such a socket stays anonymous, exactly like an invalid token.
+        if (!isSessionPayload(payload)) {
+          this.logger.error(`[PRESENCE] Non-session token refused for client: ${client.id}`);
+          client.data.user = { userId: null };
+          return;
+        }
+
         client.data.user = payload;
 
         this.webSocketService.addClient(payload.userId, client);
 
         // Set user as online
-        await this.presenceService.setUserOnline(payload.userId, payload.userName || payload.name, client.id);
+        // `userName` is what `SecurityService.signJwt` writes; `name` is the legacy key
+        // read since the first release, kept for tokens an app signs itself.
+        const displayName = payload.userName || (typeof payload.name === "string" ? payload.name : undefined);
+        await this.presenceService.setUserOnline(payload.userId, displayName, client.id);
 
         // Presence goes to the user's company only, never to every socket.
         const presencePayload = {

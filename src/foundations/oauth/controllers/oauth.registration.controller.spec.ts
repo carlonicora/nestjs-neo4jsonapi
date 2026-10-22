@@ -1,4 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
+import { HttpException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
 import { OAuthRegistrationController } from "./oauth.registration.controller";
@@ -48,5 +49,39 @@ describe("OAuthRegistrationController", () => {
     expect(res.client_id).toBe("cid_123");
     expect(res.token_endpoint_auth_method).toBe("none");
     expect(res.client_secret).toBeUndefined();
+  });
+
+  describe("scope is restricted to mcp", () => {
+    const base = {
+      redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+      client_name: "Claude",
+      token_endpoint_auth_method: "none",
+    };
+
+    beforeEach(() => clientService.createClient.mockClear());
+
+    it.each(["admin", "profile", "read write", "mcp admin", "mcp profile"])(
+      'refuses scope "%s" with 400 invalid_client_metadata and creates no client',
+      async (scope) => {
+        const error = await controller.register({ ...base, scope } as any).catch((e: unknown) => e);
+
+        expect(error).toBeInstanceOf(HttpException);
+        expect((error as HttpException).getStatus()).toBe(400);
+        expect((error as HttpException).getResponse()).toMatchObject({ error: "invalid_client_metadata" });
+        expect(clientService.createClient).not.toHaveBeenCalled();
+      },
+    );
+
+    it('registers scope "mcp" with allowedScopes ["mcp"]', async () => {
+      await controller.register({ ...base, scope: "mcp" } as any);
+
+      expect(clientService.createClient).toHaveBeenCalledWith(expect.objectContaining({ allowedScopes: ["mcp"] }));
+    });
+
+    it('defaults an omitted scope to ["mcp"]', async () => {
+      await controller.register({ ...base } as any);
+
+      expect(clientService.createClient).toHaveBeenCalledWith(expect.objectContaining({ allowedScopes: ["mcp"] }));
+    });
   });
 });

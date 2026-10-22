@@ -324,21 +324,32 @@ export class OAuthRepository implements OnModuleInit {
     }
   }
 
+  /**
+   * Marks an authorization code as used. Returns true only for the request that
+   * flips `isUsed` from false to true; every later (or concurrent) redemption
+   * gets false.
+   *
+   * The write lock is taken BEFORE `isUsed` is read (`SET ... _lock` then
+   * `REMOVE`, the Neo4j lost-update pattern): two concurrent transactions
+   * serialise on the lock, and the second one reads the committed
+   * `isUsed = true` and matches zero rows. The query has a serialiser, so
+   * `writeOne` returns null on zero rows (without one it always returned null
+   * and the result could not tell a first use from a replay).
+   */
   async markAuthorizationCodeUsed(codeHash: string): Promise<boolean> {
-    // Atomic update - returns true only if code was not already used
-    const query = this.neo4j.initQuery();
+    const query = this.neo4j.initQuery({ serialiser: OAuthAuthorizationCodeModel });
     query.queryParams = { codeHash };
     query.query = `
-      MATCH (code:OAuthAuthorizationCode {codeHash: $codeHash, isUsed: false})
-      SET code.isUsed = true
-      RETURN code
+      MATCH (oauthauthorizationcode:OAuthAuthorizationCode {codeHash: $codeHash})
+      SET oauthauthorizationcode._lock = true
+      REMOVE oauthauthorizationcode._lock
+      WITH oauthauthorizationcode
+      WHERE oauthauthorizationcode.isUsed = false
+      SET oauthauthorizationcode.isUsed = true
+      RETURN oauthauthorizationcode
     `;
-    try {
-      await this.neo4j.writeOne(query);
-      return true;
-    } catch {
-      return false;
-    }
+    const code = await this.neo4j.writeOne<OAuthAuthorizationCode>(query);
+    return code !== null && code !== undefined;
   }
 
   async deleteExpiredAuthorizationCodes(): Promise<void> {
@@ -530,6 +541,28 @@ export class OAuthRepository implements OnModuleInit {
   // ============================================
   // USER LOOKUP METHODS
   // ============================================
+
+  /**
+   * Whether the user a token was issued to may still use it: the user exists,
+   * is not deleted, is active and, when the token carries a company, still
+   * BELONGS_TO that company. A token without a company (a platform user with no
+   * company) only needs the user checks.
+   */
+  async isTokenSubjectAuthorised(params: { userId: string; companyId: string | null }): Promise<boolean> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, userId: params.userId, tokenCompanyId: params.companyId ?? null };
+    query.query = `
+      MATCH (oauthUser:User {id: $userId})
+      WHERE coalesce(oauthUser.isDeleted, false) = false
+        AND oauthUser.isActive = true
+        AND ($tokenCompanyId IS NULL OR EXISTS {
+          MATCH (oauthUser)-[:BELONGS_TO]->(:${companyMeta.labelName} {id: $tokenCompanyId})
+        })
+      RETURN count(oauthUser) AS total
+    `;
+    const total = await this.neo4j.readCount(query.query, query.queryParams);
+    return total > 0;
+  }
 
   /**
    * Looks up the company ID for a user.

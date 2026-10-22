@@ -901,6 +901,107 @@ describe("S3Controller", () => {
     });
   });
 
+  describe("served content type and disposition (uploaded objects never render as active content)", () => {
+    const makeReply = () => ({
+      status: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
+      removeHeader: vi.fn().mockReturnThis(),
+      send: vi.fn(),
+    });
+    const headerOf = (reply: ReturnType<typeof makeReply>, name: string) =>
+      reply.header.mock.calls.filter(([key]) => key === name).map(([, value]) => value);
+
+    beforeEach(() => {
+      s3Service.contentDispositionAttachment.mockImplementation((name: string) => `attachment; filename="${name}"`);
+      s3Service.contentDispositionInline.mockImplementation((key: string) => `inline; key="${key}"`);
+      s3Service.contentDispositionInlineFilename.mockImplementation((name: string) => `inline; filename="${name}"`);
+    });
+
+    it.each(["application/pdf", "image/png", "image/jpeg", "text/html", "image/svg+xml", undefined])(
+      "always sends X-Content-Type-Options: nosniff (stored type %s)",
+      async (contentType) => {
+        cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/x" });
+        s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType });
+        const reply = makeReply();
+
+        await controller.getObject(reply as any, "token");
+
+        expect(headerOf(reply, "X-Content-Type-Options")).toEqual(["nosniff"]);
+      },
+    );
+
+    it.each([
+      "text/html",
+      "text/html; charset=utf-8",
+      "image/svg+xml",
+      "application/xhtml+xml",
+      "text/xml",
+      "application/javascript",
+    ])(
+      "serves a stored %s object as an octet-stream attachment, even when the token asks for inline",
+      async (contentType) => {
+        cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/page.html", f: "page.html", i: 1 });
+        s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType });
+        const reply = makeReply();
+
+        await controller.getObject(reply as any, "token");
+
+        expect(headerOf(reply, "Content-Type")).toEqual(["application/octet-stream"]);
+        expect(headerOf(reply, "Content-Disposition")).toEqual([`attachment; filename="page.html"`]);
+        expect(s3Service.contentDispositionInline).not.toHaveBeenCalled();
+        expect(s3Service.contentDispositionInlineFilename).not.toHaveBeenCalled();
+      },
+    );
+
+    it("names an unsafe object without a token file name after the last key segment, as an attachment", async () => {
+      cipher.verifyObjectToken.mockReturnValue({ o: "get", k: "companies/c/x/evil%20page.svg" });
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType: "image/svg+xml" });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(headerOf(reply, "Content-Disposition")).toEqual([`attachment; filename="evil page.svg"`]);
+      expect(headerOf(reply, "Content-Type")).toEqual(["application/octet-stream"]);
+    });
+
+    it.each([
+      ["image/png", { o: "get", k: "companies/c/a.png" }, `inline; key="companies/c/a.png"`],
+      ["application/pdf", { o: "get", k: "companies/c/a.pdf", f: "Atto.pdf", i: 1 }, `inline; filename="Atto.pdf"`],
+      ["IMAGE/JPEG", { o: "get", k: "companies/c/a.jpg" }, `inline; key="companies/c/a.jpg"`],
+    ])("keeps a stored %s object inline with its own type", async (contentType, token, disposition) => {
+      cipher.verifyObjectToken.mockReturnValue(token);
+      s3Service.downloadObject.mockResolvedValue({ stream: Readable.from(["data"]), contentType });
+      const reply = makeReply();
+
+      await controller.getObject(reply as any, "token");
+
+      expect(headerOf(reply, "Content-Type")).toEqual([contentType]);
+      expect(headerOf(reply, "Content-Disposition")).toEqual([disposition]);
+    });
+
+    it.each(["text/html", "TEXT/HTML; charset=utf-8", "image/svg+xml", "application/xhtml+xml"])(
+      "presign refuses contentType %s with 400 and never signs a put token",
+      async (contentType) => {
+        await expect(controller.getPresignedUrl("companies/company-1/x", contentType, false)).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(s3Service.generatePresignedUrl).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      "application/pdf",
+      "image/png",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ])("presign still signs contentType %s", async (contentType) => {
+      s3Service.generatePresignedUrl.mockResolvedValue(mockPresignedResponse);
+
+      await controller.getPresignedUrl("companies/company-1/x", contentType, false);
+
+      expect(s3Service.generatePresignedUrl).toHaveBeenCalledWith(expect.objectContaining({ contentType }));
+    });
+  });
+
   describe("dependency injection", () => {
     it("should have s3Service injected", () => {
       expect(controller["service"]).toBeDefined();

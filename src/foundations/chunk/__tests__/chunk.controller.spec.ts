@@ -32,6 +32,7 @@ import { ChunkController } from "../controllers/chunk.controller";
 import { ChunkService } from "../services/chunk.service";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+import { RoleId } from "../../../common/constants/system.roles";
 
 describe("ChunkController", () => {
   let controller: ChunkController;
@@ -107,6 +108,35 @@ describe("ChunkController", () => {
       chunkService.findById.mockRejectedValue(new Error("Not found"));
 
       await expect(controller.findById("non-existent-id")).rejects.toThrow("Not found");
+    });
+  });
+
+  describe("authorisation metadata", () => {
+    // JwtAuthGuard._validateRoles reads `roles` from the handler Nest calls; a class-level
+    // @Roles is not read, so the restriction must sit on the method itself.
+    const rolesOf = (method: keyof ChunkController) =>
+      Reflect.getMetadata("roles", ChunkController.prototype[method] as any) as string[] | undefined;
+
+    it("restricts POST /chunks/rebuild-all-embeddings to the platform Administrator", () => {
+      expect(rolesOf("rebuildAllEmbeddings")).toEqual([RoleId.Administrator]);
+    });
+
+    it("refuses a non-admin role by metadata: CompanyAdministrator is not in the list", () => {
+      expect(rolesOf("rebuildAllEmbeddings")).not.toContain(RoleId.CompanyAdministrator);
+    });
+
+    // Same job as rebuild-all: drops the global vector index and re-embeds every company's chunks.
+    it("restricts POST /chunks/rebuild-embeddings to the platform Administrator", () => {
+      expect(rolesOf("rebuildEmbeddings")).toEqual([RoleId.Administrator]);
+      expect(rolesOf("rebuildEmbeddings")).not.toContain(RoleId.CompanyAdministrator);
+    });
+
+    it("leaves GET /chunks/:chunkId open to any authenticated user (company-filtered in the repository)", () => {
+      expect(rolesOf("findById")).toBeUndefined();
+    });
+
+    it("puts the restriction on the handler, not on the class", () => {
+      expect(Reflect.getMetadata("roles", ChunkController)).toBeUndefined();
     });
   });
 

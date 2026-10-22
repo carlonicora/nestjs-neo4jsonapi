@@ -40,6 +40,7 @@ describe("OAuthTokenService", () => {
       revokeAllUserTokensForClient: vi.fn().mockResolvedValue(undefined),
       deleteExpiredTokens: vi.fn().mockResolvedValue(undefined),
       deleteExpiredAuthorizationCodes: vi.fn().mockResolvedValue(undefined),
+      isTokenSubjectAuthorised: vi.fn().mockResolvedValue(true),
     };
 
     mockConfigService = {

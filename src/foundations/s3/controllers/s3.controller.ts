@@ -48,6 +48,33 @@ import { S3Service } from "../../s3/services/s3.service";
 /** How long the browser keeps a file reached through a permanent (non-expiring) link. */
 const PERMANENT_LINK_CACHE_SECONDS = 3600;
 
+/**
+ * Stored content types a download may render in place: raster images and PDF. Anything else
+ * (HTML, SVG, XHTML, XML, scripts, office files, unknown types) is served as an
+ * `application/octet-stream` attachment, so an uploaded document can never execute on the API origin.
+ */
+export const S3_INLINE_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  "application/pdf",
+]);
+
+/** Content types refused at presign: they render as active content in a browser. */
+export const S3_REFUSED_UPLOAD_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "text/html",
+  "image/svg+xml",
+  "application/xhtml+xml",
+]);
+
+/** `"Image/PNG; charset=binary"` → `"image/png"`; blank or absent → `""`. */
+function baseContentType(contentType: string | undefined | null): string {
+  return (contentType ?? "").split(";")[0].trim().toLowerCase();
+}
+
 @Controller(s3Meta.endpoint)
 export class S3Controller {
   constructor(
@@ -74,6 +101,9 @@ export class S3Controller {
     @Query("isPublic") isPublic: boolean,
   ) {
     await this.clientKeys.assertKeyAccess({ key, action: "upload", isPublic });
+
+    if (S3_REFUSED_UPLOAD_CONTENT_TYPES.has(baseContentType(contentType)))
+      throw new BadRequestException(`Uploads of type ${baseContentType(contentType)} are not allowed`);
 
     return await this.service.generatePresignedUrl({
       key: key,
@@ -175,15 +205,13 @@ export class S3Controller {
       return;
     }
 
-    reply.header("Content-Type", object.contentType ?? "application/octet-stream");
-    reply.header(
-      "Content-Disposition",
-      payload.f && payload.i
-        ? this.service.contentDispositionInlineFilename(payload.f)
-        : payload.f
-          ? this.service.contentDispositionAttachment(payload.f)
-          : this.service.contentDispositionInline(payload.k),
-    );
+    // Only raster images and PDF keep their stored type and may render inline. Everything else is
+    // forced to an octet-stream attachment (the stored type is client-chosen at presign), and nosniff
+    // stops the browser from guessing an executable type back out of the bytes.
+    const inlineSafe = S3_INLINE_CONTENT_TYPES.has(baseContentType(object.contentType));
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Content-Type", inlineSafe ? object.contentType : "application/octet-stream");
+    reply.header("Content-Disposition", this._contentDisposition(payload, inlineSafe));
     reply.header("Cache-Control", this._cacheControl(payload));
     reply.header("Accept-Ranges", "none");
 
@@ -196,6 +224,31 @@ export class S3Controller {
     }
 
     reply.send(object.stream);
+  }
+
+  /**
+   * Inline only for an inline-safe type; otherwise an attachment, named after the token's file name
+   * or, without one, after the last segment of the key (the same name `contentDispositionInline` uses).
+   */
+  private _contentDisposition(payload: S3ObjectTokenPayload, inlineSafe: boolean): string {
+    if (inlineSafe) {
+      return payload.f && payload.i
+        ? this.service.contentDispositionInlineFilename(payload.f)
+        : payload.f
+          ? this.service.contentDispositionAttachment(payload.f)
+          : this.service.contentDispositionInline(payload.k);
+    }
+
+    if (payload.f) return this.service.contentDispositionAttachment(payload.f);
+
+    const segment = payload.k.split("/").pop() || payload.k;
+    let filename = segment;
+    try {
+      filename = decodeURIComponent(segment);
+    } catch {
+      // Not URI-encoded: keep the raw segment.
+    }
+    return this.service.contentDispositionAttachment(filename);
   }
 
   /**

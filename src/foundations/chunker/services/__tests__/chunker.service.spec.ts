@@ -1,5 +1,4 @@
 import { Document } from "@langchain/core/documents";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as fs from "fs/promises";
@@ -14,6 +13,8 @@ vi.mock("fs/promises", async (importOriginal) => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn().mockResolvedValue("# heading\n\nsome markdown body"),
 }));
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const makeConfig = (strategy: string, targetChars = 1500) =>
   ({
@@ -31,19 +32,18 @@ const makeFullConfig = (opts: { mock?: boolean; strategy?: string } = {}) =>
     }),
   }) as any;
 
-const stubFetchWithBytes = () =>
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      statusText: "OK",
-      arrayBuffer: async () => new ArrayBuffer(8),
-    }),
-  );
-
 const md = { splitMarkdownToChunks: vi.fn() } as any;
 const sem = { splitMarkdownToChunks: vi.fn() } as any;
-const stub = {} as any;
+// Stands in for every collaborator a test does not exercise. In the S3Service slot it answers
+// `downloadFileBuffer`, so a storage-key source reads eight placeholder bytes.
+const stub = {
+  downloadFileBuffer: vi.fn(async () => ({ buffer: Buffer.alloc(8), contentType: "application/octet-stream" })),
+} as any;
+
+/** A CHUNKER_SOURCE_FETCHER binding that returns eight placeholder bytes for any URL. */
+const bytesFetcher = () => ({
+  fetch: vi.fn(async () => ({ buffer: Buffer.alloc(8), contentType: "application/octet-stream" })),
+});
 
 describe("ChunkerService splitter selection", () => {
   it("uses MarkdownChunkingService when strategy is markdown-structural", () => {
@@ -80,7 +80,7 @@ describe("ChunkerService page count", () => {
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "pdf",
-      filePath: "https://storage.test/bucket/file.pdf",
+      filePath: "bucket/file.pdf",
     });
 
     expect(docs).toHaveLength(1);
@@ -88,7 +88,6 @@ describe("ChunkerService page count", () => {
   });
 
   it("stamps the real PDF page count on every chunk", async () => {
-    stubFetchWithBytes();
     const splitter = {
       splitMarkdownToChunks: vi
         .fn()
@@ -120,7 +119,7 @@ describe("ChunkerService page count", () => {
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "pdf",
-      filePath: "https://storage.test/bucket/file.pdf",
+      filePath: "bucket/file.pdf",
     });
 
     expect(docs).toHaveLength(2);
@@ -151,7 +150,6 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
     warn.mock.calls.some((call) => String(call[0]).includes(needle));
 
   it("prefers the word estimate when the PDF reports a single page for pages of text", async () => {
-    stubFetchWithBytes();
     const splitter = twoChunkSplitter();
     const pdfService = {
       // The exact shape of the run's 23 mismatches: a real multi-page PDF whose
@@ -179,7 +177,7 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "pdf",
-      filePath: "https://storage.test/bucket/file.pdf",
+      filePath: "bucket/file.pdf",
     });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 48)).toBe(true);
@@ -187,7 +185,6 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
   });
 
   it("keeps the reported count when it is plausible", async () => {
-    stubFetchWithBytes();
     const splitter = twoChunkSplitter();
     const pdfService = {
       extractPdfContent: vi.fn().mockResolvedValue({
@@ -212,7 +209,7 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "pdf",
-      filePath: "https://storage.test/bucket/file.pdf",
+      filePath: "bucket/file.pdf",
     });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 50)).toBe(true);
@@ -220,7 +217,6 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
   });
 
   it("flags ocrTruncated when OCR covered fewer pages than the document has", async () => {
-    stubFetchWithBytes();
     const splitter = twoChunkSplitter();
     const pdfService = {
       extractPdfContent: vi.fn().mockResolvedValue({
@@ -247,7 +243,7 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "pdf",
-      filePath: "https://storage.test/bucket/scan.pdf",
+      filePath: "bucket/scan.pdf",
     });
 
     expect(docs.every((doc) => doc.metadata.totalPages === 50)).toBe(true);
@@ -256,7 +252,6 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
   });
 
   it("splits an oversized chunk produced by a type service down to the hard cap", async () => {
-    stubFetchWithBytes();
     // 60k chars ≈ 12 000 words → 24 estimated pages, well past MAX_CHUNK_CHARS.
     const oversized = "word ".repeat(12_000).trim();
     const splitter = {
@@ -284,7 +279,7 @@ describe("ChunkerService page-count plausibility, OCR truncation and chunk cap",
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "docx",
-      filePath: "https://storage.test/bucket/file.docx",
+      filePath: "bucket/file.docx",
     });
 
     expect(docs.length).toBeGreaterThanOrEqual(3);
@@ -329,13 +324,12 @@ describe("ChunkerService image usage recording", () => {
   };
 
   it("records image analysis usage when attribution is provided", async () => {
-    stubFetchWithBytes();
     const recorder = { recordTokenUsage: vi.fn().mockResolvedValue(undefined) };
     const service = makeImageService(recorder);
 
     await service.generateContentStructureFromFile({
       fileType: "png",
-      filePath: "http://example.com/image.png",
+      filePath: "companies/c1/image.png",
       attribution: { relationshipId: "doc-1", relationshipType: "Document" },
     });
 
@@ -349,13 +343,12 @@ describe("ChunkerService image usage recording", () => {
   });
 
   it("records nothing when attribution is absent", async () => {
-    stubFetchWithBytes();
     const recorder = { recordTokenUsage: vi.fn().mockResolvedValue(undefined) };
     const service = makeImageService(recorder);
 
     const docs = await service.generateContentStructureFromFile({
       fileType: "png",
-      filePath: "http://example.com/image.png",
+      filePath: "companies/c1/image.png",
     });
 
     expect(recorder.recordTokenUsage).not.toHaveBeenCalled();
@@ -370,8 +363,24 @@ describe("ChunkerService markdown title", () => {
     "&X-Amz-Credential=minioadmin%2F20260918%2Flocal%2Fs3%2Faws4_request" +
     "&X-Amz-Signature=0b0d887592e6620deadbeef";
 
+  // The title is derived from a presigned URL here, so the source is read through a bound fetcher.
   const makeService = (splitter: any) =>
-    new ChunkerService(splitter, splitter, stub, stub, stub, stub, stub, stub, stub, makeFullConfig());
+    new ChunkerService(
+      splitter,
+      splitter,
+      stub,
+      stub,
+      stub,
+      stub,
+      stub,
+      stub,
+      stub,
+      makeFullConfig(),
+      undefined,
+      undefined,
+      undefined,
+      bytesFetcher(),
+    );
 
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -379,7 +388,6 @@ describe("ChunkerService markdown title", () => {
   });
 
   it("uses the caller's title rather than anything derived from the file path", async () => {
-    stubFetchWithBytes();
     const splitter = { splitMarkdownToChunks: vi.fn().mockResolvedValue([]) } as any;
 
     await makeService(splitter).generateContentStructureFromFile({
@@ -397,7 +405,6 @@ describe("ChunkerService markdown title", () => {
   // never matched, because a presigned URL ends in its query string. The signature and
   // credential were written into chunk 0, and from there into embeddings and prompts.
   it("never leaks the presigned query string into the title when no title is given", async () => {
-    stubFetchWithBytes();
     const splitter = { splitMarkdownToChunks: vi.fn().mockResolvedValue([]) } as any;
 
     await makeService(splitter).generateContentStructureFromFile({ fileType: "md", filePath: SIGNED_URL });
@@ -451,49 +458,9 @@ describe("ChunkerService source reading", () => {
     expect(s3.generateSignedUrl).not.toHaveBeenCalled();
     // The bytes read from storage are what lands in the chunker's temp file.
     expect(fs.writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/^\/tmp\/temp-file\./),
+      expect.stringMatching(new RegExp(`^${escapeRegExp(join(tmpdir(), "temp-file."))}`)),
       Buffer.from("stored bytes"),
     );
-  });
-
-  it("still fetches an http(s) filePath", async () => {
-    const s3 = makeS3();
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      statusText: "OK",
-      arrayBuffer: async () => new TextEncoder().encode("remote bytes").buffer,
-    } as any);
-
-    await makeService(s3).generateContentStructureFromFile({
-      fileType: "md",
-      filePath: "https://external.test/legacy/d.md",
-    });
-
-    expect(fetchSpy).toHaveBeenCalledWith("https://external.test/legacy/d.md");
-    expect(s3.downloadFileBuffer).not.toHaveBeenCalled();
-    expect(s3.generateSignedUrl).not.toHaveBeenCalled();
-  });
-
-  it("reads an absolute local path from disk", async () => {
-    const s3 = makeS3();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const dir = mkdtempSync(join(tmpdir(), "chunker-spec-"));
-    const localPath = join(dir, "local.txt");
-    writeFileSync(localPath, "local bytes");
-    // fs/promises is stubbed for the chunker's temp files; this one read goes to disk.
-    const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises");
-    vi.mocked(fs.readFile).mockImplementationOnce(actual.readFile as any);
-
-    try {
-      const buffer: Buffer = await (makeService(s3) as any)._readSource({ filePath: localPath });
-
-      expect(buffer.toString("utf-8")).toBe("local bytes");
-      expect(fs.readFile).toHaveBeenCalledWith(localPath);
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(s3.downloadFileBuffer).not.toHaveBeenCalled();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it("_createChunksFromImage reads a key without signing a URL", async () => {

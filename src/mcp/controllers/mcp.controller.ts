@@ -16,6 +16,8 @@ import { FastifyReply, FastifyRequest } from "fastify";
 import { ClsService } from "nestjs-cls";
 import { UserModulesRepository } from "../../agents/graph/repositories/user-modules.repository";
 import { ConfigMcpInterface } from "../../config/interfaces/config.mcp.interface";
+import { OAuthScopes } from "../../common/decorators/oauth.scopes.decorator";
+import { OAuth2Scopes } from "../../foundations/oauth/constants/oauth.scopes";
 import { OAuthTokenGuard } from "../../foundations/oauth/guards/oauth.token.guard";
 import { McpAuthFilter } from "../filters/mcp.auth.filter";
 import { McpUserContext } from "../interfaces/mcp.tool.interface";
@@ -39,6 +41,9 @@ import { McpServerFactory } from "../services/mcp.server.factory";
 @Controller("mcp")
 @UseFilters(McpAuthFilter)
 @UseGuards(OAuthTokenGuard)
+// A token granted for any other scope (e.g. "profile", which the consent screen
+// shows as "view your profile") must not reach the MCP tool set.
+@OAuthScopes(OAuth2Scopes.MCP)
 export class McpController {
   constructor(
     private readonly factory: McpServerFactory,

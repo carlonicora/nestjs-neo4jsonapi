@@ -116,7 +116,7 @@ describe("JwtAuthGuard", () => {
   describe("handleRequest", () => {
     it("should throw Unauthorised when no token present", () => {
       const context = createMockExecutionContext({ headers: {} });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       expect(() => guard.handleRequest(null, null, null, context)).toThrow(HttpException);
       expect(() => guard.handleRequest(null, null, null, context)).toThrow("Unauthorised");
@@ -126,7 +126,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer expired-token" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       expect(() => guard.handleRequest(null, null, { message: "jwt expired" }, context)).toThrow(HttpException);
       expect(() => guard.handleRequest(null, null, { message: "jwt expired" }, context)).toThrow("Token expired");
@@ -137,7 +137,7 @@ describe("JwtAuthGuard", () => {
         headers: { authorization: "Bearer token" },
       });
       const originalError = new Error("Custom error");
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       expect(() => guard.handleRequest(originalError, null, null, context)).toThrow(originalError);
     });
@@ -146,7 +146,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer token" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       expect(() => guard.handleRequest(null, null, null, context)).toThrow(HttpException);
       expect(() => guard.handleRequest(null, null, null, context)).toThrow("Unauthorised");
@@ -159,7 +159,7 @@ describe("JwtAuthGuard", () => {
           "x-language": "fr",
         },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       const result = guard.handleRequest(null, MOCK_USER, null, context);
 
@@ -175,7 +175,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer my-jwt-token" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       guard.handleRequest(null, MOCK_USER, null, context);
 
@@ -186,22 +186,22 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "raw-token-no-bearer" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       guard.handleRequest(null, MOCK_USER, null, context);
 
       expect(clsService.set).toHaveBeenCalledWith("token", "raw-token-no-bearer");
     });
 
-    it("should use x-companyid header when user has no companyId", () => {
-      const userWithoutCompany = { ...MOCK_USER, companyId: undefined };
+    it("should use x-companyid header when a system Administrator token has no companyId", () => {
+      const userWithoutCompany = { ...MOCK_USER, companyId: undefined, roles: [TEST_IDS.adminRoleId] };
       const context = createMockExecutionContext({
         headers: {
           authorization: "Bearer valid-token",
           "x-companyid": "header-company-id",
         },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       guard.handleRequest(null, userWithoutCompany, null, context);
 
@@ -212,7 +212,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       const result = guard.handleRequest(null, MOCK_USER, null, context);
 
@@ -223,7 +223,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue(["required-role"]);
+      reflector.getAllAndOverride.mockReturnValue(["required-role"]);
 
       expect(() => guard.handleRequest(null, MOCK_USER, null, context)).toThrow(HttpException);
       expect(() => guard.handleRequest(null, MOCK_USER, null, context)).toThrow("Unauthorised");
@@ -234,7 +234,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue(["required-role"]);
+      reflector.getAllAndOverride.mockReturnValue(["required-role"]);
 
       const result = guard.handleRequest(null, userWithRequiredRole, null, context);
 
@@ -245,7 +245,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue(["some-other-role"]);
+      reflector.getAllAndOverride.mockReturnValue(["some-other-role"]);
 
       // Admin should pass even if "some-other-role" is required
       const result = guard.handleRequest(null, MOCK_ADMIN_USER, null, context);
@@ -259,7 +259,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue(null);
+      reflector.getAllAndOverride.mockReturnValue(null);
 
       const result = guard.handleRequest(null, MOCK_USER, null, context);
 
@@ -270,7 +270,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue([]);
+      reflector.getAllAndOverride.mockReturnValue([]);
 
       const result = guard.handleRequest(null, MOCK_USER, null, context);
 
@@ -285,7 +285,7 @@ describe("JwtAuthGuard", () => {
       const context = createMockExecutionContext({
         headers: { authorization: "Bearer valid-token" },
       });
-      reflector.get.mockReturnValue(["required-role"]);
+      reflector.getAllAndOverride.mockReturnValue(["required-role"]);
 
       const result = guard.handleRequest(null, multiRoleUser, null, context);
 
@@ -331,7 +331,7 @@ describe("JwtAuthGuard without SYSTEM_ROLES", () => {
     const context = createMockExecutionContext({
       headers: { authorization: "Bearer valid-token" },
     });
-    reflector.get.mockReturnValue(["some-required-role"]);
+    reflector.getAllAndOverride.mockReturnValue(["some-required-role"]);
 
     const result = guard.handleRequest(null, userWithAdminString, null, context);
 

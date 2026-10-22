@@ -4,6 +4,8 @@ import { ConfigService } from "@nestjs/config";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 
+import { RoleId } from "../../../common/constants/system.roles";
+import { Roles } from "../../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { chunkMeta } from "../../chunk/entities/chunk.meta";
@@ -38,7 +40,10 @@ export class ChunkController {
     return await this.chunkService.findById({ chunkId: chunkId });
   }
 
+  // Queues the same job as rebuild-all: it drops the global vector index and re-embeds every
+  // company's chunks. Platform Administrator only.
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator)
   @Post(`${chunkMeta.endpoint}/rebuild-embeddings`)
   async rebuildEmbeddings(): Promise<{ jobId: string; message: string }> {
     const companyId = this.clsService.get("companyId");
@@ -56,7 +61,9 @@ export class ChunkController {
     };
   }
 
+  // Drops and rebuilds every embedding across all companies: platform Administrator only.
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.Administrator)
   @Post(`${chunkMeta.endpoint}/rebuild-all-embeddings`)
   async rebuildAllEmbeddings(): Promise<{
     chunkJobId: string;

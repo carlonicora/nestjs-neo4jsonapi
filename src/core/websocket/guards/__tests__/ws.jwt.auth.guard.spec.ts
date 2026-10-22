@@ -93,6 +93,24 @@ describe("WsJwtGuard", () => {
     vi.clearAllMocks();
   });
 
+  describe("token class", () => {
+    it.each<[string, Record<string, unknown>]>([
+      ["pending-2FA token", { userId: TEST_IDS.userId, pendingId: "p1", pending: true, type: "pending_2fa" }],
+      ["company-selection token", { userId: TEST_IDS.userId, scope: "company-selection" }],
+      ["invitation-selection token", { userId: TEST_IDS.userId, scope: "invitation-selection" }],
+      ["portal Person token", { personEmail: "client@example.com", companyId: TEST_IDS.companyId }],
+      ["token without roles", { userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }],
+    ])("refuses a %s and attaches no user", async (_, payload) => {
+      const socket = createMockSocket({ authToken: "signed-but-not-a-session" });
+      jwtService.verify.mockReturnValue(payload);
+
+      const result = await guard.canActivate(createMockWsContext(socket));
+
+      expect(result).toBe(false);
+      expect(socket.data.user).toBeUndefined();
+    });
+  });
+
   describe("canActivate", () => {
     it("should return true when valid token in handshake auth", async () => {
       const socket = createMockSocket({ authToken: "valid-token" });

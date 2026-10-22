@@ -22,6 +22,7 @@ import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 import { buildFulltextTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
 import { sanitiseSignupSource, SignupSource } from "../../waitlist/utils/signup-source";
+import { revokeUserOAuthTokensClause } from "../../oauth/queries/revoke-user-oauth-tokens.query";
 
 /**
  * User repository.
@@ -66,6 +67,31 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       MATCH (company:Company {id: $companyId})
       MATCH (user:User {id: $userId})-[:BELONGS_TO]->(company)
     `;
+  }
+
+  /**
+   * Cypher that revokes every OAuth access and refresh token of `userAlias`
+   * (see `revokeUserOAuthTokensClause`). Protected so an application repository
+   * that overrides `putUser` or adds its own delete path can append the same
+   * clause to its query, after a `WITH` that carries `userAlias`.
+   */
+  protected revokeOAuthTokensClause(userAlias = "user"): string {
+    return revokeUserOAuthTokensClause(userAlias);
+  }
+
+  /**
+   * Revokes every OAuth access and refresh token of a user. For application
+   * paths that end a user's access outside `deleteUser` / `putUser`.
+   */
+  async revokeOAuthTokens(params: { userId: string }): Promise<void> {
+    const query = this.neo4j.initQuery();
+    query.queryParams = { ...query.queryParams, userId: params.userId };
+    query.query = `
+      MATCH (user:User {id: $userId})
+      WITH user
+      ${this.revokeOAuthTokensClause("user")}
+    `;
+    await this.neo4j.writeOne(query);
   }
 
   /**
@@ -575,7 +601,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     setClauses.push("user.title = $title");
     setClauses.push("user.bio = $bio");
     if (!params.preserveAvatar) setClauses.push("user.avatar = $avatar");
-    if (params.password !== undefined && params.password !== "") setClauses.push("user.password = $password");
+    const hasNewPassword = params.password !== undefined && params.password !== "";
+    if (hasNewPassword) setClauses.push("user.password = $password");
     if (params.isActive !== undefined) {
       params.isActive = params.isActive ? true : false;
       setClauses.push("user.isActive = $isActive");
@@ -626,6 +653,19 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
           `
       }
       SET ${setClauses.join(", ")}
+
+      ${
+        // A new password ends every OAuth grant of the user: a connected MCP
+        // client must not outlive the credential it was authorised under. Inside
+        // this query, so it runs only when the user matched (a caller confined
+        // to another company revokes nothing).
+        hasNewPassword
+          ? `
+            WITH user${scopeToCompany ? ", company" : ""}
+            ${this.revokeOAuthTokensClause("user")}
+          `
+          : ``
+      }
 
       ${
         scopeToCompany && params.isAdmin && params.roles !== undefined
@@ -811,6 +851,10 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
    * only a user belonging to the request company (`$companyId`) is deleted.
    * The previous unbound `MATCH (company:Company)` matched every company, so
    * any caller could soft-delete any user on the platform.
+   *
+   * The same query revokes every OAuth token of the user (`isDeleted` is
+   * global, so all companies' tokens): a connected MCP client would otherwise
+   * keep refreshing forever.
    */
   async deleteUser(params: { userId: string; isPlatformAdmin?: boolean }): Promise<void> {
     const query = this.neo4j.initQuery();
@@ -823,6 +867,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     query.query = `
       ${params.isPlatformAdmin ? `MATCH (user:User {id: $userId})` : this.companyScopedUserMatch()}
       SET user.isDeleted = true
+      WITH user
+      ${this.revokeOAuthTokensClause("user")}
     `;
 
     await this.neo4j.writeOne(query);

@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ClsService } from "nestjs-cls";
 import { Socket } from "socket.io";
+import { isSessionPayload } from "../../../common/guards/session.token";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
 
 @Injectable()
@@ -22,6 +23,8 @@ export class WsJwtGuard implements CanActivate {
 
     try {
       const payload = this.jwtService.verify(token);
+      // Only a full session: pending-2FA, selection and portal tokens share the secret.
+      if (!isSessionPayload(payload)) return false;
       client.data.user = payload;
 
       return true;

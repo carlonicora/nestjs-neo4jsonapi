@@ -288,6 +288,13 @@ export class OAuthService {
     // Use the company chosen at consent; fall back to the user's company for codes issued without one
     const companyId = storedCode.companyId ?? (await this.oauthRepository.findCompanyIdForUser(storedCode.userId));
 
+    // The user who consented must still be allowed in when the code is redeemed:
+    // not deleted, active, and still a member of the company the tokens bind to.
+    // The code is already consumed, so a refused exchange cannot be retried.
+    if (!(await this.tokenService.isSubjectAuthorised({ userId: storedCode.userId, companyId: companyId ?? null }))) {
+      throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_GRANT, "The user is no longer authorised"), 400);
+    }
+
     // Generate tokens
     const {
       token: accessToken,
@@ -497,9 +504,12 @@ export class OAuthService {
     aud?: string;
     iss?: string;
   }> {
-    // Validate client credentials (required for introspection)
+    // Validate client credentials (required for introspection). Only a
+    // confidential client authenticates: validateClient skips the secret for a
+    // public client, so any public (e.g. dynamically registered) client would
+    // otherwise introspect with an arbitrary secret.
     const client = await this.clientService.validateClient(params.clientId, params.clientSecret);
-    if (!client) {
+    if (!client || !client.isConfidential) {
       throw new HttpException(createOAuthError(OAuthErrorCodes.INVALID_CLIENT), 401);
     }
 

@@ -1,5 +1,6 @@
 import { Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 
+import { AllowedTokenScopes } from "../../../common/decorators/token-scopes.decorator";
 import { AnyScopeAuthGuard } from "../../../common/guards/jwt.auth.any-scope.guard";
 import { authMeta } from "../../auth/entities/auth.meta";
 import { AuthService } from "../../auth/services/auth.service";
@@ -25,7 +26,9 @@ export class AuthCompanyController {
   // GET /auth/companies — the companies the caller may act for.
   // AnyScopeAuthGuard because the caller may hold either a full session token
   // (company switcher) or a short-lived company-selection token (login screen).
+  // No other scope: an invitation-selection or pending-2FA token is refused.
   @UseGuards(AnyScopeAuthGuard)
+  @AllowedTokenScopes("company-selection")
   @Get(companyMeta.endpoint)
   async findCompanies() {
     return await this.service.findCompanies();
@@ -35,6 +38,7 @@ export class AuthCompanyController {
   // caller's token for one scoped to the chosen company. Path-param style mirrors
   // POST auth/refreshtoken/:refreshToken, so no DTO is needed.
   @UseGuards(AnyScopeAuthGuard)
+  @AllowedTokenScopes("company-selection")
   @Post("company-selection/:companyId")
   async selectCompany(@Param("companyId") companyId: string) {
     return await this.service.selectCompany({ companyId: companyId });

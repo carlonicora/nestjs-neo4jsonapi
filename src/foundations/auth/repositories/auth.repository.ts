@@ -19,6 +19,7 @@ import { AuthCode } from "../entities/auth.code";
 import { authCodeMeta } from "../entities/auth.code.meta";
 import { Auth, AuthDescriptor } from "../entities/auth";
 import { authMeta } from "../entities/auth.meta";
+import { revokeUserOAuthTokensClause } from "../../oauth/queries/revoke-user-oauth-tokens.query";
 
 /**
  * Auth is deliberately NOT company-scoped (see entities/auth.ts) and every
@@ -621,11 +622,15 @@ WITH auth, auth_user,  auth_user_role, module,
       password: params.password,
     };
 
+    // A reset password ends every OAuth grant of the user (MCP clients), in the
+    // same query: the revocation runs only when the password write matched.
     query.query = `
       MATCH (user:User {id: $userId})
       SET user.password = $password,
         user.code = null,
         user.codeExpiration = null
+      WITH user
+      ${revokeUserOAuthTokensClause("user")}
       RETURN user
     `;
 

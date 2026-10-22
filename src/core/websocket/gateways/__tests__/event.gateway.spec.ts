@@ -28,6 +28,7 @@ const MOCK_USER = {
   userId: TEST_IDS.userId,
   companyId: TEST_IDS.companyId,
   userName: "Test User",
+  roles: ["editor"],
 };
 
 // Mock factories
@@ -223,6 +224,44 @@ describe("EventsGateway", () => {
       await gateway.handleConnection(client as unknown as Socket);
 
       expect(client.onAny).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("handleConnection — token class", () => {
+    const NON_SESSION_TOKENS: Array<[string, Record<string, unknown>]> = [
+      ["pending-2FA token", { userId: TEST_IDS.userId, pendingId: "p1", pending: true, type: "pending_2fa" }],
+      ["company-selection token", { userId: TEST_IDS.userId, scope: "company-selection" }],
+      ["invitation-selection token", { userId: TEST_IDS.userId, scope: "invitation-selection" }],
+      ["portal Person token", { personEmail: "client@example.com", companyId: TEST_IDS.companyId }],
+      ["session-shaped token carrying a scope", { ...MOCK_USER, scope: "company-selection" }],
+      ["token without roles", { userId: TEST_IDS.userId, companyId: TEST_IDS.companyId }],
+      ["token without userId", { roles: ["editor"], companyId: TEST_IDS.companyId }],
+    ];
+
+    it.each(NON_SESSION_TOKENS)(
+      "refuses a %s: anonymous socket, no client, no presence, no forwarding",
+      async (_, payload) => {
+        jwtService.verify.mockReturnValue(payload);
+        const client = createMockClient("signed-but-not-a-session");
+
+        await gateway.handleConnection(client as unknown as Socket);
+
+        expect(client.data.user).toEqual({ userId: null });
+        expect(webSocketService.addClient).not.toHaveBeenCalled();
+        expect(presenceService.setUserOnline).not.toHaveBeenCalled();
+        expect(webSocketService.sendPresenceToCompany).not.toHaveBeenCalled();
+        expect(client.onAny).not.toHaveBeenCalled();
+      },
+    );
+
+    it("admits a full session token", async () => {
+      jwtService.verify.mockReturnValue(MOCK_USER);
+      const client = createMockClient("valid-token");
+
+      await gateway.handleConnection(client as unknown as Socket);
+
+      expect(client.data.user).toEqual(MOCK_USER);
+      expect(webSocketService.addClient).toHaveBeenCalledWith(TEST_IDS.userId, client);
     });
   });
 

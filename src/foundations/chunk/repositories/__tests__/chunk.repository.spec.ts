@@ -1378,6 +1378,71 @@ describe("ChunkRepository", () => {
       expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
     });
 
+    describe("company gate on the by-id reads", () => {
+      const COMPANY_GATE =
+        "EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(chunkOwner) WHERE (chunkOwner)-[:BELONGS_TO]->(:Company {id: $companyId}) OR NOT (chunkOwner)-[:BELONGS_TO]->(:Company) }";
+      const companyQuery = () => ({
+        query: "",
+        queryParams: { companyId: TEST_IDS.companyId } as Record<string, unknown>,
+      });
+
+      it("findChunkById refuses a chunk owned by another company when a company is in context", async () => {
+        const mockQuery = companyQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+        neo4jService.readOne.mockResolvedValue(null);
+
+        await repository.findChunkById({ chunkId: "c1" });
+
+        expect(mockQuery.query).toContain(`WHERE ${COMPANY_GATE}`);
+        expect(mockQuery.queryParams.companyId).toBe(TEST_IDS.companyId);
+      });
+
+      it("findChunksByIds refuses chunks owned by another company when a company is in context", async () => {
+        const mockQuery = companyQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+
+        await repository.findChunksByIds({ chunkIds: ["c1", "c2"] });
+
+        expect(mockQuery.query).toContain("WHERE chunk.id IN $chunkIds");
+        expect(mockQuery.query).toContain(`AND ${COMPANY_GATE}`);
+      });
+
+      it("combines the company gate with the scope gate (both must hold)", async () => {
+        const mockQuery = companyQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+        agentScopeFilter.predicate.mockReturnValue({
+          cypher: "(data:Child)",
+          params: { agentScopeId: "root-1" },
+        } as any);
+
+        await repository.findChunkById({ chunkId: "c1", dataLimits: {} });
+
+        expect(mockQuery.query).toContain(
+          `WHERE EXISTS { MATCH (chunk)<-[:HAS_CHUNK]-(data) WHERE (data:Child) } AND ${COMPANY_GATE}`,
+        );
+      });
+
+      it("adds no company gate when no company is in context (internal job)", async () => {
+        const mockQuery = createMockQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+
+        await repository.findChunkById({ chunkId: "c1" });
+        await repository.findChunksByIds({ chunkIds: ["c1"] });
+
+        expect(mockQuery.query).not.toContain("chunkOwner");
+      });
+
+      it("adds no company gate on a database that binds no request context (corpus)", async () => {
+        const mockQuery = companyQuery();
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+        (neo4jService as any).bindsRequestContext = false;
+
+        await repository.findChunkById({ chunkId: "c1" });
+
+        expect(mockQuery.query).not.toContain("chunkOwner");
+      });
+    });
+
     it("does not gate a by-id fetch in an unscoped run", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);

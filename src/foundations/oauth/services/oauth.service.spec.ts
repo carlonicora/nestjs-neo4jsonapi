@@ -85,6 +85,7 @@ describe("OAuthService", () => {
       revokeRefreshToken: vi.fn().mockResolvedValue(undefined),
       revokeAllUserTokens: vi.fn().mockResolvedValue(undefined),
       introspectToken: vi.fn().mockResolvedValue({ active: true }),
+      isSubjectAuthorised: vi.fn().mockResolvedValue(true),
     };
 
     mockPkceService = {

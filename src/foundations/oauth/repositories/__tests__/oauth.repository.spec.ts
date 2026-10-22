@@ -326,13 +326,13 @@ describe("OAuthRepository", () => {
       const result = await repository.markAuthorizationCodeUsed("hash123");
 
       expect(result).toBe(true);
-      expect(mockQuery.query).toContain("SET code.isUsed = true");
+      expect(mockQuery.query).toContain("SET oauthauthorizationcode.isUsed = true");
     });
 
-    it("should return false when code already used", async () => {
+    it("should return false when code already used (writeOne returns null on zero rows)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockRejectedValue(new Error("Code already used"));
+      neo4jService.writeOne.mockResolvedValue(null);
 
       const result = await repository.markAuthorizationCodeUsed("hash123");
 

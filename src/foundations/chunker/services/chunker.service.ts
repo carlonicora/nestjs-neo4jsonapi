@@ -3,16 +3,21 @@ import { BaseDocumentLoader } from "@langchain/core/document_loaders/base";
 import { Document } from "@langchain/core/documents";
 import { HumanMessage } from "@langchain/core/messages";
 import { MarkdownTextSplitter, RecursiveCharacterTextSplitter, TokenTextSplitter } from "@langchain/textsplitters";
-import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
+import * as os from "os";
 import * as path from "path";
 import { TOKEN_USAGE_RECORDER, TokenUsageRecorderInterface } from "../../../common/tokens";
+import { isWellFormedS3Key } from "../../../common/interfaces/s3.key-access.policy.interface";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
+import { ConfigApiInterface } from "../../../config/interfaces/config.api.interface";
 import { ConfigAiInterface } from "../../../config/interfaces/config.ai.interface";
 import { ConfigChunkerInterface } from "../../../config/interfaces/config.chunker.interface";
 import { ModelService } from "../../../core/llm/services/model.service";
+import { S3_OBJECTS_SEGMENT, s3Meta } from "../../s3/entities/s3.meta";
+import { S3CipherService } from "../../s3/services/s3-cipher.service";
 import { S3Service } from "../../s3/services/s3.service";
 import { TokenUsageType } from "../../tokenusage/enums/tokenusage.type";
 import { TokenUsageService } from "../../tokenusage/services/tokenusage.service";
@@ -38,6 +43,21 @@ export interface ChunkerAttribution {
   relationshipId: string;
   relationshipType: string;
 }
+
+/**
+ * Fetches an http(s) source for the chunker. The chunker NEVER fetches an arbitrary URL on its
+ * own: a caller-supplied URL reaching a server-side `fetch` is an SSRF (cloud metadata, internal
+ * hosts, the response reflected into chunks and summaries). An application that genuinely needs
+ * the chunker to read remote URLs binds an implementation under `CHUNKER_SOURCE_FETCHER` that
+ * vets the destination itself (public addresses only, the resolved address pinned, every redirect
+ * re-vetted, a byte cap). Without a binding every http(s) source other than this API's own signed
+ * object link is refused.
+ */
+export interface ChunkerSourceFetcher {
+  fetch(params: { url: string }): Promise<{ buffer: Buffer; contentType?: string }>;
+}
+
+export const CHUNKER_SOURCE_FETCHER = Symbol("CHUNKER_SOURCE_FETCHER");
 
 /** Words per page used to estimate page counts for formats that have no real pagination. */
 const WORDS_PER_ESTIMATED_PAGE = 500;
@@ -81,6 +101,11 @@ export class ChunkerService {
     // booting and simply record nothing.
     @Optional() private readonly tokenUsageService?: TokenUsageService,
     @Optional() @Inject(TOKEN_USAGE_RECORDER) private readonly tokenUsageRecorder?: TokenUsageRecorderInterface,
+    // Verifies this API's own signed object links (`<api>/s3/objects/<token>`), so a consumer that
+    // passes a signed link instead of the key is read straight from storage, with no HTTP request.
+    @Optional() private readonly s3Cipher?: S3CipherService,
+    // Opt-in remote reads; see ChunkerSourceFetcher. Absent = remote URLs are refused.
+    @Optional() @Inject(CHUNKER_SOURCE_FETCHER) private readonly sourceFetcher?: ChunkerSourceFetcher,
   ) {
     const chunker = this.config.get<ConfigChunkerInterface>("chunker");
     this.splitter = chunker?.strategy === "semantic" ? this.semanticSplitterService : this.markdownChunkingService;
@@ -106,31 +131,85 @@ export class ChunkerService {
   }
 
   /**
-   * Reads the bytes behind a `filePath`:
-   * - an absolute http(s) URL (external or legacy source) is fetched;
-   * - an absolute local path (the chunker's own /tmp files) is read from disk;
-   * - anything else is a storage key, read through `S3Service` (which decrypts
-   *   flagged objects) — no URL is signed and no HTTP round trip is made.
+   * Reads the bytes behind a `filePath`. A storage key is the normal source and is read through
+   * `S3Service` (which decrypts flagged objects), with no URL signed and no HTTP round trip.
+   * An http(s) URL goes through `_readUrl`, which never makes a bare request. A local absolute
+   * path is refused: no caller passes one, and reading any path a caller names is a file-disclosure
+   * primitive.
    */
   private async _readSource(params: { filePath: string }): Promise<Buffer> {
     if (/^https?:\/\//i.test(params.filePath)) {
-      const response = await fetch(params.filePath);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch the file: ${response.statusText}`);
-      }
-      return Buffer.from(await response.arrayBuffer());
+      return (await this._readUrl({ url: params.filePath })).buffer;
     }
 
-    if (path.isAbsolute(params.filePath)) {
-      return fs.readFile(params.filePath);
+    if (path.isAbsolute(params.filePath) || path.win32.isAbsolute(params.filePath) || /^file:/i.test(params.filePath)) {
+      throw new BadRequestException("The chunker does not read local file paths; pass a storage key");
+    }
+
+    if (!isWellFormedS3Key(params.filePath)) {
+      throw new BadRequestException("Invalid storage key");
     }
 
     return (await this.s3Service.downloadFileBuffer({ key: params.filePath })).buffer;
   }
 
+  /**
+   * An http(s) source:
+   * - this API's own signed object link (`<api.url>s3/objects/<token>`, what
+   *   `S3Service.generateSignedUrl` returns) is verified and read from storage by its key, with no
+   *   HTTP request: consumers that sign a key before chunking keep working;
+   * - any other URL goes to the application's `CHUNKER_SOURCE_FETCHER`, which owns the SSRF vetting;
+   * - with no fetcher bound, it is refused.
+   */
+  private async _readUrl(params: { url: string }): Promise<{ buffer: Buffer; contentType?: string }> {
+    const ownKey = this._ownObjectKey(params.url);
+    if (ownKey) return this.s3Service.downloadFileBuffer({ key: ownKey });
+
+    if (!this.sourceFetcher) {
+      throw new BadRequestException(
+        "The chunker does not fetch remote URLs; pass a storage key, or bind CHUNKER_SOURCE_FETCHER",
+      );
+    }
+
+    return this.sourceFetcher.fetch({ url: params.url });
+  }
+
+  /** The storage key behind this API's own signed `get` link, or undefined for any other URL. */
+  private _ownObjectKey(url: string): string | undefined {
+    const apiUrl = this.config.get<ConfigApiInterface>("api")?.url;
+    if (!apiUrl || !this.s3Cipher) return undefined;
+
+    let candidate: URL;
+    let prefix: URL;
+    try {
+      candidate = new URL(url);
+      prefix = new URL(`${apiUrl}${s3Meta.endpoint}/${S3_OBJECTS_SEGMENT}/`);
+    } catch {
+      return undefined;
+    }
+    if (candidate.origin !== prefix.origin || !candidate.pathname.startsWith(prefix.pathname)) return undefined;
+
+    const token = candidate.pathname.slice(prefix.pathname.length);
+    if (!token || token.includes("/")) return undefined;
+
+    try {
+      const payload = this.s3Cipher.verifyObjectToken(decodeURIComponent(token), "get");
+      return isWellFormedS3Key(payload.k) ? payload.k : undefined;
+    } catch {
+      // Not a token this server signed (or expired): treat it as a foreign URL.
+      return undefined;
+    }
+  }
+
+  /** A fresh path under the OS temp directory for a decrypted working copy. Callers unlink it in a `finally`. */
+  private _tempPath(prefix: string, extension: string): string {
+    const safeExtension = extension.replace(/[^a-z0-9]/gi, "").slice(0, 16) || "bin";
+    return path.join(os.tmpdir(), `${prefix}.${randomUUID()}.${safeExtension}`);
+  }
+
   private async _downloadFile(params: { filePath: string; extension: string }): Promise<string> {
     const buffer = await this._readSource({ filePath: params.filePath });
-    const tempFilePath = `/tmp/temp-file.${randomUUID()}.${params.extension}`;
+    const tempFilePath = this._tempPath("temp-file", params.extension);
     await fs.writeFile(tempFilePath, buffer);
     return tempFilePath;
   }
@@ -216,7 +295,10 @@ export class ChunkerService {
 
   async generateContentStructureFromFile(params: {
     fileType: string;
-    /** Storage key, or an absolute http(s) URL for external/legacy sources. */
+    /**
+     * Storage key. An http(s) URL is read only when it is this API's own signed object link or the
+     * application binds `CHUNKER_SOURCE_FETCHER`; a local path is refused.
+     */
     filePath: string;
     attribution?: ChunkerAttribution;
     /**
@@ -250,27 +332,32 @@ export class ChunkerService {
       extension: params.fileType,
     });
 
-    // Email files need special handling (attachment extraction)
-    if (params.fileType.toLowerCase() === "eml" || params.fileType.toLowerCase() === "msg") {
-      const emailDocs = await this._createFromEmail({
-        filePath: params.filePath,
-        localFilePath,
-        fileType: params.fileType.toLowerCase(),
-        attribution: params.attribution,
-      });
-      return this._capChunkChars(emailDocs);
-    }
+    // The working copy is the decrypted file: it is removed on every path, success or failure.
+    try {
+      // Email files need special handling (attachment extraction)
+      if (params.fileType.toLowerCase() === "eml" || params.fileType.toLowerCase() === "msg") {
+        const emailDocs = await this._createFromEmail({
+          filePath: params.filePath,
+          localFilePath,
+          fileType: params.fileType.toLowerCase(),
+          attribution: params.attribution,
+        });
+        return await this._capChunkChars(emailDocs);
+      }
 
-    const docs = await this._capChunkChars(
-      await this._processLocalFile({
-        localFilePath,
-        fileType: params.fileType,
-        filePath: params.filePath,
-        title: params.title,
-      }),
-    );
-    this._logChunkResult(params.fileType, docs);
-    return docs;
+      const docs = await this._capChunkChars(
+        await this._processLocalFile({
+          localFilePath,
+          fileType: params.fileType,
+          filePath: params.filePath,
+          title: params.title,
+        }),
+      );
+      this._logChunkResult(params.fileType, docs);
+      return docs;
+    } finally {
+      await fs.unlink(localFilePath).catch(() => {});
+    }
   }
 
   private async _processLocalFile(params: {
@@ -418,20 +505,19 @@ export class ChunkerService {
       return this.emailParserService.assembleMarkdown({ ...parsed, attachmentContents: nestedAttContents });
     }
 
-    // For images, use the image chunker
+    // For images, use the image chunker on the attachment bytes (no working copy needed)
     if (isImageFile(extension)) {
-      const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
-      await fs.writeFile(tempPath, attachment.content);
-      try {
-        const docs = await this._createChunksFromImage({ filePath: tempPath, fileType: extension, attribution });
-        return docs.map((d) => d.pageContent).join("\n\n");
-      } finally {
-        await fs.unlink(tempPath).catch(() => {});
-      }
+      const docs = await this._createChunksFromImage({
+        buffer: attachment.content,
+        filePath: attachment.filename,
+        fileType: extension,
+        attribution,
+      });
+      return docs.map((d) => d.pageContent).join("\n\n");
     }
 
     // For other file types, write to temp and delegate to existing handlers
-    const tempPath = `/tmp/temp-att.${randomUUID()}.${extension}`;
+    const tempPath = this._tempPath("temp-att", extension);
     await fs.writeFile(tempPath, attachment.content);
     try {
       const docs = await this._processLocalFile({ localFilePath: tempPath, fileType: extension, filePath: tempPath });
@@ -464,14 +550,15 @@ export class ChunkerService {
     return response;
   }
 
+  /**
+   * Reads a URL through the same gate as `generateContentStructureFromFile`: this API's own signed
+   * object link, or the application's `CHUNKER_SOURCE_FETCHER`. Any other URL is refused.
+   */
   async extractContentFromUrl(params: { url: string }): Promise<string> {
-    const response = await fetch(params.url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch content from URL: ${response.statusText}`);
-    }
+    if (!/^https?:\/\//i.test(params.url)) throw new BadRequestException("Not an http(s) URL");
 
-    const contentType = response.headers.get("content-type") || "";
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const { buffer, contentType: fetchedContentType } = await this._readUrl({ url: params.url });
+    const contentType = fetchedContentType || "";
 
     // Determine file type from content-type header
     let fileType = "txt";
@@ -496,17 +583,10 @@ export class ChunkerService {
       return buffer.toString("utf-8");
     }
 
-    // For complex file types, write to temp file and process
-    const tempFilePath = `/tmp/temp-file.${randomUUID()}.${fileType}`;
-    await fs.writeFile(tempFilePath, buffer);
-
-    try {
-      const documents = await this.generateContentStructureFromFile({ fileType, filePath: params.url });
-      return documents.map((doc) => doc.pageContent).join("\n\n");
-    } finally {
-      // Clean up temp file
-      await fs.unlink(tempFilePath).catch(() => {});
-    }
+    // For complex file types, process through the file pipeline (it re-reads the URL through the
+    // same gate and removes its own working copy)
+    const documents = await this.generateContentStructureFromFile({ fileType, filePath: params.url });
+    return documents.map((doc) => doc.pageContent).join("\n\n");
   }
 
   /**
@@ -536,12 +616,14 @@ export class ChunkerService {
   }
 
   private async _createChunksFromImage(params: {
+    /** The image bytes when the caller already holds them (an email attachment); otherwise `filePath` is read. */
+    buffer?: Buffer;
     filePath: string;
     fileType: string;
     attribution?: ChunkerAttribution;
   }): Promise<Document[]> {
     try {
-      const imageBuffer = await this._readSource({ filePath: params.filePath });
+      const imageBuffer = params.buffer ?? (await this._readSource({ filePath: params.filePath }));
 
       /*
        * NO USAGE IS RECORDED FOR THIS CALL, DELIBERATELY.

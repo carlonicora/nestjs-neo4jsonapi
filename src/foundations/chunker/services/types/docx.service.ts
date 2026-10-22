@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { XMLParser } from "fast-xml-parser";
-import * as JSZip from "jszip";
+import { LoadedZip, loadZipWithinLimits } from "../../utils/zip-limits";
 import { Document } from "@langchain/core/documents";
 const fs = require("fs");
 
@@ -424,9 +424,16 @@ export class DocXService {
     return rowContent.join(" ");
   }
 
+  /** Loads the DOCX zip, refusing (BadRequestException) one that expands beyond the zip limits. */
+  private async loadArchive(buffer: Buffer): Promise<LoadedZip> {
+    const zip = await loadZipWithinLimits({ buffer, label: "DOCX" });
+    if (!zip) throw new Error("Unable to read the DOCX file: it is not a zip archive.");
+    return zip;
+  }
+
   async extractDocxContent(docPath: string): Promise<DocxContent[]> {
     const buffer = fs.readFileSync(docPath);
-    const zip = await JSZip.loadAsync(buffer);
+    const zip = await this.loadArchive(buffer);
 
     const documentXml = await zip.file("word/document.xml")?.async("text");
     if (!documentXml) {
@@ -472,7 +479,7 @@ export class DocXService {
 
   async getRawElements(filePath: string): Promise<any[]> {
     const buffer = fs.readFileSync(filePath);
-    const zip = await JSZip.loadAsync(buffer);
+    const zip = await this.loadArchive(buffer);
 
     const documentXml = await zip.file("word/document.xml")?.async("text");
     if (!documentXml) {

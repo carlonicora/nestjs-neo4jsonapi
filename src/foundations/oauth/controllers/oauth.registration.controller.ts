@@ -4,6 +4,8 @@ import { ConfigService } from "@nestjs/config";
 import { ConfigOAuthInterface } from "../../../config/interfaces/config.oauth.interface";
 import { OAuthRegisterDto } from "../dtos/oauth.register.dto";
 import { OAuthClientService } from "../services/oauth.client.service";
+import { OAuth2Scopes, parseScopes } from "../constants/oauth.scopes";
+import { OAuthErrorCodes, createOAuthError } from "../constants/oauth.errors";
 
 /**
  * OAuth Dynamic Client Registration Controller
@@ -47,12 +49,26 @@ export class OAuthRegistrationController {
       throw new HttpException("OAuth is not enabled", 404);
     }
 
+    // Anyone can register (no credentials exist yet), so a registered client may
+    // only ever ask for the MCP scope. Without this an anonymous caller could
+    // register a client for `admin`, `read`, `write` or any app scope.
+    const requestedScopes = dto.scope ? parseScopes(dto.scope) : [];
+    if (requestedScopes.some((scope) => scope !== OAuth2Scopes.MCP)) {
+      throw new HttpException(
+        createOAuthError(
+          OAuthErrorCodes.INVALID_CLIENT_METADATA,
+          `Dynamically registered clients may only request the "${OAuth2Scopes.MCP}" scope`,
+        ),
+        400,
+      );
+    }
+
     const isConfidential = dto.token_endpoint_auth_method !== undefined && dto.token_endpoint_auth_method !== "none";
 
     const { client, clientSecret } = await this.clientService.createClient({
       name: dto.client_name ?? "Dynamically registered client",
       redirectUris: dto.redirect_uris,
-      allowedScopes: dto.scope ? dto.scope.split(" ").filter(Boolean) : ["mcp"],
+      allowedScopes: [OAuth2Scopes.MCP],
       allowedGrantTypes: dto.grant_types ?? ["authorization_code", "refresh_token"],
       isConfidential,
     });

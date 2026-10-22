@@ -1,6 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Document } from "@langchain/core/documents";
+import * as fs from "fs/promises";
 import * as XLSX from "xlsx-republish";
+import { loadZipWithinLimits } from "../../utils/zip-limits";
 
 interface WorksheetData {
   name: string;
@@ -222,9 +224,15 @@ export class XlsxService {
   }
 
   async extractXlsxContent(xlsxPath: string): Promise<WorksheetData[]> {
+    // An XLSX is a zip: refuse one that expands beyond the zip limits BEFORE SheetJS inflates it
+    // (outside the try below, so the refusal reaches the caller instead of reading as "empty").
+    // A non-zip spreadsheet (legacy .xls, CSV) has nothing to inflate and is parsed as before.
+    const buffer = await fs.readFile(xlsxPath);
+    await loadZipWithinLimits({ buffer, label: "XLSX" });
+
     try {
       // Read the Excel file
-      const workbook = XLSX.readFile(xlsxPath);
+      const workbook = XLSX.read(buffer, { type: "buffer" });
 
       const worksheetData: WorksheetData[] = [];
 

@@ -67,6 +67,12 @@ export const OAuthErrorCodes = {
    * due to temporary overloading or maintenance of the server.
    */
   TEMPORARILY_UNAVAILABLE: "temporarily_unavailable",
+
+  /**
+   * The value of one of the client metadata fields is invalid (RFC 7591
+   * Section 3.2.2, Dynamic Client Registration).
+   */
+  INVALID_CLIENT_METADATA: "invalid_client_metadata",
 } as const;
 
 export type OAuthErrorCode = (typeof OAuthErrorCodes)[keyof typeof OAuthErrorCodes];
@@ -85,6 +91,7 @@ export const OAuthErrorDescriptions: Record<OAuthErrorCode, string> = {
   [OAuthErrorCodes.UNSUPPORTED_RESPONSE_TYPE]: "The response type is not supported.",
   [OAuthErrorCodes.SERVER_ERROR]: "An unexpected error occurred on the authorization server.",
   [OAuthErrorCodes.TEMPORARILY_UNAVAILABLE]: "The authorization server is temporarily unavailable.",
+  [OAuthErrorCodes.INVALID_CLIENT_METADATA]: "A client metadata field is invalid.",
 };
 
 /**

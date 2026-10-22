@@ -1,6 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Document } from "@langchain/core/documents";
+import * as fs from "fs/promises";
 import * as officeParser from "officeparser";
+import { loadZipWithinLimits } from "../../utils/zip-limits";
 
 @Injectable()
 export class PptxService {
@@ -93,6 +95,10 @@ export class PptxService {
   }
 
   async extractPptxContent(pptxPath: string): Promise<string> {
+    // A PPTX is a zip: refuse one that expands beyond the zip limits BEFORE officeparser inflates it
+    // (outside the try below, so the refusal reaches the caller instead of reading as "empty").
+    await loadZipWithinLimits({ buffer: await fs.readFile(pptxPath), label: "PPTX" });
+
     try {
       const ast = await officeParser.parseOffice(pptxPath, { ignoreNotes: false });
       return ast?.toText() || "";

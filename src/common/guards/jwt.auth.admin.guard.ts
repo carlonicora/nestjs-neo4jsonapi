@@ -4,6 +4,7 @@ import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
 import { AUTH_CONTEXT_HOOK, AuthContextHookInterface, SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
+import { assertSessionPayload, resolveSessionCompanyId, SessionPayload } from "./session.token";
 
 @Injectable()
 export class AdminJwtAuthGuard extends AuthGuard("jwt") implements CanActivate {
@@ -66,18 +67,34 @@ export class AdminJwtAuthGuard extends AuthGuard("jwt") implements CanActivate {
       throw new HttpException("Unauthorised", 401);
     }
 
-    this._validateRoles(user, context);
+    // Only a full session passes: pending-2FA, selection and portal tokens are signed
+    // with the same secret and verify, but must never act as a session.
+    // Asserted on a local copy: narrowing `user` itself would change the return type
+    // away from IAuthGuard's generic `TUser`.
+    const session: unknown = user;
+    assertSessionPayload(session);
 
-    this.cls.set("userId", user.userId);
-    this.cls.set("companyId", user.companyId ?? request.headers["x-companyid"]);
+    this._validateRoles(session, context);
+
+    const companyId = resolveSessionCompanyId({
+      payload: session,
+      headerCompanyId: request.headers["x-companyid"],
+      administratorRole: this.systemRoles?.Administrator,
+    });
+
+    this.cls.set("userId", session.userId);
+    this.cls.set("companyId", companyId);
     this.cls.set("language", request.headers["x-language"]);
-    this.cls.set("roles", user.roles);
+    this.cls.set("roles", session.roles);
 
     return user;
   }
 
-  private _validateRoles(user: any, context: any): void {
-    const requiredRoles: string[] = this.reflector.get<string[]>("roles", context.getHandler()) ?? [];
+  private _validateRoles(user: SessionPayload, context: ExecutionContext): void {
+    // Handler AND class, copied so pushing the admin role never mutates the metadata.
+    const requiredRoles: string[] = [
+      ...(this.reflector.getAllAndOverride<string[]>("roles", [context.getHandler(), context.getClass()]) ?? []),
+    ];
 
     const adminRole = this.systemRoles?.Administrator ?? "administrator";
     if (!requiredRoles.includes(adminRole)) requiredRoles.push(adminRole);
