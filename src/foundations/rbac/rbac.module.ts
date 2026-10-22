@@ -36,7 +36,8 @@ export class RbacModule {
     ];
 
     const controllers: Type<any>[] = [RbacController, RbacModulePathsController];
-    if (options.devMode) {
+    // The dev editor writes source files: never mounted in production, whatever the caller passes.
+    if (options.devMode && process.env.NODE_ENV !== "production") {
       controllers.push(RbacDevController);
     }
 

@@ -433,24 +433,51 @@ describe("UserController", () => {
       expect(cacheService.invalidateByType).toHaveBeenCalledWith("users");
     });
 
-    it("should create user with new company and force company admin", async () => {
-      const req = createMockRequest();
-      const bodyWithCompany = {
-        ...createBody,
-        included: [{ type: "companies", attributes: { name: "New Company" } }],
-      };
+    const NEW_COMPANY_ID = "660e8400-e29b-41d4-a716-446655440077";
+    const withIncludedCompany = (companyRelationshipId?: string) => ({
+      data: {
+        ...createBody.data,
+        relationships: companyRelationshipId
+          ? { company: { data: { type: "companies", id: companyRelationshipId } } }
+          : {},
+      },
+      included: [{ type: "companies", id: NEW_COMPANY_ID, attributes: { name: "New Company" } }],
+    });
+
+    it("lets a platform administrator create a user with a new company, as its company administrator", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] });
+      const body = withIncludedCompany();
       userService.expectNotExists.mockResolvedValue(undefined);
       companyService.createCompanyFromDTO.mockResolvedValue(undefined);
       userService.createUser.mockResolvedValue(MOCK_USER_RESPONSE);
 
-      await controller.createUser(req, bodyWithCompany as any, mockReply, undefined);
+      await controller.createUser(req, body as any, mockReply, undefined);
 
-      expect(companyService.createCompanyFromDTO).toHaveBeenCalled();
-      expect(userService.createUser).toHaveBeenCalledWith({
-        data: bodyWithCompany.data,
-        forceCompanyAdmin: true,
-        language: "en",
-      });
+      expect(companyService.createCompanyFromDTO).toHaveBeenCalledWith({ data: body.included[0] });
+      const created = userService.createUser.mock.calls[0][0];
+      expect(created.forceCompanyAdmin).toBe(true);
+      // The user always lands in the company just created.
+      expect(created.data.relationships.company.data.id).toBe(NEW_COMPANY_ID);
+    });
+
+    it("refuses a company administrator creating a company with a user", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.CompanyAdministrator] });
+
+      await expect(
+        controller.createUser(req, withIncludedCompany() as any, mockReply, undefined),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(companyService.createCompanyFromDTO).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
+    });
+
+    it("refuses a new company whose user is related to another, existing company", async () => {
+      const req = requestAs({ userId: TEST_IDS.adminUserId, roles: [RoleId.Administrator] });
+
+      await expect(
+        controller.createUser(req, withIncludedCompany(TEST_IDS.otherCompanyId) as any, mockReply, undefined),
+      ).rejects.toMatchObject({ status: HttpStatus.BAD_REQUEST });
+      expect(companyService.createCompanyFromDTO).not.toHaveBeenCalled();
+      expect(userService.createUser).not.toHaveBeenCalled();
     });
 
     it("creates the user with an existing company when the request has no included", async () => {

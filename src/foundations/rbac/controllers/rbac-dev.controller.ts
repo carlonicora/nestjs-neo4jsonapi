@@ -1,6 +1,10 @@
-import { Body, Controller, Get, Inject, Optional, Put } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Optional, Put, UseGuards } from "@nestjs/common";
 import * as fs from "fs";
 import * as path from "path";
+import { RoleId } from "../../../common/constants/system.roles";
+import { Roles } from "../../../common/decorators/roles.decorator";
+import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
+import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { RBAC_MATRIX_TOKEN } from "../rbac.tokens";
 import { MODULE_USER_PATHS_TOKEN } from "../rbac.constants";
 import type { PermToken, RbacMatrix } from "../dsl/types";
@@ -22,6 +26,25 @@ function findMonorepoRoot(startDir: string): string {
     if (parent === current) return startDir;
     current = parent;
   }
+}
+
+/**
+ * Where the matrix file may be written: a `.ts` file inside the monorepo root,
+ * never outside it. The path comes from the request body, so without this a
+ * caller could overwrite any file the API process can write.
+ */
+export function resolveMatrixOutputPath(params: { outputPath: unknown; root: string }): string {
+  if (typeof params.outputPath !== "string" || params.outputPath.trim() === "")
+    throw new BadRequestException("outputPath is required");
+
+  const root = path.resolve(params.root);
+  const resolved = path.resolve(root, params.outputPath);
+  const relative = path.relative(root, resolved);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative))
+    throw new BadRequestException("outputPath must be inside the repository");
+  if (path.extname(resolved) !== ".ts") throw new BadRequestException("outputPath must be a .ts file");
+
+  return resolved;
 }
 
 /**
@@ -81,7 +104,9 @@ export class RbacDevController {
     private readonly moduleUserPaths: Record<string, readonly string[]> | null,
   ) {}
 
+  @UseGuards(AdminJwtAuthGuard, JwtAuthGuard)
   @Get("matrix")
+  @Roles(RoleId.Administrator)
   getMatrix() {
     return {
       data: {
@@ -95,7 +120,9 @@ export class RbacDevController {
     };
   }
 
+  @UseGuards(AdminJwtAuthGuard, JwtAuthGuard)
   @Put("matrix")
+  @Roles(RoleId.Administrator)
   async putMatrix(@Body() body: RbacMatrixPutBody) {
     const attributes = body?.data?.attributes;
     if (!attributes) {
@@ -109,9 +136,7 @@ export class RbacDevController {
       moduleNames,
     });
 
-    const outPath = path.isAbsolute(outputPath)
-      ? outputPath
-      : path.resolve(findMonorepoRoot(process.cwd()), outputPath);
+    const outPath = resolveMatrixOutputPath({ outputPath, root: findMonorepoRoot(process.cwd()) });
 
     fs.writeFileSync(outPath, source);
 

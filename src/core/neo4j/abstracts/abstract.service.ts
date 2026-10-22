@@ -431,25 +431,52 @@ export abstract class AbstractService<
    * Map JSON:API DTO data to patch params (only includes fields present in DTO)
    * Supports edge-only updates via meta.edgeOnly flag for MANY relationships
    */
+  /**
+   * True for the company BELONGS_TO edge of a company-scoped entity. The framework
+   * attaches that edge on create and the repository never rewrites it on PUT; a
+   * client request must not re-point it on PATCH either (that would move the record
+   * into another tenant).
+   */
+  protected isManagedCompanyRelationship(def: RelationshipDef): boolean {
+    return (
+      this.descriptor.isCompanyScoped === true &&
+      def.relationship === "BELONGS_TO" &&
+      def.model?.labelName === "Company"
+    );
+  }
+
   protected mapDTOToPatchParams(data: JsonApiDTOData): { id: string; [key: string]: any } {
     const params: { id: string; [key: string]: any } = { id: data.id };
 
-    // Only include attributes that are explicitly provided (regular fields only)
+    // Only include attributes that are explicitly provided (regular fields only).
+    // Immutable fields are never written from a client request — same rule as PUT
+    // (mapDTOToParams): the client-supplied value is ignored, the stored one kept.
     if (data.attributes) {
+      const fields = this.descriptor.fields as Record<string, FieldDef | undefined>;
       for (const [key, value] of Object.entries(data.attributes)) {
-        if (this.descriptor.fieldNames.includes(key)) {
+        if (this.descriptor.fieldNames.includes(key) && !fields[key]?.immutable) {
           params[key] = value;
         }
       }
     }
 
-    // Only include relationships that are explicitly provided
+    // Only include relationships that are explicitly provided.
+    // Never client-writable on PATCH (ignored, as on PUT):
+    // - `contextKey` relationships (owner/author/company taken from the request context)
+    // - `immutable` relationships (set only on creation)
+    // - `readOnly` relationships (serialisation-only)
+    // - the company BELONGS_TO edge of a company-scoped entity (managed by the framework)
     if (data.relationships) {
       for (const [dtoKey, relationshipValue] of Object.entries(data.relationships)) {
         // Find the relationship definition that matches this DTO key
         const [relationshipKey, relationshipDef] =
           Object.entries(this.descriptor.relationships).find(
-            ([key, def]) => (def.dtoKey || key) === dtoKey && !def.contextKey,
+            ([key, def]) =>
+              (def.dtoKey || key) === dtoKey &&
+              !def.contextKey &&
+              !def.immutable &&
+              !def.readOnly &&
+              !this.isManagedCompanyRelationship(def),
           ) || [];
 
         if (relationshipKey && relationshipDef && relationshipValue?.data !== undefined) {

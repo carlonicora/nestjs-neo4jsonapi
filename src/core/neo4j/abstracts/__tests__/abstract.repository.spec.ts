@@ -704,6 +704,44 @@ describe("AbstractRepository", () => {
       expect(mockQuery.query).toContain("SET rel.relevance");
       expect(mockQuery.query).toContain("rel.updatedAt = datetime()");
     });
+
+    it("should never rewrite the company BELONGS_TO edge of a company-scoped entity", async () => {
+      // A PATCH carrying `company` would otherwise delete the tenant edge and point
+      // the record at another company. create/put already skip this edge.
+      class CompanyRelRepository extends AbstractRepository<TestEntity, TestRelationships> {
+        protected readonly descriptor = {
+          ...createMockDescriptor(true),
+          relationships: {
+            ...createMockDescriptor(true).relationships,
+            company: {
+              model: { ...createMockRelatedModel(), type: "companies", nodeName: "company", labelName: "Company" },
+              direction: "out",
+              relationship: "BELONGS_TO",
+              cardinality: "one",
+            },
+          },
+        } as unknown as EntityDescriptor<TestEntity, TestRelationships>;
+      }
+
+      const repo = new CompanyRelRepository(
+        neo4jService as unknown as Neo4jService,
+        securityService as unknown as SecurityService,
+        clsService as unknown as ClsService,
+      );
+
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.validateExistingNodes.mockResolvedValue(undefined);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repo.patch({ id: TEST_IDS.entityId, name: "Patched", company: "other-company-id" });
+
+      expect(mockQuery.query).toContain("testEntity.name = $name");
+      expect(mockQuery.queryParams.company).toBeUndefined();
+      // Only the tenant MATCH mentions BELONGS_TO; no relationship rewrite follows.
+      expect(mockQuery.query.match(/BELONGS_TO/g)).toHaveLength(1);
+      expect(neo4jService.validateExistingNodes).not.toHaveBeenCalled();
+    });
   });
 
   describe("delete", () => {

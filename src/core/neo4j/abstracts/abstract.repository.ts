@@ -6,7 +6,7 @@ import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.
 import { SecurityService } from "../../security/services/security.service";
 import { buildFilterClauses } from "../helpers/build-filter-clauses";
 import { buildFulltextTerm } from "../helpers/build-fulltext-term";
-import { buildOrderByClause } from "../helpers/build-order-by";
+import { buildLegacyOrderByClause, buildOrderByClause } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
 import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
@@ -530,7 +530,11 @@ export abstract class AbstractRepository<
     const orderByClause =
       params.orderByFields && params.orderByFields.length
         ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
-        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+        : buildLegacyOrderByClause({
+            nodeAlias: nodeName,
+            orderBy: params.orderBy,
+            fallback: this.descriptor.defaultOrderBy,
+          });
 
     if (params.term && this.descriptor.fulltextIndexName) {
       query.query += this.buildFulltextAccessCheckedMatch({ filterClause: filterResult.clause });
@@ -665,7 +669,11 @@ export abstract class AbstractRepository<
     const orderByClause =
       params.orderByFields && params.orderByFields.length
         ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
-        : `ORDER BY ${nodeName}.${params.orderBy ?? this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+        : buildLegacyOrderByClause({
+            nodeAlias: nodeName,
+            orderBy: params.orderBy,
+            fallback: this.descriptor.defaultOrderBy,
+          });
 
     if (params.term && this.descriptor.fulltextIndexName) {
       // Fulltext search with relationship filter. Use EXISTS subquery — pattern
@@ -762,7 +770,7 @@ export abstract class AbstractRepository<
     const orderByClause =
       params.orderByFields && params.orderByFields.length
         ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
-        : `ORDER BY ${nodeName}.${this.descriptor.defaultOrderBy ?? "updatedAt DESC"}`;
+        : buildLegacyOrderByClause({ nodeAlias: nodeName, fallback: this.descriptor.defaultOrderBy });
 
     query.query += `
       ${this.buildDefaultMatch()}
@@ -1070,8 +1078,13 @@ export abstract class AbstractRepository<
 
     // Determine which relationships to update (only those in params).
     // Read-only relationships are serialisation-only and never written by PATCH.
+    // The company BELONGS_TO edge of a company-scoped entity is managed by the
+    // framework and never rewritten (same rule as create/put).
     const relationshipsToUpdate = Object.entries(relationships).filter(
-      ([name, rel]) => params[name] !== undefined && !rel.readOnly,
+      ([name, rel]) =>
+        params[name] !== undefined &&
+        !rel.readOnly &&
+        !(this.descriptor.isCompanyScoped && rel.relationship === "BELONGS_TO" && rel.model.labelName === "Company"),
     );
 
     // Validate related nodes exist

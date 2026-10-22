@@ -239,6 +239,146 @@ describe("AbstractService - Audit Integration", () => {
       expect("intro" in params).toBe(false);
     });
   });
+
+  // A client request (PUT or PATCH) must never rewrite what the descriptor declares
+  // immutable, the owner taken from the request context, or the tenant edge.
+  describe("client writes to immutable / server-assigned data", () => {
+    const userMetaStub = { type: "users", endpoint: "users", nodeName: "user", labelName: "User" };
+    const companyMetaStub = { type: "companies", endpoint: "companies", nodeName: "company", labelName: "Company" };
+    const parentMetaStub = { type: "parents", endpoint: "parents", nodeName: "parent", labelName: "Parent" };
+    const tagMetaStub = { type: "tags", endpoint: "tags", nodeName: "tag", labelName: "Tag" };
+
+    const guardedDescriptor = {
+      fieldNames: ["name", "intro"],
+      fieldDefaults: {},
+      fields: {
+        name: { type: "string" },
+        intro: { type: "string", immutable: true },
+      },
+      relationships: {
+        owner: {
+          model: userMetaStub,
+          direction: "out",
+          relationship: "CREATED_BY",
+          cardinality: "one",
+          contextKey: "userId",
+          immutable: true,
+        },
+        creator: {
+          model: userMetaStub,
+          direction: "in",
+          relationship: "CREATED",
+          cardinality: "one",
+          immutable: true,
+        },
+        parent: {
+          model: parentMetaStub,
+          direction: "out",
+          relationship: "CHILD_OF",
+          cardinality: "one",
+          immutable: true,
+        },
+        company: {
+          model: companyMetaStub,
+          direction: "out",
+          relationship: "BELONGS_TO",
+          cardinality: "one",
+        },
+        tags: {
+          model: tagMetaStub,
+          direction: "out",
+          relationship: "TAGGED_WITH",
+          cardinality: "many",
+        },
+      },
+      computed: {},
+      virtualFields: {},
+      isCompanyScoped: true,
+      model: testModel,
+    } as unknown as EntityDescriptor<TestEntity, Record<string, RelationshipDef>>;
+
+    class GuardedService extends AbstractService<TestEntity> {
+      protected readonly descriptor = guardedDescriptor;
+    }
+
+    const hostileBody = {
+      type: "tests",
+      id: TEST_IDS.entityId,
+      attributes: { name: "Renamed", intro: "hacked" },
+      relationships: {
+        owner: { data: { type: "users", id: "attacker" } },
+        creator: { data: { type: "users", id: "attacker" } },
+        parent: { data: { type: "parents", id: "other-parent" } },
+        company: { data: { type: "companies", id: "other-company" } },
+        tags: { data: [{ type: "tags", id: "tag-1" }] },
+      },
+    };
+
+    let svc: GuardedService;
+    beforeEach(() => {
+      svc = new GuardedService(jsonApiService, repository, clsService, testModel);
+      repository.findById.mockResolvedValue({ id: TEST_IDS.entityId });
+    });
+
+    describe("PATCH", () => {
+      it("ignores an immutable field", async () => {
+        await svc.patchFromDTO({ data: hostileBody as any });
+        expect("intro" in repository.patch.mock.calls[0][0]).toBe(false);
+      });
+
+      it("ignores an immutable relationship", async () => {
+        await svc.patchFromDTO({ data: hostileBody as any });
+        const params = repository.patch.mock.calls[0][0];
+        expect("parent" in params).toBe(false);
+        expect("creator" in params).toBe(false);
+      });
+
+      it("ignores the owner (contextKey) relationship", async () => {
+        await svc.patchFromDTO({ data: hostileBody as any });
+        expect("owner" in repository.patch.mock.calls[0][0]).toBe(false);
+      });
+
+      it("ignores the company BELONGS_TO relationship of a company-scoped entity", async () => {
+        await svc.patchFromDTO({ data: hostileBody as any });
+        expect("company" in repository.patch.mock.calls[0][0]).toBe(false);
+      });
+
+      it("still writes a mutable field and a mutable relationship", async () => {
+        await svc.patchFromDTO({ data: hostileBody as any });
+        expect(repository.patch).toHaveBeenCalledWith({
+          id: TEST_IDS.entityId,
+          name: "Renamed",
+          tags: ["tag-1"],
+        });
+      });
+    });
+
+    describe("PUT", () => {
+      it("ignores an immutable field", async () => {
+        await svc.putFromDTO({ data: hostileBody as any });
+        expect("intro" in repository.put.mock.calls[0][0]).toBe(false);
+      });
+
+      it("ignores an immutable relationship", async () => {
+        await svc.putFromDTO({ data: hostileBody as any });
+        const params = repository.put.mock.calls[0][0];
+        expect("parent" in params).toBe(false);
+        expect("creator" in params).toBe(false);
+      });
+
+      it("ignores the owner relationship (client value never reaches the repository)", async () => {
+        await svc.putFromDTO({ data: hostileBody as any });
+        expect("owner" in repository.put.mock.calls[0][0]).toBe(false);
+      });
+
+      it("still writes a mutable field", async () => {
+        await svc.putFromDTO({ data: hostileBody as any });
+        const params = repository.put.mock.calls[0][0];
+        expect(params.name).toBe("Renamed");
+        expect(params.tags).toEqual(["tag-1"]);
+      });
+    });
+  });
 });
 
 // delete() gates on CLS auth + company ownership. For a descriptor with

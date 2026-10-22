@@ -194,9 +194,23 @@ export class UserController {
         companyId: body.data.relationships.company.data.id,
       });
     } else {
-      await this.companyService.createCompanyFromDTO({
-        data: body.included[0] as CompanyPostDataDTO,
-      });
+      // Creating a company (with its credit balances) together with its first
+      // administrator is a platform operation. The new user always lands in
+      // that new company: before, the relationship could name any existing
+      // company and plant a CompanyAdministrator there.
+      if (!this.isPlatformAdmin(request.user))
+        throw new ForbiddenException("Only a platform administrator can create a company with a user");
+
+      const includedCompany = body.included[0] as CompanyPostDataDTO;
+      const relatedCompanyId = body.data.relationships?.company?.data?.id;
+      if (relatedCompanyId && relatedCompanyId !== includedCompany.id)
+        throw new HttpException("The user's company must be the included company", HttpStatus.BAD_REQUEST);
+
+      await this.companyService.createCompanyFromDTO({ data: includedCompany });
+      body.data.relationships = {
+        ...body.data.relationships,
+        company: { data: { type: companyMeta.endpoint, id: includedCompany.id } },
+      } as typeof body.data.relationships;
       forceCompanyAdmin = true;
     }
 
