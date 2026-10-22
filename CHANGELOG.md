@@ -1,3 +1,9 @@
+## [6.6.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.1...v6.6.2) (2026-10-22)
+
+### 🐛 Bug Fixes
+
+* **security:** token classes, OAuth re-checks, admin-only chunk rebuild, safe object serving, parser limits ([31503c6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/31503c6d27e85254f8a59933ff3f0f6be1d7c90b))
+
 ## [6.6.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.0...v6.6.1) (2026-10-22)
 
 ### 🐛 Bug Fixes
