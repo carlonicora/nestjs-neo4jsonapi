@@ -1,3 +1,9 @@
+## [6.5.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.1...v6.5.2) (2026-10-22)
+
+### 🐛 Bug Fixes
+
+* **security:** block orderBy injection, guard the rbac dev editor, protect immutable fields on PATCH ([f6c7862](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f6c786248e8d2263e452237afc73ae5a09d83055))
+
 ## [6.5.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.5.0...v6.5.1) (2026-10-21)
 
 ### 🐛 Bug Fixes
