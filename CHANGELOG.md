@@ -1,3 +1,9 @@
+## [6.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.7.0...v6.8.0) (2026-10-23)
+
+### 🚀 Features
+
+* **blog:** platform blog foundation ([335d499](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/335d499770a600e562357c5bed21f4beb6656919))
+
 ## [6.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.2...v6.7.0) (2026-10-23)
 
 ### 🚀 Features
