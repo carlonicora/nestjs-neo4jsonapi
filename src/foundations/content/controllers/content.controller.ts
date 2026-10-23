@@ -9,8 +9,11 @@ import { ContentCypherService } from "../../content/services/content.cypher.serv
 import { ContentService } from "../../content/services/content.service";
 import { RelevancyService } from "../../relevancy/services/relevancy.service";
 import { authorMeta, ownerMeta } from "../../user/entities/user.meta";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Content })
 @Controller()
 export class ContentController {
   constructor(

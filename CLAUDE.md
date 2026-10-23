@@ -89,6 +89,16 @@ export class PhotographService extends AbstractService<Photograph, PhotographRel
 }
 ```
 
+### Request Permission Gate (opt-in)
+
+Off by default; an app with it off behaves exactly as before. Switch it on in `bootstrap({ permissions: { enforce: true } })` (API and worker).
+
+- **Sections.** Every controller declares its section with `@ModuleACL({ module: <Module id> })` at class level. A handler-level `@ModuleACL` overrides the section and/or the action; a POST that only reads (search, preview, count) gets `@ModuleACL({ module, action: "read" })`. Library controllers use `CoreModuleId.*`.
+- **Check.** `JwtAuthGuard`, `AdminJwtAuthGuard` and `OptionalJwtAuthGuard` (when a user authenticated) call `ModulePermissionGate.assert` after authentication. Action: GET/HEAD/OPTIONS read, POST create, PUT/PATCH update, DELETE delete. Permissions resolve once per request in the token's company plus platform memberships (never the legacy `BELONGS_TO` edge): `true` or a record path allows, `false`/absent refuses with 403. A read with no section is allowed. No administrator bypass.
+- **Boot audit.** `ModulePermissionAuditService` refuses to start when a session-guarded write route has no section, or when a referenced section id has no `(:Module)` node.
+- **Before switching on**, the app must: seed a `(Module)` node for every section its mounted controllers reference (including the `CoreModuleId` ones); declare a section on every session-guarded write route; give every role, the platform Administrator included, its grants in the `RbacMatrix` (the reconciler writes Administrator edges only while the gate is on).
+- `RbacPermissionService.can()` delegates to the same resolver while the gate is on, so tool calls and HTTP routes never disagree.
+
 ## Rules for Changes
 
 1. **Backward compatibility** - Breaking changes require major version bump

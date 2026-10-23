@@ -31,8 +31,11 @@ import { emailAutomationStepMeta } from "../entities/email-automation-step.meta"
 import { emailAutomationMeta } from "../entities/email-automation.meta";
 import { EmailAutomationStepService } from "../services/email-automation-step.service";
 import { EmailAutomationService } from "../services/email-automation.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(AdminJwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.EmailAutomation })
 @Controller()
 export class EmailAutomationController {
   private readonly crud = createCrudHandlers(() => this.emailAutomationService);

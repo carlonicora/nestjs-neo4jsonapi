@@ -19,6 +19,8 @@ import { AdminJwtAuthGuard, JwtAuthGuard } from "../../../common/guards";
 import { StripeProductPostDTO, StripeProductPutDTO } from "../dtos/stripe-product.dto";
 import { stripeProductMeta } from "../entities/stripe-product.meta";
 import { StripeProductAdminService } from "../services/stripe-product-admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * StripeProductController
@@ -44,6 +46,7 @@ import { StripeProductAdminService } from "../services/stripe-product-admin.serv
  * POST /billing/products/:id/archive
  * ```
  */
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripeProductController {
   constructor(private readonly stripeProductAdminService: StripeProductAdminService) {}

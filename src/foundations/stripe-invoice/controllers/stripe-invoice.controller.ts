@@ -5,7 +5,10 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
 import { StripeInvoiceAdminService } from "../services/stripe-invoice-admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripeInvoiceController {
   constructor(private readonly stripeInvoiceAdminService: StripeInvoiceAdminService) {}

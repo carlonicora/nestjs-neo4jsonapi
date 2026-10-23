@@ -6,7 +6,10 @@ import { roleMeta } from "../../role/entities/role.meta";
 
 import { RoleService } from "../../role/services/role.service";
 import { userMeta } from "../../user/entities/user.meta";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Role })
 @Controller(userMeta.endpoint)
 export class RoleUserController {
   constructor(

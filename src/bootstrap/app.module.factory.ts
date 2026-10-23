@@ -19,6 +19,8 @@ import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
 import { FoundationsModule } from "../foundations/foundations.modules";
 import { McpModule } from "../mcp/mcp.module";
+import { RbacPermissionModule } from "../foundations/rbac/rbac-permission.module";
+import { PERMISSIONS_ENFORCE } from "../foundations/rbac/rbac.tokens";
 import { OpenApiModule } from "../openapi/module/openapi.module";
 import { BootstrapOptions } from "./bootstrap.options";
 
@@ -143,6 +145,10 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                 }),
               ]),
 
+          // Permission resolution + request gate + boot audit (global: the session
+          // guards inject the gate). Inert while `permissions.enforce` is off.
+          RbacPermissionModule,
+
           // Library's AI agents (prompts configured via baseConfig.prompts)
           ...(options.agents === false ? [] : [AgentsModule]),
 
@@ -185,7 +191,11 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // Global rate-limit enforcement (adds X-RateLimit-* headers). Only
           // registered when rateLimit.enabled — apps no longer wire this themselves.
           ...(rateLimitEnabled ? [{ provide: APP_GUARD, useClass: CustomThrottlerGuard }] : []),
+          // Bootstrap option `permissions.enforce`, read by the gate, the boot
+          // audit, RbacPermissionService and RbacReconcilerService.
+          { provide: PERMISSIONS_ENFORCE, useValue: options.permissions?.enforce === true },
         ],
+        exports: [PERMISSIONS_ENFORCE],
       };
     }
   }

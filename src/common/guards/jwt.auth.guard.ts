@@ -3,6 +3,7 @@ import { Reflector } from "@nestjs/core";
 import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../core/neo4j/services/neo4j.service";
+import { ModulePermissionGate } from "../../foundations/rbac/services/module-permission.gate";
 import { AUTH_CONTEXT_HOOK, AuthContextHookInterface, SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
 import { assertSessionPayload, resolveSessionCompanyId, SessionPayload } from "./session.token";
 
@@ -18,6 +19,10 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     @Optional()
     @Inject(AUTH_CONTEXT_HOOK)
     private readonly authContextHook?: AuthContextHookInterface,
+    // Request permission gate (no-op unless the app sets `permissions.enforce`).
+    @Optional()
+    @Inject(ModulePermissionGate)
+    private readonly permissionGate?: ModulePermissionGate,
   ) {
     super();
   }
@@ -32,6 +37,8 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
 
     if (isAuthenticated && request.user && this.authContextHook)
       await this.authContextHook.onAuthenticated({ request, context });
+
+    if (isAuthenticated && request.user && this.permissionGate) await this.permissionGate.assert({ request, context });
 
     return isAuthenticated;
   }

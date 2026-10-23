@@ -5,7 +5,10 @@ import { Roles } from "../../../common/decorators/roles.decorator";
 import { RoleId } from "../../../common/constants/system.roles";
 import { RbacService } from "../services/rbac.service";
 import { modulePathsMeta } from "../entities/module-paths.meta";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Role })
 @Controller(modulePathsMeta.endpoint)
 export class RbacModulePathsController {
   constructor(private readonly rbacService: RbacService) {}

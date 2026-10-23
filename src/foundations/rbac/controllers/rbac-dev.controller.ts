@@ -9,6 +9,8 @@ import { RBAC_MATRIX_TOKEN } from "../rbac.tokens";
 import { MODULE_USER_PATHS_TOKEN } from "../rbac.constants";
 import type { PermToken, RbacMatrix } from "../dsl/types";
 import { serializeMatrixToTs } from "../serializer/matrix-to-ts";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Walk up from `startDir` looking for `pnpm-workspace.yaml`. Returns that
@@ -95,6 +97,7 @@ interface RbacMatrixPutBody {
  * can consume them via the standard `callApi()` pipeline instead of a
  * bespoke raw-fetch escape hatch.
  */
+@ModuleACL({ module: CoreModuleId.Role })
 @Controller("_dev/rbac")
 export class RbacDevController {
   constructor(

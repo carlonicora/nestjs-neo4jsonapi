@@ -10,6 +10,8 @@ import { TotpSetupVerifyDTO } from "../dtos/totp-verify.dto";
 import { totpAuthenticatorMeta } from "../entities/totp-authenticator.meta";
 import { TotpService } from "../services/totp.service";
 import { TwoFactorService } from "../services/two-factor.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * TOTP Controller
@@ -18,6 +20,7 @@ import { TwoFactorService } from "../services/two-factor.service";
  * All endpoints require JWT authentication.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.User })
 @Controller("auth/totp")
 export class TotpController {
   constructor(
@@ -33,6 +36,7 @@ export class TotpController {
    * Returns a QR code and secret for the authenticator app.
    * The authenticator is created in unverified state until verify-setup is called.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("setup")
   async setup(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply, @Body() body: TotpSetupDTO) {
     const userId = req.user.userId;
@@ -53,6 +57,7 @@ export class TotpController {
    * Verify and activate a newly set up TOTP authenticator.
    * The user must provide a valid TOTP code from their authenticator app.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("verify-setup")
   async verifySetup(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply, @Body() body: TotpSetupVerifyDTO) {
     const { authenticatorId, code } = body.data.attributes;
@@ -83,6 +88,7 @@ export class TotpController {
    * Delete a TOTP authenticator.
    * If this is the last 2FA method, 2FA will be automatically disabled.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Delete("authenticators/:authenticatorId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(totpAuthenticatorMeta, "authenticatorId")

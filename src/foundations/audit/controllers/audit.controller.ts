@@ -6,8 +6,11 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 import { auditLogMeta } from "../entities/audit.meta";
 import { AuditService } from "../services/audit.service";
 import { userMeta } from "../../user/entities/user.meta";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Audit })
 @Controller()
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

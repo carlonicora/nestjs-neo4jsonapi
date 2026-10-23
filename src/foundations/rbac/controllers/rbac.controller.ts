@@ -5,7 +5,10 @@ import { Roles } from "../../../common/decorators/roles.decorator";
 import { RoleId } from "../../../common/constants/system.roles";
 import { RbacService } from "../services/rbac.service";
 import { permissionMappingMeta } from "../entities/permission-mapping.meta";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Role })
 @Controller(permissionMappingMeta.endpoint)
 export class RbacController {
   constructor(private readonly rbacService: RbacService) {}

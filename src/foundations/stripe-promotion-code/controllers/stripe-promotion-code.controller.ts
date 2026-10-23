@@ -5,12 +5,16 @@ import {
   PromotionCodeValidationResult,
   StripePromotionCodeApiService,
 } from "../services/stripe-promotion-code-api.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller("stripe-promotion-codes")
 @UseGuards(JwtAuthGuard)
 export class StripePromotionCodeController {
   constructor(private readonly promotionCodeService: StripePromotionCodeApiService) {}
 
+  @ModuleACL({ module: CoreModuleId.Billing, action: "read" })
   @Post("validate")
   async validatePromotionCode(@Body() dto: ValidatePromotionCodeDTO): Promise<PromotionCodeValidationResult> {
     return this.promotionCodeService.validatePromotionCode({

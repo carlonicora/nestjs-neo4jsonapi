@@ -21,7 +21,10 @@ import { AuthPostRegisterDTO } from "../../auth/dtos/auth.post.register.dto";
 import { AuthPostResetPasswordDTO } from "../../auth/dtos/auth.post.resetpassword.dto";
 import { authMeta } from "../../auth/entities/auth.meta";
 import { AuthService } from "../../auth/services/auth.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Auth })
 @Controller(authMeta.endpoint)
 export class AuthController {
   constructor(private readonly service: AuthService) {}

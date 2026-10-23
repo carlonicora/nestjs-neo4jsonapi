@@ -5,6 +5,8 @@ import { Roles } from "../../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { tokenUsageMeta } from "../entities/tokenusage.meta";
 import { TokenUsageAdminService } from "../services/tokenusage.admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 const GRANULARITIES = ["day", "week", "month"] as const;
 const STACK_BY = ["scope", "type", "company"] as const;
@@ -30,6 +32,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * values), so an unvalidated string would be an injection vector.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.TokenUsage })
 @Controller()
 export class TokenUsageAdminController {
   constructor(private readonly service: TokenUsageAdminService) {}

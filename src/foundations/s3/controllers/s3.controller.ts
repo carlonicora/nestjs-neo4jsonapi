@@ -44,6 +44,8 @@ import { S3_OBJECTS_SEGMENT, s3Meta } from "../../s3/entities/s3.meta";
 import { S3CipherService } from "../../s3/services/s3-cipher.service";
 import { S3ClientKeyService } from "../../s3/services/s3-client-key.service";
 import { S3Service } from "../../s3/services/s3.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /** How long the browser keeps a file reached through a permanent (non-expiring) link. */
 const PERMANENT_LINK_CACHE_SECONDS = 3600;
@@ -75,6 +77,7 @@ function baseContentType(contentType: string | undefined | null): string {
   return (contentType ?? "").split(";")[0].trim().toLowerCase();
 }
 
+@ModuleACL({ module: CoreModuleId.S3 })
 @Controller(s3Meta.endpoint)
 export class S3Controller {
   constructor(

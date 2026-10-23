@@ -6,7 +6,10 @@ import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { FeatureService } from "../../feature/services/feature.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Feature })
 @Controller(featureMeta.endpoint)
 export class FeatureController {
   constructor(private readonly featureService: FeatureService) {}

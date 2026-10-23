@@ -21,6 +21,8 @@ import { StripePaymentMethodModel } from "../entities/stripe-payment-method.mode
 import { StripeCustomerRepository } from "../repositories/stripe-customer.repository";
 import { StripeCustomerAdminService } from "../services/stripe-customer-admin.service";
 import { StripeCustomerApiService } from "../services/stripe-customer-api.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * StripeCustomerController
@@ -30,6 +32,7 @@ import { StripeCustomerApiService } from "../services/stripe-customer-api.servic
  *
  * Base path: /stripe-customers
  */
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller("stripe-customers")
 export class StripeCustomerController {
   constructor(

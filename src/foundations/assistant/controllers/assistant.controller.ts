@@ -39,6 +39,8 @@ import {
   JsonApiListDocument,
   JsonApiSingleDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Merge two JSON:API `included` lists for the `create()` response.
@@ -88,6 +90,7 @@ export function mergeIncluded(
 }
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Assistant })
 @Controller()
 export class AssistantController {
   private readonly logger = new Logger(AssistantController.name);

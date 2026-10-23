@@ -49,6 +49,7 @@ export * from "./tokens";
 
 // Constants
 export * from "./constants/system.roles";
+export * from "./constants/core-module.ids";
 
 // Utils
 // Exported by file, like ./constants/system.roles above: src/common/utils has no

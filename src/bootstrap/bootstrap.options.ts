@@ -204,6 +204,24 @@ export interface BootstrapOptions {
   rbac?: RbacMatrix;
 
   /**
+   * Request-level permission gate. Default undefined = off: no new query, no
+   * new refusal, no new reconcile writes.
+   *
+   * With `enforce: true`:
+   * - every request that passes `JwtAuthGuard`, `AdminJwtAuthGuard` or
+   *   `OptionalJwtAuthGuard` (with a user) is checked against the section its
+   *   controller/handler declares with `@ModuleACL({ module })` and the action
+   *   of its HTTP method (or `@ModuleACL({ action })`); a refusal is 403;
+   * - permissions resolve in the token's company only (plus platform
+   *   memberships); a record-path value allows at the section level;
+   * - there is no administrator bypass, and `RbacReconcilerService` writes the
+   *   Administrator's grants from the matrix like any other role's;
+   * - the boot audit refuses to start when a session-guarded write route has
+   *   no section, or a referenced section has no `(:Module)` node.
+   */
+  permissions?: { enforce: boolean };
+
+  /**
    * Optional custom SecurityService subclass to inject into the package engine.
    * The subclass must extend the package SecurityService.
    * Default undefined uses the base SecurityService (neural-erp behavior unchanged).

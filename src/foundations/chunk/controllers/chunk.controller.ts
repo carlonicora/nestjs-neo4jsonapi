@@ -10,6 +10,8 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { chunkMeta } from "../../chunk/entities/chunk.meta";
 import { ChunkService } from "../../chunk/services/chunk.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 // App embedding-rebuild queues. The package QueueId enum is a base apps extend;
 // apps register these queues via config.chunkQueues.queueIds (or the module below
@@ -17,6 +19,7 @@ import { ChunkService } from "../../chunk/services/chunk.service";
 const EMBEDDING_CHUNKS_QUEUE = "embedding-chunks";
 const EMBEDDING_KEYCONCEPTS_QUEUE = "embedding-keyconcepts";
 
+@ModuleACL({ module: CoreModuleId.Chunk })
 @Controller()
 export class ChunkController {
   private readonly rebuildChunksJobName: string;

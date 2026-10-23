@@ -6,8 +6,11 @@ import { CacheService } from "../../../core/cache/services/cache.service";
 import { NotificationDataPatchDTO, NotificationPatchListDTO } from "../../notification/dtos/notification.patch.dto";
 import { notificationMeta } from "../../notification/entities/notification.meta";
 import { NotificationServices } from "../../notification/services/notification.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Notification })
 @Controller()
 export class NotificationController {
   constructor(
@@ -35,6 +38,7 @@ export class NotificationController {
     });
   }
 
+  @ModuleACL({ module: CoreModuleId.Notification, action: "update" })
   @Post(`${notificationMeta.endpoint}/:notificationId/archive`)
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(notificationMeta, "notificationId")

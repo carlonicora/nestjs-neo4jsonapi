@@ -19,6 +19,8 @@ import { AdminJwtAuthGuard, JwtAuthGuard } from "../../../common/guards";
 import { StripePricePostDTO, StripePricePutDTO } from "../dtos/stripe-price.dto";
 import { stripePriceMeta } from "../entities/stripe-price.meta";
 import { StripePriceAdminService } from "../services/stripe-price-admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * StripePriceController
@@ -28,6 +30,7 @@ import { StripePriceAdminService } from "../services/stripe-price-admin.service"
  *
  * All endpoints require admin authentication.
  */
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripePriceController {
   constructor(private readonly stripePriceAdminService: StripePriceAdminService) {}

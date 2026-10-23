@@ -3,6 +3,8 @@ import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { tokenUsageMeta } from "../entities/tokenusage.meta";
 import { TokenUsageReportService } from "../services/tokenusage.report.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 const GRANULARITIES = ["day", "week", "month"] as const;
 const DIMENSIONS = ["operation", "target"] as const;
@@ -35,6 +37,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * Cypher clause, they are not bound values.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.TokenUsage })
 @Controller()
 export class TokenUsageReportController {
   constructor(private readonly service: TokenUsageReportService) {}

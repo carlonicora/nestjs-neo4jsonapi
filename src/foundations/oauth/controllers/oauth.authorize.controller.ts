@@ -5,6 +5,8 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { OAuthAuthorizeQueryDto, OAuthConsentDecisionDto, OAuthConsentInfoQueryDto } from "../dtos/oauth.authorize.dto";
 import { OAuthErrorCodes } from "../constants/oauth.errors";
 import { ConsentInfoResponse, OAuthService } from "../services/oauth.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * OAuth Authorization Controller
@@ -12,6 +14,7 @@ import { ConsentInfoResponse, OAuthService } from "../services/oauth.service";
  * Handles the authorization endpoint (RFC 6749 Section 3.1).
  * Requires user authentication - user must be logged in before authorizing.
  */
+@ModuleACL({ module: CoreModuleId.OAuthClient })
 @Controller("oauth")
 export class OAuthAuthorizeController {
   constructor(
@@ -142,6 +145,7 @@ export class OAuthAuthorizeController {
    * Called when the user denies the authorization request.
    * Returns a redirect URL with error=access_denied.
    */
+  @ModuleACL({ module: CoreModuleId.OAuthClient, action: "read" })
   @Post("authorize/deny")
   @UseGuards(JwtAuthGuard)
   async denyAuthorization(@Body() body: OAuthConsentDecisionDto): Promise<{ meta: { redirectUrl: string } }> {

@@ -29,8 +29,11 @@ import { HowToPostDTO } from "../dtos/how-to.post.dto";
 import { HowToPutDTO } from "../dtos/how-to.put.dto";
 import { howToMeta } from "../entities/how-to.meta";
 import { HowToService } from "../services/how-to.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.HowTo })
 @Controller()
 export class HowToController {
   private readonly crud = createCrudHandlers(() => this.howToService);

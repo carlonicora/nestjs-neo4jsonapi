@@ -8,3 +8,12 @@
  * it from there rather than duplicating it here.
  */
 export const RBAC_MATRIX_TOKEN = Symbol("RBAC_MATRIX_TOKEN");
+
+/**
+ * DI token carrying the bootstrap option `permissions.enforce` (boolean).
+ *
+ * Provided globally by the generated app module. Every consumer injects it
+ * `@Optional()` and treats a missing value as `false`, so an app that never
+ * sets the option behaves exactly as before.
+ */
+export const PERMISSIONS_ENFORCE = Symbol("PERMISSIONS_ENFORCE");

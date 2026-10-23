@@ -14,8 +14,11 @@ import { AssistantMessageDescriptor } from "../../assistant-message/entities/ass
 import { AssistantActionDescriptor } from "../entities/assistant-action";
 import { assistantActionMeta } from "../entities/assistant-action.meta";
 import { AssistantActionService } from "../services/assistant-action.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Assistant })
 @Controller()
 export class AssistantActionController {
   private readonly crud = createCrudHandlers(() => this.assistantActions);

@@ -33,6 +33,7 @@ vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { FastifyReply } from "fastify";
+import { JwtAuthGuard } from "../../../../common/guards";
 import { BillingController } from "../billing.controller";
 import { BillingService } from "../../services/billing.service";
 import { MOCK_PAYMENT_METHOD } from "../../__tests__/fixtures/stripe.fixtures";
@@ -237,6 +238,11 @@ describe("BillingController", () => {
     });
 
     describe("DELETE /billing/payment-methods/:paymentMethodId", () => {
+      it("requires a session", () => {
+        const guards = Reflect.getMetadata("__guards__", BillingController.prototype.removePaymentMethod);
+        expect(guards).toContain(JwtAuthGuard);
+      });
+
       it("should remove payment method with 204 NO_CONTENT status", async () => {
         const req = createMockRequest();
         billingService.removePaymentMethod.mockResolvedValue(undefined);

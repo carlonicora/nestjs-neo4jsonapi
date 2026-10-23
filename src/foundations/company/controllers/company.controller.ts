@@ -28,7 +28,10 @@ import { CompanyPutDTO } from "../../company/dtos/company.put.dto";
 import { companyMeta } from "../../company/entities/company.meta";
 import { CompanyService } from "../../company/services/company.service";
 import { CompanyConfigurationsPutDTO } from "../dtos/company.configurations.put.dto";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Company })
 @Controller()
 export class CompanyController {
   constructor(

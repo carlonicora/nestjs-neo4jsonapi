@@ -3,6 +3,8 @@ import { ClsService } from "nestjs-cls";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { OAuthClientService } from "../services/oauth.client.service";
 import { OAuthClientCreateDto, OAuthClientUpdateDto } from "../dtos/oauth.client.dto";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * OAuth Client Management Controller
@@ -13,6 +15,7 @@ import { OAuthClientCreateDto, OAuthClientUpdateDto } from "../dtos/oauth.client
  * Note: JSON:API serialization will be added by OAuthClientSerialiser
  * once the serializers module is complete.
  */
+@ModuleACL({ module: CoreModuleId.OAuthClient })
 @Controller("oauth/clients")
 @UseGuards(JwtAuthGuard)
 export class OAuthManagementController {

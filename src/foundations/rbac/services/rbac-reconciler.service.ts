@@ -2,7 +2,7 @@ import { Inject, Injectable, Optional, OnApplicationBootstrap } from "@nestjs/co
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { SystemRoles } from "../../../common/constants/system.roles";
-import { RBAC_MATRIX_TOKEN } from "../rbac.tokens";
+import { PERMISSIONS_ENFORCE, RBAC_MATRIX_TOKEN } from "../rbac.tokens";
 import type { RbacMatrix } from "../dsl/types";
 import { iterateDeclaredEdges, iterateDeclaredModules, resolveDefault, resolveForRole } from "../dsl/resolver";
 
@@ -23,7 +23,9 @@ interface ActualState {
  *
  * Behaviour (per spec §6.3):
  *  - Administrator role is never written as an HAS_PERMISSIONS edge — the
- *    security layer short-circuits for it.
+ *    security layer short-circuits for it. Exception: with
+ *    `permissions.enforce` on (no administrator bypass in the request gate)
+ *    its edges are reconciled like any other role's.
  *  - Module defaults are stored on `Module.permissions`.
  *  - Role-specific permissions are stored on `(Role)-[:HAS_PERMISSIONS]->(Module)`.
  *  - Deletions are scoped to modules declared in the matrix: edges for
@@ -37,7 +39,17 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
     private readonly neo4j: Neo4jService,
     @Optional() @Inject(RBAC_MATRIX_TOKEN) private readonly matrix: RbacMatrix | null,
     private readonly logger: AppLoggingService,
+    @Optional() @Inject(PERMISSIONS_ENFORCE) private readonly enforce?: boolean,
   ) {}
+
+  /**
+   * The Administrator role is skipped (never written, never deleted) unless the
+   * request permission gate is on: the gate has no administrator bypass, so the
+   * Administrator's grants must then be reconciled like any other role's.
+   */
+  private skipsRole(roleId: string): boolean {
+    return this.enforce !== true && roleId === ADMINISTRATOR_ID;
+  }
 
   async onApplicationBootstrap(): Promise<void> {
     if (!this.matrix) {
@@ -69,7 +81,7 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
       moduleIds.add(moduleId);
     }
     for (const { roleId } of iterateDeclaredEdges(this.matrix!)) {
-      if (roleId === ADMINISTRATOR_ID) continue;
+      if (this.skipsRole(roleId)) continue;
       roleIds.add(roleId);
     }
 
@@ -142,7 +154,7 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
     // Edges — expected (Administrator excluded)
     const expectedEdgeKeys = new Set<string>();
     const sortedEdges = Array.from(iterateDeclaredEdges(this.matrix!))
-      .filter((e) => e.roleId !== ADMINISTRATOR_ID)
+      .filter((e) => !this.skipsRole(e.roleId))
       .sort((a, b) => (a.moduleId + a.roleId).localeCompare(b.moduleId + b.roleId));
 
     const actualByKey = new Map<string, string>();
@@ -167,7 +179,7 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
     // Edges — to delete (scoped to declared modules only; Administrator never managed)
     for (const edge of actual.edges) {
       if (!declaredModules.has(edge.moduleId)) continue;
-      if (edge.roleId === ADMINISTRATOR_ID) continue;
+      if (this.skipsRole(edge.roleId)) continue;
       const key = `${edge.roleId}|${edge.moduleId}`;
       if (!expectedEdgeKeys.has(key)) {
         operations.push({

@@ -43,7 +43,10 @@ import { userMeta } from "../../user/entities/user.meta";
 import { User } from "../entities/user";
 import { UserCypherService } from "../services/user.cypher.service";
 import { UserService } from "../services/user.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.User })
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class UserController {

@@ -22,7 +22,10 @@ import { AuditService } from "../../audit/services/audit.service";
 import { RolePostDTO } from "../../role/dtos/role.post.dto";
 import { roleMeta } from "../../role/entities/role.meta";
 import { RoleService } from "../services/role.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Role })
 @Controller(roleMeta.endpoint)
 export class RoleController {
   constructor(

@@ -27,6 +27,8 @@ import { PendingAuthGuard, PendingAuthPayload } from "../guards/pending-auth.gua
 import { BackupCodeService } from "../services/backup-code.service";
 import { PasskeyService } from "../services/passkey.service";
 import { TwoFactorService } from "../services/two-factor.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Request with pending auth payload attached.
@@ -43,6 +45,7 @@ interface PendingAuthRequest {
  * Status/Enable/Disable endpoints require full JWT authentication.
  * Verification endpoints require pending 2FA token (issued after password validation).
  */
+@ModuleACL({ module: CoreModuleId.User })
 @Controller("auth")
 export class TwoFactorController {
   private readonly logger: Logger = new Logger(TwoFactorController.name);
@@ -77,6 +80,7 @@ export class TwoFactorController {
    * Requires at least one 2FA method (TOTP or passkey) to be configured.
    */
   @UseGuards(JwtAuthGuard)
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("two-factor/enable")
   async enable(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply, @Body() body: TwoFactorEnableDTO) {
     const userId = req.user.userId;
@@ -90,6 +94,7 @@ export class TwoFactorController {
    * Disable 2FA for the authenticated user.
    */
   @UseGuards(JwtAuthGuard)
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("two-factor/disable")
   @HttpCode(HttpStatus.NO_CONTENT)
   async disable(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply) {
@@ -257,6 +262,7 @@ export class TwoFactorController {
    * Returns the plain text codes ONCE - they should be shown to the user.
    */
   @UseGuards(JwtAuthGuard)
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("backup-codes/generate")
   async generateBackupCodes(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply) {
     const userId = req.user.userId;
@@ -276,6 +282,7 @@ export class TwoFactorController {
    * Returns the new plain text codes ONCE - they should be shown to the user.
    */
   @UseGuards(JwtAuthGuard)
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("backup-codes/regenerate")
   async regenerateBackupCodes(@Req() req: AuthenticatedRequest, @Res() reply: FastifyReply) {
     const userId = req.user.userId;

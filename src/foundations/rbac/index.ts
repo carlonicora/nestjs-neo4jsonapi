@@ -4,6 +4,13 @@ export { RbacPermissionService } from "./services/rbac-permission.service";
 export type { RbacAction } from "./services/rbac-permission.service";
 export { RbacPermissionRepository } from "./repositories/rbac-permission.repository";
 export { MODULE_USER_PATHS_TOKEN } from "./rbac.constants";
+export { PERMISSIONS_ENFORCE } from "./rbac.tokens";
+
+// Request permission gate (bootstrap option `permissions: { enforce: true }`).
+export { ModulePermissionService } from "./services/module-permission.service";
+export type { EffectivePermissions } from "./services/module-permission.service";
+export { ModulePermissionGate, rbacActionForHttpMethod, resolveRouteAcl } from "./services/module-permission.gate";
+export { ModulePermissionAuditService } from "./services/module-permission-audit.service";
 export { permissionMappingMeta } from "./entities/permission-mapping.meta";
 export { modulePathsMeta } from "./entities/module-paths.meta";
 export type { PermissionMapping } from "./entities/permission-mapping.entity";

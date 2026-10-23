@@ -5,6 +5,8 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 import { stripeUsageRecordMeta } from "../entities/stripe-usage-record.meta";
 import { StripeUsageRecordPostDTO } from "../dtos/stripe-usage.dto";
 import { StripeUsageAdminService } from "../services/stripe-usage-admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * StripeUsageController
@@ -19,6 +21,7 @@ import { StripeUsageAdminService } from "../services/stripe-usage-admin.service"
  * - GET  /stripe-usage-records                  - List usage records (filter by subscription)
  * - GET  /stripe-usage-records/summary          - Get usage summary
  */
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller(stripeUsageRecordMeta.endpoint)
 export class StripeUsageController {
   constructor(private readonly usageService: StripeUsageAdminService) {}

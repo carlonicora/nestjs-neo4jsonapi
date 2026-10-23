@@ -6,6 +6,8 @@ import { AnalyticsEventPostDTO } from "../dtos/analytics-event.post.dto";
 import { analyticsEventMeta } from "../entities/analytics-event.meta";
 import { AnalyticsPageViewInput } from "../interfaces/analytics.page-view.input";
 import { AnalyticsService } from "../services/analytics.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Public page-view beacon. Anonymous visitors are accepted; when a valid JWT is
@@ -17,6 +19,7 @@ import { AnalyticsService } from "../services/analytics.service";
  * agent travel only inside the queued job: the worker hashes / classifies them
  * and nothing raw reaches Neo4j.
  */
+@ModuleACL({ module: CoreModuleId.Analytics })
 @Controller()
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}

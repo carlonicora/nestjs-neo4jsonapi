@@ -13,6 +13,8 @@ import { analyticsSummaryMeta } from "../entities/analytics-summary.meta";
 import { analyticsTimelineMeta } from "../entities/analytics-timeline.meta";
 import { DIMENSIONS, GRANULARITIES, SECTIONS } from "../repositories/analytics.admin.repository";
 import { AnalyticsAdminService } from "../services/analytics.admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 const DEFAULT_WINDOW_DAYS = 30;
 const MAX_WINDOW_DAYS = 400;
@@ -35,6 +37,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * values), so an unvalidated string would be an injection vector.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Analytics })
 @Controller()
 export class AnalyticsAdminController {
   private readonly crud = createCrudHandlers(() => this.service);

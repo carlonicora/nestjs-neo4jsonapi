@@ -18,7 +18,10 @@ import { WaitlistPostDTO } from "../dtos/waitlist.post.dto";
 import { WaitlistStatus } from "../entities/waitlist";
 import { waitlistMeta } from "../entities/waitlist.meta";
 import { WaitlistService } from "../services/waitlist.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Waitlist })
 @Controller(waitlistMeta.endpoint)
 export class WaitlistController {
   constructor(private readonly service: WaitlistService) {}

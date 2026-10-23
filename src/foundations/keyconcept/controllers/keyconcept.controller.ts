@@ -7,7 +7,10 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { keyConceptMeta } from "../entities/key.concept.meta";
 import { KEYCONCEPT_EMBEDDING_QUEUE } from "../processors/keyconcept.embedding.processor";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.KeyConcept })
 @Controller(keyConceptMeta.endpoint)
 export class KeyConceptController {
   private readonly rebuildKeyConceptsJobName: string;

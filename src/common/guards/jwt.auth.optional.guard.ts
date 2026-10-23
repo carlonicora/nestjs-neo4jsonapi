@@ -2,6 +2,7 @@ import { ExecutionContext, HttpException, Inject, Injectable, Optional } from "@
 import { Reflector } from "@nestjs/core";
 import { AuthGuard } from "@nestjs/passport";
 import { ClsService } from "nestjs-cls";
+import { ModulePermissionGate } from "../../foundations/rbac/services/module-permission.gate";
 import { SYSTEM_ROLES, SystemRolesInterface } from "../tokens";
 import { assertSessionPayload, resolveSessionCompanyId, SessionPayload } from "./session.token";
 
@@ -13,6 +14,10 @@ export class OptionalJwtAuthGuard extends AuthGuard("jwt") {
     @Optional()
     @Inject(SYSTEM_ROLES)
     private readonly systemRoles?: SystemRolesInterface,
+    // Request permission gate (no-op unless the app sets `permissions.enforce`).
+    @Optional()
+    @Inject(ModulePermissionGate)
+    private readonly permissionGate?: ModulePermissionGate,
   ) {
     super();
   }
@@ -25,7 +30,13 @@ export class OptionalJwtAuthGuard extends AuthGuard("jwt") {
       return true;
     }
 
-    return super.canActivate(context) as boolean;
+    const isAuthenticated = (await super.canActivate(context)) as boolean;
+
+    // Only a caller that authenticated as a session is checked; an anonymous
+    // caller (no token) keeps today's behaviour.
+    if (isAuthenticated && request.user && this.permissionGate) await this.permissionGate.assert({ request, context });
+
+    return isAuthenticated;
   }
 
   handleRequest(err: any, user: any, info: any, context: ExecutionContext) {

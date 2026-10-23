@@ -23,6 +23,8 @@ import { HandbookThreadPostDTO } from "../dtos/handbook-thread-post.dto";
 import { handbookThreadMeta } from "../entities/handbook-thread.meta";
 import { handbookThreadMessageMeta } from "../entities/handbook-thread-message.meta";
 import { HandbookThreadService } from "../services/handbook-thread.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Persisted handbook conversations.
@@ -41,6 +43,7 @@ import { HandbookThreadService } from "../services/handbook-thread.service";
  * cached.
  */
 @UseGuards(AdminJwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Handbook })
 @Controller()
 export class HandbookThreadController {
   private readonly crud = createCrudHandlers(() => this.handbookThreadService);

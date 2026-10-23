@@ -10,7 +10,10 @@ import {
 import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
 import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
 import { StripeSubscriptionAdminService } from "../services/stripe-subscription-admin.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripeSubscriptionController {
   constructor(private readonly subscriptionService: StripeSubscriptionAdminService) {}

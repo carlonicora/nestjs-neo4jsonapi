@@ -30,6 +30,8 @@ import {
   JsonApiListDocument,
   JsonApiSingleDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Standalone HTTP surface for the checkpointed operator engine.
@@ -41,6 +43,7 @@ import {
  * request DTOs and response documents reuse the assistant descriptors.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Assistant })
 @Controller()
 export class OperatorController {
   private readonly logger = new Logger(OperatorController.name);

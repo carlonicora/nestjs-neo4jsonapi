@@ -7,8 +7,11 @@ import { assistantMeta } from "../../assistant/entities/assistant.meta";
 import { AssistantMessageDescriptor } from "../entities/assistant-message";
 import { assistantMessageMeta } from "../entities/assistant-message.meta";
 import { AssistantMessageService } from "../services/assistant-message.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Assistant })
 @Controller()
 export class AssistantMessageController {
   private readonly crud = createCrudHandlers(() => this.messages);

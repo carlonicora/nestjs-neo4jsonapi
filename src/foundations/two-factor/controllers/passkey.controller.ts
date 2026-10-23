@@ -23,6 +23,8 @@ import { PasskeyRegistrationVerifyDTO, PasskeyRenameDTO } from "../dtos/passkey-
 import { passkeyMeta } from "../entities/passkey.meta";
 import { PasskeyService } from "../services/passkey.service";
 import { TwoFactorService } from "../services/two-factor.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Passkey Controller
@@ -31,6 +33,7 @@ import { TwoFactorService } from "../services/two-factor.service";
  * All endpoints require JWT authentication.
  */
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.User })
 @Controller("auth")
 export class PasskeyController {
   constructor(
@@ -45,6 +48,7 @@ export class PasskeyController {
    * Generate WebAuthn registration options for creating a new passkey.
    * Returns options to be passed to navigator.credentials.create().
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("passkey/register/options")
   async getRegistrationOptions(
     @Req() req: AuthenticatedRequest,
@@ -69,6 +73,7 @@ export class PasskeyController {
    * Verify and register a new passkey after the user completes
    * the WebAuthn ceremony on their device.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Post("passkey/register/verify")
   async verifyRegistration(
     @Req() req: AuthenticatedRequest,
@@ -105,6 +110,7 @@ export class PasskeyController {
    * Delete a passkey.
    * If this is the last 2FA method, 2FA will be automatically disabled.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Delete("passkeys/:passkeyId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(passkeyMeta, "passkeyId")
@@ -127,6 +133,7 @@ export class PasskeyController {
    *
    * Rename a passkey.
    */
+  @ModuleACL({ module: CoreModuleId.User, action: "update" })
   @Patch("passkeys/:passkeyId")
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(passkeyMeta, "passkeyId")

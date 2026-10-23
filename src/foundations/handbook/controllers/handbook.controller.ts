@@ -11,6 +11,8 @@ import { handbookSectionMeta } from "../entities/handbook-section.meta";
 import { HandbookIngestService } from "../services/handbook-ingest.service";
 import { HandbookPageService } from "../services/handbook-page.service";
 import { HandbookSectionService } from "../services/handbook-section.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * Developer documentation is administrator-only, enforced HERE and not merely by
@@ -20,6 +22,7 @@ import { HandbookSectionService } from "../services/handbook-section.service";
  * gated too.
  */
 @UseGuards(AdminJwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Handbook })
 @Controller()
 export class HandbookController {
   private readonly crud = createCrudHandlers(() => this.handbookPageService);

@@ -17,8 +17,11 @@ import { ReferralInviteDTO } from "../dtos/referral-invite.dto";
 import { referralMeta } from "../entities/referral.meta";
 import { REFERRAL_CONFIG, ReferralModuleConfig } from "../interfaces/referral.config.interface";
 import { ReferralService } from "../services/referral.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 @UseGuards(JwtAuthGuard)
+@ModuleACL({ module: CoreModuleId.Referral })
 @Controller()
 export class ReferralController {
   constructor(

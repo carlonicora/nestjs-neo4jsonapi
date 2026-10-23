@@ -4,6 +4,8 @@ import { JwtAuthGuard } from "../../../common/guards";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CreateSetupIntentDTO } from "../dtos/create-setup-intent.dto";
 import { BillingService } from "../services/billing.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * BillingController
@@ -16,6 +18,7 @@ import { BillingService } from "../services/billing.service";
  * Usage-related endpoints have been moved to StripeUsageController.
  * Webhook endpoint has been moved to WebhookController in stripe-webhook module.
  */
+@ModuleACL({ module: CoreModuleId.Billing })
 @Controller("billing")
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
@@ -76,6 +79,7 @@ export class BillingController {
   }
 
   @Delete("payment-methods/:paymentMethodId")
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async removePaymentMethod(
     @Req() req: AuthenticatedRequest,

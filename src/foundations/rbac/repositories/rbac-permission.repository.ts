@@ -1,12 +1,21 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
-import { featureModuleQuery } from "../../module/queries/feature.module.query";
+import { Module } from "../../module/entities/module.entity";
+import { ModuleModel } from "../../module/entities/module.model";
+import { adminModuleQuery, featureModuleQuery } from "../../module/queries/feature.module.query";
 import type { RbacAction } from "../services/rbac-permission.service";
 
 interface PermissionEntry {
   type: string;
   value: unknown;
 }
+
+/**
+ * Effective permission values per module id. A value is `true`, `false` or a
+ * record path (a non-empty string such as `"id"`), exactly as resolved by
+ * `modulePermissionResolutionQuery`.
+ */
+export type EffectivePermissions = Map<string, Record<RbacAction, boolean | string>>;
 
 /**
  * Resolves the effective per-module permission flags for a user. Mirrors the
@@ -17,7 +26,7 @@ interface PermissionEntry {
  * `permissions` JSON with any role-level `HAS_PERMISSIONS` overrides.
  *
  * Used by RbacPermissionService to answer `can(userId, moduleId, action)`
- * for the MCP layer.
+ * for the MCP layer, and by ModulePermissionService for the request gate.
  */
 @Injectable()
 export class RbacPermissionRepository {
@@ -66,5 +75,81 @@ export class RbacPermissionRepository {
       }
     }
     return map;
+  }
+
+  /**
+   * Effective permissions of a user in ONE company: the module defaults plus
+   * the grants of the roles on the user's membership in that company and on
+   * the user's platform memberships (no `IN_COMPANY`). Never follows the
+   * legacy `(User)-[:BELONGS_TO]->(Company)` edge.
+   *
+   * With no `companyId` (a platform session) it resolves through the
+   * platform membership only (`adminModuleQuery`).
+   *
+   * Record-path values are kept as strings: the request gate allows them at
+   * the section level and leaves the record decision to the app.
+   *
+   * Intentional exception to "use buildDefaultMatch": this is the library's
+   * own permission resolution (the same `company` binding UserModulesRepository
+   * uses), not an entity read.
+   */
+  async findEffectivePermissions(params: {
+    userId: string;
+    companyId: string | undefined;
+  }): Promise<EffectivePermissions> {
+    const result = params.companyId
+      ? await this.neo4j.read(
+          `
+          MATCH (user:User {id: $userId})
+          MATCH (company:Company {id: $companyId})
+          ${featureModuleQuery}
+          `,
+          { userId: params.userId, companyId: params.companyId },
+        )
+      : await this.neo4j.read(adminModuleQuery, { searchValue: params.userId });
+
+    const map: EffectivePermissions = new Map();
+    for (const record of result.records) {
+      const moduleNode: any = record.get("module");
+      const props = moduleNode?.properties;
+      if (!props) continue;
+      const id = props.id;
+      const permsJson = props.permissions;
+      if (typeof id !== "string" || !id.length || typeof permsJson !== "string") continue;
+      try {
+        const perms = JSON.parse(permsJson) as PermissionEntry[];
+        const value = (type: RbacAction): boolean | string => {
+          const raw = perms.find((p) => p.type === type)?.value;
+          if (raw === true) return true;
+          if (typeof raw === "string" && raw.length > 0) return raw;
+          return false;
+        };
+        map.set(id, {
+          read: value("read"),
+          create: value("create"),
+          update: value("update"),
+          delete: value("delete"),
+        });
+      } catch {
+        this.logger.warn(`findEffectivePermissions: malformed permissions JSON on module ${id}`);
+      }
+    }
+    return map;
+  }
+
+  /** The subset of `ids` that exist as `(:Module)` nodes. */
+  async findExistingModuleIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+
+    const query = this.neo4j.initQuery({ serialiser: ModuleModel });
+    query.queryParams = { ...query.queryParams, ids };
+    query.query += `
+      MATCH (module:Module)
+      WHERE module.id IN $ids
+      RETURN module
+    `;
+
+    const modules = await this.neo4j.readMany<Module>(query);
+    return new Set<string>(modules.map((module) => module.id));
   }
 }

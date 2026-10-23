@@ -25,6 +25,8 @@ import { AiConnectionPutDTO } from "../dtos/ai-connection.put.dto";
 import { AiConnectionReorderDTO } from "../dtos/ai-connection.reorder.dto";
 import { aiConnectionMeta } from "../entities/ai-connection.meta";
 import { AiConnectionService } from "../services/ai-connection.service";
+import { ModuleACL } from "../../../common/decorators/module.decorator";
+import { CoreModuleId } from "../../../common/constants/core-module.ids";
 
 /**
  * AiConnectionController
@@ -38,6 +40,7 @@ import { AiConnectionService } from "../services/ai-connection.service";
  * `createCrudHandlers()`: both need service-level registry validation and
  * secret encryption before the generic DTO path runs.
  */
+@ModuleACL({ module: CoreModuleId.AiConnection })
 @Controller()
 export class AiConnectionController {
   constructor(
@@ -70,6 +73,7 @@ export class AiConnectionController {
   // signatures — (reply, id, body) — carry no object with a `params` property,
   // so it would silently invalidate nothing. invalidateByType clears every
   // cache key registered to any element of the type, list responses included.
+  @ModuleACL({ module: CoreModuleId.AiConnection, action: "update" })
   @Post(`${aiConnectionMeta.endpoint}/reorder`)
   @UseGuards(AdminJwtAuthGuard)
   @Roles(RoleId.Administrator)
