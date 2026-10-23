@@ -7,6 +7,7 @@ import type { RbacMatrix } from "../foundations/rbac/dsl/types";
 import { ReferralModuleConfig } from "../foundations/referral/interfaces/referral.config.interface";
 import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
 import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
+import { BlogModuleConfig } from "../foundations/blog/interfaces/blog.config.interface";
 import { EmailAutomationModuleConfig } from "../foundations/email-automation/interfaces/email-automation.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
 import { AnalyticsModuleConfig } from "../foundations/analytics/interfaces/analytics.config.interface";
@@ -135,6 +136,21 @@ export interface BootstrapOptions {
    * ```
    */
   howTo?: HowToModuleConfig;
+
+  /**
+   * Configuration for the blog feature module.
+   * Forwarded to `FoundationsModule.forRoot({ blog })`. OPT-IN: omitted, the
+   * blog is not mounted at all (no controllers, queue or worker, and no Blog
+   * permission section to seed). `{}` mounts the authenticated admin
+   * controllers; `publicRoutes: true` also adds the unauthenticated
+   * `public/blog-*` reads, which serve published posts only.
+   *
+   * @example
+   * ```typescript
+   * blog: { publicRoutes: true }
+   * ```
+   */
+  blog?: BlogModuleConfig;
 
   /**
    * Configuration for the email-automation feature module.

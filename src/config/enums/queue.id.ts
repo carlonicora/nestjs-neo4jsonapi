@@ -9,6 +9,7 @@ export enum QueueId {
   COMPANY_DELETION = "company-deletion",
   COMMUNITY_SUMMARISER = "community-summariser",
   BILLING_WEBHOOK = "billing-webhook",
+  BLOG = "blog",
   EMAIL = "email",
   HOWTO = "howto",
   HANDBOOK_PAGE = "handbookpage",

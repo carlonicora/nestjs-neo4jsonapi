@@ -34,6 +34,7 @@ export const CoreModuleId = {
   KeyConcept: "f69f5384-d4aa-4001-920d-95d8fa572198",
   Handbook: "7b04d088-3512-4554-852a-c26804e618ec",
   OAuthClient: "f7812e20-16d6-44a0-bcd5-2b47a44808e9",
+  Blog: "c1d0e6a2-4b8f-4f3e-9a7d-2e5b8c6f1a90",
 } as const;
 
 export type CoreModuleIdKey = keyof typeof CoreModuleId;

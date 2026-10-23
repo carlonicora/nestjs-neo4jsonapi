@@ -448,6 +448,97 @@ export class BlockNoteService {
     return params.nodes.map((node) => this.processNodeAsPlainText(node)).join("");
   }
 
+  /**
+   * Every translatable inline text string of a BlockNote document, depth-first, in document
+   * order. Used to send a body through a model as an ordered list of text fragments, so the
+   * block structure (headings, lists, links, styles, images, tables) never passes through the
+   * model and cannot be lost.
+   *
+   * Walk order (identical in `applyTextSegments`):
+   * 1. the block's inline `content` array (text nodes, and the nested `content` of link nodes),
+   *    or the table cells in `content.rows[].cells[]`;
+   * 2. the block's `children`, depth-first.
+   *
+   * Whitespace-only text nodes are skipped in both directions, and code blocks are never
+   * included, so code samples stay byte-identical.
+   */
+  extractTextSegments(blocks: unknown[]): string[] {
+    const segments: string[] = [];
+    this.walkTextSegmentBlocks(blocks, (node) => segments.push(node.text as string));
+    return segments;
+  }
+
+  /**
+   * Returns a deep copy of `blocks` with each translatable text (see `extractTextSegments`)
+   * replaced by the segment at the same position. Throws when the segment count differs from
+   * the document's, so a caller that merged or dropped fragments never produces a corrupted body.
+   */
+  applyTextSegments(blocks: unknown[], segments: string[]): unknown[] {
+    const expected = this.extractTextSegments(blocks).length;
+    if (expected !== segments.length) {
+      throw new Error(`segment count mismatch: expected ${expected}, received ${segments.length}`);
+    }
+
+    const copy = structuredClone(blocks);
+    let index = 0;
+    this.walkTextSegmentBlocks(copy, (node) => {
+      node.text = segments[index++];
+    });
+
+    return copy;
+  }
+
+  protected walkTextSegmentBlocks(blocks: unknown, visit: (node: Record<string, unknown>) => void): void {
+    if (!Array.isArray(blocks)) return;
+
+    for (const block of blocks) {
+      if (!this.isPlainObject(block)) continue;
+
+      if (block.type !== "codeBlock") {
+        if (Array.isArray(block.content)) this.walkTextSegmentInline(block.content, visit);
+        else if (this.isPlainObject(block.content)) this.walkTextSegmentTable(block.content, visit);
+      }
+
+      this.walkTextSegmentBlocks(block.children, visit);
+    }
+  }
+
+  protected walkTextSegmentInline(content: unknown, visit: (node: Record<string, unknown>) => void): void {
+    if (!Array.isArray(content)) return;
+
+    for (const node of content) {
+      if (!this.isPlainObject(node)) continue;
+
+      if (node.type === "text" && typeof node.text === "string" && node.text.trim().length > 0) {
+        visit(node);
+      } else if (node.type === "link") {
+        this.walkTextSegmentInline(node.content, visit);
+      }
+    }
+  }
+
+  protected walkTextSegmentTable(
+    content: Record<string, unknown>,
+    visit: (node: Record<string, unknown>) => void,
+  ): void {
+    if (!Array.isArray(content.rows)) return;
+
+    for (const row of content.rows) {
+      if (!this.isPlainObject(row) || !Array.isArray(row.cells)) continue;
+
+      for (const cell of row.cells) {
+        // Older BlockNote versions store a cell as an inline-content array, newer ones as
+        // { type: "tableCell", content: [...] }.
+        if (Array.isArray(cell)) this.walkTextSegmentInline(cell, visit);
+        else if (this.isPlainObject(cell)) this.walkTextSegmentInline(cell.content, visit);
+      }
+    }
+  }
+
+  protected isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
   // Plain text conversion methods (no markdown formatting)
   protected processNodeAsPlainText(node: any, indentLevel = 0): string {
     switch (node.type) {

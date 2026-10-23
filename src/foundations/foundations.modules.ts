@@ -6,6 +6,8 @@ import { AssistantModule } from "./assistant/assistant.module";
 import { AtomicFactModule } from "./atomicfact/atomicfact.module";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
+import { BlogModule } from "./blog/blog.module";
+import { BlogModuleConfig } from "./blog/interfaces/blog.config.interface";
 import { ChunkModule } from "./chunk/chunk.module";
 import { ChunkerModule } from "./chunker/chunker.module";
 import { CompanyModule } from "./company/company.module";
@@ -62,6 +64,13 @@ export interface FoundationsModuleConfig {
   handbook?: HandbookModuleConfig;
   /** Optional configuration for the how-to feature module (opt-in public routes) */
   howTo?: HowToModuleConfig;
+  /**
+   * The blog feature module. OPT-IN: the blog mounts only when this key is
+   * present (`blog: {}` for the admin routes, `blog: { publicRoutes: true }`
+   * for the public reads too). Omitted, no blog controller, queue or worker is
+   * mounted, so an app with the permission gate on needs no Blog section seed.
+   */
+  blog?: BlogModuleConfig;
   /** Optional configuration for the email-automation feature module (the triggers the app declares) */
   emailAutomation?: EmailAutomationModuleConfig;
   /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
@@ -78,7 +87,7 @@ export interface FoundationsModuleConfig {
 
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
- * UserActivityModule, ReferralModule, HandbookModule, HowToModule, EmailAutomationModule,
+ * UserActivityModule, ReferralModule, HandbookModule, HowToModule, BlogModule (opt-in), EmailAutomationModule,
  * AnalyticsModule) are
  * assembled inside forRoot().
  *
@@ -186,6 +195,8 @@ export class FoundationsModule {
         factory: () => EmailAutomationModule.forRoot(config?.emailAutomation),
       },
       { classRef: AnalyticsModule, factory: () => AnalyticsModule.forRoot(config?.analytics) },
+      // Opt-in: mounted only when the app passes a `blog` config.
+      ...(config?.blog ? [{ classRef: BlogModule, factory: () => BlogModule.forRoot(config.blog) }] : []),
     ].filter((entry) => !excluded.has(entry.classRef));
 
     return {

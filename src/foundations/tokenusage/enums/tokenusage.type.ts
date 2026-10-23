@@ -10,7 +10,9 @@ export type TokenUsageType =
   | "text_generation"
   | "embedding"
   | "image_analysis"
-  | "community_summariser";
+  | "community_summariser"
+  | "blog_summary"
+  | "blog_translation";
 
 export const TokenUsageType = {
   GraphCreator: "graph_creator",
@@ -25,4 +27,6 @@ export const TokenUsageType = {
   Embedding: "embedding",
   ImageAnalysis: "image_analysis",
   CommunitySummariser: "community_summariser",
+  BlogSummary: "blog_summary",
+  BlogTranslation: "blog_translation",
 } as const;

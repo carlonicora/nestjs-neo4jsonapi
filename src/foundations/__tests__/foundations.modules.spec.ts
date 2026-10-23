@@ -1,5 +1,7 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
+import { BlogPublicController } from "../blog/controllers/blog.public.controller";
+import { BlogModule } from "../blog/blog.module";
 import { ContentModule } from "../content/content.module";
 import { FoundationsModule } from "../foundations.modules";
 import { HowToPublicController } from "../how-to/controllers/how-to.public.controller";
@@ -113,5 +115,34 @@ describe("FoundationsModule.forRoot — how-to public routes", () => {
     expect(importedClasses(dynamicModule)).not.toContain(HowToModule);
     expect(dynamicModule.exports ?? []).not.toContain(HowToModule);
     expect(dynamicControllersOf(dynamicModule, HowToModule)).toEqual([]);
+  });
+});
+
+describe("FoundationsModule.forRoot — blog is opt-in", () => {
+  it("should NOT mount BlogModule without a blog config", () => {
+    const dynamicModule = FoundationsModule.forRoot();
+
+    expect(importedClasses(dynamicModule)).not.toContain(BlogModule);
+    expect(dynamicModule.exports ?? []).not.toContain(BlogModule);
+  });
+
+  it("should mount BlogModule with the admin routes only for an empty blog config", () => {
+    const dynamicModule = FoundationsModule.forRoot({ blog: {} });
+
+    expect(importedClasses(dynamicModule)).toContain(BlogModule);
+    expect(dynamicModule.exports ?? []).toContain(BlogModule);
+    expect(dynamicControllersOf(dynamicModule, BlogModule)).not.toContain(BlogPublicController);
+  });
+
+  it("should add BlogPublicController when blog.publicRoutes is true", () => {
+    const dynamicModule = FoundationsModule.forRoot({ blog: { publicRoutes: true } });
+
+    expect(dynamicControllersOf(dynamicModule, BlogModule)).toContain(BlogPublicController);
+  });
+
+  it("should exclude BlogModule even when a blog config is supplied", () => {
+    const dynamicModule = FoundationsModule.forRoot({ blog: { publicRoutes: true }, exclude: [BlogModule] });
+
+    expect(importedClasses(dynamicModule)).not.toContain(BlogModule);
   });
 });
