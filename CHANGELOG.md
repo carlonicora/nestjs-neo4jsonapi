@@ -1,3 +1,9 @@
+## [6.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.2...v6.7.0) (2026-10-23)
+
+### 🚀 Features
+
+* **rbac:** opt-in module permission gate ([fd43d4c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fd43d4cbec37ec028cf430c92004c271ebef8a61))
+
 ## [6.6.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.6.1...v6.6.2) (2026-10-22)
 
 ### 🐛 Bug Fixes
