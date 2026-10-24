@@ -1,3 +1,9 @@
+## [6.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.8.0...v6.9.0) (2026-10-24)
+
+### 🚀 Features
+
+* **stripe:** charge one-time purchases through an invoice ([d648ac4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d648ac4431e2451e1b44ac65d5b4aba0cfc56395))
+
 ## [6.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.7.0...v6.8.0) (2026-10-23)
 
 ### 🚀 Features
