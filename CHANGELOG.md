@@ -1,3 +1,19 @@
+## [8.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v7.1.0...v8.0.0) (2026-10-24)
+
+### ⚠ BREAKING CHANGES
+
+* **stripe:** StripeSubscription's entity/model/map/serialiser exports are
+replaced by StripeSubscriptionDescriptor (entities/stripe-subscription); the
+subscription's price relationship is named stripePrice (was price); the admin
+service's create is createSubscription; the pause and resume routes, DTOs and
+service methods are removed.
+
+Claude-Session: https://claude.ai/code/session_01BCLBwynYqcW9RZoRp5Ycbd
+
+### 🚀 Features
+
+* **stripe:** failed-card grace, billing emails and the subscription framework shape ([ecc2d3b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ecc2d3b6500720e6ddf82004ed6a43b74435dc9b))
+
 ## [7.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v7.0.0...v7.1.0) (2026-10-24)
 
 ### 🚀 Features
