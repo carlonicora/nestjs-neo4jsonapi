@@ -20,6 +20,13 @@ export const mapStripeSubscription = (params: {
     trialEnd: params.data.trialEnd ? new Date(params.data.trialEnd) : undefined,
     pausedAt: params.data.pausedAt ? new Date(params.data.pausedAt) : undefined,
     quantity: Number(params.data.quantity ?? 1),
+    discountPercentOff: params.data.discountPercentOff != null ? Number(params.data.discountPercentOff) : undefined,
+    discountAmountOff: params.data.discountAmountOff != null ? Number(params.data.discountAmountOff) : undefined,
+    discountCurrency: params.data.discountCurrency ?? undefined,
+    discountDuration: params.data.discountDuration ?? undefined,
+    discountDurationInMonths:
+      params.data.discountDurationInMonths != null ? Number(params.data.discountDurationInMonths) : undefined,
+    discountEnd: params.data.discountEnd ? new Date(params.data.discountEnd) : undefined,
     stripeCustomer: undefined,
     stripePrice: undefined,
   };

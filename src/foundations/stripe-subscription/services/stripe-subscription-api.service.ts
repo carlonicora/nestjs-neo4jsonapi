@@ -2,6 +2,9 @@ import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
 import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
 import { StripeService } from "../../stripe/services/stripe.service";
+import { STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND } from "../entities/stripe-subscription.discount";
+import { STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT } from "../entities/stripe-subscription.meta";
+import { SUBSCRIPTION_PAYMENT_EXPAND } from "./subscription-payment-confirmation";
 
 /**
  * Stripe Subscription API Service
@@ -61,7 +64,7 @@ export class StripeSubscriptionApiService {
       items: [{ price: params.priceId }],
       payment_behavior: "default_incomplete",
       payment_settings: { save_default_payment_method: "on_subscription" },
-      expand: ["latest_invoice.payment_intent", "pending_setup_intent"],
+      expand: [...SUBSCRIPTION_PAYMENT_EXPAND, "pending_setup_intent", STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND],
       metadata: params.metadata,
     };
 
@@ -98,7 +101,7 @@ export class StripeSubscriptionApiService {
   async retrieveSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
     const stripe = this.stripeService.getClient();
     return stripe.subscriptions.retrieve(subscriptionId, {
-      expand: ["latest_invoice", "default_payment_method"],
+      expand: ["latest_invoice", "default_payment_method", STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND],
     });
   }
 
@@ -130,6 +133,8 @@ export class StripeSubscriptionApiService {
     metadata?: Record<string, string>;
     promotionCode?: string;
     trialEnd?: "now";
+    /** The card the subscription charges from now on (the customer default) */
+    defaultPaymentMethodId?: string;
   }): Promise<Stripe.Subscription> {
     const stripe = this.stripeService.getClient();
     const updateParams: Stripe.SubscriptionUpdateParams = {};
@@ -157,6 +162,16 @@ export class StripeSubscriptionApiService {
     if (params.trialEnd === "now") {
       updateParams.trial_end = "now";
     }
+
+    // A card saved on the subscription by an earlier payment would otherwise beat the customer default
+    if (params.defaultPaymentMethodId) {
+      updateParams.default_payment_method = params.defaultPaymentMethodId;
+    }
+
+    // A change that charges at once (trial upgrade) can leave the invoice open
+    // when the card needs 3D Secure; the caller reads the client secret from it
+    // The discount is expanded so the caller can store what the subscription carries after the update.
+    updateParams.expand = [...SUBSCRIPTION_PAYMENT_EXPAND, STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND];
 
     return stripe.subscriptions.update(params.subscriptionId, updateParams);
   }
@@ -186,6 +201,18 @@ export class StripeSubscriptionApiService {
       return stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true });
     }
     return stripe.subscriptions.cancel(subscriptionId);
+  }
+
+  /**
+   * Cancel at once an unpaid first-payment attempt that a new attempt replaces, marking it
+   * so the webhook knows it never granted anything.
+   */
+  @HandleStripeErrors()
+  async cancelUnpaidAttempt(subscriptionId: string): Promise<Stripe.Subscription> {
+    const stripe = this.stripeService.getClient();
+    return stripe.subscriptions.cancel(subscriptionId, {
+      cancellation_details: { comment: STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT },
+    });
   }
 
   /**

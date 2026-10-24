@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from "@nestjs/common";
 
@@ -17,6 +18,7 @@ import { RoleId } from "../../../common/constants/system.roles";
 import { Audit, CacheInvalidate } from "../../../common/decorators";
 import { Roles } from "../../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { RolePostDTO } from "../../role/dtos/role.post.dto";
@@ -70,7 +72,12 @@ export class RoleController {
   @Roles(RoleId.Administrator)
   @Put(":roleId")
   @CacheInvalidate(roleMeta, "roleId")
-  async update(@Body() body: RolePostDTO, @Param("roleId") roleId: string) {
+  async update(
+    // The request carries the route params @CacheInvalidate reads
+    @Req() _req: AuthenticatedRequest,
+    @Body() body: RolePostDTO,
+    @Param("roleId") roleId: string,
+  ) {
     if (roleId !== body.data.id)
       throw new HttpException("Role id does not match the {json:api} id", HttpStatus.PRECONDITION_FAILED);
 
@@ -84,7 +91,11 @@ export class RoleController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @Delete(":roleId")
   @CacheInvalidate(roleMeta, "roleId")
-  async delete(@Param("roleId") roleId: string) {
+  async delete(
+    // The request carries the route params @CacheInvalidate reads
+    @Req() _req: AuthenticatedRequest,
+    @Param("roleId") roleId: string,
+  ) {
     await this.roleService.delete({
       roleId: roleId,
     });

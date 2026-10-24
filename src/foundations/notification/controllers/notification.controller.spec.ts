@@ -52,7 +52,8 @@ describe("NotificationController", () => {
     id: MOCK_USER_ID,
   };
 
-  const mockRequest = { user: mockUser };
+  // A real request always carries the route params object
+  const mockRequest = { user: mockUser, params: {} };
 
   const mockServiceResponse: JsonApiSingleDocument = {
     data: {

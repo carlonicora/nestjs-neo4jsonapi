@@ -34,6 +34,12 @@ export class StripeSubscriptionSerialiser extends AbstractJsonApiSerialiser impl
       trialEnd: (data: StripeSubscription) => data.trialEnd?.toISOString(),
       pausedAt: (data: StripeSubscription) => data.pausedAt?.toISOString(),
       quantity: (data: StripeSubscription) => Number(data.quantity ?? 1),
+      discountPercentOff: "discountPercentOff",
+      discountAmountOff: "discountAmountOff",
+      discountCurrency: "discountCurrency",
+      discountDuration: "discountDuration",
+      discountDurationInMonths: "discountDurationInMonths",
+      discountEnd: (data: StripeSubscription) => data.discountEnd?.toISOString(),
     };
 
     this.relationships = {

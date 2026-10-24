@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable, Logger, forwardRef } from "@nestjs/common";
 import Stripe from "stripe";
 import { JsonApiListDocument, JsonApiPaginator, JsonApiService, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.entity";
@@ -6,11 +6,15 @@ import { StripeCustomerRepository } from "../../stripe-customer/repositories/str
 import { StripeCustomerApiService } from "../../stripe-customer/services/stripe-customer-api.service";
 import { StripePrice } from "../../stripe-price/entities/stripe-price.entity";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
+import { StripeCouponCodeCheckoutService } from "../../stripe-coupon/services/stripe-coupon-code-checkout.service";
+import { StripeError } from "../../stripe/errors/stripe.errors";
 import { StripePaymentService } from "../../stripe/services/stripe.payment.service";
-import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
+import { StripeSubscription, StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
 import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
+import { discountFromStripeSubscription } from "../entities/stripe-subscription.discount";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";
 import { StripeSubscriptionApiService } from "./stripe-subscription-api.service";
+import { subscriptionPaymentConfirmation } from "./subscription-payment-confirmation";
 
 export interface CreateSubscriptionResult {
   data: JsonApiSingleDocument;
@@ -39,6 +43,8 @@ export interface CreateSubscriptionResult {
  */
 @Injectable()
 export class StripeSubscriptionAdminService {
+  private readonly logger = new Logger(StripeSubscriptionAdminService.name);
+
   constructor(
     private readonly subscriptionRepository: StripeSubscriptionRepository,
     private readonly stripeCustomerRepository: StripeCustomerRepository,
@@ -47,6 +53,8 @@ export class StripeSubscriptionAdminService {
     private readonly stripeCustomerApiService: StripeCustomerApiService,
     private readonly stripePaymentService: StripePaymentService,
     private readonly jsonApiService: JsonApiService,
+    @Inject(forwardRef(() => StripeCouponCodeCheckoutService))
+    private readonly stripeCouponCodeCheckoutService: StripeCouponCodeCheckoutService,
   ) {}
 
   /**
@@ -157,8 +165,9 @@ export class StripeSubscriptionAdminService {
     }
 
     // Prevent duplicate recurring subscriptions
+    let existingSubscriptions: StripeSubscription[] = [];
     if (price.priceType === "recurring") {
-      const existingSubscriptions = await this.subscriptionRepository.findByStripeCustomerId({
+      existingSubscriptions = await this.subscriptionRepository.findByStripeCustomerId({
         stripeCustomerId: customer.id,
       });
 
@@ -186,7 +195,9 @@ export class StripeSubscriptionAdminService {
           HttpStatus.PAYMENT_REQUIRED,
         );
       }
-      paymentMethodId = paymentMethods[0].id;
+      // The customer default (the card picked last, e.g. "Use another card"); the first card only without one
+      paymentMethodId =
+        paymentMethods.find((method) => method.id === customer.defaultPaymentMethodId)?.id ?? paymentMethods[0].id;
     }
 
     // Branch based on price type: one-time vs recurring
@@ -202,33 +213,40 @@ export class StripeSubscriptionAdminService {
     }
 
     // Recurring subscription flow
-    const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.createSubscription({
-      stripeCustomerId: customer.stripeCustomerId,
-      priceId: price.stripePriceId,
-      paymentMethodId,
-      trialPeriodDays: params.trialPeriodDays,
-      trialEnd: params.trialEnd,
-      metadata: {
-        companyId: params.companyId,
-        priceId: params.priceId,
-      },
+    // A first payment gets the automatic code only when the server confirms it still applies.
+    const { promotionCode, automatic } = await this.resolvePromotionCode({
+      companyId: params.companyId,
+      priceId: params.priceId,
       promotionCode: params.promotionCode,
+      firstPayment: !params.trialPeriodDays && !params.trialEnd,
     });
 
-    // Extract payment intent details for SCA confirmation
-    let clientSecret: string | null = null;
-    let paymentIntentId: string | null = null;
-    const latestInvoice = stripeSubscription.latest_invoice;
-    if (latestInvoice && typeof latestInvoice !== "string") {
-      const invoice = latestInvoice as Stripe.Invoice & { payment_intent?: string | Stripe.PaymentIntent | null };
-      const paymentIntent = invoice.payment_intent;
-      if (paymentIntent && typeof paymentIntent !== "string") {
-        clientSecret = paymentIntent.client_secret;
-        paymentIntentId = paymentIntent.id;
-      }
-    }
+    // An earlier attempt that was never paid (declined card, failed 3D Secure) is
+    // cancelled first, so retries do not pile up unpaid subscriptions
+    await this.cancelUnpaidRecurringSubscriptions(existingSubscriptions);
 
-    const requiresAction = stripeSubscription.status === "incomplete" && clientSecret !== null;
+    const stripeSubscription: Stripe.Subscription = await this.withDiscountSoldOutMapping(
+      automatic,
+      promotionCode,
+      () =>
+        this.stripeSubscriptionApiService.createSubscription({
+          stripeCustomerId: customer.stripeCustomerId,
+          priceId: price.stripePriceId,
+          paymentMethodId,
+          trialPeriodDays: params.trialPeriodDays,
+          trialEnd: params.trialEnd,
+          metadata: {
+            companyId: params.companyId,
+            priceId: params.priceId,
+          },
+          promotionCode,
+        }),
+    );
+
+    if (promotionCode) await this.stripeCouponCodeCheckoutService.refreshCountsByStripePromotionCodeId(promotionCode);
+
+    // Payment details the browser needs to confirm the first payment (SCA)
+    const { clientSecret, paymentIntentId, requiresAction } = subscriptionPaymentConfirmation(stripeSubscription);
 
     const subscriptionItem = stripeSubscription.items.data[0];
     const subscription = await this.subscriptionRepository.create({
@@ -243,6 +261,7 @@ export class StripeSubscriptionAdminService {
       trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : undefined,
       trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : undefined,
       quantity: params.quantity ?? 1,
+      discount: discountFromStripeSubscription(stripeSubscription),
     });
 
     const data = await this.jsonApiService.buildSingle(StripeSubscriptionModel, subscription);
@@ -297,14 +316,56 @@ export class StripeSubscriptionAdminService {
       !params.cancelImmediately,
     );
 
-    const updatedSubscription = await this.subscriptionRepository.update({
-      id: params.id,
+    const updatedSubscription = await this.storeCancellation(params.id, stripeSubscription);
+
+    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+  }
+
+  /**
+   * Stores the cancellation Stripe answered with on our subscription node.
+   */
+  private async storeCancellation(id: string, stripeSubscription: Stripe.Subscription): Promise<StripeSubscription> {
+    return this.subscriptionRepository.update({
+      id,
       status: stripeSubscription.status as StripeSubscriptionStatus,
       cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
       canceledAt: stripeSubscription.canceled_at ? new Date(stripeSubscription.canceled_at * 1000) : undefined,
     });
+  }
 
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+  /**
+   * Cancels, in Stripe and at once, every recurring subscription of the customer that is
+   * still `incomplete`: a first payment that never went through. Active, trialing and
+   * past_due subscriptions are never touched, nor one-time purchases (their node holds a
+   * PaymentIntent id, not a subscription id).
+   *
+   * A failed cancellation never blocks the new subscription: the node is re-read from
+   * Stripe instead (an attempt older than 23 hours is already `incomplete_expired`).
+   */
+  private async cancelUnpaidRecurringSubscriptions(subscriptions: StripeSubscription[]): Promise<void> {
+    const unpaid = subscriptions.filter(
+      (sub) => sub.status === "incomplete" && sub.stripePrice?.priceType === "recurring" && sub.stripeSubscriptionId,
+    );
+
+    for (const sub of unpaid) {
+      try {
+        const stripeSubscription = await this.stripeSubscriptionApiService.cancelUnpaidAttempt(
+          sub.stripeSubscriptionId,
+        );
+        await this.storeCancellation(sub.id, stripeSubscription);
+      } catch (error) {
+        this.logger.warn(
+          `Could not cancel unpaid subscription ${sub.stripeSubscriptionId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        try {
+          await this.syncSubscriptionFromStripe({ stripeSubscriptionId: sub.stripeSubscriptionId });
+        } catch (syncError) {
+          this.logger.warn(
+            `Could not re-read unpaid subscription ${sub.stripeSubscriptionId}: ${syncError instanceof Error ? syncError.message : String(syncError)}`,
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -426,22 +487,45 @@ export class StripeSubscriptionAdminService {
     // Check if subscription is in trial status
     const isTrialUpgrade = subscription.status === "trialing";
 
+    // The subscription charges the customer default from now on: a card saved on the
+    // subscription by an earlier payment would otherwise beat a card added since
+    let defaultPaymentMethodId: string | undefined = customer.defaultPaymentMethodId || undefined;
+
     // For trial upgrades, require a payment method
     if (isTrialUpgrade) {
       const paymentMethods = await this.stripeCustomerApiService.listPaymentMethods(customer.stripeCustomerId);
       if (paymentMethods.length === 0) {
         throw new HttpException("A payment method is required to upgrade from trial", HttpStatus.PAYMENT_REQUIRED);
       }
+      // A default that is no longer attached is not sent
+      if (!paymentMethods.some((method) => method.id === defaultPaymentMethodId)) defaultPaymentMethodId = undefined;
     }
 
-    // Update with trial_end: 'now' for trial upgrades
-    const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.updateSubscription({
-      subscriptionId: subscription.stripeSubscriptionId,
-      priceId: newPrice.stripePriceId,
-      prorationBehavior: isTrialUpgrade ? "none" : "create_prorations",
+    // Paying for a trial is a first payment and can get the automatic code.
+    // A paid plan change sends no code unless the GM typed one, so an existing discount stays.
+    const { promotionCode, automatic } = await this.resolvePromotionCode({
+      companyId: params.companyId,
+      priceId: params.newPriceId,
       promotionCode: params.promotionCode,
-      trialEnd: isTrialUpgrade ? "now" : undefined,
+      firstPayment: isTrialUpgrade,
     });
+
+    // Update with trial_end: 'now' for trial upgrades
+    const stripeSubscription: Stripe.Subscription = await this.withDiscountSoldOutMapping(
+      automatic,
+      promotionCode,
+      () =>
+        this.stripeSubscriptionApiService.updateSubscription({
+          subscriptionId: subscription.stripeSubscriptionId,
+          priceId: newPrice.stripePriceId,
+          prorationBehavior: isTrialUpgrade ? "none" : "create_prorations",
+          promotionCode,
+          trialEnd: isTrialUpgrade ? "now" : undefined,
+          defaultPaymentMethodId,
+        }),
+    );
+
+    if (promotionCode) await this.stripeCouponCodeCheckoutService.refreshCountsByStripePromotionCodeId(promotionCode);
 
     await this.subscriptionRepository.updatePrice({
       id: params.id,
@@ -454,9 +538,17 @@ export class StripeSubscriptionAdminService {
       status: stripeSubscription.status as StripeSubscriptionStatus,
       currentPeriodStart: new Date(subscriptionItem.current_period_start * 1000),
       currentPeriodEnd: new Date(subscriptionItem.current_period_end * 1000),
+      discount: discountFromStripeSubscription(stripeSubscription),
     });
 
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+    const document = await this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+
+    // A trial upgrade charges at once; a card that asks for 3D Secure leaves the
+    // invoice open. The browser confirms it with the client secret in meta.
+    const confirmation = subscriptionPaymentConfirmation(stripeSubscription);
+    if (!confirmation.requiresAction) return document;
+
+    return { ...document, meta: { ...document.meta, ...confirmation } };
   }
 
   /**
@@ -604,6 +696,7 @@ export class StripeSubscriptionAdminService {
         canceledAt: stripeSubscription.canceled_at ? new Date(stripeSubscription.canceled_at * 1000) : null,
         trialStart: stripeSubscription.trial_start ? new Date(stripeSubscription.trial_start * 1000) : undefined,
         trialEnd: stripeSubscription.trial_end ? new Date(stripeSubscription.trial_end * 1000) : undefined,
+        discount: discountFromStripeSubscription(stripeSubscription),
       });
     }
   }
@@ -682,5 +775,86 @@ export class StripeSubscriptionAdminService {
       paymentIntentId: confirmedPaymentIntent.id,
       requiresAction,
     };
+  }
+
+  /**
+   * Decides which promotion code goes to Stripe and whether it is our automatic code.
+   * - No code sent: on a first payment the server attaches the automatic code when it applies.
+   * - Our automatic code sent (the review showed it): it goes to Stripe only when it still applies.
+   *   Otherwise the payment stops here, so the GM is never charged full price silently:
+   *   410 `discount_sold_out` when the places ran out, 422 `discount_unavailable` for any other reason.
+   * - Any other code (typed, or not ours): passed to Stripe unchanged.
+   */
+  private async resolvePromotionCode(params: {
+    companyId: string;
+    priceId: string;
+    promotionCode?: string;
+    firstPayment: boolean;
+  }): Promise<{ promotionCode: string | undefined; automatic: boolean }> {
+    if (!params.promotionCode) {
+      if (!params.firstPayment) return { promotionCode: undefined, automatic: false };
+      const code = await this.stripeCouponCodeCheckoutService.findAutomaticForPrice({
+        companyId: params.companyId,
+        priceId: params.priceId,
+      });
+      return { promotionCode: code?.stripePromotionCodeId, automatic: !!code };
+    }
+
+    const status = await this.stripeCouponCodeCheckoutService.checkAutomaticForPrice({
+      companyId: params.companyId,
+      priceId: params.priceId,
+      stripePromotionCodeId: params.promotionCode,
+      firstPayment: params.firstPayment,
+    });
+
+    switch (status) {
+      case "eligible":
+        return { promotionCode: params.promotionCode, automatic: true };
+      case "sold_out":
+        throw new HttpException(
+          { message: "The discount has no places left", code: "discount_sold_out" },
+          HttpStatus.GONE,
+        );
+      case "unavailable":
+        throw new HttpException(
+          { message: "The discount is no longer available", code: "discount_unavailable" },
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      case "not_automatic":
+        return { promotionCode: params.promotionCode, automatic: false };
+    }
+  }
+
+  /**
+   * Runs a Stripe call. When it carries our automatic code and Stripe refuses it because the code
+   * has no places left (two GMs on the last place), answers 410 `discount_sold_out`; Stripe
+   * refused the whole call, so nothing was charged. A typed code, and any other failure, is
+   * re-thrown unchanged: the "last founding place" message is only true for the automatic code.
+   */
+  private async withDiscountSoldOutMapping<T>(
+    automatic: boolean,
+    promotionCode: string | undefined,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      if (!(error instanceof StripeError) || !automatic || !promotionCode) throw error;
+
+      let exhausted = false;
+      try {
+        exhausted = await this.stripeCouponCodeCheckoutService.isExhausted(promotionCode);
+      } catch {
+        throw error;
+      }
+
+      if (exhausted) {
+        throw new HttpException(
+          { message: "The discount has no places left", code: "discount_sold_out" },
+          HttpStatus.GONE,
+        );
+      }
+      throw error;
+    }
   }
 }

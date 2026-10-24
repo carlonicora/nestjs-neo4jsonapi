@@ -14,6 +14,7 @@ import {
   STRIPE_RATE_LIMIT_ERROR,
 } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 import Stripe from "stripe";
+import { STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT } from "../../entities/stripe-subscription.meta";
 
 describe("StripeSubscriptionApiService", () => {
   let service: StripeSubscriptionApiService;
@@ -62,7 +63,13 @@ describe("StripeSubscriptionApiService", () => {
         items: [{ price: validParams.priceId }],
         payment_behavior: "default_incomplete",
         payment_settings: { save_default_payment_method: "on_subscription" },
-        expand: ["latest_invoice.payment_intent", "pending_setup_intent"],
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "pending_setup_intent",
+          "discounts.source.coupon",
+        ],
         metadata: undefined,
       });
       expect(result).toEqual(MOCK_SUBSCRIPTION);
@@ -133,7 +140,13 @@ describe("StripeSubscriptionApiService", () => {
         items: [{ price: fullParams.priceId }],
         payment_behavior: "default_incomplete",
         payment_settings: { save_default_payment_method: "on_subscription" },
-        expand: ["latest_invoice.payment_intent", "pending_setup_intent"],
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "pending_setup_intent",
+          "discounts.source.coupon",
+        ],
         default_payment_method: fullParams.paymentMethodId,
         trial_period_days: 30,
         metadata: fullParams.metadata,
@@ -173,7 +186,7 @@ describe("StripeSubscriptionApiService", () => {
       const result = await service.retrieveSubscription(TEST_IDS.subscriptionId);
 
       expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
-        expand: ["latest_invoice", "default_payment_method"],
+        expand: ["latest_invoice", "default_payment_method", "discounts.source.coupon"],
       });
       expect(result).toEqual(MOCK_SUBSCRIPTION);
     });
@@ -225,8 +238,36 @@ describe("StripeSubscriptionApiService", () => {
 
       expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith(TEST_IDS.subscriptionId);
       expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
         items: [{ id: "si_current_123", price: "price_new_123" }],
       });
+    });
+
+    it("sets the subscription's default payment method when one is given", async () => {
+      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.updateSubscription({
+        subscriptionId: TEST_IDS.subscriptionId,
+        defaultPaymentMethodId: "pm_default",
+      });
+
+      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
+        TEST_IDS.subscriptionId,
+        expect.objectContaining({ default_payment_method: "pm_default" }),
+      );
+    });
+
+    it("leaves the subscription's payment method alone when none is given", async () => {
+      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.updateSubscription({ subscriptionId: TEST_IDS.subscriptionId });
+
+      expect(mockStripe.subscriptions.update.mock.calls[0][1]).not.toHaveProperty("default_payment_method");
     });
 
     it("should update subscription with proration behavior", async () => {
@@ -240,6 +281,12 @@ describe("StripeSubscriptionApiService", () => {
       await service.updateSubscription(params);
 
       expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
         proration_behavior: "create_prorations",
       });
     });
@@ -255,6 +302,12 @@ describe("StripeSubscriptionApiService", () => {
       await service.updateSubscription(params);
 
       expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
         metadata: { tier: "premium", updated: "true" },
       });
     });
@@ -280,6 +333,12 @@ describe("StripeSubscriptionApiService", () => {
       await service.updateSubscription(params);
 
       expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
         items: [{ id: "si_current_123", price: "price_new_123" }],
         proration_behavior: "none",
         metadata: { updated: "true" },
@@ -302,7 +361,14 @@ describe("StripeSubscriptionApiService", () => {
       await service.updateSubscription(params);
 
       // Should not include items when no current item exists
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {});
+      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
+      });
     });
 
     it("should handle Stripe API errors", async () => {
@@ -314,6 +380,18 @@ describe("StripeSubscriptionApiService", () => {
       };
 
       await expect(service.updateSubscription(params)).rejects.toThrow(StripeError);
+    });
+  });
+
+  describe("cancelUnpaidAttempt", () => {
+    it("cancels at once and marks the cancellation so the webhook keeps the company active", async () => {
+      mockStripe.subscriptions.cancel.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.cancelUnpaidAttempt(TEST_IDS.subscriptionId);
+
+      expect(mockStripe.subscriptions.cancel).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        cancellation_details: { comment: STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT },
+      });
     });
   });
 
@@ -624,7 +702,14 @@ describe("StripeSubscriptionApiService", () => {
 
       await service.updateSubscription(params);
 
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {});
+      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
+        expand: [
+          "latest_invoice.confirmation_secret",
+          "latest_invoice.payments",
+          "latest_invoice.payment_intent",
+          "discounts.source.coupon",
+        ],
+      });
     });
 
     it("should handle empty metadata object", async () => {

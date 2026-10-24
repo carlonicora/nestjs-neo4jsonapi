@@ -1,9 +1,10 @@
-import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { Audit } from "../../../common/decorators/audit.decorator";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
 import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { handbookPageMeta } from "../entities/handbook-page.meta";
@@ -76,7 +77,12 @@ export class HandbookController {
   @Delete(`${handbookPageMeta.endpoint}/:handbookPageId`)
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(handbookPageMeta, "handbookPageId")
-  async delete(@Res() reply: FastifyReply, @Param("handbookPageId") handbookPageId: string) {
+  async delete(
+    // The request carries the route params @CacheInvalidate reads
+    @Req() _req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("handbookPageId") handbookPageId: string,
+  ) {
     return this.crud.delete(reply, handbookPageId);
   }
 }

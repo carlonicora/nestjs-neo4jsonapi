@@ -49,5 +49,8 @@ export * from "../stripe-product";
 // Re-export stripe-promotion-code module for backward compatibility
 export * from "../stripe-promotion-code";
 
+// Re-export stripe-coupon module
+export * from "../stripe-coupon";
+
 // Re-export stripe-trial module for backward compatibility
 export * from "../stripe-trial";

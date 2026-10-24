@@ -8,15 +8,21 @@ import {
   StripeSubscriptionPostDTO,
 } from "../dtos/stripe-subscription.dto";
 import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
-import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
+import { STRIPE_SUBSCRIPTION_SYNC_SEGMENT, stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
 import { StripeSubscriptionAdminService } from "../services/stripe-subscription-admin.service";
 import { ModuleACL } from "../../../common/decorators/module.decorator";
 import { CoreModuleId } from "../../../common/constants/core-module.ids";
+import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
+import { CacheService } from "../../../core/cache/services/cache.service";
 
 @ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripeSubscriptionController {
-  constructor(private readonly subscriptionService: StripeSubscriptionAdminService) {}
+  constructor(
+    private readonly subscriptionService: StripeSubscriptionAdminService,
+    // Read by @CacheInvalidate
+    private readonly cacheService: CacheService,
+  ) {}
 
   @Get(stripeSubscriptionMeta.endpoint)
   @UseGuards(JwtAuthGuard)
@@ -178,20 +184,27 @@ export class StripeSubscriptionController {
     reply.send(response);
   }
 
-  @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/sync`)
+  /**
+   * Re-reads the subscription from Stripe and stores it. The wizard calls it right after the
+   * browser confirmed the first payment, before the webhooks arrive.
+   */
+  // @Roles sits above @CacheInvalidate, which replaces the method: metadata set
+  // below it would land on the discarded original and never be enforced.
+  @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/${STRIPE_SUBSCRIPTION_SYNC_SEGMENT}`)
   @UseGuards(JwtAuthGuard)
+  @Roles(RoleId.CompanyAdministrator)
+  @CacheInvalidate(stripeSubscriptionMeta, "subscriptionId")
   async syncSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("subscriptionId") subscriptionId: string,
   ) {
-    // First get the subscription to verify ownership and get stripe ID
+    // Ownership: getSubscription answers 404 / 403 for a subscription of another company
     const subscription = await this.subscriptionService.getSubscription({
       id: subscriptionId,
       companyId: req.user.companyId,
     });
 
-    // Extract stripeSubscriptionId from the response
     const stripeSubscriptionId = subscription.data?.attributes?.stripeSubscriptionId;
     if (!stripeSubscriptionId) {
       reply.status(HttpStatus.BAD_REQUEST).send({ error: "Subscription has no Stripe ID" });

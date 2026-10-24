@@ -135,7 +135,7 @@ describe("CompanyController", () => {
   });
 
   describe("fetchAllCompanies", () => {
-    const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+    const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
     const mockQuery = { page: { number: 1, size: 10 } };
     const mockSearch = "test search";
 
@@ -179,7 +179,7 @@ describe("CompanyController", () => {
 
   describe("findCompany", () => {
     it("should find company when user is administrator", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       companyService.findOne.mockResolvedValue(mockServiceResponse);
 
       await controller.findCompany(mockRequest, mockReply, MOCK_COMPANY_ID);
@@ -191,7 +191,7 @@ describe("CompanyController", () => {
     });
 
     it("should find company when user belongs to the same company", async () => {
-      const mockRequest = { user: mockRegularUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockRegularUser, params: {} } as AuthenticatedRequest;
       companyService.findOne.mockResolvedValue(mockServiceResponse);
 
       await controller.findCompany(mockRequest, mockReply, MOCK_COMPANY_ID);
@@ -203,7 +203,7 @@ describe("CompanyController", () => {
     });
 
     it("should throw unauthorized error when user tries to access different company", async () => {
-      const mockRequest = { user: mockRegularUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockRegularUser, params: {} } as AuthenticatedRequest;
 
       await expect(controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID)).rejects.toThrow(
         new HttpException("Unauthorised", 401),
@@ -214,7 +214,7 @@ describe("CompanyController", () => {
     });
 
     it("should allow administrator to access any company", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       companyService.findOne.mockResolvedValue(mockServiceResponse);
 
       await controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID);
@@ -226,7 +226,7 @@ describe("CompanyController", () => {
     });
 
     it("should handle service errors", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       const serviceError = new Error("Company not found");
       companyService.findOne.mockRejectedValue(serviceError);
 
@@ -242,7 +242,7 @@ describe("CompanyController", () => {
   });
 
   describe("create", () => {
-    const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+    const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
     const mockPostDTO: CompanyPostDTO = {
       data: {
         type: "companies",
@@ -379,7 +379,7 @@ describe("CompanyController", () => {
     });
 
     it("should throw unauthorized error when company admin tries to update different company", async () => {
-      const mockRequest = { user: mockCompanyAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockCompanyAdminUser, params: {} } as AuthenticatedRequest;
 
       await expect(controller.update(mockRequest, mockReply, mockPutDTO, DIFFERENT_COMPANY_ID)).rejects.toThrow(
         new HttpException("Unauthorised", 401),
@@ -391,7 +391,7 @@ describe("CompanyController", () => {
     });
 
     it("should throw precondition failed error when path ID does not match body ID", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       const mismatchedPutDTO: CompanyPutDTO = {
         data: {
           ...mockPutDTO.data,
@@ -431,7 +431,7 @@ describe("CompanyController", () => {
     });
 
     it("should handle service errors during update", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       const serviceError = new Error("Update failed");
       companyService.update.mockRejectedValue(serviceError);
 
@@ -480,7 +480,7 @@ describe("CompanyController", () => {
     });
 
     it("should handle service errors during deletion", async () => {
-      const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+      const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
       const serviceError = new Error("Deletion failed");
       companyService.deleteImmediate.mockRejectedValue(serviceError);
 
@@ -520,7 +520,7 @@ describe("CompanyController", () => {
           roles: [],
           language: "en",
         };
-        const mockRequest = { user: userWithNoRoles } as AuthenticatedRequest;
+        const mockRequest = { user: userWithNoRoles, params: {} } as AuthenticatedRequest;
 
         await expect(controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID)).rejects.toThrow(
           new HttpException("Unauthorised", 401),
@@ -534,7 +534,7 @@ describe("CompanyController", () => {
           roles: null as any,
           language: "en",
         };
-        const mockRequest = { user: userWithNullRoles } as AuthenticatedRequest;
+        const mockRequest = { user: userWithNullRoles, params: {} } as AuthenticatedRequest;
 
         await expect(controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID)).rejects.toThrow();
       });
@@ -546,7 +546,7 @@ describe("CompanyController", () => {
           roles: [RoleId.CompanyAdministrator, RoleId.Administrator],
           language: "en",
         };
-        const mockRequest = { user: userWithMultipleRoles } as AuthenticatedRequest;
+        const mockRequest = { user: userWithMultipleRoles, params: {} } as AuthenticatedRequest;
         companyService.findOne.mockResolvedValue(mockServiceResponse);
 
         await controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID);
@@ -560,7 +560,7 @@ describe("CompanyController", () => {
 
     describe("Input Validation Edge Cases", () => {
       it("should handle empty query parameters in fetchAllCompanies", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const emptyQuery = {};
         companyService.find.mockResolvedValue(mockServiceResponseList);
 
@@ -573,7 +573,7 @@ describe("CompanyController", () => {
       });
 
       it("should handle empty string search parameter", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const mockQuery = { page: { number: 1, size: 10 } };
         const emptySearch = "";
         companyService.find.mockResolvedValue(mockServiceResponseList);
@@ -587,7 +587,7 @@ describe("CompanyController", () => {
       });
 
       it("should handle special characters in company ID", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const specialCharId = "company-with-dashes-123";
         companyService.findOne.mockResolvedValue(mockServiceResponse);
 
@@ -601,7 +601,7 @@ describe("CompanyController", () => {
 
     describe("Service Response Edge Cases", () => {
       it("should handle empty service response in fetchAllCompanies", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const mockQuery = { page: { number: 1, size: 10 } };
         const emptyResponse: JsonApiListDocument = {
           data: [
@@ -624,7 +624,7 @@ describe("CompanyController", () => {
       });
 
       it("should handle null service response", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         companyService.findOne.mockResolvedValue(null);
 
         await controller.findCompany(mockRequest, mockReply, MOCK_COMPANY_ID);
@@ -638,7 +638,7 @@ describe("CompanyController", () => {
 
     describe("Concurrent Operations", () => {
       it("should handle concurrent cache invalidation calls", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const mockPostDTO: CompanyPostDTO = {
           data: {
             type: "companies",
@@ -665,7 +665,7 @@ describe("CompanyController", () => {
 
     describe("HTTP Status Code Verification", () => {
       it("should return 204 No Content for successful deletion", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         companyService.delete.mockResolvedValue();
         cacheService.invalidateByElement.mockResolvedValue();
 
@@ -676,7 +676,7 @@ describe("CompanyController", () => {
       });
 
       it("should throw 401 Unauthorized for access violations", async () => {
-        const mockRequest = { user: mockRegularUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockRegularUser, params: {} } as AuthenticatedRequest;
 
         await expect(controller.findCompany(mockRequest, mockReply, DIFFERENT_COMPANY_ID)).rejects.toThrow(
           new HttpException("Unauthorised", 401),
@@ -684,7 +684,7 @@ describe("CompanyController", () => {
       });
 
       it("should throw 412 Precondition Failed for ID mismatch", async () => {
-        const mockRequest = { user: mockAdminUser } as AuthenticatedRequest;
+        const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
         const mismatchedPutDTO: CompanyPutDTO = {
           data: {
             type: "companies",

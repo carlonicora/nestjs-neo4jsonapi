@@ -33,6 +33,7 @@ import { HttpException, HttpStatus } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { RoleId } from "../../../common/constants/system.roles";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { RolePostDTO } from "../dtos/role.post.dto";
@@ -42,6 +43,9 @@ import {
   JsonApiSingleDocument,
   JsonApiListDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+
+// The handlers take the request first: @CacheInvalidate reads the route params from it
+const requestFor = (roleId: string) => ({ params: { roleId } }) as unknown as AuthenticatedRequest;
 
 describe("RoleController", () => {
   let controller: RoleController;
@@ -241,7 +245,7 @@ describe("RoleController", () => {
         data: { ...mockServiceResponse.data, attributes: { name: "Updated Role" } },
       });
 
-      const result = await controller.update(updateDto, MOCK_ROLE_ID);
+      const result = await controller.update(requestFor(MOCK_ROLE_ID), updateDto, MOCK_ROLE_ID);
 
       expect(roleService.update).toHaveBeenCalledWith({
         data: updateDto.data,
@@ -250,7 +254,7 @@ describe("RoleController", () => {
     });
 
     it("should throw PRECONDITION_FAILED when IDs do not match", async () => {
-      await expect(controller.update(updateDto, MOCK_ROLE_ID_2)).rejects.toThrow(
+      await expect(controller.update(requestFor(MOCK_ROLE_ID_2), updateDto, MOCK_ROLE_ID_2)).rejects.toThrow(
         new HttpException("Role id does not match the {json:api} id", HttpStatus.PRECONDITION_FAILED),
       );
 
@@ -260,7 +264,9 @@ describe("RoleController", () => {
     it("should handle service errors during update", async () => {
       roleService.update.mockRejectedValue(new Error("Update failed"));
 
-      await expect(controller.update(updateDto, MOCK_ROLE_ID)).rejects.toThrow("Update failed");
+      await expect(controller.update(requestFor(MOCK_ROLE_ID), updateDto, MOCK_ROLE_ID)).rejects.toThrow(
+        "Update failed",
+      );
     });
   });
 
@@ -268,7 +274,7 @@ describe("RoleController", () => {
     it("should delete a role", async () => {
       roleService.delete.mockResolvedValue(undefined);
 
-      await controller.delete(MOCK_ROLE_ID);
+      await controller.delete(requestFor(MOCK_ROLE_ID), MOCK_ROLE_ID);
 
       expect(roleService.delete).toHaveBeenCalledWith({
         roleId: MOCK_ROLE_ID,
@@ -278,13 +284,15 @@ describe("RoleController", () => {
     it("should handle service errors during deletion", async () => {
       roleService.delete.mockRejectedValue(new Error("Deletion failed"));
 
-      await expect(controller.delete(MOCK_ROLE_ID)).rejects.toThrow("Deletion failed");
+      await expect(controller.delete(requestFor(MOCK_ROLE_ID), MOCK_ROLE_ID)).rejects.toThrow("Deletion failed");
     });
 
     it("should handle non-existent role deletion", async () => {
       roleService.delete.mockRejectedValue(new Error("Role not found"));
 
-      await expect(controller.delete("non-existent-id")).rejects.toThrow("Role not found");
+      await expect(controller.delete(requestFor("non-existent-id"), "non-existent-id")).rejects.toThrow(
+        "Role not found",
+      );
     });
   });
 

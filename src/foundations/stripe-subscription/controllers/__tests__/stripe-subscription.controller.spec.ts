@@ -32,10 +32,12 @@ vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
 });
 
 import { Test, TestingModule } from "@nestjs/testing";
-import { HttpStatus } from "@nestjs/common";
+import { HttpException, HttpStatus } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { StripeSubscriptionController } from "../stripe-subscription.controller";
 import { StripeSubscriptionAdminService } from "../../services/stripe-subscription-admin.service";
+import { CacheService } from "../../../../core/cache/services/cache.service";
+import { RoleId } from "../../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 import type { StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
 import type {
@@ -47,6 +49,7 @@ describe("StripeSubscriptionController", () => {
   let controller: StripeSubscriptionController;
   let subscriptionService: Mocked<StripeSubscriptionAdminService>;
   let mockReply: Mocked<FastifyReply>;
+  let cacheService: { invalidateByElement: ReturnType<typeof vi.fn>; invalidateByType: ReturnType<typeof vi.fn> };
 
   // Test data constants
   const TEST_IDS = {
@@ -97,6 +100,12 @@ describe("StripeSubscriptionController", () => {
       resumeSubscription: vi.fn(),
       changePlan: vi.fn(),
       previewProration: vi.fn(),
+      syncSubscriptionFromStripe: vi.fn(),
+    };
+
+    cacheService = {
+      invalidateByElement: vi.fn().mockResolvedValue(undefined),
+      invalidateByType: vi.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -106,6 +115,7 @@ describe("StripeSubscriptionController", () => {
           provide: StripeSubscriptionAdminService,
           useValue: mockStripeSubscriptionAdminService,
         },
+        { provide: CacheService, useValue: cacheService },
       ],
     }).compile();
 
@@ -581,6 +591,73 @@ describe("StripeSubscriptionController", () => {
         companyId: TEST_IDS.companyId,
         newPriceId: priceId,
       });
+    });
+  });
+
+  describe("POST /stripe-subscriptions/:subscriptionId/sync", () => {
+    const createRequestWithParams = (companyId: string = TEST_IDS.companyId): AuthenticatedRequest =>
+      ({ ...createMockRequest(companyId), params: { subscriptionId: TEST_IDS.subscriptionId } }) as any;
+
+    it("is limited to company administrators", () => {
+      const roles = Reflect.getMetadata("roles", StripeSubscriptionController.prototype.syncSubscription);
+      expect(roles).toEqual([RoleId.CompanyAdministrator]);
+    });
+
+    it("checks ownership, re-reads the subscription from Stripe and answers with the stored one", async () => {
+      const req = createRequestWithParams();
+      const synced: JsonApiSingleDocument = {
+        data: {
+          ...MOCK_SUBSCRIPTION_RESPONSE.data,
+          attributes: { stripeSubscriptionId: "stripe_sub_123", status: "active" },
+        },
+      };
+      subscriptionService.getSubscription
+        .mockResolvedValueOnce({
+          data: {
+            ...MOCK_SUBSCRIPTION_RESPONSE.data,
+            attributes: { stripeSubscriptionId: "stripe_sub_123", status: "incomplete" },
+          },
+        })
+        .mockResolvedValueOnce(synced);
+      subscriptionService.syncSubscriptionFromStripe.mockResolvedValue(undefined);
+
+      await controller.syncSubscription(req, mockReply, TEST_IDS.subscriptionId);
+
+      expect(subscriptionService.getSubscription).toHaveBeenNthCalledWith(1, {
+        id: TEST_IDS.subscriptionId,
+        companyId: TEST_IDS.companyId,
+      });
+      expect(subscriptionService.syncSubscriptionFromStripe).toHaveBeenCalledWith({
+        stripeSubscriptionId: "stripe_sub_123",
+      });
+      expect(mockReply.send).toHaveBeenCalledWith(synced);
+      expect(cacheService.invalidateByElement).toHaveBeenCalledWith("stripe-subscriptions", TEST_IDS.subscriptionId);
+    });
+
+    it("never syncs a subscription of another company", async () => {
+      const req = createRequestWithParams("other-company");
+      subscriptionService.getSubscription.mockRejectedValue(
+        new HttpException("Subscription does not belong to this company", HttpStatus.FORBIDDEN),
+      );
+
+      await expect(controller.syncSubscription(req, mockReply, TEST_IDS.subscriptionId)).rejects.toThrow(
+        "Subscription does not belong to this company",
+      );
+
+      expect(subscriptionService.syncSubscriptionFromStripe).not.toHaveBeenCalled();
+      expect(cacheService.invalidateByElement).not.toHaveBeenCalled();
+    });
+
+    it("answers 400 when the subscription has no Stripe id", async () => {
+      const req = createRequestWithParams();
+      subscriptionService.getSubscription.mockResolvedValue({
+        data: { ...MOCK_SUBSCRIPTION_RESPONSE.data, attributes: { status: "incomplete" } },
+      });
+
+      await controller.syncSubscription(req, mockReply, TEST_IDS.subscriptionId);
+
+      expect(mockReply.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
+      expect(subscriptionService.syncSubscriptionFromStripe).not.toHaveBeenCalled();
     });
   });
 });

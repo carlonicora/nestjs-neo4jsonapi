@@ -6,6 +6,7 @@ import { stripeCustomerMeta } from "../../stripe-customer/entities/stripe-custom
 import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
 import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
 import { StripeSubscription, StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
+import { StripeSubscriptionDiscount, discountQueryParams } from "../entities/stripe-subscription.discount";
 import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
 import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
 
@@ -116,6 +117,28 @@ export class StripeSubscriptionRepository implements OnModuleInit {
   }
 
   /**
+   * Find every subscription, of every company.
+   *
+   * Not company-scoped and not paginated: it serves system jobs that run outside a
+   * request (the discount backfill), never an endpoint. It matches the same
+   * customer and price path as {@link update}, so every row it returns can be updated.
+   *
+   * @returns All subscriptions ordered by creation date ascending
+   */
+  async findAll(): Promise<StripeSubscription[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel, fetchAll: true });
+
+    query.query += `
+      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
+      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+      ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt ASC
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
    * Find subscription by Stripe subscription ID
    *
    * @param params - Query parameters
@@ -170,6 +193,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     trialStart?: Date;
     trialEnd?: Date;
     quantity: number;
+    discount?: StripeSubscriptionDiscount | null;
   }): Promise<StripeSubscription> {
     const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
@@ -189,6 +213,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
       trialStart: params.trialStart?.toISOString() ?? null,
       trialEnd: params.trialEnd?.toISOString() ?? null,
       quantity: params.quantity,
+      ...discountQueryParams(params.discount ?? null),
     };
 
     // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
@@ -206,6 +231,12 @@ export class StripeSubscriptionRepository implements OnModuleInit {
         trialStart: CASE WHEN $trialStart IS NOT NULL THEN datetime($trialStart) ELSE null END,
         trialEnd: CASE WHEN $trialEnd IS NOT NULL THEN datetime($trialEnd) ELSE null END,
         quantity: $quantity,
+        discountPercentOff: $discountPercentOff,
+        discountAmountOff: $discountAmountOff,
+        discountCurrency: $discountCurrency,
+        discountDuration: $discountDuration,
+        discountDurationInMonths: $discountDurationInMonths,
+        discountEnd: CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END,
         createdAt: datetime(),
         updatedAt: datetime()
       })
@@ -246,6 +277,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     trialEnd?: Date;
     pausedAt?: Date | null;
     quantity?: number;
+    discount?: StripeSubscriptionDiscount | null;
   }): Promise<StripeSubscription> {
     const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
 
@@ -287,6 +319,17 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     if (params.quantity !== undefined) {
       setParams.push(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
     }
+    // undefined leaves the stored discount as it is; null clears it.
+    if (params.discount !== undefined) {
+      setParams.push(
+        `${stripeSubscriptionMeta.nodeName}.discountPercentOff = $discountPercentOff`,
+        `${stripeSubscriptionMeta.nodeName}.discountAmountOff = $discountAmountOff`,
+        `${stripeSubscriptionMeta.nodeName}.discountCurrency = $discountCurrency`,
+        `${stripeSubscriptionMeta.nodeName}.discountDuration = $discountDuration`,
+        `${stripeSubscriptionMeta.nodeName}.discountDurationInMonths = $discountDurationInMonths`,
+        `${stripeSubscriptionMeta.nodeName}.discountEnd = CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END`,
+      );
+    }
 
     query.queryParams = {
       id: params.id,
@@ -299,6 +342,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
       trialEnd: params.trialEnd?.toISOString(),
       pausedAt: params.pausedAt?.toISOString(),
       quantity: params.quantity,
+      ...(params.discount !== undefined ? discountQueryParams(params.discount) : {}),
     };
 
     query.query = `
@@ -340,6 +384,7 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     trialEnd?: Date;
     pausedAt?: Date | null;
     quantity?: number;
+    discount?: StripeSubscriptionDiscount | null;
   }): Promise<StripeSubscription | null> {
     const existing = await this.findByStripeSubscriptionId({ stripeSubscriptionId: params.stripeSubscriptionId });
     if (!existing) return null;

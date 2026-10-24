@@ -22,6 +22,7 @@ import { TokenAllocationService } from "../../stripe-subscription/services/token
 import { StripeService } from "../../stripe/services/stripe.service";
 import { StripeWebhookEventRepository } from "../repositories/stripe-webhook-event.repository";
 import { StripeWebhookNotificationService } from "../services/stripe-webhook-notification.service";
+import { STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT } from "../../stripe-subscription/entities/stripe-subscription.meta";
 
 export interface StripeWebhookJobData {
   webhookEventId: string;
@@ -188,8 +189,33 @@ export class StripeWebhookProcessor extends WorkerHost {
             const isTrialEndedWithoutPayment =
               wasTrialing && isNowActive && (priceAmount === 0 || priceAmount === null || priceAmount === undefined);
 
+            // A subscription that was never paid granted nothing, so ending it takes nothing away:
+            // a first-payment attempt that expired unpaid, or one we cancelled because the GM retried.
+            const neverPaid =
+              subscription.status === "incomplete_expired" ||
+              subscription.cancellation_details?.comment === STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT;
+
+            // Another subscription of the company still grants access (a late or retried event
+            // about an old subscription must not switch off the one the GM pays for now)
+            const otherLiveSubscription = isEndState
+              ? (
+                  await this.subscriptionRepository.findByStripeCustomerId({ stripeCustomerId: stripeCustomer.id })
+                ).some(
+                  (sub) =>
+                    sub.stripeSubscriptionId !== subscription.id &&
+                    (sub.status === "active" || sub.status === "trialing"),
+                )
+              : false;
+
+            if (isEndState && (neverPaid || otherLiveSubscription)) {
+              this.logger.log(
+                `Company ${company.id}: subscription ${subscription.id} ended (${subscription.status}) without deactivating ` +
+                  `(reason: ${neverPaid ? "never_paid" : "other_subscription_active"})`,
+              );
+            }
+
             // Deactivate subscription if it's an end state OR if trial ended without valid payment
-            const shouldDeactivate = isEndState || isTrialEndedWithoutPayment;
+            const shouldDeactivate = (isEndState && !neverPaid && !otherLiveSubscription) || isTrialEndedWithoutPayment;
             const deactivationReason = isEndState ? subscription.status : "trial_ended_without_payment";
 
             if (shouldDeactivate) {

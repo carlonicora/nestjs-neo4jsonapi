@@ -23,6 +23,7 @@ vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
       createSubscription: vi.fn(),
       retrieveSubscription: vi.fn(),
       cancelSubscription: vi.fn(),
+      cancelUnpaidAttempt: vi.fn(),
       pauseSubscription: vi.fn(),
       resumeSubscription: vi.fn(),
       updateSubscription: vi.fn(),
@@ -42,6 +43,7 @@ import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeSubscriptionApiService } from "../stripe-subscription-api.service";
 import { StripeCustomerApiService } from "../../../stripe-customer/services/stripe-customer-api.service";
 import { StripePaymentService } from "../../../stripe/services/stripe.payment.service";
+import { StripeCouponCodeCheckoutService } from "../../../stripe-coupon/services/stripe-coupon-code-checkout.service";
 import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
@@ -160,6 +162,7 @@ describe("StripeSubscriptionAdminService", () => {
       createSubscription: vi.fn(),
       retrieveSubscription: vi.fn(),
       cancelSubscription: vi.fn(),
+      cancelUnpaidAttempt: vi.fn(),
       pauseSubscription: vi.fn(),
       resumeSubscription: vi.fn(),
       updateSubscription: vi.fn(),
@@ -221,6 +224,14 @@ describe("StripeSubscriptionAdminService", () => {
         {
           provide: JsonApiService,
           useValue: mockJsonApiService,
+        },
+        {
+          provide: StripeCouponCodeCheckoutService,
+          useValue: {
+            findAutomaticForPrice: vi.fn().mockResolvedValue(null),
+            isExhausted: vi.fn().mockResolvedValue(false),
+            refreshCountsByStripePromotionCodeId: vi.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
@@ -446,6 +457,32 @@ describe("StripeSubscriptionAdminService", () => {
       });
     });
 
+    it("returns the client secret of an incomplete subscription's open invoice (current Stripe API shape)", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
+      stripeSubscriptionApiService.createSubscription.mockResolvedValue({
+        ...mockStripeSubscriptionWithItem,
+        status: "incomplete",
+        latest_invoice: {
+          id: "in_1",
+          status: "open",
+          confirmation_secret: { client_secret: "pi_1_secret", type: "payment_intent" },
+          payments: { data: [{ is_default: true, payment: { type: "payment_intent", payment_intent: "pi_1" } }] },
+        },
+      } as unknown as Stripe.Subscription);
+      subscriptionRepository.create.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+
+      const result = await service.createSubscription(validParams);
+
+      expect(result).toEqual({
+        data: MOCK_JSON_API_RESPONSE,
+        clientSecret: "pi_1_secret",
+        paymentIntentId: "pi_1",
+        requiresAction: true,
+      });
+    });
+
     it("should throw NOT_FOUND when customer does not exist", async () => {
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
 
@@ -662,6 +699,199 @@ describe("StripeSubscriptionAdminService", () => {
         requiresAction: false,
       });
       expect(jsonApiService.buildSingle).toHaveBeenCalledWith(expect.any(Object), MOCK_DB_SUBSCRIPTION);
+    });
+  });
+
+  describe("createSubscription picks the card", () => {
+    const params = { companyId: TEST_IDS.companyId, priceId: MOCK_STRIPE_PRICE.id };
+    const secondCard = { ...MOCK_PAYMENT_METHOD, id: "pm_added_later" } as Stripe.PaymentMethod;
+
+    beforeEach(() => {
+      stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
+      stripeSubscriptionApiService.createSubscription.mockResolvedValue({
+        ...MOCK_SUBSCRIPTION,
+        items: {
+          ...MOCK_SUBSCRIPTION.items,
+          data: [
+            { ...MOCK_SUBSCRIPTION.items.data[0], current_period_start: 1704067200, current_period_end: 1706745600 },
+          ],
+        },
+      } as Stripe.Subscription);
+      subscriptionRepository.create.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+      stripeCustomerApiService.listPaymentMethods.mockResolvedValue([MOCK_PAYMENT_METHOD, secondCard]);
+    });
+
+    it("uses the customer default, not the first card", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_STRIPE_CUSTOMER,
+        defaultPaymentMethodId: secondCard.id,
+      });
+
+      await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodId: secondCard.id }),
+      );
+    });
+
+    it("falls back to the first card without a default", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_STRIPE_CUSTOMER,
+        defaultPaymentMethodId: undefined,
+      });
+
+      await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodId: MOCK_PAYMENT_METHOD.id }),
+      );
+    });
+
+    it("falls back to the first card when the default is no longer attached", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_STRIPE_CUSTOMER,
+        defaultPaymentMethodId: "pm_detached",
+      });
+
+      await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodId: MOCK_PAYMENT_METHOD.id }),
+      );
+    });
+
+    it("keeps the card the request names", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+        ...MOCK_STRIPE_CUSTOMER,
+        defaultPaymentMethodId: secondCard.id,
+      });
+
+      await service.createSubscription({ ...params, paymentMethodId: "pm_named" });
+
+      expect(stripeCustomerApiService.listPaymentMethods).not.toHaveBeenCalled();
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ paymentMethodId: "pm_named" }),
+      );
+    });
+  });
+
+  describe("createSubscription cleans up unpaid attempts", () => {
+    const params = { companyId: TEST_IDS.companyId, priceId: MOCK_STRIPE_PRICE.id };
+    const createdStripeSubscription: Stripe.Subscription = {
+      ...MOCK_SUBSCRIPTION,
+      items: {
+        ...MOCK_SUBSCRIPTION.items,
+        data: [
+          { ...MOCK_SUBSCRIPTION.items.data[0], current_period_start: 1704067200, current_period_end: 1706745600 },
+        ],
+      },
+    };
+    const unpaid = (id: string): StripeSubscription => ({
+      ...MOCK_DB_SUBSCRIPTION,
+      id,
+      stripeSubscriptionId: `sub_stripe_${id}`,
+      status: "incomplete",
+    });
+    const canceledInStripe = (id: string) =>
+      ({
+        ...MOCK_SUBSCRIPTION,
+        id: `sub_stripe_${id}`,
+        status: "canceled",
+        canceled_at: 1704067200,
+      }) as Stripe.Subscription;
+
+    beforeEach(() => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(MOCK_STRIPE_PRICE);
+      stripeSubscriptionApiService.createSubscription.mockResolvedValue(createdStripeSubscription);
+      subscriptionRepository.create.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("cancels every incomplete recurring subscription in Stripe at once and stores the cancellation, before creating the new one", async () => {
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([unpaid("a"), unpaid("b")]);
+      stripeSubscriptionApiService.cancelUnpaidAttempt.mockImplementation(async (stripeId: string) =>
+        canceledInStripe(stripeId.replace("sub_stripe_", "")),
+      );
+
+      await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.cancelUnpaidAttempt).toHaveBeenCalledTimes(2);
+      expect(stripeSubscriptionApiService.cancelUnpaidAttempt).toHaveBeenCalledWith("sub_stripe_a");
+      expect(stripeSubscriptionApiService.cancelUnpaidAttempt).toHaveBeenCalledWith("sub_stripe_b");
+      expect(subscriptionRepository.update).toHaveBeenCalledWith({
+        id: "a",
+        status: "canceled",
+        cancelAtPeriodEnd: MOCK_SUBSCRIPTION.cancel_at_period_end,
+        canceledAt: new Date(1704067200 * 1000),
+      });
+      expect(subscriptionRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "b", status: "canceled" }),
+      );
+
+      const lastCancel = Math.max(...stripeSubscriptionApiService.cancelUnpaidAttempt.mock.invocationCallOrder);
+      expect(stripeSubscriptionApiService.createSubscription.mock.invocationCallOrder[0]).toBeGreaterThan(lastCancel);
+    });
+
+    it("never touches past_due, canceled or one-time purchases", async () => {
+      const oneTime: StripeSubscription = {
+        ...unpaid("one-time"),
+        stripePrice: { ...MOCK_STRIPE_PRICE, priceType: "one_time" },
+      };
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([
+        { ...MOCK_DB_SUBSCRIPTION, id: "pd", status: "past_due" },
+        { ...MOCK_DB_SUBSCRIPTION, id: "c", status: "canceled" },
+        { ...MOCK_DB_SUBSCRIPTION, id: "x", status: "incomplete_expired" },
+        oneTime,
+      ]);
+
+      await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.cancelUnpaidAttempt).not.toHaveBeenCalled();
+      expect(subscriptionRepository.update).not.toHaveBeenCalled();
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not cancel anything when the customer already has an active subscription (409)", async () => {
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([MOCK_DB_SUBSCRIPTION, unpaid("a")]);
+
+      await expect(service.createSubscription(params)).rejects.toBeInstanceOf(HttpException);
+
+      expect(stripeSubscriptionApiService.cancelUnpaidAttempt).not.toHaveBeenCalled();
+    });
+
+    it("a failed cancellation re-reads that subscription from Stripe and still creates the new one", async () => {
+      subscriptionRepository.findByStripeCustomerId.mockResolvedValue([unpaid("a")]);
+      stripeSubscriptionApiService.cancelUnpaidAttempt.mockRejectedValue(new Error("already expired"));
+      stripeSubscriptionApiService.retrieveSubscription.mockResolvedValue({
+        ...createdStripeSubscription,
+        id: "sub_stripe_a",
+        status: "incomplete_expired",
+      } as Stripe.Subscription);
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(unpaid("a"));
+
+      const result = await service.createSubscription(params);
+
+      expect(stripeSubscriptionApiService.retrieveSubscription).toHaveBeenCalledWith("sub_stripe_a");
+      expect(subscriptionRepository.updateByStripeSubscriptionId).toHaveBeenCalledWith(
+        expect.objectContaining({ stripeSubscriptionId: "sub_stripe_a", status: "incomplete_expired" }),
+      );
+      expect(subscriptionRepository.update).not.toHaveBeenCalled();
+      expect(stripeSubscriptionApiService.createSubscription).toHaveBeenCalledTimes(1);
+      expect(result.data).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("does not cancel anything for a one-time purchase", async () => {
+      stripePriceRepository.findById.mockResolvedValue({ ...MOCK_STRIPE_PRICE, priceType: "one_time" });
+      stripePaymentService.createAndPayOneTimeInvoice.mockResolvedValue({
+        paymentIntent: { id: "pi_1", status: "succeeded", client_secret: null },
+      } as any);
+
+      await service.createSubscription(params);
+
+      expect(subscriptionRepository.findByStripeCustomerId).not.toHaveBeenCalled();
+      expect(stripeSubscriptionApiService.cancelSubscription).not.toHaveBeenCalled();
     });
   });
 
@@ -1127,8 +1357,91 @@ describe("StripeSubscriptionAdminService", () => {
         subscriptionId: MOCK_DB_SUBSCRIPTION.stripeSubscriptionId,
         priceId: newStripePrice.stripePriceId,
         prorationBehavior: "create_prorations",
+        defaultPaymentMethodId: MOCK_STRIPE_CUSTOMER.defaultPaymentMethodId,
       });
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
+    });
+
+    describe("charges the customer default card", () => {
+      const secondCard = { ...MOCK_PAYMENT_METHOD, id: "pm_added_later" } as Stripe.PaymentMethod;
+
+      beforeEach(() => {
+        stripePriceRepository.findById.mockResolvedValue(newStripePrice);
+        stripeSubscriptionApiService.updateSubscription.mockResolvedValue(mockUpdatedSubscription);
+        subscriptionRepository.updatePrice.mockResolvedValue(undefined);
+        subscriptionRepository.update.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+        jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+      });
+
+      it("a trial upgrade sends the customer default, so a card saved on the subscription does not win", async () => {
+        subscriptionRepository.findById.mockResolvedValue({ ...MOCK_DB_SUBSCRIPTION, status: "trialing" });
+        stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+          ...MOCK_STRIPE_CUSTOMER,
+          defaultPaymentMethodId: secondCard.id,
+        });
+        stripeCustomerApiService.listPaymentMethods.mockResolvedValue([MOCK_PAYMENT_METHOD, secondCard]);
+
+        await service.changePlan(validParams);
+
+        expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
+          expect.objectContaining({ trialEnd: "now", defaultPaymentMethodId: secondCard.id }),
+        );
+      });
+
+      it("a trial upgrade sends no card when the default is no longer attached", async () => {
+        subscriptionRepository.findById.mockResolvedValue({ ...MOCK_DB_SUBSCRIPTION, status: "trialing" });
+        stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+          ...MOCK_STRIPE_CUSTOMER,
+          defaultPaymentMethodId: "pm_detached",
+        });
+        stripeCustomerApiService.listPaymentMethods.mockResolvedValue([MOCK_PAYMENT_METHOD]);
+
+        await service.changePlan(validParams);
+
+        expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
+          expect.objectContaining({ defaultPaymentMethodId: undefined }),
+        );
+      });
+
+      it("sends no card when the customer has no default", async () => {
+        subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+        stripeCustomerRepository.findByCompanyId.mockResolvedValue({
+          ...MOCK_STRIPE_CUSTOMER,
+          defaultPaymentMethodId: undefined,
+        });
+
+        await service.changePlan(validParams);
+
+        expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
+          expect.objectContaining({ defaultPaymentMethodId: undefined }),
+        );
+      });
+    });
+
+    it("adds the client secret to meta when the charge waits on 3D Secure", async () => {
+      subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(newStripePrice);
+      stripeSubscriptionApiService.updateSubscription.mockResolvedValue({
+        ...mockUpdatedSubscription,
+        status: "past_due",
+        latest_invoice: {
+          id: "in_2",
+          status: "open",
+          confirmation_secret: { client_secret: "pi_2_secret", type: "payment_intent" },
+          payments: { data: [{ is_default: true, payment: { type: "payment_intent", payment_intent: "pi_2" } }] },
+        },
+      } as unknown as Stripe.Subscription);
+      subscriptionRepository.updatePrice.mockResolvedValue(undefined);
+      subscriptionRepository.update.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+
+      const result = await service.changePlan(validParams);
+
+      expect(result).toEqual({
+        ...MOCK_JSON_API_RESPONSE,
+        meta: { clientSecret: "pi_2_secret", paymentIntentId: "pi_2", requiresAction: true },
+      });
     });
 
     it("should throw NOT_FOUND when subscription does not exist", async () => {
@@ -1568,7 +1881,43 @@ describe("StripeSubscriptionAdminService", () => {
         canceledAt: null,
         trialStart: undefined,
         trialEnd: undefined,
+        discount: null,
       });
+    });
+
+    it("should store the discount the Stripe subscription carries", async () => {
+      const withDiscount = {
+        ...mockStripeSubscriptionForSync,
+        discounts: [
+          {
+            id: "di_1",
+            object: "discount",
+            end: null,
+            source: {
+              type: "coupon",
+              coupon: { id: "co_1", percent_off: 20, amount_off: null, currency: null, duration: "forever" },
+            },
+          },
+        ],
+      } as unknown as Stripe.Subscription;
+      stripeSubscriptionApiService.retrieveSubscription.mockResolvedValue(withDiscount);
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      subscriptionRepository.updateByStripeSubscriptionId.mockResolvedValue(undefined);
+
+      await service.syncSubscriptionFromStripe(validParams);
+
+      expect(subscriptionRepository.updateByStripeSubscriptionId).toHaveBeenCalledWith(
+        expect.objectContaining({
+          discount: {
+            percentOff: 20,
+            amountOff: null,
+            currency: null,
+            duration: "forever",
+            durationInMonths: null,
+            end: null,
+          },
+        }),
+      );
     });
   });
 

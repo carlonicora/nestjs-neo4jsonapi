@@ -522,6 +522,103 @@ describe("StripeSubscriptionRepository", () => {
     });
   });
 
+  describe("discount fields", () => {
+    const DISCOUNT = {
+      percentOff: 20,
+      amountOff: null,
+      currency: null,
+      duration: "repeating" as const,
+      durationInMonths: 6,
+      end: new Date("2025-07-01T00:00:00Z"),
+    };
+
+    it("create writes the discount, the end cast to a datetime", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await repository.create({
+        stripeCustomerId: TEST_IDS.stripeCustomerId,
+        priceId: TEST_IDS.priceId,
+        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
+        status: "active",
+        currentPeriodStart: MOCK_DATES.currentPeriodStart,
+        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
+        cancelAtPeriodEnd: false,
+        quantity: 1,
+        discount: DISCOUNT,
+      });
+
+      expect(mockQuery.queryParams).toMatchObject({
+        discountPercentOff: 20,
+        discountAmountOff: null,
+        discountDuration: "repeating",
+        discountDurationInMonths: 6,
+        discountEnd: "2025-07-01T00:00:00.000Z",
+      });
+      expect(mockQuery.query).toContain(
+        "discountEnd: CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END",
+      );
+    });
+
+    it("create without a discount writes nulls", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await repository.create({
+        stripeCustomerId: TEST_IDS.stripeCustomerId,
+        priceId: TEST_IDS.priceId,
+        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
+        status: "active",
+        currentPeriodStart: MOCK_DATES.currentPeriodStart,
+        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
+        cancelAtPeriodEnd: false,
+        quantity: 1,
+      });
+
+      expect(mockQuery.queryParams.discountPercentOff).toBeNull();
+      expect(mockQuery.queryParams.discountEnd).toBeNull();
+    });
+
+    it("update sets every discount field when a discount is given", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await repository.update({ id: TEST_IDS.subscriptionId, discount: DISCOUNT });
+
+      expect(mockQuery.queryParams.discountPercentOff).toBe(20);
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.discountPercentOff = $discountPercentOff`);
+      expect(mockQuery.query).toContain(
+        `${stripeSubscriptionMeta.nodeName}.discountEnd = CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END`,
+      );
+    });
+
+    it("update clears the discount when null is given", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await repository.update({ id: TEST_IDS.subscriptionId, discount: null });
+
+      expect(mockQuery.queryParams.discountPercentOff).toBeNull();
+      expect(mockQuery.queryParams.discountDuration).toBeNull();
+      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.discountDuration = $discountDuration`);
+    });
+
+    it("update leaves the discount alone when none is given", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
+
+      expect(mockQuery.query).not.toContain("discount");
+      expect(mockQuery.queryParams).not.toHaveProperty("discountPercentOff");
+    });
+  });
+
   describe("update", () => {
     it("should update status field", async () => {
       const mockQuery = createMockQuery();

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PreconditionFailedException } from "@nestjs/common";
+import { Body, Patch, PreconditionFailedException, Req, Request, Res } from "@nestjs/common";
+import { Audit } from "../audit.decorator";
+import { Roles } from "../roles.decorator";
 import { ValidateId } from "../validate-id.decorator";
 
 const TEST_IDS = {
@@ -21,7 +23,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -41,7 +43,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -55,12 +57,12 @@ describe("ValidateId decorator", () => {
       expect(originalMethod).not.toHaveBeenCalled();
     });
 
-    it("should allow when paramId is missing (no params object)", async () => {
+    it("should throw when the request does not reach the handler at runtime", async () => {
       const originalMethod = vi.fn().mockResolvedValue("success");
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -68,10 +70,10 @@ describe("ValidateId decorator", () => {
       const controller = new TestController();
       const body = { data: { id: TEST_IDS.entityId } };
 
-      const result = await controller.testMethod(body);
-
-      expect(result).toBe("success");
-      expect(originalMethod).toHaveBeenCalledTimes(1);
+      await expect(controller.testMethod(body)).rejects.toThrow(
+        '@ValidateId("entityId") on TestController.testMethod did not receive the request',
+      );
+      expect(originalMethod).not.toHaveBeenCalled();
     });
 
     it("should allow when paramId is undefined in params", async () => {
@@ -79,7 +81,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -99,7 +101,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -119,7 +121,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -139,14 +141,14 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
 
       const controller = new TestController();
 
-      const result = await controller.testMethod();
+      const result = await controller.testMethod({ params: {} });
 
       expect(result).toBe("success");
       expect(originalMethod).toHaveBeenCalledTimes(1);
@@ -160,7 +162,7 @@ describe("ValidateId decorator", () => {
       // Custom bodyPath "data.attributes.resourceId" - body still needs "data" property to be found
       class TestController {
         @ValidateId("entityId", "data.attributes.resourceId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -180,7 +182,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId", "data.attributes.resourceId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -198,7 +200,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId", "nonexistent.path.id")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -220,7 +222,7 @@ describe("ValidateId decorator", () => {
 
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return originalMethod(...args);
         }
       }
@@ -238,7 +240,7 @@ describe("ValidateId decorator", () => {
     it("should preserve the return value of the original method", async () => {
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return { status: "created", id: args[1]?.data?.id };
         }
       }
@@ -255,7 +257,7 @@ describe("ValidateId decorator", () => {
     it("should work with async methods that throw errors", async () => {
       class TestController {
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           throw new Error("Original method error");
         }
       }
@@ -272,7 +274,7 @@ describe("ValidateId decorator", () => {
         private value = "controller value";
 
         @ValidateId("entityId")
-        async testMethod(...args: any[]) {
+        async testMethod(@Req() ...args: any[]) {
           return this.value;
         }
       }
@@ -284,6 +286,127 @@ describe("ValidateId decorator", () => {
       const result = await controller.testMethod(req, body);
 
       expect(result).toBe("controller value");
+    });
+  });
+  describe("definition-time check", () => {
+    it("throws when the handler does not declare @Req()", () => {
+      expect(() => {
+        class StripeCouponController {
+          @ValidateId("couponId")
+          async rename(@Res() reply: any, @Body() body: any) {
+            return { reply, body };
+          }
+        }
+        return StripeCouponController;
+      }).toThrow(
+        '@ValidateId("couponId") on StripeCouponController.rename needs the request: add @Req() to its parameters',
+      );
+    });
+
+    it("throws when the handler has no decorated parameters at all", () => {
+      expect(() => {
+        class TestController {
+          @ValidateId("entityId")
+          async testMethod(_req: any, _body: any) {
+            return "success";
+          }
+        }
+        return TestController;
+      }).toThrow("needs the request");
+    });
+
+    it.each([0, 1, 2])("accepts @Req() at parameter %i", (position) => {
+      expect(() => {
+        if (position === 0) {
+          class A {
+            @ValidateId("entityId")
+            async m(@Req() _req: any, @Res() _reply: any, @Body() _body: any) {}
+          }
+          return A;
+        }
+        if (position === 1) {
+          class B {
+            @ValidateId("entityId")
+            async m(@Res() _reply: any, @Req() _req: any, @Body() _body: any) {}
+          }
+          return B;
+        }
+        class C {
+          @ValidateId("entityId")
+          async m(@Res() _reply: any, @Body() _body: any, @Req() _req: any) {}
+        }
+        return C;
+      }).not.toThrow();
+    });
+
+    it("accepts @Request(), Nest's alias of @Req()", () => {
+      expect(() => {
+        class UserController {
+          @ValidateId("userId")
+          async put(@Request() _request: any, @Res() _reply: any, @Body() _body: any) {}
+        }
+        return UserController;
+      }).not.toThrow();
+    });
+
+    it("sees @Req() whatever the order of the other method decorators", () => {
+      const meta = { type: "tests", endpoint: "tests", nodeName: "test", labelName: "Test" };
+      expect(() => {
+        class Above {
+          @Patch("tests/:entityId")
+          @Roles("admin")
+          @Audit(meta, "entityId")
+          @ValidateId("entityId")
+          async m(@Req() _req: any, @Body() _body: any) {}
+        }
+        class Below {
+          @ValidateId("entityId")
+          @Audit(meta, "entityId")
+          @Roles("admin")
+          @Patch("tests/:entityId")
+          async m(@Req() _req: any, @Body() _body: any) {}
+        }
+        class Middle {
+          @Roles("admin")
+          @ValidateId("entityId")
+          @Patch("tests/:entityId")
+          async m(@Body() _body: any, @Req() _req: any) {}
+        }
+        return [Above, Below, Middle];
+      }).not.toThrow();
+
+      expect(() => {
+        class Below {
+          @ValidateId("entityId")
+          @Audit(meta, "entityId")
+          @Roles("admin")
+          @Patch("tests/:entityId")
+          async m(@Body() _body: any) {}
+        }
+        return Below;
+      }).toThrow("needs the request");
+    });
+
+    it("refuses a mismatch on a real handler shape with @Req() after @Res()", async () => {
+      const update = vi.fn().mockResolvedValue("ok");
+      class TestController {
+        @Patch("tests/:entityId")
+        @ValidateId("entityId")
+        async m(@Res() _reply: any, @Req() _req: any, @Body() body: any) {
+          return update(body);
+        }
+      }
+      const controller = new TestController();
+      const reply = { send: vi.fn() };
+
+      await expect(
+        controller.m(reply, { params: { entityId: TEST_IDS.entityId } }, { data: { id: TEST_IDS.differentId } }),
+      ).rejects.toThrow(PreconditionFailedException);
+      expect(update).not.toHaveBeenCalled();
+
+      await expect(
+        controller.m(reply, { params: { entityId: TEST_IDS.entityId } }, { data: { id: TEST_IDS.entityId } }),
+      ).resolves.toBe("ok");
     });
   });
 });

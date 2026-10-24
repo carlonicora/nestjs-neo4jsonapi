@@ -1,11 +1,16 @@
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 import { modelRegistry } from "../../common";
+import { createWorkerProvider } from "../../common/decorators/conditional-service.decorator";
+import { CacheModule } from "../../core/cache/cache.module";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
 import { Neo4JModule } from "../../core/neo4j/neo4j.module";
 import { CompanyModule } from "../company/company.module";
+import { StripeCouponModule } from "../stripe-coupon/stripe-coupon.module";
 import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
 import { StripePriceModule } from "../stripe-price/stripe-price.module";
 import { StripeModule } from "../stripe/stripe.module";
+import { StripeSubscriptionBackfillRepository } from "./backfills/stripe-subscription-backfill.repository";
+import { StripeSubscriptionDiscountBackfillService } from "./backfills/stripe-subscription-discount-backfill.service";
 import { StripeSubscriptionController } from "./controllers/stripe-subscription.controller";
 import { StripeSubscriptionModel } from "./entities/stripe-subscription.model";
 import { StripeSubscriptionRepository } from "./repositories/stripe-subscription.repository";
@@ -50,10 +55,12 @@ import { TokenAllocationService } from "./services/token-allocation.service";
   imports: [
     Neo4JModule,
     JsonApiModule,
+    CacheModule,
     forwardRef(() => CompanyModule),
     forwardRef(() => StripeCustomerModule),
     forwardRef(() => StripePriceModule),
     forwardRef(() => StripeModule),
+    forwardRef(() => StripeCouponModule),
   ],
   controllers: [StripeSubscriptionController],
   providers: [
@@ -63,6 +70,9 @@ import { TokenAllocationService } from "./services/token-allocation.service";
     StripeSubscriptionSerialiser,
     TokenAllocationService,
     FeatureSyncService,
+    StripeSubscriptionBackfillRepository,
+    // One-off discount backfill: worker mode only, once per database (marker node).
+    createWorkerProvider(StripeSubscriptionDiscountBackfillService),
   ],
   exports: [
     StripeSubscriptionApiService,

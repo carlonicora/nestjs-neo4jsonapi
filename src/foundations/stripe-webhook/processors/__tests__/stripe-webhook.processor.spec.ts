@@ -37,6 +37,7 @@ import { FeatureSyncService } from "../../../stripe-subscription/services/featur
 import { TokenAllocationService } from "../../../stripe-subscription/services/token-allocation.service";
 import { StripeCustomerRepository } from "../../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeSubscriptionRepository } from "../../../stripe-subscription/repositories/stripe-subscription.repository";
+import { STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT } from "../../../stripe-subscription/entities/stripe-subscription.meta";
 import { StripeInvoiceRepository } from "../../../stripe-invoice/repositories/stripe-invoice.repository";
 import { StripePriceRepository } from "../../../stripe-price/repositories/stripe-price.repository";
 import { CompanyRepository } from "../../../company/repositories/company.repository";
@@ -104,6 +105,7 @@ describe("StripeWebhookProcessor", () => {
     const mockSubscriptionRepository = {
       cancelAllByStripeCustomerId: vi.fn(),
       findByStripeSubscriptionId: vi.fn().mockResolvedValue(null),
+      findByStripeCustomerId: vi.fn().mockResolvedValue([]),
     };
 
     const mockStripeInvoiceRepository = {
@@ -375,6 +377,58 @@ describe("StripeWebhookProcessor", () => {
       expect(companyRepository.markSubscriptionStatus).toHaveBeenCalledWith({
         companyId: "company-id",
         isActiveSubscription: false,
+      });
+    });
+
+    describe("ending a subscription that never granted anything", () => {
+      const mockStripeCustomer = { id: "internal-customer-id", stripeCustomerId: TEST_IDS.customerId };
+      const mockCompany = { id: "company-id" };
+
+      beforeEach(() => {
+        stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(mockStripeCustomer as any);
+        companyRepository.findByStripeCustomerId.mockResolvedValue(mockCompany as any);
+        subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
+      });
+
+      it("does not deactivate the company for an unpaid attempt we cancelled because the GM retried", async () => {
+        const job = createMockJob("customer.subscription.deleted", {
+          ...MOCK_SUBSCRIPTION,
+          status: "canceled",
+          cancellation_details: { comment: STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT },
+        } as unknown as Record<string, any>);
+
+        await processor.process(job);
+
+        expect(companyRepository.markSubscriptionStatus).not.toHaveBeenCalled();
+      });
+
+      it("does not deactivate the company when a first-payment attempt expires unpaid", async () => {
+        const job = createMockJob("customer.subscription.updated", {
+          ...MOCK_SUBSCRIPTION,
+          status: "incomplete_expired",
+        } as unknown as Record<string, any>);
+
+        await processor.process(job);
+
+        expect(companyRepository.markSubscriptionStatus).not.toHaveBeenCalled();
+      });
+
+      it("does not deactivate the company when another of its subscriptions is still active", async () => {
+        subscriptionRepository.findByStripeCustomerId.mockResolvedValue([
+          { stripeSubscriptionId: MOCK_SUBSCRIPTION.id, status: "canceled" },
+          { stripeSubscriptionId: "sub_new_paid", status: "active" },
+        ] as any);
+        const job = createMockJob("customer.subscription.deleted", {
+          ...MOCK_SUBSCRIPTION,
+          status: "canceled",
+        } as unknown as Record<string, any>);
+
+        await processor.process(job);
+
+        expect(subscriptionRepository.findByStripeCustomerId).toHaveBeenCalledWith({
+          stripeCustomerId: "internal-customer-id",
+        });
+        expect(companyRepository.markSubscriptionStatus).not.toHaveBeenCalled();
       });
     });
 

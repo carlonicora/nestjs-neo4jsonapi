@@ -138,6 +138,8 @@ export class PasskeyController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @CacheInvalidate(passkeyMeta, "passkeyId")
   async renamePasskey(
+    // The request carries the route params @CacheInvalidate reads
+    @Req() _req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
     @Param("passkeyId") passkeyId: string,
     @Body() body: PasskeyRenameDTO,

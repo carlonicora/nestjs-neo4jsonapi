@@ -19,9 +19,18 @@ export { StripeSubscriptionAdminService } from "./services/stripe-subscription-a
 export { StripeSubscriptionRepository } from "./repositories/stripe-subscription.repository";
 
 // Entities
-export { StripeSubscription, StripeSubscriptionStatus } from "./entities/stripe-subscription.entity";
+export {
+  StripeSubscription,
+  StripeSubscriptionDiscountDuration,
+  StripeSubscriptionStatus,
+} from "./entities/stripe-subscription.entity";
+export {
+  STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND,
+  StripeSubscriptionDiscount,
+  discountFromStripeSubscription,
+} from "./entities/stripe-subscription.discount";
 export { StripeSubscriptionModel } from "./entities/stripe-subscription.model";
-export { stripeSubscriptionMeta } from "./entities/stripe-subscription.meta";
+export { STRIPE_SUBSCRIPTION_SYNC_SEGMENT, stripeSubscriptionMeta } from "./entities/stripe-subscription.meta";
 export { mapStripeSubscription } from "./entities/stripe-subscription.map";
 
 // DTOs
