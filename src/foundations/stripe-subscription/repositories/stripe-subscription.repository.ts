@@ -1,187 +1,164 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
-import { Neo4jService } from "../../../core/neo4j";
-import { companyMeta } from "../../company";
+import { ClsService } from "nestjs-cls";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
+import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
+import { companyMeta } from "../../company/entities/company.meta";
 import { stripeCustomerMeta } from "../../stripe-customer/entities/stripe-customer.meta";
 import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
 import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
-import { StripeSubscription, StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
+import { userMeta } from "../../user/entities/user.meta";
+import {
+  StripeSubscription,
+  StripeSubscriptionDescriptor,
+  StripeSubscriptionStatus,
+} from "../entities/stripe-subscription";
 import { StripeSubscriptionDiscount, discountQueryParams } from "../entities/stripe-subscription.discount";
 import { stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
-import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
+
+const S = stripeSubscriptionMeta.nodeName;
+
+type StripeSubscriptionUpdateParams = {
+  status?: StripeSubscriptionStatus;
+  currentPeriodStart?: Date;
+  currentPeriodEnd?: Date;
+  cancelAtPeriodEnd?: boolean;
+  canceledAt?: Date | null;
+  trialStart?: Date;
+  trialEnd?: Date;
+  cardExpiryCheckedFor?: Date | null;
+  quantity?: number;
+  discount?: StripeSubscriptionDiscount | null;
+};
+
+/** Datetime fields `update()` can set or clear: undefined leaves, null clears. */
+const CLEARABLE_DATETIME_FIELDS = ["canceledAt", "cardExpiryCheckedFor"] as const;
 
 /**
  * StripeSubscriptionRepository
  *
- * Neo4j repository for managing Subscription nodes and their relationships to BillingCustomer and Price nodes.
- * Handles subscription lifecycle data storage and queries with status filtering.
+ * Neo4j repository for StripeSubscription nodes:
+ * `(stripeSubscription)-[:BELONGS_TO]->(stripeCustomer)`, `-[:USES_PRICE]->(stripePrice)`,
+ * `-[:BELONGS_TO]->(company)` and `-[:CREATED_BY]->(user)`.
  *
- * Key Features:
- * - Automatic constraint creation for ID and Stripe subscription ID uniqueness
- * - Query subscriptions by customer, status, or Stripe ID
- * - Create and update operations with relationship management
- * - Support for plan changes by updating price relationships
- * - Sync operations for webhook data
- * - Track trial periods, billing cycles, and cancellation status
- * - Bulk cancel operations for customer deletion
- *
- * @example
- * ```typescript
- * const subscription = await subscriptionRepository.create({
- *   stripeCustomerId: 'cust_123',
- *   priceId: 'price_456',
- *   stripeSubscriptionId: 'sub_stripe789',
- *   status: 'active',
- *   currentPeriodStart: new Date(),
- *   currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
- *   cancelAtPeriodEnd: false,
- *   quantity: 1
- * });
- * ```
+ * Every read and every request-time write starts from `buildDefaultMatch()`, so a request is
+ * scoped to the caller's company. Jobs with no company in CLS (webhooks, crons, backfills)
+ * reach every company through the `$companyId IS NULL` branch.
  */
 @Injectable()
-export class StripeSubscriptionRepository implements OnModuleInit {
-  constructor(private readonly neo4j: Neo4jService) {}
+export class StripeSubscriptionRepository extends AbstractRepository<
+  StripeSubscription,
+  typeof StripeSubscriptionDescriptor.relationships
+> {
+  protected readonly descriptor = StripeSubscriptionDescriptor;
 
-  /**
-   * Initialize repository constraints
-   *
-   * Creates unique constraints and indexes on module initialization.
-   */
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
+  }
+
+  /** The inherited id constraint and indexes, plus the unique Stripe subscription id. */
   async onModuleInit() {
-    await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.id IS UNIQUE`,
-    });
+    await super.onModuleInit();
 
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${S}_stripeSubscriptionId IF NOT EXISTS FOR (${S}:${stripeSubscriptionMeta.labelName}) REQUIRE ${S}.stripeSubscriptionId IS UNIQUE`,
     });
   }
 
   /**
-   * Find subscriptions by stripe customer ID
+   * The subscription with its company, customer, price, the price's product and its creator.
+   */
+  protected buildReturnStatement(): string {
+    return `
+      MATCH (${S})-[:BELONGS_TO]->(${S}_${companyMeta.nodeName}:${companyMeta.labelName})
+      MATCH (${S})-[:BELONGS_TO]->(${S}_stripeCustomer:${stripeCustomerMeta.labelName})
+      MATCH (${S})-[:USES_PRICE]->(${S}_stripePrice:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${S}_stripePrice_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      OPTIONAL MATCH (${S})-[:CREATED_BY]->(${S}_createdBy:${userMeta.labelName})
+      RETURN ${S},
+        ${S}_${companyMeta.nodeName},
+        ${S}_stripeCustomer,
+        ${S}_stripePrice,
+        ${S}_stripePrice_${stripeProductMeta.nodeName},
+        ${S}_createdBy
+    `;
+  }
+
+  /**
+   * The cron finders read across every company. Inside a request `buildDefaultMatch()` would
+   * scope them to the caller's company, so they refuse to run there.
+   */
+  private assertNoRequestCompany(method: string): void {
+    if (this.clsService.get("companyId")) {
+      throw new Error(`StripeSubscriptionRepository.${method} is for the worker cron only, not for a request.`);
+    }
+  }
+
+  /**
+   * Subscriptions of a customer, newest first.
    *
-   * @param params - Query parameters
-   * @param params.stripeCustomerId - Stripe customer identifier (internal ID)
-   * @param params.status - Optional filter by subscription status
-   * @returns Array of subscriptions ordered by creation date descending
+   * @param params.stripeCustomerId - internal StripeCustomer id
+   * @param params.status - optional status filter
    */
   async findByStripeCustomerId(params: {
     stripeCustomerId: string;
     status?: StripeSubscriptionStatus;
   }): Promise<StripeSubscription[]> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
-
-    const whereParams: string[] = [];
-    if (params.status) {
-      query.queryParams.status = params.status;
-      whereParams.push(`${stripeSubscriptionMeta.nodeName}.status = $status`);
-    }
-
-    const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
-
-    query.queryParams.stripeCustomerId = params.stripeCustomerId;
-
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      WHERE 1=1 ${where}
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
-      ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC
-    `;
-
-    return this.neo4j.readMany(query);
-  }
-
-  /**
-   * Find subscription by internal ID
-   *
-   * @param params - Query parameters
-   * @param params.id - Internal subscription ID
-   * @returns Subscription if found, null otherwise
-   */
-  async findById(params: { id: string }): Promise<StripeSubscription | null> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
 
     query.queryParams = {
-      id: params.id,
+      ...query.queryParams,
+      stripeCustomerId: params.stripeCustomerId,
+      ...(params.status ? { status: params.status } : {}),
     };
-
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
-    `;
-
-    return this.neo4j.readOne(query);
-  }
-
-  /**
-   * Find every subscription, of every company.
-   *
-   * Not company-scoped and not paginated: it serves system jobs that run outside a
-   * request (the discount backfill), never an endpoint. It matches the same
-   * customer and price path as {@link update}, so every row it returns can be updated.
-   *
-   * @returns All subscriptions ordered by creation date ascending
-   */
-  async findAll(): Promise<StripeSubscription[]> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel, fetchAll: true });
 
     query.query += `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
-      ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt ASC
+      ${this.buildDefaultMatch()}
+      MATCH (${S})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
+      ${params.status ? `WHERE ${S}.status = $status` : ``}
+      WITH ${S}
+      ${this.buildReturnStatement()}
+      ORDER BY ${S}.createdAt DESC
     `;
 
     return this.neo4j.readMany(query);
   }
 
   /**
-   * Find subscription by Stripe subscription ID
-   *
-   * @param params - Query parameters
-   * @param params.stripeSubscriptionId - Stripe subscription ID
-   * @returns Subscription if found, null otherwise
+   * Every subscription, oldest first. Not paginated: it serves system jobs that run outside a
+   * request (the discount backfill), never an endpoint.
    */
+  async findAll(): Promise<StripeSubscription[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      ${this.buildReturnStatement()}
+      ORDER BY ${S}.createdAt ASC
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /** The subscription with this Stripe subscription id, or null. */
   async findByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<StripeSubscription | null> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
 
-    query.queryParams = {
-      stripeSubscriptionId: params.stripeSubscriptionId,
-    };
+    query.queryParams = { ...query.queryParams, searchValue: params.stripeSubscriptionId };
 
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "stripeSubscriptionId" })}
+      ${this.buildReturnStatement()}
     `;
 
     return this.neo4j.readOne(query);
   }
 
   /**
-   * Create a new subscription
-   *
-   * Creates a Subscription node with BELONGS_TO relationship to StripeCustomer
-   * and USES_PRICE relationship to StripePrice.
-   *
-   * @param params - Creation parameters
-   * @param params.stripeCustomerId - Stripe customer ID to link to
-   * @param params.priceId - Price ID to link to
-   * @param params.stripeSubscriptionId - Stripe subscription ID
-   * @param params.stripeSubscriptionItemId - Optional Stripe subscription item ID
-   * @param params.status - Subscription status
-   * @param params.currentPeriodStart - Current billing period start date
-   * @param params.currentPeriodEnd - Current billing period end date
-   * @param params.cancelAtPeriodEnd - Whether subscription cancels at period end
-   * @param params.trialStart - Optional trial start date
-   * @param params.trialEnd - Optional trial end date
-   * @param params.quantity - Subscription quantity
-   * @returns Created Subscription
+   * Creates a subscription linked to its customer, its price, the caller's company and the
+   * caller. The customer and price ids are checked against the caller's company first.
    */
-  async create(params: {
+  async createSubscription(params: {
     stripeCustomerId: string;
     priceId: string;
     stripeSubscriptionId: string;
@@ -195,13 +172,18 @@ export class StripeSubscriptionRepository implements OnModuleInit {
     quantity: number;
     discount?: StripeSubscriptionDiscount | null;
   }): Promise<StripeSubscription> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+    await this.neo4j.validateRelatedNodes({
+      nodes: [
+        { id: params.stripeCustomerId, label: stripeCustomerMeta.labelName },
+        { id: params.priceId, label: stripePriceMeta.labelName },
+      ],
+    });
 
-    const id = randomUUID();
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
 
     query.queryParams = {
       ...query.queryParams,
-      id: id,
+      id: randomUUID(),
       stripeCustomerId: params.stripeCustomerId,
       priceId: params.priceId,
       stripeSubscriptionId: params.stripeSubscriptionId,
@@ -216,11 +198,12 @@ export class StripeSubscriptionRepository implements OnModuleInit {
       ...discountQueryParams(params.discount ?? null),
     };
 
-    // Guarded: initQuery() binds this variable only when the id is in CLS; an unbound CREATE target creates an orphan node.
+    // Guarded: initQuery() binds `company` / `currentUser` only when CLS holds them; an
+    // unbound CREATE target would create an orphan node.
     query.query += `
-      MATCH (${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
-      MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {
+      MATCH (newStripeCustomer:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
+      MATCH (newStripePrice:${stripePriceMeta.labelName} {id: $priceId})
+      CREATE (${S}:${stripeSubscriptionMeta.labelName} {
         id: $id,
         stripeSubscriptionId: $stripeSubscriptionId,
         stripeSubscriptionItemId: $stripeSubscriptionItemId,
@@ -240,271 +223,213 @@ export class StripeSubscriptionRepository implements OnModuleInit {
         createdAt: datetime(),
         updatedAt: datetime()
       })
-      CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})
-      CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})
-      ${query.queryParams.companyId ? `CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${companyMeta.nodeName})` : ``}
-      ${query.queryParams.currentUserId ? `CREATE (${stripeSubscriptionMeta.nodeName})-[:CREATED_BY]->(currentUser)` : ``}
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+      CREATE (${S})-[:BELONGS_TO]->(newStripeCustomer)
+      CREATE (${S})-[:USES_PRICE]->(newStripePrice)
+      ${query.queryParams.companyId ? `CREATE (${S})-[:BELONGS_TO]->(${companyMeta.nodeName})` : ``}
+      ${query.queryParams.currentUserId ? `CREATE (${S})-[:CREATED_BY]->(currentUser)` : ``}
+      WITH ${S}
+      ${this.buildReturnStatement()}
     `;
 
     return this.neo4j.writeOne(query);
   }
 
   /**
-   * Update subscription by internal ID
-   *
-   * @param params - Update parameters
-   * @param params.id - Internal subscription ID
-   * @param params.status - Optional new status
-   * @param params.currentPeriodStart - Optional new period start
-   * @param params.currentPeriodEnd - Optional new period end
-   * @param params.cancelAtPeriodEnd - Optional cancel at period end flag
-   * @param params.canceledAt - Optional cancellation date (null to clear)
-   * @param params.trialStart - Optional trial start date
-   * @param params.trialEnd - Optional trial end date
-   * @param params.pausedAt - Optional pause date (null to clear)
-   * @param params.quantity - Optional new quantity
-   * @returns Updated Subscription
+   * Updates a subscription by internal id. For every optional field, undefined leaves the
+   * stored value and (where the type allows it) null clears it.
    */
-  async update(params: {
-    id: string;
-    status?: StripeSubscriptionStatus;
-    currentPeriodStart?: Date;
-    currentPeriodEnd?: Date;
-    cancelAtPeriodEnd?: boolean;
-    canceledAt?: Date | null;
-    trialStart?: Date;
-    trialEnd?: Date;
-    pausedAt?: Date | null;
-    quantity?: number;
-    discount?: StripeSubscriptionDiscount | null;
-  }): Promise<StripeSubscription> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+  async update(params: { id: string } & StripeSubscriptionUpdateParams): Promise<StripeSubscription> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
 
-    const setParams: string[] = [];
-    setParams.push(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
+    const setParams: string[] = [`${S}.updatedAt = datetime()`];
+    const values: Record<string, unknown> = {};
 
     if (params.status !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.status = $status`);
+      setParams.push(`${S}.status = $status`);
+      values.status = params.status;
     }
     if (params.currentPeriodStart !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`);
+      setParams.push(`${S}.currentPeriodStart = datetime($currentPeriodStart)`);
+      values.currentPeriodStart = params.currentPeriodStart.toISOString();
     }
     if (params.currentPeriodEnd !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`);
+      setParams.push(`${S}.currentPeriodEnd = datetime($currentPeriodEnd)`);
+      values.currentPeriodEnd = params.currentPeriodEnd.toISOString();
     }
     if (params.cancelAtPeriodEnd !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
-    }
-    if (params.canceledAt !== undefined) {
-      setParams.push(
-        params.canceledAt === null
-          ? `${stripeSubscriptionMeta.nodeName}.canceledAt = null`
-          : `${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`,
-      );
+      setParams.push(`${S}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
+      values.cancelAtPeriodEnd = params.cancelAtPeriodEnd;
     }
     if (params.trialStart !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
+      setParams.push(`${S}.trialStart = datetime($trialStart)`);
+      values.trialStart = params.trialStart.toISOString();
     }
     if (params.trialEnd !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
+      setParams.push(`${S}.trialEnd = datetime($trialEnd)`);
+      values.trialEnd = params.trialEnd.toISOString();
     }
-    if (params.pausedAt !== undefined) {
-      setParams.push(
-        params.pausedAt === null
-          ? `${stripeSubscriptionMeta.nodeName}.pausedAt = null`
-          : `${stripeSubscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`,
-      );
+    for (const field of CLEARABLE_DATETIME_FIELDS) {
+      const value = params[field];
+      if (value === undefined) continue;
+      if (value === null) {
+        setParams.push(`${S}.${field} = null`);
+      } else {
+        setParams.push(`${S}.${field} = datetime($${field})`);
+        values[field] = value.toISOString();
+      }
     }
     if (params.quantity !== undefined) {
-      setParams.push(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
+      setParams.push(`${S}.quantity = $quantity`);
+      values.quantity = params.quantity;
     }
     // undefined leaves the stored discount as it is; null clears it.
     if (params.discount !== undefined) {
       setParams.push(
-        `${stripeSubscriptionMeta.nodeName}.discountPercentOff = $discountPercentOff`,
-        `${stripeSubscriptionMeta.nodeName}.discountAmountOff = $discountAmountOff`,
-        `${stripeSubscriptionMeta.nodeName}.discountCurrency = $discountCurrency`,
-        `${stripeSubscriptionMeta.nodeName}.discountDuration = $discountDuration`,
-        `${stripeSubscriptionMeta.nodeName}.discountDurationInMonths = $discountDurationInMonths`,
-        `${stripeSubscriptionMeta.nodeName}.discountEnd = CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END`,
+        `${S}.discountPercentOff = $discountPercentOff`,
+        `${S}.discountAmountOff = $discountAmountOff`,
+        `${S}.discountCurrency = $discountCurrency`,
+        `${S}.discountDuration = $discountDuration`,
+        `${S}.discountDurationInMonths = $discountDurationInMonths`,
+        `${S}.discountEnd = CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END`,
       );
+      Object.assign(values, discountQueryParams(params.discount));
     }
 
-    query.queryParams = {
-      id: params.id,
-      status: params.status,
-      currentPeriodStart: params.currentPeriodStart?.toISOString(),
-      currentPeriodEnd: params.currentPeriodEnd?.toISOString(),
-      cancelAtPeriodEnd: params.cancelAtPeriodEnd,
-      canceledAt: params.canceledAt?.toISOString(),
-      trialStart: params.trialStart?.toISOString(),
-      trialEnd: params.trialEnd?.toISOString(),
-      pausedAt: params.pausedAt?.toISOString(),
-      quantity: params.quantity,
-      ...(params.discount !== undefined ? discountQueryParams(params.discount) : {}),
-    };
+    query.queryParams = { ...query.queryParams, ...values, searchValue: params.id };
 
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
       SET ${setParams.join(", ")}
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+      WITH ${S}
+      ${this.buildReturnStatement()}
     `;
 
     return this.neo4j.writeOne(query);
   }
 
   /**
-   * Update subscription by Stripe subscription ID
+   * Updates a subscription by Stripe subscription id (webhook sync).
    *
-   * Used primarily by webhook handlers to sync subscription data from Stripe.
-   *
-   * @param params - Update parameters
-   * @param params.stripeSubscriptionId - Stripe subscription ID
-   * @param params.status - Optional new status
-   * @param params.currentPeriodStart - Optional new period start
-   * @param params.currentPeriodEnd - Optional new period end
-   * @param params.cancelAtPeriodEnd - Optional cancel at period end flag
-   * @param params.canceledAt - Optional cancellation date (null to clear)
-   * @param params.trialStart - Optional trial start date
-   * @param params.trialEnd - Optional trial end date
-   * @param params.pausedAt - Optional pause date (null to clear)
-   * @param params.quantity - Optional new quantity
-   * @returns Updated Subscription if found, null otherwise
+   * @returns the updated subscription, or null when none has this id
    */
-  async updateByStripeSubscriptionId(params: {
-    stripeSubscriptionId: string;
-    status?: StripeSubscriptionStatus;
-    currentPeriodStart?: Date;
-    currentPeriodEnd?: Date;
-    cancelAtPeriodEnd?: boolean;
-    canceledAt?: Date | null;
-    trialStart?: Date;
-    trialEnd?: Date;
-    pausedAt?: Date | null;
-    quantity?: number;
-    discount?: StripeSubscriptionDiscount | null;
-  }): Promise<StripeSubscription | null> {
+  async updateByStripeSubscriptionId(
+    params: { stripeSubscriptionId: string } & StripeSubscriptionUpdateParams,
+  ): Promise<StripeSubscription | null> {
     const existing = await this.findByStripeSubscriptionId({ stripeSubscriptionId: params.stripeSubscriptionId });
     if (!existing) return null;
 
-    return this.update({
-      id: existing.id,
-      ...params,
-    });
+    return this.update({ id: existing.id, ...params });
   }
 
   /**
-   * Update subscription price (change plan)
-   *
-   * Removes old USES_PRICE relationship and creates new one to different price.
-   *
-   * @param params - Update parameters
-   * @param params.id - Internal subscription ID
-   * @param params.newPriceId - New price ID to switch to
-   * @returns Updated Subscription with new price relationship
+   * Moves the subscription to another price (plan change). The price id is checked against
+   * the caller's company first.
    */
   async updatePrice(params: { id: string; newPriceId: string }): Promise<StripeSubscription> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+    await this.neo4j.validateRelatedNodes({
+      nodes: [{ id: params.newPriceId, label: stripePriceMeta.labelName }],
+    });
 
-    query.queryParams = {
-      id: params.id,
-      newPriceId: params.newPriceId,
-    };
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
 
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      MATCH (${stripeSubscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})
+    query.queryParams = { ...query.queryParams, searchValue: params.id, newPriceId: params.newPriceId };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      MATCH (${S})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})
       DELETE oldRel
-      WITH ${stripeSubscriptionMeta.nodeName}, ${stripeCustomerMeta.nodeName}
-      MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})
-      SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
+      WITH ${S}
+      MATCH (newStripePrice:${stripePriceMeta.labelName} {id: $newPriceId})
+      CREATE (${S})-[:USES_PRICE]->(newStripePrice)
+      SET ${S}.updatedAt = datetime()
+      WITH ${S}
+      ${this.buildReturnStatement()}
     `;
 
     return this.neo4j.writeOne(query);
   }
 
   /**
-   * Delete subscription
+   * Cancels every active, trialing or past_due subscription of a customer (customer deleted).
    *
-   * Performs a DETACH DELETE to remove the subscription and all relationships.
-   *
-   * @param params - Deletion parameters
-   * @param params.id - Internal subscription ID
-   * @returns Promise that resolves when deletion is complete
-   */
-  async delete(params: { id: string }): Promise<void> {
-    const query = this.neo4j.initQuery();
-
-    query.queryParams = {
-      id: params.id,
-    };
-
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})
-      DETACH DELETE ${stripeSubscriptionMeta.nodeName}
-    `;
-
-    await this.neo4j.writeOne(query);
-  }
-
-  /**
-   * Cancel all active subscriptions for a Stripe customer
-   *
-   * Bulk operation to cancel all active, trialing, or past_due subscriptions
-   * when a customer is deleted. Sets status to canceled and updates timestamps.
-   *
-   * @param params - Cancellation parameters
-   * @param params.stripeCustomerId - Stripe customer ID
-   * @returns Number of subscriptions canceled
+   * @param params.stripeCustomerId - Stripe customer id (cus_xxx)
+   * @returns number of subscriptions cancelled
    */
   async cancelAllByStripeCustomerId(params: { stripeCustomerId: string }): Promise<number> {
-    const query = this.neo4j.initQuery();
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
 
     query.queryParams = {
+      ...query.queryParams,
       stripeCustomerId: params.stripeCustomerId,
       canceledStatus: "canceled" as StripeSubscriptionStatus,
       canceledAt: new Date().toISOString(),
     };
 
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
-      WHERE ${stripeSubscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']
-      SET ${stripeSubscriptionMeta.nodeName}.status = $canceledStatus,
-          ${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt),
-          ${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false,
-          ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()
-      RETURN count(${stripeSubscriptionMeta.nodeName}) as count
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (${S})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
+      WHERE ${S}.status IN ['active', 'trialing', 'past_due']
+      SET ${S}.status = $canceledStatus,
+          ${S}.canceledAt = datetime($canceledAt),
+          ${S}.cancelAtPeriodEnd = false,
+          ${S}.updatedAt = datetime()
+      WITH ${S}
+      ${this.buildReturnStatement()}
     `;
 
-    const result = await this.neo4j.writeOne(query);
-    return result?.count ?? 0;
+    const cancelled = await this.neo4j.writeAndReturnMany(query);
+    return (cancelled ?? []).length;
   }
 
   /**
-   * Find all active subscriptions for a Stripe customer
-   * Used for smart feature removal to check overlapping features
+   * Active or trialing subscriptions of a customer, newest first (smart feature removal).
    *
-   * @param params - Query parameters
-   * @param params.stripeCustomerId - Stripe customer ID (cus_xxx format)
-   * @returns Array of active subscriptions with price and product info
+   * @param params.stripeCustomerId - Stripe customer id (cus_xxx)
    */
   async findActiveByStripeCustomerId(params: { stripeCustomerId: string }): Promise<StripeSubscription[]> {
-    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
+
+    query.queryParams = { ...query.queryParams, stripeCustomerId: params.stripeCustomerId };
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (${S})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
+      WHERE ${S}.status IN ['active', 'trialing']
+      WITH ${S}
+      ${this.buildReturnStatement()}
+      ORDER BY ${S}.createdAt DESC
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
+  /**
+   * Worker cron only. Active recurring subscriptions renewing between `now` (excluded) and
+   * `before` (included), not cancelling, whose card has not been checked yet for this renewal.
+   */
+  async findRenewalsForCardCheck(params: { now: Date; before: Date }): Promise<StripeSubscription[]> {
+    this.assertNoRequestCompany("findRenewalsForCardCheck");
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
 
     query.queryParams = {
-      stripeCustomerId: params.stripeCustomerId,
+      ...query.queryParams,
+      now: params.now.toISOString(),
+      before: params.before.toISOString(),
     };
 
-    query.query = `
-      MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})
-      WHERE ${stripeSubscriptionMeta.nodeName}.status IN ['active', 'trialing']
-      MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
-      RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}
-      ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC
+    query.query += `
+      ${this.buildDefaultMatch()}
+      WHERE ${S}.status = "active"
+        AND ${S}.cancelAtPeriodEnd = false
+        AND ${S}.currentPeriodEnd > datetime($now)
+        AND ${S}.currentPeriodEnd <= datetime($before)
+        AND (${S}.cardExpiryCheckedFor IS NULL OR ${S}.cardExpiryCheckedFor <> ${S}.currentPeriodEnd)
+        AND EXISTS {
+          MATCH (${S})-[:USES_PRICE]->(recurringPrice:${stripePriceMeta.labelName})
+          WHERE recurringPrice.priceType = "recurring"
+        }
+      ${this.buildReturnStatement()}
+      ORDER BY ${S}.currentPeriodEnd ASC
     `;
 
     return this.neo4j.readMany(query);

@@ -21,6 +21,7 @@ import { AppLoggingService } from "../../../../core/logging";
 import { ResponseLanguageService } from "../../../user/services/response-language.service";
 import { QueueId } from "../../../../config/enums/queue.id";
 import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
+import { BillingModuleConfig, resolveBillingConfig } from "../../../billing/interfaces/billing.config.interface";
 
 describe("StripeWebhookNotificationService", () => {
   let service: StripeWebhookNotificationService;
@@ -846,15 +847,22 @@ describe("StripeWebhookNotificationService", () => {
 
   describe("sendSubscriptionCancelledEmail", () => {
     let companyRepository: Mocked<CompanyRepository>;
+    let userRepository: Mocked<UserRepository>;
 
     const MOCK_COMPANY = {
       id: "company-test-123",
       name: "Test Company",
-      ownerEmail: "owner@test.com",
     };
+
+    const MOCK_ADMINS = [
+      { id: "admin-1", email: "admin1@test.com", name: "Admin One" },
+      { id: "admin-2", email: "admin2@test.com", name: "Admin Two" },
+    ];
 
     beforeEach(() => {
       companyRepository = service["companyRepository"] as Mocked<CompanyRepository>;
+      userRepository = service["userRepository"] as Mocked<UserRepository>;
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue([MOCK_ADMINS[0]]);
     });
 
     it("should log warning and return when company not found", async () => {
@@ -871,16 +879,16 @@ describe("StripeWebhookNotificationService", () => {
       expect(emailQueue.add).not.toHaveBeenCalled();
     });
 
-    it("should log warning and return when no owner email", async () => {
-      const companyWithoutEmail = { ...MOCK_COMPANY, ownerEmail: null };
-      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(companyWithoutEmail);
+    it("should log warning and return when the company has no admins", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue([]);
 
       await service.sendSubscriptionCancelledEmail({
         companyId: MOCK_COMPANY.id,
         dataRemovalDate: new Date("2025-02-25"),
       });
 
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no owner email"));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no admins found"));
       expect(emailQueue.add).not.toHaveBeenCalled();
     });
 
@@ -894,12 +902,13 @@ describe("StripeWebhookNotificationService", () => {
         dataRemovalDate,
       });
 
+      expect(userRepository.findAdminsByCompanyId).toHaveBeenCalledWith({ companyId: MOCK_COMPANY.id });
       expect(emailQueue.add).toHaveBeenCalledWith(
         "billing-notification",
         {
           jobType: "subscription-cancelled",
           payload: {
-            to: MOCK_COMPANY.ownerEmail,
+            to: MOCK_ADMINS[0].email,
             companyName: MOCK_COMPANY.name,
             dataRemovalDate: dataRemovalDate.toISOString(),
             locale: "en",
@@ -909,6 +918,34 @@ describe("StripeWebhookNotificationService", () => {
           attempts: 3,
           backoff: { type: "exponential", delay: 5000 },
         },
+      );
+    });
+
+    it("should queue one email per admin, each in that admin's language", async () => {
+      companyRepository.findByCompanyId = vi.fn().mockResolvedValue(MOCK_COMPANY);
+      userRepository.findAdminsByCompanyId = vi.fn().mockResolvedValue(MOCK_ADMINS);
+      responseLanguage.resolveForUser.mockImplementation(async ({ userId }: { userId: string }) =>
+        userId === "admin-2" ? "it" : undefined,
+      );
+      emailQueue.add.mockResolvedValue({} as any);
+
+      await service.sendSubscriptionCancelledEmail({
+        companyId: MOCK_COMPANY.id,
+        dataRemovalDate: new Date("2025-02-25"),
+      });
+
+      expect(emailQueue.add).toHaveBeenCalledTimes(2);
+      expect(emailQueue.add).toHaveBeenNthCalledWith(
+        1,
+        "billing-notification",
+        expect.objectContaining({ payload: expect.objectContaining({ to: "admin1@test.com", locale: "en" }) }),
+        expect.any(Object),
+      );
+      expect(emailQueue.add).toHaveBeenNthCalledWith(
+        2,
+        "billing-notification",
+        expect.objectContaining({ payload: expect.objectContaining({ to: "admin2@test.com", locale: "it" }) }),
+        expect.any(Object),
       );
     });
 
@@ -934,7 +971,9 @@ describe("StripeWebhookNotificationService", () => {
         dataRemovalDate: new Date(),
       });
 
-      expect(logger.log).toHaveBeenCalledWith(`Queued subscription cancelled email for company ${MOCK_COMPANY.id}`);
+      expect(logger.log).toHaveBeenCalledWith(
+        `Queued subscription cancelled email for company ${MOCK_COMPANY.id} (1 admins)`,
+      );
     });
 
     it("should use default company name when name is missing", async () => {
@@ -956,6 +995,173 @@ describe("StripeWebhookNotificationService", () => {
         }),
         expect.any(Object),
       );
+    });
+  });
+
+  describe("billing emails (BillingModule)", () => {
+    let userRepository: Mocked<UserRepository>;
+    let companyRepository: Mocked<CompanyRepository>;
+
+    const MOCK_ADMINS = [
+      { id: "admin-1", email: "admin1@test.com", name: "Admin One" },
+      { id: "admin-2", email: "admin2@test.com", name: "Admin Two" },
+    ];
+
+    /** The same service, built with an app's billing config. */
+    const withBillingConfig = (config: BillingModuleConfig) =>
+      new StripeWebhookNotificationService(
+        emailQueue,
+        stripeCustomerRepository,
+        stripeInvoiceRepository,
+        userRepository,
+        companyRepository,
+        service["cls"],
+        logger,
+        service["responseLanguage"],
+        resolveBillingConfig(config),
+      );
+
+    beforeEach(() => {
+      userRepository = service["userRepository"] as Mocked<UserRepository>;
+      companyRepository = service["companyRepository"] as Mocked<CompanyRepository>;
+      emailQueue.add.mockResolvedValue({} as any);
+    });
+
+    it("sendCardExpiringEmail queues card-expiring for each company admin", async () => {
+      userRepository.findCompanyAdminsByStripeCustomerId.mockResolvedValue(MOCK_ADMINS as any);
+      responseLanguage.resolveForUser.mockImplementation(async ({ userId }: { userId: string }) =>
+        userId === "admin-2" ? "it" : undefined,
+      );
+      const renewalDate = new Date("2026-12-03T00:00:00Z");
+
+      await service.sendCardExpiringEmail({
+        stripeCustomerId: TEST_IDS.customerId,
+        renewalDate,
+        cardBrand: "visa",
+        cardLast4: "4242",
+      });
+
+      expect(userRepository.findCompanyAdminsByStripeCustomerId).toHaveBeenCalledWith({
+        stripeCustomerId: TEST_IDS.customerId,
+      });
+      expect(emailQueue.add).toHaveBeenCalledTimes(2);
+      expect(emailQueue.add).toHaveBeenNthCalledWith(
+        1,
+        "billing-notification",
+        {
+          jobType: "card-expiring",
+          payload: {
+            to: "admin1@test.com",
+            customerName: "Admin One",
+            stripeCustomerId: TEST_IDS.customerId,
+            renewalDate: renewalDate.toISOString(),
+            cardBrand: "visa",
+            cardLast4: "4242",
+            locale: "en",
+          },
+        },
+        { attempts: 3, backoff: { type: "exponential", delay: 5000 } },
+      );
+      expect(emailQueue.add).toHaveBeenNthCalledWith(
+        2,
+        "billing-notification",
+        expect.objectContaining({
+          jobType: "card-expiring",
+          payload: expect.objectContaining({ to: "admin2@test.com", locale: "it" }),
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it("sendCardExpiringEmail skips when the company has no admins", async () => {
+      userRepository.findCompanyAdminsByStripeCustomerId.mockResolvedValue([]);
+
+      await service.sendCardExpiringEmail({
+        stripeCustomerId: TEST_IDS.customerId,
+        renewalDate: new Date(),
+        cardBrand: "visa",
+        cardLast4: "4242",
+      });
+
+      expect(emailQueue.add).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("skipping card expiring warning"));
+    });
+
+    it("payment failure payload carries keepsAccess", async () => {
+      stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
+
+      await service.sendPaymentFailedEmail({ stripeCustomerId: TEST_IDS.customerId, keepsAccess: true });
+
+      expect(emailQueue.add).toHaveBeenCalledWith(
+        "billing-notification",
+        expect.objectContaining({
+          jobType: "payment-failure",
+          payload: expect.objectContaining({ keepsAccess: true }),
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it("payment failure payload is unchanged when keepsAccess is not given", async () => {
+      stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
+
+      await service.sendPaymentFailedEmail({ stripeCustomerId: TEST_IDS.customerId });
+
+      const payload = (emailQueue.add.mock.calls[0][1] as { payload: Record<string, unknown> }).payload;
+      expect(payload).not.toHaveProperty("keepsAccess");
+    });
+
+    describe("each billing email is skipped when its switch is off", () => {
+      it("paymentFailed", async () => {
+        stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER as any);
+
+        await withBillingConfig({ emails: { paymentFailed: false } }).sendPaymentFailedEmail({
+          stripeCustomerId: TEST_IDS.customerId,
+        });
+
+        expect(stripeCustomerRepository.findByStripeCustomerId).not.toHaveBeenCalled();
+        expect(emailQueue.add).not.toHaveBeenCalled();
+        expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('"paymentFailed" is switched off'));
+      });
+
+      it("cardExpiring", async () => {
+        userRepository.findCompanyAdminsByStripeCustomerId.mockResolvedValue(MOCK_ADMINS as any);
+
+        await withBillingConfig({ emails: { cardExpiring: false } }).sendCardExpiringEmail({
+          stripeCustomerId: TEST_IDS.customerId,
+          renewalDate: new Date(),
+          cardBrand: "visa",
+          cardLast4: "4242",
+        });
+
+        expect(userRepository.findCompanyAdminsByStripeCustomerId).not.toHaveBeenCalled();
+        expect(emailQueue.add).not.toHaveBeenCalled();
+      });
+
+      it("subscriptionEnded", async () => {
+        companyRepository.findByCompanyId = vi.fn().mockResolvedValue({ id: "company-1", name: "Acme" });
+
+        await withBillingConfig({ emails: { subscriptionEnded: false } }).sendSubscriptionCancelledEmail({
+          companyId: "company-1",
+          dataRemovalDate: new Date(),
+        });
+
+        expect(companyRepository.findByCompanyId).not.toHaveBeenCalled();
+        expect(emailQueue.add).not.toHaveBeenCalled();
+      });
+
+      it("keeps the other emails on when one is off", async () => {
+        userRepository.findCompanyAdminsByStripeCustomerId.mockResolvedValue([MOCK_ADMINS[0]] as any);
+
+        await withBillingConfig({ emails: { paymentFailed: false } }).sendCardExpiringEmail({
+          stripeCustomerId: TEST_IDS.customerId,
+          renewalDate: new Date(),
+          cardBrand: "visa",
+          cardLast4: "4242",
+        });
+
+        expect(emailQueue.add).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

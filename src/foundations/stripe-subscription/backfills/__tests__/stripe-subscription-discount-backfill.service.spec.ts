@@ -8,7 +8,7 @@ vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
 import Stripe from "stripe";
 import { StripeError } from "../../../stripe/errors/stripe.errors";
-import { StripeSubscription } from "../../entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../entities/stripe-subscription";
 import {
   STRIPE_SUBSCRIPTION_DISCOUNT_BACKFILL_ID,
   StripeSubscriptionDiscountBackfillService,

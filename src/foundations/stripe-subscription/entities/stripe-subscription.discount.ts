@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { StripeSubscriptionDiscountDuration } from "./stripe-subscription.entity";
+import { StripeSubscriptionDiscountDuration } from "./stripe-subscription";
 
 /**
  * The discount a subscription carries, as written to the StripeSubscription node.

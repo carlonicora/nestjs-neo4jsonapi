@@ -6,7 +6,7 @@ vi.mock("../../../../foundations/chunker/chunker.module", () => ({
 vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
 import { stripeSubscriptionMeta } from "../../entities/stripe-subscription.meta";
-import { StripeSubscriptionModel } from "../../entities/stripe-subscription.model";
+import { StripeSubscriptionDescriptor } from "../../entities/stripe-subscription";
 import { StripeSubscriptionRepository } from "../../repositories/stripe-subscription.repository";
 import { StripeSubscriptionBackfillRepository } from "../stripe-subscription-backfill.repository";
 
@@ -51,18 +51,21 @@ describe("StripeSubscriptionBackfillRepository", () => {
 describe("StripeSubscriptionRepository.findAll", () => {
   it("appends to the initQuery preamble and reads every subscription that update() can reach", async () => {
     const neo4j = {
-      initQuery: vi.fn().mockReturnValue({ query: "PREAMBLE", queryParams: {} }),
+      initQuery: vi.fn().mockReturnValue({ query: "PREAMBLE", queryParams: { companyId: null } }),
       readMany: vi.fn().mockResolvedValue([]),
     };
-    const repository = new StripeSubscriptionRepository(neo4j as any);
+    const cls = { get: vi.fn(() => undefined), has: vi.fn(() => false) };
+    const repository = new StripeSubscriptionRepository(neo4j as any, {} as any, cls as any);
 
     await repository.findAll();
 
-    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: StripeSubscriptionModel, fetchAll: true });
+    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
     const { query } = neo4j.readMany.mock.calls[0][0];
     const n = stripeSubscriptionMeta.nodeName;
     expect(query.startsWith("PREAMBLE")).toBe(true);
-    expect(flat(query)).toContain(`MATCH (${n}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->`);
+    // update() starts from the same default match, so every row read here can be updated
+    expect(flat(query)).toContain(`MATCH (${n}:${stripeSubscriptionMeta.labelName}) WHERE $companyId IS NULL`);
+    expect(flat(query)).toContain(`MATCH (${n})-[:BELONGS_TO]->(${n}_stripeCustomer:StripeCustomer)`);
     expect(flat(query)).toContain(`MATCH (${n})-[:USES_PRICE]->`);
     expect(query).not.toMatch(/SKIP|LIMIT|\{CURSOR\}/);
     expect(query).not.toMatch(/\bSET\b|\bDELETE\b|\bCREATE\b/);

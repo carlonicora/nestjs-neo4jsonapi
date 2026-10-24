@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import Stripe from "stripe";
 import { discountFromStripeSubscription, discountQueryParams } from "../stripe-subscription.discount";
-import { mapStripeSubscription } from "../stripe-subscription.map";
+import { StripeSubscriptionDescriptor } from "../stripe-subscription";
+
+const mapStripeSubscription = StripeSubscriptionDescriptor.model.mapper;
 
 const coupon = (overrides: Partial<Stripe.Coupon> = {}): Stripe.Coupon =>
   ({
@@ -113,7 +115,7 @@ describe("discountQueryParams", () => {
   });
 });
 
-describe("mapStripeSubscription discount fields", () => {
+describe("StripeSubscriptionDescriptor mapper discount fields", () => {
   const base = {
     id: "sub-1",
     stripeSubscriptionId: "sub_1",
@@ -128,9 +130,8 @@ describe("mapStripeSubscription discount fields", () => {
     const mapped = mapStripeSubscription({
       data: {
         ...base,
+        // Neo4j stores no property for a null value, so the cleared fields are absent.
         discountPercentOff: 20,
-        discountAmountOff: null,
-        discountCurrency: null,
         discountDuration: "repeating",
         discountDurationInMonths: 6,
         discountEnd: "2024-07-01T00:00:00.000Z",

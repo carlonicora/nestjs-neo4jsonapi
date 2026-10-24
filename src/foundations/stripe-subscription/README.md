@@ -1,12 +1,11 @@
 # Stripe Subscription Module
 
-Provides subscription management functionality for the Stripe billing system. Handles subscription lifecycle including creation, updates, cancellations, pausing/resuming, and plan changes with proration.
+Provides subscription management functionality for the Stripe billing system. Handles subscription lifecycle including creation, updates, cancellations and plan changes with proration.
 
 ## Features
 
 - **Create subscriptions** with optional trial periods and custom quantities
 - **Cancel subscriptions** (immediately or at period end)
-- **Pause and resume subscriptions**
 - **Change subscription plans** with automatic proration
 - **Preview proration amounts** before making changes
 - **Sync subscription data** from Stripe webhooks
@@ -116,8 +115,6 @@ All endpoints are prefixed with `/billing`:
 - `GET /billing/subscriptions/:subscriptionId` - Get single subscription
 - `POST /billing/subscriptions` - Create new subscription
 - `POST /billing/subscriptions/:subscriptionId/cancel` - Cancel subscription
-- `POST /billing/subscriptions/:subscriptionId/pause` - Pause subscription
-- `POST /billing/subscriptions/:subscriptionId/resume` - Resume paused subscription
 - `POST /billing/subscriptions/:subscriptionId/change-plan` - Change subscription plan
 - `GET /billing/subscriptions/:subscriptionId/proration-preview` - Preview proration for plan change
 

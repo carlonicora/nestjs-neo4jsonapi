@@ -8,6 +8,7 @@ import { ReferralModuleConfig } from "../foundations/referral/interfaces/referra
 import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
 import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
 import { BlogModuleConfig } from "../foundations/blog/interfaces/blog.config.interface";
+import { BillingModuleConfig } from "../foundations/billing/interfaces/billing.config.interface";
 import { EmailAutomationModuleConfig } from "../foundations/email-automation/interfaces/email-automation.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
 import { AnalyticsModuleConfig } from "../foundations/analytics/interfaces/analytics.config.interface";
@@ -171,6 +172,26 @@ export interface BootstrapOptions {
    * ```
    */
   emailAutomation?: EmailAutomationModuleConfig;
+
+  /**
+   * Configuration for the billing module.
+   * Forwarded to `FoundationsModule.forRoot({ billing })`, exactly like
+   * `emailAutomation` above. The module is always mounted; every key is optional.
+   *
+   * Omitted keeps the defaults: failed-card grace on, the library
+   * billing email sender off (apps that consume `QueueId.EMAIL` with their own
+   * processor keep it), every billing email on, deletion 30 days after a
+   * subscription ends.
+   *
+   * @example
+   * ```typescript
+   * billing: {
+   *   emailSender: { enabled: true },
+   *   deletion: { afterSubscriptionEndedDays: 365 },
+   * }
+   * ```
+   */
+  billing?: BillingModuleConfig;
 
   /**
    * Configuration for the first-party web analytics feature module.

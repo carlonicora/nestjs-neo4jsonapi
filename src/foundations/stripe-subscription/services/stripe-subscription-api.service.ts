@@ -9,7 +9,7 @@ import { SUBSCRIPTION_PAYMENT_EXPAND } from "./subscription-payment-confirmation
 /**
  * Stripe Subscription API Service
  *
- * Manages Stripe subscription operations including creation, updates, cancellations, pausing/resuming,
+ * Manages Stripe subscription operations including creation, updates, cancellations
  * and proration previews. Handles subscription lifecycle and billing changes.
  *
  * @example
@@ -213,52 +213,6 @@ export class StripeSubscriptionApiService {
     return stripe.subscriptions.cancel(subscriptionId, {
       cancellation_details: { comment: STRIPE_UNPAID_ATTEMPT_CANCELLATION_COMMENT },
     });
-  }
-
-  /**
-   * Pause a subscription
-   *
-   * @param subscriptionId - The subscription ID to pause
-   * @param resumeAt - Optional date to automatically resume the subscription
-   * @returns Promise resolving to the paused subscription
-   * @throws {StripeError} If pausing fails
-   *
-   * @example
-   * ```typescript
-   * const resumeDate = new Date('2025-02-01');
-   * const subscription = await service.pauseSubscription('sub_abc123', resumeDate);
-   * ```
-   */
-  @HandleStripeErrors()
-  async pauseSubscription(subscriptionId: string, resumeAt?: Date): Promise<Stripe.Subscription> {
-    const stripe = this.stripeService.getClient();
-
-    const pauseCollection: Stripe.SubscriptionUpdateParams.PauseCollection = {
-      behavior: "mark_uncollectible",
-    };
-    if (resumeAt) {
-      pauseCollection.resumes_at = Math.floor(resumeAt.getTime() / 1000);
-    }
-
-    return stripe.subscriptions.update(subscriptionId, { pause_collection: pauseCollection });
-  }
-
-  /**
-   * Resume a paused subscription
-   *
-   * @param subscriptionId - The subscription ID to resume
-   * @returns Promise resolving to the resumed subscription
-   * @throws {StripeError} If resuming fails
-   *
-   * @example
-   * ```typescript
-   * const subscription = await service.resumeSubscription('sub_abc123');
-   * ```
-   */
-  @HandleStripeErrors()
-  async resumeSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
-    const stripe = this.stripeService.getClient();
-    return stripe.subscriptions.update(subscriptionId, { pause_collection: "" as any });
   }
 
   /**

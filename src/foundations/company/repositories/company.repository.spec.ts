@@ -651,6 +651,30 @@ describe("CompanyRepository", () => {
     });
   });
 
+  describe("scheduleCompanyDeletion with delayDays", () => {
+    it("scheduleCompanyDeletion uses delayDays", async () => {
+      let capturedQuery: any;
+      mockNeo4jService.initQuery.mockReturnValue({
+        query: "",
+        queryParams: {},
+      } as any);
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+      });
+
+      const endDate = new Date("2025-01-15T00:00:00.000Z");
+      await repository.scheduleCompanyDeletion({
+        companyId: MOCK_COMPANY_ID,
+        endDate,
+        reason: "subscription_cancelled",
+        delayDays: 365,
+      });
+
+      expect(capturedQuery.queryParams.scheduledDeletionAt).toBe(new Date("2026-01-15T00:00:00.000Z").toISOString());
+      expect(capturedQuery.query).toContain("datetime($scheduledDeletionAt)");
+    });
+  });
+
   describe("clearDeletionSchedule", () => {
     it("should clear all deletion fields to null", async () => {
       mockNeo4jService.writeOne.mockResolvedValue(undefined);

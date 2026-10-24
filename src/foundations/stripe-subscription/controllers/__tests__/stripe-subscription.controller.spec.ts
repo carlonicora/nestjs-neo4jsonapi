@@ -39,7 +39,7 @@ import { StripeSubscriptionAdminService } from "../../services/stripe-subscripti
 import { CacheService } from "../../../../core/cache/services/cache.service";
 import { RoleId } from "../../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
-import type { StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
+import type { StripeSubscriptionStatus } from "../../entities/stripe-subscription";
 import type {
   JsonApiListDocument,
   JsonApiSingleDocument,
@@ -70,13 +70,18 @@ describe("StripeSubscriptionController", () => {
   };
 
   // Create a mock authenticated request
-  const createMockRequest = (companyId: string = TEST_IDS.companyId): AuthenticatedRequest => {
+  // @CacheInvalidate(meta, "subscriptionId") reads the URL param from the request
+  const createMockRequest = (
+    companyId: string = TEST_IDS.companyId,
+    subscriptionId: string = TEST_IDS.subscriptionId,
+  ): AuthenticatedRequest => {
     return {
       user: {
         companyId,
         userId: "550e8400-e29b-41d4-a716-446655440001",
       },
-    } as AuthenticatedRequest;
+      params: { subscriptionId },
+    } as unknown as AuthenticatedRequest;
   };
 
   // Create a mock Fastify reply
@@ -96,8 +101,6 @@ describe("StripeSubscriptionController", () => {
       getSubscription: vi.fn(),
       createSubscription: vi.fn(),
       cancelSubscription: vi.fn(),
-      pauseSubscription: vi.fn(),
-      resumeSubscription: vi.fn(),
       changePlan: vi.fn(),
       previewProration: vi.fn(),
       syncSubscriptionFromStripe: vi.fn(),
@@ -362,59 +365,48 @@ describe("StripeSubscriptionController", () => {
     });
   });
 
-  describe("POST /subscriptions/:subscriptionId/pause", () => {
-    it("should pause subscription successfully", async () => {
+  describe("decorators on the mutation routes", () => {
+    const prototype = StripeSubscriptionController.prototype as unknown as Record<string, unknown>;
+    const elementRoutes = ["cancelSubscription", "changePlan"];
+
+    it("mutations invalidate the subscription cache", async () => {
       const req = createMockRequest();
-      subscriptionService.pauseSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
-
-      await controller.pauseSubscription(req, mockReply, TEST_IDS.subscriptionId);
-
-      expect(subscriptionService.pauseSubscription).toHaveBeenCalledWith({
-        id: TEST_IDS.subscriptionId,
-        companyId: TEST_IDS.companyId,
+      subscriptionService.cancelSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
+      subscriptionService.changePlan.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
+      subscriptionService.createSubscription.mockResolvedValue({
+        data: MOCK_SUBSCRIPTION_RESPONSE,
+        clientSecret: null,
+        paymentIntentId: null,
+        requiresAction: false,
       });
-      expect(mockReply.send).toHaveBeenCalledWith(MOCK_SUBSCRIPTION_RESPONSE);
+      const body = { data: { type: "stripe-subscriptions", id: TEST_IDS.subscriptionId, attributes: {} } } as any;
+
+      await controller.cancelSubscription(req, mockReply, TEST_IDS.subscriptionId, body);
+      await controller.changePlan(req, mockReply, TEST_IDS.subscriptionId, {
+        data: { ...body.data, attributes: { priceId: TEST_IDS.priceId } },
+      } as any);
+
+      expect(cacheService.invalidateByElement).toHaveBeenCalledTimes(2);
+      expect(cacheService.invalidateByElement).toHaveBeenCalledWith("stripe-subscriptions", TEST_IDS.subscriptionId);
+
+      await controller.createSubscription(req, mockReply, {
+        data: {
+          type: "stripe-subscriptions",
+          id: TEST_IDS.subscriptionId,
+          relationships: { stripePrice: { data: { type: "stripe-prices", id: TEST_IDS.priceId } } },
+        },
+      } as any);
+
+      expect(cacheService.invalidateByType).toHaveBeenCalledWith("stripe-subscriptions");
     });
 
-    it("should extract subscriptionId from path params", async () => {
-      const req = createMockRequest();
-      const customSubscriptionId = "sub_pause_789";
-      subscriptionService.pauseSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
-
-      await controller.pauseSubscription(req, mockReply, customSubscriptionId);
-
-      expect(subscriptionService.pauseSubscription).toHaveBeenCalledWith({
-        id: customSubscriptionId,
-        companyId: TEST_IDS.companyId,
-      });
-    });
-  });
-
-  describe("POST /subscriptions/:subscriptionId/resume", () => {
-    it("should resume subscription successfully", async () => {
-      const req = createMockRequest();
-      subscriptionService.resumeSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
-
-      await controller.resumeSubscription(req, mockReply, TEST_IDS.subscriptionId);
-
-      expect(subscriptionService.resumeSubscription).toHaveBeenCalledWith({
-        id: TEST_IDS.subscriptionId,
-        companyId: TEST_IDS.companyId,
-      });
-      expect(mockReply.send).toHaveBeenCalledWith(MOCK_SUBSCRIPTION_RESPONSE);
-    });
-
-    it("should extract subscriptionId from path params", async () => {
-      const req = createMockRequest();
-      const customSubscriptionId = "sub_resume_789";
-      subscriptionService.resumeSubscription.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
-
-      await controller.resumeSubscription(req, mockReply, customSubscriptionId);
-
-      expect(subscriptionService.resumeSubscription).toHaveBeenCalledWith({
-        id: customSubscriptionId,
-        companyId: TEST_IDS.companyId,
-      });
+    it("roles are still enforced on decorated routes", () => {
+      for (const route of elementRoutes) {
+        expect(Reflect.getMetadata("roles", prototype[route] as object)).toEqual([RoleId.CompanyAdministrator]);
+      }
+      expect(Reflect.getMetadata("roles", prototype.createSubscription as object)).toEqual([
+        RoleId.CompanyAdministrator,
+      ]);
     });
   });
 

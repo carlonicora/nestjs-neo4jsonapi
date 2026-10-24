@@ -21,17 +21,17 @@ export { StripeSubscriptionRepository } from "./repositories/stripe-subscription
 // Entities
 export {
   StripeSubscription,
+  StripeSubscriptionDescriptor,
+  StripeSubscriptionDescriptorType,
   StripeSubscriptionDiscountDuration,
   StripeSubscriptionStatus,
-} from "./entities/stripe-subscription.entity";
+} from "./entities/stripe-subscription";
 export {
   STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND,
   StripeSubscriptionDiscount,
   discountFromStripeSubscription,
 } from "./entities/stripe-subscription.discount";
-export { StripeSubscriptionModel } from "./entities/stripe-subscription.model";
 export { STRIPE_SUBSCRIPTION_SYNC_SEGMENT, stripeSubscriptionMeta } from "./entities/stripe-subscription.meta";
-export { mapStripeSubscription } from "./entities/stripe-subscription.map";
 
 // DTOs
 export {
@@ -46,6 +46,3 @@ export {
   StripeSubscriptionChangePlanDataDTO,
   StripeSubscriptionChangePlanAttributesDTO,
 } from "./dtos/stripe-subscription.dto";
-
-// Serializers
-export { StripeSubscriptionSerialiser } from "./serialisers/stripe-subscription.serialiser";

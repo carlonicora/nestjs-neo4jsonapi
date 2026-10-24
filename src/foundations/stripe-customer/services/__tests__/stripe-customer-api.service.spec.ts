@@ -435,6 +435,56 @@ describe("StripeCustomerApiService", () => {
     });
   });
 
+  describe("getDefaultCard", () => {
+    const cardMethod = (last4: string, expMonth: number, expYear: number) => ({
+      id: `pm_${last4}`,
+      type: "card",
+      card: { brand: "visa", last4, exp_month: expMonth, exp_year: expYear },
+    });
+    const params = { stripeCustomerId: TEST_IDS.customerId, stripeSubscriptionId: "sub_card_test" };
+
+    it("getDefaultCard prefers the subscription's payment method", async () => {
+      mockStripe.subscriptions.retrieve.mockResolvedValue({ default_payment_method: cardMethod("1111", 11, 2026) });
+
+      const result = await service.getDefaultCard(params);
+
+      expect(mockStripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_card_test", {
+        expand: ["default_payment_method"],
+      });
+      expect(mockStripe.customers.retrieve).not.toHaveBeenCalled();
+      expect(result).toEqual({ brand: "visa", last4: "1111", expMonth: 11, expYear: 2026 });
+    });
+
+    it("falls back to the customer's invoice default", async () => {
+      mockStripe.subscriptions.retrieve.mockResolvedValue({ default_payment_method: null });
+      mockStripe.customers.retrieve.mockResolvedValue({
+        ...MOCK_CUSTOMER,
+        invoice_settings: { default_payment_method: cardMethod("2222", 3, 2027) },
+      });
+
+      const result = await service.getDefaultCard(params);
+
+      expect(mockStripe.customers.retrieve).toHaveBeenCalledWith(TEST_IDS.customerId, {
+        expand: ["invoice_settings.default_payment_method"],
+      });
+      expect(result).toEqual({ brand: "visa", last4: "2222", expMonth: 3, expYear: 2027 });
+    });
+
+    it("returns null for a non-card method", async () => {
+      mockStripe.subscriptions.retrieve.mockResolvedValue({
+        default_payment_method: { id: "pm_sepa", type: "sepa_debit", sepa_debit: { last4: "3000" } },
+      });
+      mockStripe.customers.retrieve.mockResolvedValue({
+        ...MOCK_CUSTOMER,
+        invoice_settings: { default_payment_method: { id: "pm_link", type: "link" } },
+      });
+
+      const result = await service.getDefaultCard(params);
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe("Service Integration", () => {
     it("should use StripeService to get client", async () => {
       mockStripe.customers.create.mockResolvedValue(MOCK_CUSTOMER);

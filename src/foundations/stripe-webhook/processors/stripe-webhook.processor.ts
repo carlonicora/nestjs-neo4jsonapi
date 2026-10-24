@@ -14,6 +14,12 @@ import { CompanyRepository } from "../../company/repositories/company.repository
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
 import { StripeInvoiceAdminService } from "../../stripe-invoice/services/stripe-invoice-admin.service";
+import { StripeInvoiceApiService } from "../../stripe-invoice/services/stripe-invoice-api.service";
+import {
+  BILLING_CONFIG,
+  DEFAULT_BILLING_CONFIG,
+  ResolvedBillingConfig,
+} from "../../billing/interfaces/billing.config.interface";
 import { StripePriceRepository } from "../../stripe-price/repositories/stripe-price.repository";
 import { StripeSubscriptionRepository } from "../../stripe-subscription/repositories/stripe-subscription.repository";
 import { FeatureSyncService } from "../../stripe-subscription/services/feature-sync.service";
@@ -49,11 +55,19 @@ export class StripeWebhookProcessor extends WorkerHost {
     private readonly logger: AppLoggingService,
     private readonly cls: ClsService,
     private readonly webSocketService: WebSocketService,
+    private readonly stripeInvoiceApiService: StripeInvoiceApiService,
     @Optional()
     @Inject(REFERRAL_COMPLETION_HANDLER)
     private readonly referralCompletionHandler?: ReferralCompletionHandler,
+    @Optional()
+    @Inject(BILLING_CONFIG)
+    private readonly billingConfig?: ResolvedBillingConfig,
   ) {
     super();
+  }
+
+  private get config(): ResolvedBillingConfig {
+    return this.billingConfig ?? DEFAULT_BILLING_CONFIG;
   }
 
   @OnWorkerEvent("active")
@@ -178,8 +192,22 @@ export class StripeWebhookProcessor extends WorkerHost {
             // The subscription should only be marked active when payment is confirmed (invoice.paid).
             // The TokenAllocationService.allocateTokensOnPayment handles setting isActiveSubscription=true.
 
-            // Handle subscription end states: canceled, past_due, unpaid, incomplete_expired
-            const isEndState = ["canceled", "past_due", "unpaid", "incomplete_expired"].includes(subscription.status);
+            // Failed-card grace: while Stripe retries a renewal, a GM who has paid before keeps access.
+            // A failed first payment after a trial has nothing to keep, so it still cuts off at once.
+            let keepsAccess = false;
+            if (subscription.status === "past_due" && this.config.failedCardGrace) {
+              keepsAccess = await this.stripeInvoiceApiService.hasPaidInvoice({ stripeCustomerId });
+              if (keepsAccess) {
+                this.logger.log(
+                  `Company ${company.id}: subscription ${subscription.id} is past_due, access kept while Stripe retries`,
+                );
+              }
+            }
+
+            // Handle subscription end states: canceled, past_due (unless grace keeps access), unpaid, incomplete_expired
+            const isEndState =
+              ["canceled", "unpaid", "incomplete_expired"].includes(subscription.status) ||
+              (subscription.status === "past_due" && !keepsAccess);
 
             // Detect trial-to-active transition with $0 price (trial ended without valid paid subscription)
             // When a trial ends with a $0 price, Stripe transitions status from 'trialing' to 'active'
@@ -299,11 +327,17 @@ export class StripeWebhookProcessor extends WorkerHost {
 
               // Schedule company deletion for subscription cancellation (not trial expiry)
               if (isEndState && subscription.status === "canceled") {
+                const delayDays = this.config.deletion.afterSubscriptionEndedDays;
+                const endDate = new Date();
+                const dataRemovalDate = new Date(endDate);
+                dataRemovalDate.setDate(dataRemovalDate.getDate() + delayDays);
+
                 try {
                   await this.companyRepository.scheduleCompanyDeletion({
                     companyId: company.id,
-                    endDate: new Date(),
+                    endDate,
                     reason: "subscription_cancelled",
+                    delayDays,
                   });
                   this.logger.log(`Scheduled deletion for company ${company.id} (subscription_cancelled)`);
                 } catch (error) {
@@ -311,6 +345,18 @@ export class StripeWebhookProcessor extends WorkerHost {
                     `Failed to schedule deletion for ${company.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
                   );
                   // Don't throw - deletion scheduling failure shouldn't block webhook processing
+                }
+
+                try {
+                  await this.notificationService.sendSubscriptionCancelledEmail({
+                    companyId: company.id,
+                    dataRemovalDate,
+                  });
+                } catch (error) {
+                  this.logger.error(
+                    `Failed to send subscription ended notification for ${subscription.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                  );
+                  // Don't throw - notification failure shouldn't block webhook processing
                 }
               }
             }
@@ -434,15 +480,32 @@ export class StripeWebhookProcessor extends WorkerHost {
           attempted: true,
         });
 
-        // Send payment failure notification
+        // Send payment failure notification.
+        // With grace on, only the first failed attempt sends it (Stripe retries send the same webhook again).
         try {
-          await this.notificationService.sendPaymentFailedEmail({
-            stripeCustomerId,
-            stripeInvoiceId: invoice.id,
-            amount: invoice.amount_due / 100, // Convert cents to dollars
-            currency: invoice.currency,
-            errorMessage: invoice.last_finalization_error?.message,
-          });
+          if (!this.config.failedCardGrace) {
+            await this.notificationService.sendPaymentFailedEmail({
+              stripeCustomerId,
+              stripeInvoiceId: invoice.id,
+              amount: invoice.amount_due / 100, // Convert cents to dollars
+              currency: invoice.currency,
+              errorMessage: invoice.last_finalization_error?.message,
+            });
+          } else if (invoice.attempt_count === 1) {
+            const keepsAccess = await this.stripeInvoiceApiService.hasPaidInvoice({ stripeCustomerId });
+            await this.notificationService.sendPaymentFailedEmail({
+              stripeCustomerId,
+              stripeInvoiceId: invoice.id,
+              amount: invoice.amount_due / 100, // Convert cents to dollars
+              currency: invoice.currency,
+              errorMessage: invoice.last_finalization_error?.message,
+              keepsAccess,
+            });
+          } else {
+            this.logger.debug(
+              `Invoice ${invoice.id} failed attempt ${invoice.attempt_count ?? 0} - failure email already sent on attempt 1`,
+            );
+          }
         } catch (error) {
           this.logger.error(
             `Failed to send payment failure notification for invoice ${invoice.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -728,6 +791,15 @@ export class StripeWebhookProcessor extends WorkerHost {
 
       if (!stripeCustomerId) {
         this.logger.warn(`Payment intent ${paymentIntent.id} has no customer ID - skipping notification`);
+        return;
+      }
+
+      // With grace on, a subscription payment's failure is emailed once from invoice.payment_failed;
+      // only one-time purchases are emailed from here
+      if (this.config.failedCardGrace && paymentIntent.metadata?.type !== "one_time_purchase") {
+        this.logger.debug(
+          `Payment intent ${paymentIntent.id} is not a one-time purchase - failure email comes from the invoice`,
+        );
         return;
       }
 

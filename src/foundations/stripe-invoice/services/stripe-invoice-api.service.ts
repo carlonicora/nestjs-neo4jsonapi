@@ -84,6 +84,23 @@ export class StripeInvoiceApiService {
   }
 
   /**
+   * Whether the customer has ever paid real money
+   *
+   * Reads the customer's paid invoices from Stripe and looks for one with `amount_paid > 0`.
+   * A $0 trial invoice does not count.
+   *
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @returns Promise resolving to true when at least one paid invoice charged money
+   * @throws {StripeError} If listing fails
+   */
+  @HandleStripeErrors()
+  async hasPaidInvoice(params: { stripeCustomerId: string }): Promise<boolean> {
+    const stripe = this.stripeService.getClient();
+    const invoices = await stripe.invoices.list({ customer: params.stripeCustomerId, status: "paid", limit: 100 });
+    return invoices.data.some((invoice) => (invoice.amount_paid ?? 0) > 0);
+  }
+
+  /**
    * Get an invoice with expanded line items
    *
    * @param invoiceId - The Stripe invoice ID

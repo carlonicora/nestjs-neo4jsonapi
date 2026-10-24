@@ -13,6 +13,7 @@ export * from "./assistant-message";
 export * from "./atomicfact";
 export * from "./audit";
 export * from "./auth";
+export * from "./billing";
 export * from "./blog";
 export * from "./chunk";
 export * from "./chunker";

@@ -8,6 +8,7 @@ import type { StripePriceRepository } from "../../../stripe-price/repositories/s
 import { StripeError } from "../../../stripe/errors/stripe.errors";
 import type { StripePaymentService } from "../../../stripe/services/stripe.payment.service";
 import type { StripeSubscriptionRepository } from "../../repositories/stripe-subscription.repository";
+import type { ClsService } from "nestjs-cls";
 import { StripeSubscriptionAdminService } from "../stripe-subscription-admin.service";
 import type { StripeSubscriptionApiService } from "../stripe-subscription-api.service";
 
@@ -36,7 +37,10 @@ const dbSubscription = (status: string) => ({
 describe("StripeSubscriptionAdminService coupon integration", () => {
   let service: StripeSubscriptionAdminService;
   let subscriptionRepository: Mocked<
-    Pick<StripeSubscriptionRepository, "findById" | "findByStripeCustomerId" | "create" | "update" | "updatePrice">
+    Pick<
+      StripeSubscriptionRepository,
+      "findById" | "findByStripeCustomerId" | "createSubscription" | "update" | "updatePrice"
+    >
   >;
   let customerRepository: Mocked<Pick<StripeCustomerRepository, "findByCompanyId">>;
   let priceRepository: Mocked<Pick<StripePriceRepository, "findById">>;
@@ -54,7 +58,7 @@ describe("StripeSubscriptionAdminService coupon integration", () => {
     subscriptionRepository = {
       findById: vi.fn(),
       findByStripeCustomerId: vi.fn().mockResolvedValue([]),
-      create: vi.fn().mockResolvedValue({ id: "sub_db_new" }),
+      createSubscription: vi.fn().mockResolvedValue({ id: "sub_db_new" }),
       update: vi.fn().mockResolvedValue({ id: "sub_db_1" }),
       updatePrice: vi.fn().mockResolvedValue(undefined),
     };
@@ -74,13 +78,14 @@ describe("StripeSubscriptionAdminService coupon integration", () => {
     };
 
     service = new StripeSubscriptionAdminService(
+      jsonApiService as unknown as JsonApiService,
       subscriptionRepository as unknown as StripeSubscriptionRepository,
+      {} as ClsService,
       customerRepository as unknown as StripeCustomerRepository,
       priceRepository as unknown as StripePriceRepository,
       subscriptionApi as unknown as StripeSubscriptionApiService,
       customerApi as unknown as StripeCustomerApiService,
       {} as StripePaymentService,
-      jsonApiService as unknown as JsonApiService,
       checkout as unknown as StripeCouponCodeCheckoutService,
     );
   });
@@ -152,7 +157,7 @@ describe("StripeSubscriptionAdminService coupon integration", () => {
       expect((error as HttpException).getStatus()).toBe(HttpStatus.GONE);
       expect((error as HttpException).getResponse()).toEqual(expect.objectContaining({ code: "discount_sold_out" }));
       expect(checkout.isExhausted).toHaveBeenCalledWith("promo_auto");
-      expect(subscriptionRepository.create).not.toHaveBeenCalled();
+      expect(subscriptionRepository.createSubscription).not.toHaveBeenCalled();
       expect(checkout.refreshCountsByStripePromotionCodeId).not.toHaveBeenCalled();
     });
 
@@ -219,7 +224,7 @@ describe("StripeSubscriptionAdminService coupon integration", () => {
         code: "discount_sold_out",
       });
       expect(subscriptionApi.createSubscription).not.toHaveBeenCalled();
-      expect(subscriptionRepository.create).not.toHaveBeenCalled();
+      expect(subscriptionRepository.createSubscription).not.toHaveBeenCalled();
     });
 
     it("answers 422 and never calls Stripe when the sent automatic code no longer applies", async () => {

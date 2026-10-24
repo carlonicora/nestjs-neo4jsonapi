@@ -13,7 +13,7 @@ import { CompanyRepository } from "../../../company/repositories/company.reposit
 import { CompanyService } from "../../../company/services/company.service";
 import { StripePriceRepository } from "../../../stripe-price/repositories/stripe-price.repository";
 import { AppLoggingService } from "../../../../core/logging";
-import { StripeSubscription } from "../../entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../entities/stripe-subscription";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 import { StripeProduct } from "../../../stripe-product/entities/stripe-product.entity";
 import { Company } from "../../../company/entities/company";
@@ -57,6 +57,7 @@ describe("TokenAllocationService", () => {
     type: "stripe-subscriptions",
     stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
     status: "active" as const,
+    company: {} as any,
     currentPeriodStart: new Date("2025-01-01T00:00:00Z"),
     currentPeriodEnd: new Date("2025-02-01T00:00:00Z"),
     cancelAtPeriodEnd: false,

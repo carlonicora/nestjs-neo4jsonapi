@@ -30,7 +30,7 @@ import { StripeCustomerRepository } from "../../../stripe-customer/repositories/
 import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeUsageApiService } from "../stripe-usage-api.service";
 import { StripeUsageRecord } from "../../entities/stripe-usage-record.entity";
-import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
 import { TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 import type Stripe from "stripe";
@@ -73,6 +73,7 @@ describe("StripeUsageAdminService", () => {
     quantity: 1,
     stripeCustomer: MOCK_STRIPE_CUSTOMER,
     stripePrice: {} as StripePrice,
+    company: {} as any,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     updatedAt: new Date("2025-01-01T00:00:00Z"),
   };

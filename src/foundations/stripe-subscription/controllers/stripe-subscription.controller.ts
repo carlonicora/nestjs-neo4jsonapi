@@ -7,7 +7,7 @@ import {
   StripeSubscriptionChangePlanDTO,
   StripeSubscriptionPostDTO,
 } from "../dtos/stripe-subscription.dto";
-import { StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
+import { StripeSubscriptionStatus } from "../entities/stripe-subscription";
 import { STRIPE_SUBSCRIPTION_SYNC_SEGMENT, stripeSubscriptionMeta } from "../entities/stripe-subscription.meta";
 import { StripeSubscriptionAdminService } from "../services/stripe-subscription-admin.service";
 import { ModuleACL } from "../../../common/decorators/module.decorator";
@@ -15,6 +15,8 @@ import { CoreModuleId } from "../../../common/constants/core-module.ids";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
 import { CacheService } from "../../../core/cache/services/cache.service";
 
+// On every route with both, @Roles sits above @CacheInvalidate, which replaces the method:
+// metadata set below it would land on the discarded original and never be enforced.
 @ModuleACL({ module: CoreModuleId.Billing })
 @Controller()
 export class StripeSubscriptionController {
@@ -61,6 +63,7 @@ export class StripeSubscriptionController {
   @Post(`${stripeSubscriptionMeta.endpoint}`)
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.CompanyAdministrator)
+  @CacheInvalidate(stripeSubscriptionMeta)
   async createSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -90,6 +93,7 @@ export class StripeSubscriptionController {
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/cancel`)
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.CompanyAdministrator)
+  @CacheInvalidate(stripeSubscriptionMeta, "subscriptionId")
   async cancelSubscription(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -105,41 +109,10 @@ export class StripeSubscriptionController {
     reply.send(response);
   }
 
-  @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/pause`)
-  @UseGuards(JwtAuthGuard)
-  @Roles(RoleId.CompanyAdministrator)
-  async pauseSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-  ) {
-    const response = await this.subscriptionService.pauseSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
-  }
-
-  @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/resume`)
-  @UseGuards(JwtAuthGuard)
-  @Roles(RoleId.CompanyAdministrator)
-  async resumeSubscription(
-    @Req() req: AuthenticatedRequest,
-    @Res() reply: FastifyReply,
-    @Param("subscriptionId") subscriptionId: string,
-  ) {
-    const response = await this.subscriptionService.resumeSubscription({
-      id: subscriptionId,
-      companyId: req.user.companyId,
-    });
-
-    reply.send(response);
-  }
-
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/change-plan`)
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.CompanyAdministrator)
+  @CacheInvalidate(stripeSubscriptionMeta, "subscriptionId")
   async changePlan(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
@@ -188,8 +161,6 @@ export class StripeSubscriptionController {
    * Re-reads the subscription from Stripe and stores it. The wizard calls it right after the
    * browser confirmed the first payment, before the webhooks arrive.
    */
-  // @Roles sits above @CacheInvalidate, which replaces the method: metadata set
-  // below it would land on the discarded original and never be enforced.
   @Post(`${stripeSubscriptionMeta.endpoint}/:subscriptionId/${STRIPE_SUBSCRIPTION_SYNC_SEGMENT}`)
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.CompanyAdministrator)

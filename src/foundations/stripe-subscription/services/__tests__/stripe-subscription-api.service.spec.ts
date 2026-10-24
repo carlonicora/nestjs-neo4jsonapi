@@ -442,85 +442,6 @@ describe("StripeSubscriptionApiService", () => {
     });
   });
 
-  describe("pauseSubscription", () => {
-    it("should pause subscription without resume date", async () => {
-      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const result = await service.pauseSubscription(TEST_IDS.subscriptionId);
-
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
-        pause_collection: {
-          behavior: "mark_uncollectible",
-        },
-      });
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
-    });
-
-    it("should pause subscription with resume date", async () => {
-      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
-      const resumeDate = new Date("2025-12-31T23:59:59Z");
-      const expectedTimestamp = Math.floor(resumeDate.getTime() / 1000);
-
-      const result = await service.pauseSubscription(TEST_IDS.subscriptionId, resumeDate);
-
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
-        pause_collection: {
-          behavior: "mark_uncollectible",
-          resumes_at: expectedTimestamp,
-        },
-      });
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
-    });
-
-    it("should convert resume date to Unix timestamp correctly", async () => {
-      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
-      const resumeDate = new Date("2025-01-15T12:00:00Z");
-      const expectedTimestamp = Math.floor(resumeDate.getTime() / 1000);
-
-      await service.pauseSubscription(TEST_IDS.subscriptionId, resumeDate);
-
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
-        TEST_IDS.subscriptionId,
-        expect.objectContaining({
-          pause_collection: expect.objectContaining({
-            resumes_at: expectedTimestamp,
-          }),
-        }),
-      );
-    });
-
-    it("should handle Stripe API errors", async () => {
-      mockStripe.subscriptions.update.mockRejectedValue(STRIPE_API_ERROR);
-
-      await expect(service.pauseSubscription(TEST_IDS.subscriptionId)).rejects.toThrow(StripeError);
-    });
-  });
-
-  describe("resumeSubscription", () => {
-    it("should resume paused subscription", async () => {
-      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const result = await service.resumeSubscription(TEST_IDS.subscriptionId);
-
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(TEST_IDS.subscriptionId, {
-        pause_collection: "" as any,
-      });
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
-    });
-
-    it("should handle Stripe API errors", async () => {
-      mockStripe.subscriptions.update.mockRejectedValue(STRIPE_API_ERROR);
-
-      await expect(service.resumeSubscription(TEST_IDS.subscriptionId)).rejects.toThrow(StripeError);
-    });
-
-    it("should handle Stripe invalid request errors for non-paused subscription", async () => {
-      mockStripe.subscriptions.update.mockRejectedValue(STRIPE_INVALID_REQUEST_ERROR);
-
-      await expect(service.resumeSubscription(TEST_IDS.subscriptionId)).rejects.toThrow(StripeError);
-    });
-  });
-
   describe("previewProration", () => {
     it("should preview proration for subscription change", async () => {
       const subscription = {
@@ -725,22 +646,6 @@ describe("StripeSubscriptionApiService", () => {
       expect(mockStripe.subscriptions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           metadata: {},
-        }),
-      );
-    });
-
-    it("should handle pause with future resume date", async () => {
-      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
-      const futureDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 days in future
-
-      await service.pauseSubscription(TEST_IDS.subscriptionId, futureDate);
-
-      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
-        TEST_IDS.subscriptionId,
-        expect.objectContaining({
-          pause_collection: expect.objectContaining({
-            resumes_at: Math.floor(futureDate.getTime() / 1000),
-          }),
         }),
       );
     });

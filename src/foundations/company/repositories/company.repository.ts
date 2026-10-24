@@ -678,10 +678,12 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     companyId: string;
     endDate: Date;
     reason: "trial_expired" | "subscription_cancelled";
+    /** Days between the end date and the deletion date. Defaults to 30. */
+    delayDays?: number;
   }): Promise<void> {
-    const { companyId, endDate, reason } = params;
+    const { companyId, endDate, reason, delayDays = 30 } = params;
     const scheduledDeletionAt = new Date(endDate);
-    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + 30);
+    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + delayDays);
 
     const query = this.neo4j.initQuery();
     query.queryParams = {

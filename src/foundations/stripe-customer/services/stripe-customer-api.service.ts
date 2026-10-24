@@ -189,6 +189,46 @@ export class StripeCustomerApiService {
   }
 
   /**
+   * The card a subscription will be charged on: the subscription's own default payment
+   * method, else the customer's invoice default.
+   *
+   * @returns The card details, or null when neither default is a card
+   * @throws {StripeError} If a Stripe call fails
+   */
+  @HandleStripeErrors()
+  async getDefaultCard(params: {
+    stripeCustomerId: string;
+    stripeSubscriptionId: string;
+  }): Promise<{ brand: string; last4: string; expMonth: number; expYear: number } | null> {
+    const stripe = this.stripeService.getClient();
+
+    const subscription = await stripe.subscriptions.retrieve(params.stripeSubscriptionId, {
+      expand: ["default_payment_method"],
+    });
+    const subscriptionCard = this.cardOf(subscription.default_payment_method);
+    if (subscriptionCard) return subscriptionCard;
+
+    const customer = await stripe.customers.retrieve(params.stripeCustomerId, {
+      expand: ["invoice_settings.default_payment_method"],
+    });
+    if (customer.deleted) return null;
+    return this.cardOf((customer as Stripe.Customer).invoice_settings?.default_payment_method ?? null);
+  }
+
+  private cardOf(
+    paymentMethod: string | Stripe.PaymentMethod | null | undefined,
+  ): { brand: string; last4: string; expMonth: number; expYear: number } | null {
+    if (!paymentMethod || typeof paymentMethod === "string") return null;
+    if (paymentMethod.type !== "card" || !paymentMethod.card) return null;
+    return {
+      brand: paymentMethod.card.brand,
+      last4: paymentMethod.card.last4,
+      expMonth: paymentMethod.card.exp_month,
+      expYear: paymentMethod.card.exp_year,
+    };
+  }
+
+  /**
    * Detach a payment method from its customer
    *
    * @param paymentMethodId - The payment method ID to detach

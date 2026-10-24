@@ -6,6 +6,8 @@ import { AssistantModule } from "./assistant/assistant.module";
 import { AtomicFactModule } from "./atomicfact/atomicfact.module";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
+import { BillingModule } from "./billing/billing.module";
+import { BillingModuleConfig } from "./billing/interfaces/billing.config.interface";
 import { BlogModule } from "./blog/blog.module";
 import { BlogModuleConfig } from "./blog/interfaces/blog.config.interface";
 import { ChunkModule } from "./chunk/chunk.module";
@@ -76,6 +78,8 @@ export interface FoundationsModuleConfig {
   emailAutomation?: EmailAutomationModuleConfig;
   /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
   analytics?: AnalyticsModuleConfig;
+  /** Optional configuration for the billing module (settings, lifecycle cron, opt-in email sender) */
+  billing?: BillingModuleConfig;
   /**
    * Foundation module classes to exclude from registration.
    * Default [] keeps all modules registered (neural-erp behavior unchanged).
@@ -89,7 +93,7 @@ export interface FoundationsModuleConfig {
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
  * UserActivityModule, ReferralModule, HandbookModule, HowToModule, BlogModule (opt-in), EmailAutomationModule,
- * AnalyticsModule) are
+ * AnalyticsModule, BillingModule) are
  * assembled inside forRoot().
  *
  * HowToModule is dynamic solely so an app can reach
@@ -197,6 +201,7 @@ export class FoundationsModule {
         factory: () => EmailAutomationModule.forRoot(config?.emailAutomation),
       },
       { classRef: AnalyticsModule, factory: () => AnalyticsModule.forRoot(config?.analytics) },
+      { classRef: BillingModule, factory: () => BillingModule.forRoot(config?.billing) },
       // Opt-in: mounted only when the app passes a `blog` config.
       ...(config?.blog ? [{ classRef: BlogModule, factory: () => BlogModule.forRoot(config.blog) }] : []),
     ].filter((entry) => !excluded.has(entry.classRef));

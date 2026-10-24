@@ -4,6 +4,7 @@ import { createWorkerProvider } from "../../common/decorators/conditional-servic
 import { CacheModule } from "../../core/cache/cache.module";
 import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
 import { Neo4JModule } from "../../core/neo4j/neo4j.module";
+import { SecurityModule } from "../../core/security/security.module";
 import { CompanyModule } from "../company/company.module";
 import { StripeCouponModule } from "../stripe-coupon/stripe-coupon.module";
 import { StripeCustomerModule } from "../stripe-customer/stripe-customer.module";
@@ -12,9 +13,8 @@ import { StripeModule } from "../stripe/stripe.module";
 import { StripeSubscriptionBackfillRepository } from "./backfills/stripe-subscription-backfill.repository";
 import { StripeSubscriptionDiscountBackfillService } from "./backfills/stripe-subscription-discount-backfill.service";
 import { StripeSubscriptionController } from "./controllers/stripe-subscription.controller";
-import { StripeSubscriptionModel } from "./entities/stripe-subscription.model";
+import { StripeSubscriptionDescriptor } from "./entities/stripe-subscription";
 import { StripeSubscriptionRepository } from "./repositories/stripe-subscription.repository";
-import { StripeSubscriptionSerialiser } from "./serialisers/stripe-subscription.serialiser";
 import { StripeSubscriptionAdminService } from "./services/stripe-subscription-admin.service";
 import { StripeSubscriptionApiService } from "./services/stripe-subscription-api.service";
 import { FeatureSyncService } from "./services/feature-sync.service";
@@ -24,13 +24,12 @@ import { TokenAllocationService } from "./services/token-allocation.service";
  * Stripe Subscription Module
  *
  * Provides subscription management functionality for the Stripe billing system.
- * Handles subscription lifecycle including creation, updates, cancellations,
- * pausing/resuming, and plan changes with proration.
+ * Handles subscription lifecycle including creation, updates, cancellations
+ * and plan changes with proration.
  *
  * Features:
  * - Create subscriptions with optional trial periods
  * - Cancel subscriptions (immediately or at period end)
- * - Pause and resume subscriptions
  * - Change subscription plans with automatic proration
  * - Preview proration amounts before making changes
  * - Sync subscription data from Stripe webhooks
@@ -42,6 +41,7 @@ import { TokenAllocationService } from "./services/token-allocation.service";
  * - StripeModule: For Stripe API client and billing customer operations
  * - StripeCustomerModule: For customer lookups
  * - CompanyModule: For company token updates
+ * - SecurityModule: For the repository's access checks
  * - Neo4jModule: For database operations
  * - JsonApiModule: For JSON:API serialization
  *
@@ -56,6 +56,7 @@ import { TokenAllocationService } from "./services/token-allocation.service";
     Neo4JModule,
     JsonApiModule,
     CacheModule,
+    SecurityModule,
     forwardRef(() => CompanyModule),
     forwardRef(() => StripeCustomerModule),
     forwardRef(() => StripePriceModule),
@@ -67,7 +68,7 @@ import { TokenAllocationService } from "./services/token-allocation.service";
     StripeSubscriptionApiService,
     StripeSubscriptionAdminService,
     StripeSubscriptionRepository,
-    StripeSubscriptionSerialiser,
+    StripeSubscriptionDescriptor.model.serialiser,
     TokenAllocationService,
     FeatureSyncService,
     StripeSubscriptionBackfillRepository,
@@ -84,6 +85,6 @@ import { TokenAllocationService } from "./services/token-allocation.service";
 })
 export class StripeSubscriptionModule implements OnModuleInit {
   onModuleInit() {
-    modelRegistry.register(StripeSubscriptionModel);
+    modelRegistry.register(StripeSubscriptionDescriptor.model);
   }
 }

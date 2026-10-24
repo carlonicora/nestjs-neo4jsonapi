@@ -5,7 +5,7 @@ import { AbstractJsonApiSerialiser } from "../../../core/jsonapi";
 import { JsonApiSerialiserFactory } from "../../../core/jsonapi";
 import { JsonApiDataInterface } from "../../../core/jsonapi";
 import { JsonApiServiceInterface } from "../../../core/jsonapi";
-import { StripeSubscriptionModel } from "../../stripe-subscription/entities/stripe-subscription.model";
+import { StripeSubscriptionDescriptor } from "../../stripe-subscription/entities/stripe-subscription";
 import { StripeUsageRecord } from "../entities/stripe-usage-record.entity";
 import { StripeUsageRecordModel } from "../entities/stripe-usage-record.model";
 
@@ -31,7 +31,7 @@ export class StripeUsageRecordSerialiser extends AbstractJsonApiSerialiser imple
 
     this.relationships = {
       subscription: {
-        data: this.serialiserFactory.create(StripeSubscriptionModel),
+        data: this.serialiserFactory.create(StripeSubscriptionDescriptor.model),
       },
     };
 

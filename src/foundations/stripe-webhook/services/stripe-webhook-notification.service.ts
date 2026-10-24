@@ -1,5 +1,5 @@
 import { InjectQueue } from "@nestjs/bullmq";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { QueueId } from "../../../config/enums/queue.id";
@@ -9,6 +9,12 @@ import { CompanyRepository } from "../../company/repositories/company.repository
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeInvoiceRepository } from "../../stripe-invoice/repositories/stripe-invoice.repository";
 import { UserRepository } from "../../user/repositories/user.repository";
+import {
+  BILLING_CONFIG,
+  BillingEmailKey,
+  DEFAULT_BILLING_CONFIG,
+  ResolvedBillingConfig,
+} from "../../billing/interfaces/billing.config.interface";
 
 export interface StripeWebhookPaymentFailureNotificationParams {
   stripeCustomerId: string;
@@ -17,6 +23,13 @@ export interface StripeWebhookPaymentFailureNotificationParams {
   errorMessage?: string;
   amount?: number;
   currency?: string;
+}
+
+export interface StripeWebhookCardExpiringNotificationParams {
+  stripeCustomerId: string;
+  renewalDate: Date;
+  cardBrand: string;
+  cardLast4: string;
 }
 
 export interface StripeWebhookPaymentSuccessNotificationParams {
@@ -66,13 +79,32 @@ export class StripeWebhookNotificationService {
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
     private readonly responseLanguage: ResponseLanguageService,
+    @Optional() @Inject(BILLING_CONFIG) private readonly billingConfig?: ResolvedBillingConfig,
   ) {}
 
   /**
-   * Send payment failure notification email
+   * True when the app switched the given billing email off; logs the skip.
    */
-  async sendPaymentFailedEmail(params: StripeWebhookPaymentFailureNotificationParams): Promise<void> {
-    const { stripeCustomerId, stripeInvoiceId, stripePaymentIntentId, errorMessage, amount, currency } = params;
+  private isEmailDisabled(key: BillingEmailKey, context: string): boolean {
+    const config = this.billingConfig ?? DEFAULT_BILLING_CONFIG;
+    if (config.emails[key]) return false;
+    this.logger.log(`Billing email "${key}" is switched off - skipping ${context}`);
+    return true;
+  }
+
+  /**
+   * Send payment failure notification email
+   *
+   * `keepsAccess` (set by the failed-card grace) tells the template that nothing
+   * has stopped while Stripe retries. Omitted, the payload is unchanged.
+   */
+  async sendPaymentFailedEmail(
+    params: StripeWebhookPaymentFailureNotificationParams & { keepsAccess?: boolean },
+  ): Promise<void> {
+    const { stripeCustomerId, stripeInvoiceId, stripePaymentIntentId, errorMessage, amount, currency, keepsAccess } =
+      params;
+
+    if (this.isEmailDisabled("paymentFailed", `payment failure notification for ${stripeCustomerId}`)) return;
 
     try {
       // Retrieve stripe customer from Neo4j
@@ -105,6 +137,7 @@ export class StripeWebhookNotificationService {
             currency: currency || "usd",
             invoiceUrl: invoiceDetails?.stripeHostedInvoiceUrl,
             invoiceNumber: invoiceDetails?.stripeInvoiceNumber || undefined,
+            ...(keepsAccess !== undefined ? { keepsAccess } : {}),
             locale: (await this.responseLanguage.resolveForEmail({ email: stripeCustomer.email })) ?? "en",
           },
         },
@@ -481,6 +514,8 @@ export class StripeWebhookNotificationService {
   async sendSubscriptionCancelledEmail(params: { companyId: string; dataRemovalDate: Date }): Promise<void> {
     const { companyId, dataRemovalDate } = params;
 
+    if (this.isEmailDisabled("subscriptionEnded", `subscription cancelled email for company ${companyId}`)) return;
+
     try {
       await this.cls.run(async () => {
         // Find company
@@ -490,35 +525,93 @@ export class StripeWebhookNotificationService {
           return;
         }
 
-        // Find company owner
-        const ownerEmail = company.ownerEmail;
-        if (!ownerEmail) {
-          this.logger.warn(`Cannot send cancellation email: no owner email for company ${companyId}`);
+        // Find all admin users for this company (Company.ownerEmail is never written)
+        const admins = await this.userRepository.findAdminsByCompanyId({ companyId });
+        if (admins.length === 0) {
+          this.logger.warn(`Cannot send cancellation email: no admins found for company ${companyId}`);
           return;
         }
 
-        await this.emailQueue.add(
-          "billing-notification",
-          {
-            jobType: "subscription-cancelled" as const,
-            payload: {
-              to: ownerEmail,
-              companyName: company.name ?? "Your company",
-              dataRemovalDate: dataRemovalDate.toISOString(),
-              locale: (await this.responseLanguage.resolveForEmail({ email: ownerEmail })) ?? "en",
+        for (const admin of admins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "subscription-cancelled" as const,
+              payload: {
+                to: admin.email,
+                companyName: company.name ?? "Your company",
+                dataRemovalDate: dataRemovalDate.toISOString(),
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
+              },
             },
-          },
-          {
-            attempts: 3,
-            backoff: { type: "exponential", delay: 5000 },
-          },
-        );
+            {
+              attempts: 3,
+              backoff: { type: "exponential", delay: 5000 },
+            },
+          );
+        }
 
-        this.logger.log(`Queued subscription cancelled email for company ${companyId}`);
+        this.logger.log(`Queued subscription cancelled email for company ${companyId} (${admins.length} admins)`);
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       this.logger.error(`Failed to queue subscription cancelled notification: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block processing
+    }
+  }
+
+  /**
+   * Send the "card expiring" warning to company admins
+   * Sent about seven days before a renewal the saved card will not reach
+   */
+  async sendCardExpiringEmail(params: StripeWebhookCardExpiringNotificationParams): Promise<void> {
+    const { stripeCustomerId, renewalDate, cardBrand, cardLast4 } = params;
+
+    if (this.isEmailDisabled("cardExpiring", `card expiring warning for ${stripeCustomerId}`)) return;
+
+    try {
+      await this.cls.run(async () => {
+        const companyAdmins = await this.userRepository.findCompanyAdminsByStripeCustomerId({ stripeCustomerId });
+
+        if (companyAdmins.length === 0) {
+          this.logger.warn(
+            `No company admins found for Stripe customer ${stripeCustomerId} - skipping card expiring warning`,
+          );
+          return;
+        }
+
+        for (const admin of companyAdmins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "card-expiring" as const,
+              payload: {
+                to: admin.email,
+                customerName: admin.name || "Customer",
+                stripeCustomerId,
+                renewalDate: renewalDate.toISOString(),
+                cardBrand,
+                cardLast4,
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
+              },
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: "exponential",
+                delay: 5000,
+              },
+            },
+          );
+        }
+
+        this.logger.log(
+          `Queued card expiring warning for ${companyAdmins.length} company admin(s) (customer: ${stripeCustomerId})`,
+        );
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue card expiring warning: ${errorMsg}`);
       // Don't throw - notification failure shouldn't block processing
     }
   }

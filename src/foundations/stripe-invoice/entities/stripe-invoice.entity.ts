@@ -1,6 +1,6 @@
 import { Entity } from "../../../common/abstracts/entity";
 import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.entity";
-import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription";
 
 export type StripeInvoiceStatus = "draft" | "open" | "paid" | "uncollectible" | "void";
 

@@ -142,6 +142,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                   blog: options.blog,
                   emailAutomation: options.emailAutomation,
                   analytics: options.analytics,
+                  billing: options.billing,
                   exclude: options.foundations?.exclude ?? [],
                 }),
               ]),

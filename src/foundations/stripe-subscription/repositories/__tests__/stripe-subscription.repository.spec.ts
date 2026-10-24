@@ -1,1504 +1,350 @@
-import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
+import type { MockedObject } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
 }));
 vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
-import { Test, TestingModule } from "@nestjs/testing";
-import { Neo4jService } from "../../../../core/neo4j";
+import { ClsService } from "nestjs-cls";
+import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../../core/security/services/security.service";
+import { StripeSubscriptionDescriptor } from "../../entities/stripe-subscription";
 import { StripeSubscriptionRepository } from "../stripe-subscription.repository";
-import { stripeSubscriptionMeta } from "../../entities/stripe-subscription.meta";
-import { stripeCustomerMeta } from "../../../stripe-customer/entities/stripe-customer.meta";
-import { stripePriceMeta } from "../../../stripe-price/entities/stripe-price.meta";
-import { stripeProductMeta } from "../../../stripe-product/entities/stripe-product.meta";
-import { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription.entity";
-import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
-import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
+
+type IssuedQuery = { query: string; queryParams: Record<string, unknown> };
+
+const flat = (s: string) => s.replace(/\s+/g, " ").trim();
 
 describe("StripeSubscriptionRepository", () => {
+  // The prefix Neo4jService.initQuery() emits: custom Cypher must be appended (`+=`), never assigned.
+  const initQueryPrefix = "PREAMBLE\n";
+  const DEFAULT_MATCH = "MATCH (stripeSubscription:StripeSubscription";
+
+  let neo4j: MockedObject<Neo4jService>;
+  let cls: MockedObject<ClsService>;
   let repository: StripeSubscriptionRepository;
-  let neo4jService: Mocked<Neo4jService>;
+  let initParams: Record<string, unknown>;
 
-  // Test data constants
-  const TEST_IDS = {
-    subscriptionId: "550e8400-e29b-41d4-a716-446655440000",
-    priceId: "770e8400-e29b-41d4-a716-446655440002",
-    stripeSubscriptionId: "sub_test123",
-    stripeSubscriptionItemId: "si_test456",
-    stripeCustomerId: "cus_test789",
-  };
+  const lastCall = (calls: unknown[][]): IssuedQuery => calls[calls.length - 1][0] as IssuedQuery;
 
-  const MOCK_DATES = {
-    currentPeriodStart: new Date("2025-01-01T00:00:00Z"),
-    currentPeriodEnd: new Date("2025-02-01T00:00:00Z"),
-    trialStart: new Date("2025-01-01T00:00:00Z"),
-    trialEnd: new Date("2025-01-15T00:00:00Z"),
-    canceledAt: new Date("2025-01-20T00:00:00Z"),
-    pausedAt: new Date("2025-01-25T00:00:00Z"),
-    createdAt: new Date("2025-01-01T00:00:00Z"),
-    updatedAt: new Date("2025-01-01T00:00:00Z"),
-  };
+  beforeEach(() => {
+    initParams = { companyId: null, currentUserId: null };
+    neo4j = {
+      initQuery: vi.fn((params?: any) => ({
+        query: initQueryPrefix,
+        queryParams: { ...initParams },
+        cursor: params?.cursor,
+        serialiser: params?.serialiser,
+        fetchAll: params?.fetchAll,
+      })),
+      readOne: vi.fn(async () => null),
+      readMany: vi.fn(async () => []),
+      writeOne: vi.fn(async () => null),
+      writeAndReturnMany: vi.fn(async () => []),
+      validateRelatedNodes: vi.fn(async () => undefined),
+      bindsRequestContext: true,
+    } as unknown as MockedObject<Neo4jService>;
+    cls = { get: vi.fn(() => undefined), has: vi.fn(() => false) } as unknown as MockedObject<ClsService>;
 
-  const MOCK_SUBSCRIPTION: StripeSubscription = {
-    id: TEST_IDS.subscriptionId,
-    type: "stripe-subscriptions",
-    stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-    stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
-    status: "active",
-    currentPeriodStart: MOCK_DATES.currentPeriodStart,
-    currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
-    cancelAtPeriodEnd: false,
-    trialStart: MOCK_DATES.trialStart,
-    trialEnd: MOCK_DATES.trialEnd,
-    quantity: 1,
-    createdAt: MOCK_DATES.createdAt,
-    updatedAt: MOCK_DATES.updatedAt,
-    stripeCustomer: {} as StripeCustomer,
-    stripePrice: {} as StripePrice,
-  };
-
-  const createMockQuery = (): { query: string; queryParams: Record<string, any> } => ({
-    query: "",
-    queryParams: {},
+    repository = new StripeSubscriptionRepository(neo4j, {} as unknown as SecurityService, cls);
   });
 
-  beforeEach(async () => {
-    const mockNeo4jService = {
-      writeOne: vi.fn(),
-      readOne: vi.fn(),
-      readMany: vi.fn(),
-      initQuery: vi.fn(),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        StripeSubscriptionRepository,
-        {
-          provide: Neo4jService,
-          useValue: mockNeo4jService,
-        },
-      ],
-    }).compile();
-
-    repository = module.get<StripeSubscriptionRepository>(StripeSubscriptionRepository);
-    neo4jService = module.get<Neo4jService>(Neo4jService) as Mocked<Neo4jService>;
-
-    // Reset mocks before each test
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
+  const expectScopedRead = (issued: IssuedQuery) => {
+    expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+    expect(issued.query).toContain(DEFAULT_MATCH);
+    expect(issued.query).toContain("stripeSubscription_stripePrice_stripeProduct");
+    expect(neo4j.initQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ serialiser: StripeSubscriptionDescriptor.model }),
+    );
+  };
 
   describe("onModuleInit", () => {
-    it("should create unique constraint on id field", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
+    it("creates the id and stripeSubscriptionId constraints", async () => {
       await repository.onModuleInit();
 
-      expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_id IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.id IS UNIQUE`,
-      });
+      const queries = neo4j.writeOne.mock.calls.map((call) => (call[0] as IssuedQuery).query);
+      expect(queries.some((q) => q.includes("stripeSubscription_id IF NOT EXISTS"))).toBe(true);
+      expect(queries.some((q) => q.includes("stripeSubscription_stripeSubscriptionId IF NOT EXISTS"))).toBe(true);
+      expect(queries.some((q) => q.includes("FULLTEXT"))).toBe(false);
     });
+  });
 
-    it("should create unique constraint on stripeSubscriptionId field", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
+  describe("buildReturnStatement", () => {
+    it("return statement carries the price product", async () => {
+      await repository.findAll();
 
-      await repository.onModuleInit();
-
-      expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: `CREATE CONSTRAINT ${stripeSubscriptionMeta.nodeName}_stripeSubscriptionId IF NOT EXISTS FOR (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}) REQUIRE ${stripeSubscriptionMeta.nodeName}.stripeSubscriptionId IS UNIQUE`,
-      });
-    });
-
-    it("should create both constraints in sequence", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.onModuleInit();
-
-      expect(neo4jService.writeOne).toHaveBeenCalledTimes(2);
-    });
-
-    it("should handle constraint creation errors", async () => {
-      const error = new Error("Constraint creation failed");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(repository.onModuleInit()).rejects.toThrow("Constraint creation failed");
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expect(flat(issued.query)).toContain(
+        "MATCH (stripeSubscription)-[:USES_PRICE]->(stripeSubscription_stripePrice:StripePrice)-[:BELONGS_TO]->(stripeSubscription_stripePrice_stripeProduct:StripeProduct)",
+      );
+      expect(flat(issued.query)).toContain(
+        "MATCH (stripeSubscription)-[:BELONGS_TO]->(stripeSubscription_stripeCustomer:StripeCustomer)",
+      );
+      expect(issued.query).toMatch(/RETURN stripeSubscription,[\s\S]*stripeSubscription_stripePrice_stripeProduct/);
     });
   });
 
   describe("findByStripeCustomerId", () => {
-    it("should find subscriptions by billing customer ID without status filter", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
+    it("filters on the internal customer id and the optional status", async () => {
+      await repository.findByStripeCustomerId({ stripeCustomerId: "c1", status: "active" });
 
-      const result = await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(`WHERE 1=1`);
-      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
-      );
-      expect(mockQuery.query).toContain(`ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC`);
-      expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual([MOCK_SUBSCRIPTION]);
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain("-[:BELONGS_TO]->(:StripeCustomer {id: $stripeCustomerId})");
+      expect(issued.query).toContain("stripeSubscription.status = $status");
+      expect(issued.query).toContain("ORDER BY stripeSubscription.createdAt DESC");
+      expect(issued.queryParams).toMatchObject({ stripeCustomerId: "c1", status: "active" });
     });
 
-    it("should find subscriptions by billing customer ID with status filter", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
+    it("leaves out the status filter when none is given", async () => {
+      await repository.findByStripeCustomerId({ stripeCustomerId: "c1" });
 
-      const result = await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        status: "active",
-      });
-
-      expect(mockQuery.queryParams).toEqual({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        status: "active",
-      });
-      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${stripeSubscriptionMeta.nodeName}.status = $status`);
-      expect(result).toEqual([MOCK_SUBSCRIPTION]);
-    });
-
-    it("should return empty array when no subscriptions found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-
-      const result = await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(result).toEqual([]);
-      expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should filter by specific status values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
-
-      const statuses: StripeSubscriptionStatus[] = ["active", "trialing", "past_due", "canceled"];
-
-      for (const status of statuses) {
-        vi.clearAllMocks();
-        neo4jService.initQuery.mockReturnValue(createMockQuery());
-
-        await repository.findByStripeCustomerId({
-          stripeCustomerId: TEST_IDS.stripeCustomerId,
-          status,
-        });
-
-        expect(neo4jService.initQuery().queryParams.status).toBe(status);
-      }
-    });
-
-    it("should handle database errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Database error");
-      neo4jService.readMany.mockRejectedValue(error);
-
-      await expect(repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId })).rejects.toThrow(
-        "Database error",
-      );
-    });
-
-    it("should order results by createdAt DESC", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
-
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain(`ORDER BY ${stripeSubscriptionMeta.nodeName}.createdAt DESC`);
+      expect(lastCall(neo4j.readMany.mock.calls).query).not.toContain("$status");
     });
   });
 
   describe("findById", () => {
-    it("should find subscription by ID with relationships", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("is inherited and starts from the default match", async () => {
+      neo4j.readOne.mockResolvedValueOnce({ id: "s1" } as never);
+      (repository as any).securityService = { userHasAccess: () => "WITH stripeSubscription" };
 
-      const result = await repository.findById({ id: TEST_IDS.subscriptionId });
+      await repository.findById({ id: "s1" });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams).toEqual({
-        id: TEST_IDS.subscriptionId,
-      });
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
-      );
-      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
+      const issued = lastCall(neo4j.readOne.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain("{id: $searchValue}");
+      expect(issued.queryParams).toMatchObject({ searchValue: "s1" });
     });
+  });
 
-    it("should return null when subscription not found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(null);
+  describe("findAll", () => {
+    it("reads every subscription, oldest first, unpaginated", async () => {
+      await repository.findAll();
 
-      const result = await repository.findById({ id: "nonexistent-id" });
-
-      expect(result).toBeNull();
-      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should handle database errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Read operation failed");
-      neo4jService.readOne.mockRejectedValue(error);
-
-      await expect(repository.findById({ id: TEST_IDS.subscriptionId })).rejects.toThrow("Read operation failed");
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expectScopedRead(issued);
+      expect(neo4j.initQuery).toHaveBeenCalledWith(expect.objectContaining({ fetchAll: true }));
+      expect(issued.query).toContain("ORDER BY stripeSubscription.createdAt ASC");
+      expect(issued.query).not.toMatch(/SKIP|LIMIT|\{CURSOR\}/);
     });
   });
 
   describe("findByStripeSubscriptionId", () => {
-    it("should find subscription by Stripe subscription ID with relationships", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("matches on the Stripe subscription id", async () => {
+      await repository.findByStripeSubscriptionId({ stripeSubscriptionId: "sub_1" });
 
-      const result = await repository.findByStripeSubscriptionId({
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-      });
-
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams).toEqual({
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-      });
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {stripeSubscriptionId: $stripeSubscriptionId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
-      );
-      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
-    });
-
-    it("should return null when subscription not found by Stripe ID", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(null);
-
-      const result = await repository.findByStripeSubscriptionId({ stripeSubscriptionId: "sub_nonexistent" });
-
-      expect(result).toBeNull();
-      expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should handle database errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Database connection error");
-      neo4jService.readOne.mockRejectedValue(error);
-
-      await expect(
-        repository.findByStripeSubscriptionId({ stripeSubscriptionId: TEST_IDS.stripeSubscriptionId }),
-      ).rejects.toThrow("Database connection error");
-    });
-
-    it("should preserve exact Stripe subscription ID format", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const exactStripeId = "sub_1MvN8z3FkJ0LJ6p";
-
-      await repository.findByStripeSubscriptionId({ stripeSubscriptionId: exactStripeId });
-
-      expect(mockQuery.queryParams.stripeSubscriptionId).toBe(exactStripeId);
+      const issued = lastCall(neo4j.readOne.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain("{stripeSubscriptionId: $searchValue}");
+      expect(issued.queryParams).toMatchObject({ searchValue: "sub_1" });
     });
   });
 
-  describe("create", () => {
-    const validCreateParams = {
-      stripeCustomerId: TEST_IDS.stripeCustomerId,
-      priceId: TEST_IDS.priceId,
-      stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-      status: "active" as StripeSubscriptionStatus,
-      currentPeriodStart: MOCK_DATES.currentPeriodStart,
-      currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
+  describe("findActiveByStripeCustomerId", () => {
+    it("filters on the Stripe customer id and active or trialing status", async () => {
+      await repository.findActiveByStripeCustomerId({ stripeCustomerId: "cus_1" });
+
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain("{stripeCustomerId: $stripeCustomerId}");
+      expect(issued.query).toContain("stripeSubscription.status IN ['active', 'trialing']");
+      expect(issued.queryParams).toMatchObject({ stripeCustomerId: "cus_1" });
+    });
+  });
+
+  describe("createSubscription", () => {
+    const params = {
+      stripeCustomerId: "cust-1",
+      priceId: "price-1",
+      stripeSubscriptionId: "sub_1",
+      status: "active" as const,
+      currentPeriodStart: new Date("2026-10-01T00:00:00.000Z"),
+      currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z"),
       cancelAtPeriodEnd: false,
       quantity: 1,
     };
 
-    it("should create subscription with required fields only", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("createSubscription keeps the company and creator edges", async () => {
+      initParams = { companyId: "company-1", currentUserId: "user-1" };
 
-      const result = await repository.create(validCreateParams);
+      await repository.createSubscription(params);
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      expect(issued.query).toContain("CREATE (stripeSubscription)-[:BELONGS_TO]->(company)");
+      expect(issued.query).toContain("CREATE (stripeSubscription)-[:CREATED_BY]->(currentUser)");
+      expect(issued.query).toContain("-[:BELONGS_TO]->(newStripeCustomer)");
+      expect(issued.query).toContain("-[:USES_PRICE]->(newStripePrice)");
+      expect(issued.query).toContain("currentPeriodStart: datetime($currentPeriodStart)");
+      expect(issued.query).toContain("stripeSubscription_stripePrice_stripeProduct");
+      expect(issued.queryParams).toMatchObject({
+        stripeCustomerId: "cust-1",
+        priceId: "price-1",
+        currentPeriodStart: "2026-10-01T00:00:00.000Z",
+        companyId: "company-1",
       });
-      expect(mockQuery.queryParams).toMatchObject({
-        stripeCustomerId: validCreateParams.stripeCustomerId,
-        priceId: validCreateParams.priceId,
-        stripeSubscriptionId: validCreateParams.stripeSubscriptionId,
-        status: validCreateParams.status,
-        currentPeriodStart: MOCK_DATES.currentPeriodStart.toISOString(),
-        currentPeriodEnd: MOCK_DATES.currentPeriodEnd.toISOString(),
-        cancelAtPeriodEnd: false,
-        stripeSubscriptionItemId: null,
-        trialStart: null,
-        trialEnd: null,
-        quantity: 1,
-      });
-      expect(mockQuery.queryParams.id).toBeDefined();
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $priceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `CREATE (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`,
-      );
-      expect(mockQuery.query).toContain("createdAt: datetime()");
-      expect(mockQuery.query).toContain("updatedAt: datetime()");
-      expect(mockQuery.query).toContain(
-        `CREATE (${stripeSubscriptionMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`,
-      );
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
-    });
-
-    it("should create subscription with optional stripeSubscriptionItemId", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const paramsWithItemId = {
-        ...validCreateParams,
-        stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
-      };
-
-      await repository.create(paramsWithItemId);
-
-      expect(mockQuery.queryParams.stripeSubscriptionItemId).toBe(TEST_IDS.stripeSubscriptionItemId);
-    });
-
-    it("should create subscription with optional trial dates", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const paramsWithTrial = {
-        ...validCreateParams,
-        trialStart: MOCK_DATES.trialStart,
-        trialEnd: MOCK_DATES.trialEnd,
-      };
-
-      await repository.create(paramsWithTrial);
-
-      expect(mockQuery.queryParams.trialStart).toBe(MOCK_DATES.trialStart.toISOString());
-      expect(mockQuery.queryParams.trialEnd).toBe(MOCK_DATES.trialEnd.toISOString());
-    });
-
-    it("should convert Date objects to ISO strings for Neo4j datetime", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create(validCreateParams);
-
-      expect(mockQuery.queryParams.currentPeriodStart).toBe(MOCK_DATES.currentPeriodStart.toISOString());
-      expect(mockQuery.queryParams.currentPeriodEnd).toBe(MOCK_DATES.currentPeriodEnd.toISOString());
-      expect(mockQuery.query).toContain("currentPeriodStart: datetime($currentPeriodStart)");
-      expect(mockQuery.query).toContain("currentPeriodEnd: datetime($currentPeriodEnd)");
-    });
-
-    it("should handle CASE WHEN for nullable trial dates", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create(validCreateParams);
-
-      expect(mockQuery.query).toContain(
-        "trialStart: CASE WHEN $trialStart IS NOT NULL THEN datetime($trialStart) ELSE null END",
-      );
-      expect(mockQuery.query).toContain(
-        "trialEnd: CASE WHEN $trialEnd IS NOT NULL THEN datetime($trialEnd) ELSE null END",
-      );
-    });
-
-    it("should generate unique UUID for each subscription", async () => {
-      const mockQuery1 = createMockQuery();
-      const mockQuery2 = createMockQuery();
-      neo4jService.initQuery.mockReturnValueOnce(mockQuery1).mockReturnValueOnce(mockQuery2);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create(validCreateParams);
-      await repository.create(validCreateParams);
-
-      expect(mockQuery1.queryParams.id).toBeDefined();
-      expect(mockQuery2.queryParams.id).toBeDefined();
-      expect(mockQuery1.queryParams.id).not.toEqual(mockQuery2.queryParams.id);
-    });
-
-    it("should handle creation errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Creation failed - billing customer not found");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(repository.create(validCreateParams)).rejects.toThrow(
-        "Creation failed - billing customer not found",
-      );
-    });
-
-    it("should set null for optional fields when not provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create(validCreateParams);
-
-      expect(mockQuery.queryParams.stripeSubscriptionItemId).toBeNull();
-      expect(mockQuery.queryParams.trialStart).toBeNull();
-      expect(mockQuery.queryParams.trialEnd).toBeNull();
-    });
-
-    it("should create subscription with all optional fields", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const fullParams = {
-        ...validCreateParams,
-        stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
-        trialStart: MOCK_DATES.trialStart,
-        trialEnd: MOCK_DATES.trialEnd,
-      };
-
-      await repository.create(fullParams);
-
-      expect(mockQuery.queryParams).toMatchObject({
-        stripeSubscriptionItemId: TEST_IDS.stripeSubscriptionItemId,
-        trialStart: MOCK_DATES.trialStart.toISOString(),
-        trialEnd: MOCK_DATES.trialEnd.toISOString(),
+      expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [
+          { id: "cust-1", label: "StripeCustomer" },
+          { id: "price-1", label: "StripePrice" },
+        ],
       });
     });
-  });
 
-  describe("discount fields", () => {
-    const DISCOUNT = {
-      percentOff: 20,
-      amountOff: null,
-      currency: null,
-      duration: "repeating" as const,
-      durationInMonths: 6,
-      end: new Date("2025-07-01T00:00:00Z"),
-    };
+    it("leaves out the company and creator edges when CLS has neither", async () => {
+      await repository.createSubscription(params);
 
-    it("create writes the discount, the end cast to a datetime", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        priceId: TEST_IDS.priceId,
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "active",
-        currentPeriodStart: MOCK_DATES.currentPeriodStart,
-        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
-        cancelAtPeriodEnd: false,
-        quantity: 1,
-        discount: DISCOUNT,
-      });
-
-      expect(mockQuery.queryParams).toMatchObject({
-        discountPercentOff: 20,
-        discountAmountOff: null,
-        discountDuration: "repeating",
-        discountDurationInMonths: 6,
-        discountEnd: "2025-07-01T00:00:00.000Z",
-      });
-      expect(mockQuery.query).toContain(
-        "discountEnd: CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END",
-      );
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).not.toContain("->(company)");
+      expect(issued.query).not.toContain("->(currentUser)");
     });
 
-    it("create without a discount writes nulls", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("createSubscription refuses an unknown price", async () => {
+      neo4j.validateRelatedNodes.mockRejectedValueOnce(new Error("Related node not found"));
 
-      await repository.create({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        priceId: TEST_IDS.priceId,
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "active",
-        currentPeriodStart: MOCK_DATES.currentPeriodStart,
-        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
-        cancelAtPeriodEnd: false,
-        quantity: 1,
-      });
-
-      expect(mockQuery.queryParams.discountPercentOff).toBeNull();
-      expect(mockQuery.queryParams.discountEnd).toBeNull();
-    });
-
-    it("update sets every discount field when a discount is given", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, discount: DISCOUNT });
-
-      expect(mockQuery.queryParams.discountPercentOff).toBe(20);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.discountPercentOff = $discountPercentOff`);
-      expect(mockQuery.query).toContain(
-        `${stripeSubscriptionMeta.nodeName}.discountEnd = CASE WHEN $discountEnd IS NOT NULL THEN datetime($discountEnd) ELSE null END`,
-      );
-    });
-
-    it("update clears the discount when null is given", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, discount: null });
-
-      expect(mockQuery.queryParams.discountPercentOff).toBeNull();
-      expect(mockQuery.queryParams.discountDuration).toBeNull();
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.discountDuration = $discountDuration`);
-    });
-
-    it("update leaves the discount alone when none is given", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
-
-      expect(mockQuery.query).not.toContain("discount");
-      expect(mockQuery.queryParams).not.toHaveProperty("discountPercentOff");
+      await expect(repository.createSubscription(params)).rejects.toThrow("Related node not found");
+      expect(neo4j.writeOne).not.toHaveBeenCalled();
     });
   });
 
   describe("update", () => {
-    it("should update status field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("update clears a clearable datetime field with null", async () => {
+      await repository.update({ id: "s1", cardExpiryCheckedFor: null });
 
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        status: "canceled" as StripeSubscriptionStatus,
-      };
+      let issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      expect(issued.query).toContain(`${DEFAULT_MATCH} {id: $searchValue}`);
+      expect(issued.query).toContain("stripeSubscription.cardExpiryCheckedFor = null");
+      expect(issued.queryParams).toMatchObject({ searchValue: "s1" });
+      expect(issued.queryParams).not.toHaveProperty("cardExpiryCheckedFor");
 
-      const result = await repository.update(params);
+      const d = new Date("2027-01-01T00:00:00.000Z");
+      await repository.update({ id: "s1", cardExpiryCheckedFor: d });
 
-      expect(mockQuery.queryParams.id).toBe(TEST_IDS.subscriptionId);
-      expect(mockQuery.queryParams.status).toBe("canceled");
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
+      issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).toContain("stripeSubscription.cardExpiryCheckedFor = datetime($cardExpiryCheckedFor)");
+      expect(issued.queryParams).toMatchObject({ cardExpiryCheckedFor: d.toISOString() });
     });
 
-    it("should update currentPeriodStart field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("leaves an undefined field untouched", async () => {
+      await repository.update({ id: "s1", status: "past_due" });
 
-      const newDate = new Date("2025-02-01T00:00:00Z");
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        currentPeriodStart: newDate,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.currentPeriodStart).toBe(newDate.toISOString());
-      expect(mockQuery.query).toContain(
-        `${stripeSubscriptionMeta.nodeName}.currentPeriodStart = datetime($currentPeriodStart)`,
-      );
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).toContain("stripeSubscription.status = $status");
+      expect(issued.query).not.toContain("cardExpiryCheckedFor");
+      expect(issued.query).not.toContain("discountPercentOff");
     });
 
-    it("should update currentPeriodEnd field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const newDate = new Date("2025-03-01T00:00:00Z");
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        currentPeriodEnd: newDate,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.currentPeriodEnd).toBe(newDate.toISOString());
-      expect(mockQuery.query).toContain(
-        `${stripeSubscriptionMeta.nodeName}.currentPeriodEnd = datetime($currentPeriodEnd)`,
-      );
-    });
-
-    it("should update cancelAtPeriodEnd field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        cancelAtPeriodEnd: true,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.cancelAtPeriodEnd).toBe(true);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
-    });
-
-    it("should update canceledAt field with Date value", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        canceledAt: MOCK_DATES.canceledAt,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.canceledAt).toBe(MOCK_DATES.canceledAt.toISOString());
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = null`);
-    });
-
-    it("should update canceledAt field with null value", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        canceledAt: null,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = null`);
-      expect(mockQuery.query).not.toContain(`datetime($canceledAt)`);
-    });
-
-    it("should update trialStart field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        trialStart: MOCK_DATES.trialStart,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.trialStart).toBe(MOCK_DATES.trialStart.toISOString());
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.trialStart = datetime($trialStart)`);
-    });
-
-    it("should update trialEnd field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        trialEnd: MOCK_DATES.trialEnd,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.trialEnd).toBe(MOCK_DATES.trialEnd.toISOString());
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.trialEnd = datetime($trialEnd)`);
-    });
-
-    it("should update pausedAt field with Date value", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        pausedAt: MOCK_DATES.pausedAt,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.pausedAt).toBe(MOCK_DATES.pausedAt.toISOString());
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = datetime($pausedAt)`);
-      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = null`);
-    });
-
-    it("should update pausedAt field with null value", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        pausedAt: null,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.pausedAt = null`);
-      expect(mockQuery.query).not.toContain(`datetime($pausedAt)`);
-    });
-
-    it("should update quantity field", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        quantity: 5,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.queryParams.quantity).toBe(5);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
-    });
-
-    it("should update multiple fields at once", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        status: "canceled" as StripeSubscriptionStatus,
-        cancelAtPeriodEnd: true,
-        canceledAt: MOCK_DATES.canceledAt,
-        quantity: 2,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
-      expect(mockQuery.queryParams).toMatchObject({
-        status: "canceled",
-        cancelAtPeriodEnd: true,
-        canceledAt: MOCK_DATES.canceledAt.toISOString(),
-        quantity: 2,
+    it("writes every clearable datetime field with a datetime cast", async () => {
+      const at = new Date("2026-11-01T00:00:00.000Z");
+      await repository.update({
+        id: "s1",
+        canceledAt: at,
+        cardExpiryCheckedFor: at,
       });
+
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      for (const field of ["canceledAt", "cardExpiryCheckedFor"]) {
+        expect(issued.query).toContain(`stripeSubscription.${field} = datetime($${field})`);
+        expect(issued.queryParams[field]).toBe(at.toISOString());
+      }
+      expect(issued.query).toMatch(/SET [\s\S]*WITH stripeSubscription[\s\S]*RETURN/);
     });
 
-    it("should only update updatedAt when no optional fields provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("clears the discount with null", async () => {
+      await repository.update({ id: "s1", discount: null });
 
-      const params = {
-        id: TEST_IDS.subscriptionId,
-      };
-
-      await repository.update(params);
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).not.toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
-    });
-
-    it("should always update updatedAt timestamp", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-    });
-
-    it("should include relationships in MATCH and RETURN clauses", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, status: "active" });
-
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
-      );
-    });
-
-    it("should handle update errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Update failed - subscription not found");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(repository.update({ id: TEST_IDS.subscriptionId, status: "active" })).rejects.toThrow(
-        "Update failed - subscription not found",
-      );
-    });
-
-    it("should handle quantity as zero", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, quantity: 0 });
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.quantity = $quantity`);
-      expect(mockQuery.queryParams.quantity).toBe(0);
-    });
-
-    it("should handle cancelAtPeriodEnd as false", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({ id: TEST_IDS.subscriptionId, cancelAtPeriodEnd: false });
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = $cancelAtPeriodEnd`);
-      expect(mockQuery.queryParams.cancelAtPeriodEnd).toBe(false);
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).toContain("stripeSubscription.discountPercentOff = $discountPercentOff");
+      expect(issued.queryParams).toMatchObject({ discountPercentOff: null, discountEnd: null });
     });
   });
 
   describe("updateByStripeSubscriptionId", () => {
-    it("should find subscription and delegate to update method", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValueOnce(MOCK_SUBSCRIPTION);
-      neo4jService.writeOne.mockResolvedValue({ ...MOCK_SUBSCRIPTION, status: "canceled" });
+    it("updates the subscription found by Stripe id", async () => {
+      neo4j.readOne.mockResolvedValueOnce({ id: "s1" } as never);
 
-      const params = {
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "canceled" as StripeSubscriptionStatus,
-      };
+      await repository.updateByStripeSubscriptionId({ stripeSubscriptionId: "sub_1", status: "canceled" });
 
-      const result = await repository.updateByStripeSubscriptionId(params);
-
-      // First call should be findByStripeSubscriptionId
-      expect(neo4jService.readOne).toHaveBeenCalled();
-      // Second call should be update
-      expect(neo4jService.writeOne).toHaveBeenCalled();
-      expect(result).toBeDefined();
-      expect(result?.status).toBe("canceled");
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).toContain(`${DEFAULT_MATCH} {id: $searchValue}`);
+      expect(issued.queryParams).toMatchObject({ searchValue: "s1", status: "canceled" });
     });
 
-    it("should return null when subscription not found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(null);
-
-      const result = await repository.updateByStripeSubscriptionId({
-        stripeSubscriptionId: "sub_nonexistent",
-        status: "canceled",
-      });
-
-      expect(result).toBeNull();
-      expect(neo4jService.readOne).toHaveBeenCalled();
-      expect(neo4jService.writeOne).not.toHaveBeenCalled();
-    });
-
-    it("should pass all update parameters to update method", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "canceled" as StripeSubscriptionStatus,
-        cancelAtPeriodEnd: true,
-        canceledAt: MOCK_DATES.canceledAt,
-        quantity: 3,
-      };
-
-      await repository.updateByStripeSubscriptionId(params);
-
-      // The last writeOne call should have the update query
-      const lastWriteCall = neo4jService.writeOne.mock.calls[neo4jService.writeOne.mock.calls.length - 1];
-      const updateQuery = lastWriteCall[0];
-
-      expect(updateQuery.queryParams).toMatchObject({
-        id: MOCK_SUBSCRIPTION.id,
-        status: "canceled",
-        cancelAtPeriodEnd: true,
-        canceledAt: MOCK_DATES.canceledAt.toISOString(),
-        quantity: 3,
-      });
-    });
-
-    it("should handle update errors after finding subscription", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-      const error = new Error("Update failed");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(
-        repository.updateByStripeSubscriptionId({
-          stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-          status: "canceled",
-        }),
-      ).rejects.toThrow("Update failed");
-    });
-
-    it("should update with only stripeSubscriptionId when no other fields provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.updateByStripeSubscriptionId({
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-      });
-
-      expect(neo4jService.readOne).toHaveBeenCalled();
-      expect(neo4jService.writeOne).toHaveBeenCalled();
+    it("returns null when no subscription has the Stripe id", async () => {
+      await expect(repository.updateByStripeSubscriptionId({ stripeSubscriptionId: "sub_x" })).resolves.toBeNull();
+      expect(neo4j.writeOne).not.toHaveBeenCalled();
     });
   });
 
   describe("updatePrice", () => {
-    it("should delete old USES_PRICE relationship and create new one", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("swaps the price edge after checking the new price", async () => {
+      await repository.updatePrice({ id: "s1", newPriceId: "price-2" });
 
-      const params = {
-        id: TEST_IDS.subscriptionId,
-        newPriceId: "new-price-id",
-      };
-
-      const result = await repository.updatePrice(params);
-
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams).toEqual({
-        id: TEST_IDS.subscriptionId,
-        newPriceId: "new-price-id",
-      });
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName})-[oldRel:USES_PRICE]->(:${stripePriceMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain("DELETE oldRel");
-      expect(mockQuery.query).toContain(`WITH ${stripeSubscriptionMeta.nodeName}, ${stripeCustomerMeta.nodeName}`);
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName} {id: $newPriceId})-[:BELONGS_TO]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(
-        `CREATE (${stripeSubscriptionMeta.nodeName})-[:USES_PRICE]->(${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName})`,
-      );
-      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeSubscriptionMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}_${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}`,
-      );
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_SUBSCRIPTION);
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      expect(issued.query).toContain(`${DEFAULT_MATCH} {id: $searchValue}`);
+      expect(issued.query).toContain("DELETE oldRel");
+      expect(issued.query).toContain("MATCH (newStripePrice:StripePrice {id: $newPriceId})");
+      expect(issued.query).toContain("CREATE (stripeSubscription)-[:USES_PRICE]->(newStripePrice)");
+      expect(issued.queryParams).toMatchObject({ searchValue: "s1", newPriceId: "price-2" });
+      expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [{ id: "price-2", label: "StripePrice" }] });
     });
 
-    it("should update updatedAt timestamp when changing price", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
+    it("refuses an unknown price", async () => {
+      neo4j.validateRelatedNodes.mockRejectedValueOnce(new Error("Related node not found"));
 
-      await repository.updatePrice({
-        id: TEST_IDS.subscriptionId,
-        newPriceId: "new-price-id",
-      });
-
-      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-    });
-
-    it("should handle errors when new price not found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Price not found");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(
-        repository.updatePrice({
-          id: TEST_IDS.subscriptionId,
-          newPriceId: "nonexistent-price",
-        }),
-      ).rejects.toThrow("Price not found");
-    });
-
-    it("should handle errors when subscription not found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Subscription not found");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(
-        repository.updatePrice({
-          id: "nonexistent-subscription",
-          newPriceId: TEST_IDS.priceId,
-        }),
-      ).rejects.toThrow("Subscription not found");
-    });
-
-    it("should use WITH clause to maintain context between operations", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.updatePrice({
-        id: TEST_IDS.subscriptionId,
-        newPriceId: "new-price-id",
-      });
-
-      expect(mockQuery.query).toContain(`WITH ${stripeSubscriptionMeta.nodeName}, ${stripeCustomerMeta.nodeName}`);
-    });
-  });
-
-  describe("delete", () => {
-    it("should delete subscription using DETACH DELETE", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.delete({ id: TEST_IDS.subscriptionId });
-
-      expect(neo4jService.initQuery).toHaveBeenCalledWith();
-      expect(mockQuery.queryParams).toEqual({
-        id: TEST_IDS.subscriptionId,
-      });
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $id})`,
-      );
-      expect(mockQuery.query).toContain(`DETACH DELETE ${stripeSubscriptionMeta.nodeName}`);
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should not return a value after deletion", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      const result = await repository.delete({ id: TEST_IDS.subscriptionId });
-
-      expect(result).toBeUndefined();
-    });
-
-    it("should handle deletion errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Deletion failed");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(repository.delete({ id: TEST_IDS.subscriptionId })).rejects.toThrow("Deletion failed");
-    });
-
-    it("should delete subscription with all relationships using DETACH DELETE", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.delete({ id: TEST_IDS.subscriptionId });
-
-      expect(mockQuery.query).toContain("DETACH DELETE");
+      await expect(repository.updatePrice({ id: "s1", newPriceId: "price-x" })).rejects.toThrow();
+      expect(neo4j.writeOne).not.toHaveBeenCalled();
     });
   });
 
   describe("cancelAllByStripeCustomerId", () => {
-    it("should cancel all active, trialing, and past_due subscriptions", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 3 });
+    it("returns how many subscriptions it cancelled", async () => {
+      neo4j.writeAndReturnMany.mockResolvedValueOnce([{ id: "s1" }, { id: "s2" }] as never);
 
-      const result = await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
+      await expect(repository.cancelAllByStripeCustomerId({ stripeCustomerId: "cus_1" })).resolves.toBe(2);
+    });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith();
-      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
-      expect(mockQuery.queryParams.canceledStatus).toBe("canceled");
-      expect(mockQuery.queryParams.canceledAt).toBeDefined();
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {stripeCustomerId: $stripeCustomerId})`,
+    it("cancels the customer's live subscriptions from the default match", async () => {
+      await repository.cancelAllByStripeCustomerId({ stripeCustomerId: "cus_1" });
+
+      const issued = lastCall(neo4j.writeAndReturnMany.mock.calls);
+      expect(neo4j.initQuery).toHaveBeenLastCalledWith({ serialiser: StripeSubscriptionDescriptor.model });
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      expect(issued.query).toContain(DEFAULT_MATCH);
+      expect(issued.query).toContain("{stripeCustomerId: $stripeCustomerId}");
+      expect(issued.query).toContain("stripeSubscription.status IN ['active', 'trialing', 'past_due']");
+      expect(issued.query).toContain("stripeSubscription.canceledAt = datetime($canceledAt)");
+      expect(issued.queryParams).toMatchObject({ stripeCustomerId: "cus_1", canceledStatus: "canceled" });
+    });
+  });
+
+  describe("cron finders", () => {
+    const now = new Date("2026-11-01T10:00:00.000Z");
+    const before = new Date("2026-11-08T10:00:00.000Z");
+
+    it("findRenewalsForCardCheck skips cancelling subscriptions", async () => {
+      await repository.findRenewalsForCardCheck({ now, before });
+
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain('stripeSubscription.status = "active"');
+      expect(issued.query).toContain("stripeSubscription.cancelAtPeriodEnd = false");
+      expect(issued.query).toContain("stripeSubscription.currentPeriodEnd > datetime($now)");
+      expect(issued.query).toContain("stripeSubscription.currentPeriodEnd <= datetime($before)");
+      expect(issued.query).toContain(
+        "stripeSubscription.cardExpiryCheckedFor IS NULL OR stripeSubscription.cardExpiryCheckedFor <> stripeSubscription.currentPeriodEnd",
       );
-      expect(mockQuery.query).toContain(
-        `WHERE ${stripeSubscriptionMeta.nodeName}.status IN ['active', 'trialing', 'past_due']`,
-      );
-      expect(mockQuery.query).toContain(`SET ${stripeSubscriptionMeta.nodeName}.status = $canceledStatus`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.canceledAt = datetime($canceledAt)`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-      expect(mockQuery.query).toContain(`RETURN count(${stripeSubscriptionMeta.nodeName}) as count`);
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toBe(3);
+      expect(issued.query).toContain('recurringPrice.priceType = "recurring"');
+      expect(issued.queryParams).toMatchObject({ now: now.toISOString(), before: before.toISOString() });
     });
 
-    it("should return 0 when no subscriptions found to cancel", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 0 });
-
-      const result = await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: "cus_no_subscriptions",
-      });
-
-      expect(result).toBe(0);
-    });
-
-    it("should return 0 when result is null", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(null);
-
-      const result = await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(result).toBe(0);
-    });
-
-    it("should set cancelAtPeriodEnd to false for all canceled subscriptions", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 2 });
-
-      await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.cancelAtPeriodEnd = false`);
-    });
-
-    it("should update canceledAt with current datetime", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 1 });
-
-      const beforeTime = new Date();
-      await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-      const afterTime = new Date();
-
-      expect(mockQuery.queryParams.canceledAt).toBeDefined();
-      const canceledAtTime = new Date(mockQuery.queryParams.canceledAt);
-      expect(canceledAtTime.getTime()).toBeGreaterThanOrEqual(beforeTime.getTime());
-      expect(canceledAtTime.getTime()).toBeLessThanOrEqual(afterTime.getTime());
-    });
-
-    it("should update updatedAt timestamp for all canceled subscriptions", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 5 });
-
-      await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain(`${stripeSubscriptionMeta.nodeName}.updatedAt = datetime()`);
-    });
-
-    it("should only cancel subscriptions with specific statuses", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 2 });
-
-      await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain("WHERE");
-      expect(mockQuery.query).toContain("IN ['active', 'trialing', 'past_due']");
-    });
-
-    it("should handle database errors", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      const error = new Error("Bulk update failed");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(
-        repository.cancelAllByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId }),
-      ).rejects.toThrow("Bulk update failed");
-    });
-
-    it("should return count as number from database result", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({ count: 7 });
-
-      const result = await repository.cancelAllByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(typeof result).toBe("number");
-      expect(result).toBe(7);
-    });
-  });
-
-  describe("Edge Cases", () => {
-    it("should handle empty string values in Stripe IDs", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const params = {
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        priceId: TEST_IDS.priceId,
-        stripeSubscriptionId: "",
-        status: "active" as StripeSubscriptionStatus,
-        currentPeriodStart: MOCK_DATES.currentPeriodStart,
-        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
-        cancelAtPeriodEnd: false,
-        quantity: 1,
-      };
-
-      await repository.create(params);
-
-      expect(mockQuery.queryParams.stripeSubscriptionId).toBe("");
-    });
-
-    it("should handle very large quantity values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({
-        id: TEST_IDS.subscriptionId,
-        quantity: 999999,
-      });
-
-      expect(mockQuery.queryParams.quantity).toBe(999999);
-    });
-
-    it("should handle negative quantity values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.update({
-        id: TEST_IDS.subscriptionId,
-        quantity: -1,
-      });
-
-      expect(mockQuery.queryParams.quantity).toBe(-1);
-    });
-
-    it("should handle future dates for trial and period dates", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const futureDate = new Date("2099-12-31T23:59:59Z");
-
-      await repository.update({
-        id: TEST_IDS.subscriptionId,
-        currentPeriodEnd: futureDate,
-        trialEnd: futureDate,
-      });
-
-      expect(mockQuery.queryParams.currentPeriodEnd).toBe(futureDate.toISOString());
-      expect(mockQuery.queryParams.trialEnd).toBe(futureDate.toISOString());
-    });
-
-    it("should handle past dates for canceledAt and pausedAt", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const pastDate = new Date("2000-01-01T00:00:00Z");
-
-      await repository.update({
-        id: TEST_IDS.subscriptionId,
-        canceledAt: pastDate,
-        pausedAt: pastDate,
-      });
-
-      expect(mockQuery.queryParams.canceledAt).toBe(pastDate.toISOString());
-      expect(mockQuery.queryParams.pausedAt).toBe(pastDate.toISOString());
-    });
-
-    it("should handle all possible subscription statuses", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const statuses: StripeSubscriptionStatus[] = [
-        "active",
-        "past_due",
-        "unpaid",
-        "canceled",
-        "incomplete",
-        "incomplete_expired",
-        "trialing",
-        "paused",
-      ];
-
-      for (const status of statuses) {
-        vi.clearAllMocks();
-        neo4jService.initQuery.mockReturnValue(createMockQuery());
-
-        await repository.update({
-          id: TEST_IDS.subscriptionId,
-          status,
-        });
-
-        expect(neo4jService.initQuery().queryParams.status).toBe(status);
-      }
-    });
-  });
-
-  describe("Parameter Validation", () => {
-    it("should preserve exact UUID values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const exactId = "123e4567-e89b-12d3-a456-426614174000";
-
-      await repository.findById({ id: exactId });
-
-      expect(mockQuery.queryParams.id).toBe(exactId);
-    });
-
-    it("should preserve exact Stripe subscription ID format", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const exactStripeId = "sub_1MvN8z3FkJ0LJ6p";
-
-      await repository.findByStripeSubscriptionId({ stripeSubscriptionId: exactStripeId });
-
-      expect(mockQuery.queryParams.stripeSubscriptionId).toBe(exactStripeId);
-    });
-
-    it("should preserve exact datetime values after ISO conversion", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      const exactDate = new Date("2025-06-15T14:30:00.000Z");
-
-      await repository.update({
-        id: TEST_IDS.subscriptionId,
-        currentPeriodStart: exactDate,
-      });
-
-      expect(mockQuery.queryParams.currentPeriodStart).toBe("2025-06-15T14:30:00.000Z");
-    });
-  });
-
-  describe("Service Integration", () => {
-    it("should call Neo4jService.initQuery with serialiser for read operations", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
-
-      await repository.findById({ id: TEST_IDS.subscriptionId });
-      await repository.findByStripeSubscriptionId({ stripeSubscriptionId: TEST_IDS.stripeSubscriptionId });
-      await repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId });
-
-      expect(neo4jService.initQuery).toHaveBeenCalledTimes(3);
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: expect.anything() });
-    });
-
-    it("should call Neo4jService.writeOne for create, update, and delete operations", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.create({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        priceId: TEST_IDS.priceId,
-        stripeSubscriptionId: TEST_IDS.stripeSubscriptionId,
-        status: "active",
-        currentPeriodStart: MOCK_DATES.currentPeriodStart,
-        currentPeriodEnd: MOCK_DATES.currentPeriodEnd,
-        cancelAtPeriodEnd: false,
-        quantity: 1,
-      });
-
-      await repository.update({ id: TEST_IDS.subscriptionId, status: "canceled" });
-      await repository.updatePrice({ id: TEST_IDS.subscriptionId, newPriceId: "new-price" });
-
-      neo4jService.writeOne.mockResolvedValue(undefined);
-      await repository.delete({ id: TEST_IDS.subscriptionId });
-
-      expect(neo4jService.writeOne).toHaveBeenCalledTimes(4);
-    });
-
-    it("should use readMany for findByStripeCustomerId", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_SUBSCRIPTION]);
-
-      await repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId });
-
-      expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should use readOne for findById and findByStripeSubscriptionId", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_SUBSCRIPTION);
-
-      await repository.findById({ id: TEST_IDS.subscriptionId });
-      await repository.findByStripeSubscriptionId({ stripeSubscriptionId: TEST_IDS.stripeSubscriptionId });
-
-      expect(neo4jService.readOne).toHaveBeenCalledTimes(2);
+    it("cron finders refuse to run inside a request", async () => {
+      cls.get.mockImplementation(((key: string) => (key === "companyId" ? "company-1" : undefined)) as never);
+
+      await expect(repository.findRenewalsForCardCheck({ now, before })).rejects.toThrow(/worker cron only/);
+      expect(neo4j.readMany).not.toHaveBeenCalled();
     });
   });
 });

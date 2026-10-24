@@ -399,42 +399,6 @@ await this.stripeSubscription.cancelSubscription("sub_123", true);
 await this.stripeSubscription.cancelSubscription("sub_123", false);
 ```
 
-### pauseSubscription()
-
-Pause a subscription.
-
-**Parameters:**
-
-- `subscriptionId: string` - Subscription ID
-- `resumeAt?: Date` - Optional date to automatically resume
-
-**Returns:** `Promise<Stripe.Subscription>`
-
-**Example:**
-
-```typescript
-const resumeDate = new Date();
-resumeDate.setMonth(resumeDate.getMonth() + 1);
-
-await this.stripeSubscription.pauseSubscription("sub_123", resumeDate);
-```
-
-### resumeSubscription()
-
-Resume a paused subscription.
-
-**Parameters:**
-
-- `subscriptionId: string` - Subscription ID
-
-**Returns:** `Promise<Stripe.Subscription>`
-
-**Example:**
-
-```typescript
-await this.stripeSubscription.resumeSubscription("sub_123");
-```
-
 ### previewProration()
 
 Preview proration amount for a subscription change.

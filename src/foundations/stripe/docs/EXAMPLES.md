@@ -448,34 +448,6 @@ export class SubscriptionManagementService {
   }
 
   /**
-   * Pause subscription temporarily
-   */
-  async pauseSubscription(subscriptionId: string, resumeInDays?: number) {
-    const resumeDate = resumeInDays ? new Date(Date.now() + resumeInDays * 24 * 60 * 60 * 1000) : undefined;
-
-    const pausedSubscription = await this.stripeSubscription.pauseSubscription(subscriptionId, resumeDate);
-
-    return {
-      subscription: pausedSubscription,
-      pausedUntil: resumeDate || "manual resume required",
-      status: pausedSubscription.status,
-    };
-  }
-
-  /**
-   * Resume paused subscription
-   */
-  async resumeSubscription(subscriptionId: string) {
-    const resumedSubscription = await this.stripeSubscription.resumeSubscription(subscriptionId);
-
-    return {
-      subscription: resumedSubscription,
-      status: resumedSubscription.status,
-      nextBillingDate: new Date(resumedSubscription.current_period_end * 1000),
-    };
-  }
-
-  /**
    * Cancel subscription
    */
   async cancelSubscription(params: { subscriptionId: string; immediate: boolean; reason?: string }) {

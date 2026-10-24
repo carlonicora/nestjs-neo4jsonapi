@@ -20,12 +20,16 @@
             {{#if errorMessage}}<p style="margin: 0; font-size: 14px; color: #ef4444;"><strong>Error:</strong> {{errorMessage}}</p>{{/if}}
           </div>
           {{/if}}
+          {{#if keepsAccess}}
+          <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 24px 0;">Nothing has stopped: everything keeps working while we retry. Update your card so it doesn't run out.</p>
+          {{else}}
           <p style="color: #333333; font-size: 16px; line-height: 1.6; margin: 0 0 16px 0;"><strong>What you need to do:</strong></p>
           <ul style="color: #333333; font-size: 16px; line-height: 1.8; margin: 0 0 24px 0; padding-left: 24px;">
             <li>Verify your payment method is up to date</li>
             <li>Ensure sufficient funds are available</li>
             <li>Update your payment information if needed</li>
           </ul>
+          {{/if}}
           {{#if invoiceUrl}}
           <div style="text-align: center; margin: 32px 0 16px 0;">
             <a href="{{invoiceUrl}}" style="display: inline-block; background: #1a1a1a; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: 600; font-size: 16px;">View Invoice</a>

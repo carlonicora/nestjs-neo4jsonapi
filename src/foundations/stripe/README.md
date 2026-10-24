@@ -47,7 +47,7 @@ This billing foundation provides a complete, production-ready Stripe integration
 - ✅ Setup intents for payment method collection
 
 ### Subscription Management
-- ✅ Create, pause, resume, and cancel subscriptions
+- ✅ Create and cancel subscriptions
 - ✅ Plan upgrades/downgrades with proration preview
 - ✅ Trial period support
 - ✅ Subscription status tracking and synchronization
@@ -401,16 +401,6 @@ Cancel a subscription.
 ```
 
 **Response:** Updated subscription with `cancelAtPeriodEnd: true` or `status: canceled`
-
-#### POST `/billing/subscriptions/:subscriptionId/pause`
-Pause a subscription.
-
-**Response:** Updated subscription with `status: paused`
-
-#### POST `/billing/subscriptions/:subscriptionId/resume`
-Resume a paused subscription.
-
-**Response:** Updated subscription with `status: active`
 
 #### POST `/billing/subscriptions/:subscriptionId/change-plan`
 Change subscription to a different price.

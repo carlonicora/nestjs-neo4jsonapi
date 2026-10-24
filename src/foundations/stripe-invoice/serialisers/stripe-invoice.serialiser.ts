@@ -8,7 +8,7 @@ import {
   JsonApiServiceInterface,
 } from "../../../core/jsonapi";
 import { StripeCustomerModel } from "../../stripe-customer";
-import { StripeSubscriptionModel } from "../../stripe-subscription/entities/stripe-subscription.model";
+import { StripeSubscriptionDescriptor } from "../../stripe-subscription/entities/stripe-subscription";
 import { StripeInvoice } from "../entities/stripe-invoice.entity";
 import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
 
@@ -49,7 +49,7 @@ export class StripeInvoiceSerialiser extends AbstractJsonApiSerialiser implement
         data: this.serialiserFactory.create(StripeCustomerModel),
       },
       subscription: {
-        data: this.serialiserFactory.create(StripeSubscriptionModel),
+        data: this.serialiserFactory.create(StripeSubscriptionDescriptor.model),
       },
     };
 

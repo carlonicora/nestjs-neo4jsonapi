@@ -76,6 +76,29 @@ describe("StripeInvoiceApiService", () => {
     });
   });
 
+  describe("hasPaidInvoice", () => {
+    it("hasPaidInvoice is true only for an invoice with amount_paid > 0", async () => {
+      mockStripe.invoices.list.mockResolvedValueOnce({
+        data: [{ ...MOCK_INVOICE, status: "paid", amount_paid: 0 }],
+      } as any);
+      await expect(service.hasPaidInvoice({ stripeCustomerId: TEST_IDS.customerId })).resolves.toBe(false);
+      expect(mockStripe.invoices.list).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: TEST_IDS.customerId, status: "paid" }),
+      );
+
+      mockStripe.invoices.list.mockResolvedValueOnce({ data: [] } as any);
+      await expect(service.hasPaidInvoice({ stripeCustomerId: TEST_IDS.customerId })).resolves.toBe(false);
+
+      mockStripe.invoices.list.mockResolvedValueOnce({
+        data: [
+          { ...MOCK_INVOICE, status: "paid", amount_paid: 0 },
+          { ...MOCK_INVOICE, status: "paid", amount_paid: 900 },
+        ],
+      } as any);
+      await expect(service.hasPaidInvoice({ stripeCustomerId: TEST_IDS.customerId })).resolves.toBe(true);
+    });
+  });
+
   describe("listInvoices", () => {
     const validParams = {
       stripeCustomerId: TEST_IDS.customerId,

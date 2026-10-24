@@ -1,6 +1,8 @@
 import { HttpException, HttpStatus, Inject, Injectable, Logger, forwardRef } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import Stripe from "stripe";
 import { JsonApiListDocument, JsonApiPaginator, JsonApiService, JsonApiSingleDocument } from "../../../core/jsonapi";
+import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { StripeCustomer } from "../../stripe-customer/entities/stripe-customer.entity";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
 import { StripeCustomerApiService } from "../../stripe-customer/services/stripe-customer-api.service";
@@ -9,8 +11,11 @@ import { StripePriceRepository } from "../../stripe-price/repositories/stripe-pr
 import { StripeCouponCodeCheckoutService } from "../../stripe-coupon/services/stripe-coupon-code-checkout.service";
 import { StripeError } from "../../stripe/errors/stripe.errors";
 import { StripePaymentService } from "../../stripe/services/stripe.payment.service";
-import { StripeSubscription, StripeSubscriptionStatus } from "../entities/stripe-subscription.entity";
-import { StripeSubscriptionModel } from "../entities/stripe-subscription.model";
+import {
+  StripeSubscription,
+  StripeSubscriptionDescriptor,
+  StripeSubscriptionStatus,
+} from "../entities/stripe-subscription";
 import { discountFromStripeSubscription } from "../entities/stripe-subscription.discount";
 import { StripeSubscriptionRepository } from "../repositories/stripe-subscription.repository";
 import { StripeSubscriptionApiService } from "./stripe-subscription-api.service";
@@ -27,13 +32,12 @@ export interface CreateSubscriptionResult {
  * StripeSubscriptionAdminService
  *
  * Manages subscription lifecycle for billing customers, coordinating between Stripe and the local database.
- * Provides comprehensive subscription management including creation, cancellation, pausing, resuming,
+ * Provides comprehensive subscription management including creation, cancellation,
  * plan changes, and proration previews.
  *
  * Key Features:
  * - Create subscriptions with optional trials and custom quantities
  * - Cancel subscriptions (immediately or at period end)
- * - Pause and resume subscriptions
  * - Change subscription plans with automatic proration
  * - Preview proration amounts before plan changes
  * - Sync subscription data from Stripe webhooks
@@ -42,20 +46,27 @@ export interface CreateSubscriptionResult {
  * All operations update both Stripe and the local Neo4j database to maintain consistency.
  */
 @Injectable()
-export class StripeSubscriptionAdminService {
+export class StripeSubscriptionAdminService extends AbstractService<
+  StripeSubscription,
+  typeof StripeSubscriptionDescriptor.relationships
+> {
+  protected readonly descriptor = StripeSubscriptionDescriptor;
   private readonly logger = new Logger(StripeSubscriptionAdminService.name);
 
   constructor(
+    jsonApiService: JsonApiService,
     private readonly subscriptionRepository: StripeSubscriptionRepository,
+    clsService: ClsService,
     private readonly stripeCustomerRepository: StripeCustomerRepository,
     private readonly stripePriceRepository: StripePriceRepository,
     private readonly stripeSubscriptionApiService: StripeSubscriptionApiService,
     private readonly stripeCustomerApiService: StripeCustomerApiService,
     private readonly stripePaymentService: StripePaymentService,
-    private readonly jsonApiService: JsonApiService,
     @Inject(forwardRef(() => StripeCouponCodeCheckoutService))
     private readonly stripeCouponCodeCheckoutService: StripeCouponCodeCheckoutService,
-  ) {}
+  ) {
+    super(jsonApiService, subscriptionRepository, clsService, StripeSubscriptionDescriptor.model);
+  }
 
   /**
    * List subscriptions for a company
@@ -93,7 +104,7 @@ export class StripeSubscriptionAdminService {
       status: params.status,
     });
 
-    return this.jsonApiService.buildList(StripeSubscriptionModel, subscriptions, paginator);
+    return this.jsonApiService.buildList(StripeSubscriptionDescriptor.model, subscriptions, paginator);
   }
 
   /**
@@ -118,7 +129,7 @@ export class StripeSubscriptionAdminService {
       throw new HttpException("Subscription does not belong to this company", HttpStatus.FORBIDDEN);
     }
 
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, subscription);
+    return this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, subscription);
   }
 
   /**
@@ -249,7 +260,7 @@ export class StripeSubscriptionAdminService {
     const { clientSecret, paymentIntentId, requiresAction } = subscriptionPaymentConfirmation(stripeSubscription);
 
     const subscriptionItem = stripeSubscription.items.data[0];
-    const subscription = await this.subscriptionRepository.create({
+    const subscription = await this.subscriptionRepository.createSubscription({
       stripeCustomerId: customer.id,
       priceId: params.priceId,
       stripeSubscriptionId: stripeSubscription.id,
@@ -264,7 +275,7 @@ export class StripeSubscriptionAdminService {
       discount: discountFromStripeSubscription(stripeSubscription),
     });
 
-    const data = await this.jsonApiService.buildSingle(StripeSubscriptionModel, subscription);
+    const data = await this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, subscription);
 
     return {
       data,
@@ -318,7 +329,7 @@ export class StripeSubscriptionAdminService {
 
     const updatedSubscription = await this.storeCancellation(params.id, stripeSubscription);
 
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+    return this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, updatedSubscription);
   }
 
   /**
@@ -366,78 +377,6 @@ export class StripeSubscriptionAdminService {
         }
       }
     }
-  }
-
-  /**
-   * Pause a subscription
-   *
-   * @param params - Parameters
-   * @param params.id - Subscription ID
-   * @param params.companyId - Company identifier
-   * @param params.resumeAt - Optional date to automatically resume
-   * @returns JSON:API formatted updated subscription data
-   * @throws {HttpException} NOT_FOUND if subscription not found
-   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
-   */
-  async pauseSubscription(params: { id: string; companyId: string; resumeAt?: Date }): Promise<JsonApiSingleDocument> {
-    const subscription = await this.subscriptionRepository.findById({ id: params.id });
-
-    if (!subscription) {
-      throw new HttpException("Subscription not found", HttpStatus.NOT_FOUND);
-    }
-
-    const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
-    if (!customer || subscription.stripeCustomer?.id !== customer.id) {
-      throw new HttpException("Subscription does not belong to this company", HttpStatus.FORBIDDEN);
-    }
-
-    const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.pauseSubscription(
-      subscription.stripeSubscriptionId,
-      params.resumeAt,
-    );
-
-    const updatedSubscription = await this.subscriptionRepository.update({
-      id: params.id,
-      status: stripeSubscription.status as StripeSubscriptionStatus,
-      pausedAt: new Date(),
-    });
-
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
-  }
-
-  /**
-   * Resume a paused subscription
-   *
-   * @param params - Parameters
-   * @param params.id - Subscription ID
-   * @param params.companyId - Company identifier
-   * @returns JSON:API formatted updated subscription data
-   * @throws {HttpException} NOT_FOUND if subscription not found
-   * @throws {HttpException} FORBIDDEN if subscription doesn't belong to company
-   */
-  async resumeSubscription(params: { id: string; companyId: string }): Promise<JsonApiSingleDocument> {
-    const subscription = await this.subscriptionRepository.findById({ id: params.id });
-
-    if (!subscription) {
-      throw new HttpException("Subscription not found", HttpStatus.NOT_FOUND);
-    }
-
-    const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
-    if (!customer || subscription.stripeCustomer?.id !== customer.id) {
-      throw new HttpException("Subscription does not belong to this company", HttpStatus.FORBIDDEN);
-    }
-
-    const stripeSubscription: Stripe.Subscription = await this.stripeSubscriptionApiService.resumeSubscription(
-      subscription.stripeSubscriptionId,
-    );
-
-    const updatedSubscription = await this.subscriptionRepository.update({
-      id: params.id,
-      status: stripeSubscription.status as StripeSubscriptionStatus,
-      pausedAt: null,
-    });
-
-    return this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
   }
 
   /**
@@ -541,7 +480,7 @@ export class StripeSubscriptionAdminService {
       discount: discountFromStripeSubscription(stripeSubscription),
     });
 
-    const document = await this.jsonApiService.buildSingle(StripeSubscriptionModel, updatedSubscription);
+    const document = await this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, updatedSubscription);
 
     // A trial upgrade charges at once; a card that asks for 3D Secure leaves the
     // invoice open. The browser confirms it with the client secret in meta.
@@ -755,7 +694,7 @@ export class StripeSubscriptionAdminService {
     // Create a "subscription" record to track the purchase
     // Note: stripeSubscriptionId stores the PaymentIntent ID for one-time purchases
     const now = new Date();
-    const subscription = await this.subscriptionRepository.create({
+    const subscription = await this.subscriptionRepository.createSubscription({
       stripeCustomerId: customer.id,
       priceId: priceId,
       stripeSubscriptionId: confirmedPaymentIntent.id, // Store PaymentIntent ID
@@ -767,7 +706,7 @@ export class StripeSubscriptionAdminService {
       quantity: quantity,
     });
 
-    const data = await this.jsonApiService.buildSingle(StripeSubscriptionModel, subscription);
+    const data = await this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, subscription);
 
     return {
       data,

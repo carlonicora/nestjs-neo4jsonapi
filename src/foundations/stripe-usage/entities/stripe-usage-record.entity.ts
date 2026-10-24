@@ -1,5 +1,5 @@
 import { Entity } from "../../../common/abstracts/entity";
-import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../stripe-subscription/entities/stripe-subscription";
 
 export type StripeUsageRecord = Entity & {
   subscriptionId: string;

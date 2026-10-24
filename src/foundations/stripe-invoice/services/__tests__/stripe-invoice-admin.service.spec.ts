@@ -37,7 +37,7 @@ import { JsonApiService } from "../../../../core/jsonapi";
 import { StripeInvoiceApiService } from "../stripe-invoice-api.service";
 import { StripeInvoice, StripeInvoiceStatus } from "../../entities/stripe-invoice.entity";
 import { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
-import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription.entity";
+import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 import { MOCK_INVOICE, TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
 
@@ -79,6 +79,7 @@ describe("StripeInvoiceAdminService", () => {
     updatedAt: new Date("2025-01-01T00:00:00Z"),
     stripeCustomer: MOCK_STRIPE_CUSTOMER,
     stripePrice: {} as StripePrice,
+    company: {} as any,
   };
 
   const MOCK_DB_INVOICE: StripeInvoice = {
