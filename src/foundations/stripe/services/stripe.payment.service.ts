@@ -181,6 +181,84 @@ export class StripePaymentService {
   }
 
   /**
+   * Charge a one-time price through a Stripe invoice, so the customer gets an invoice
+   * and receipt for the purchase.
+   *
+   * Creates a draft invoice, adds the price as an invoice item, finalizes it, copies the
+   * metadata onto the invoice's payment intent and pays it with the given payment method.
+   * When the card needs authentication the payment intent is returned with
+   * `status: "requires_action"` instead of throwing. Any other payment failure voids the
+   * invoice and rethrows.
+   *
+   * @param params - Purchase parameters
+   * @param params.stripeCustomerId - Stripe customer ID
+   * @param params.stripePriceId - Stripe price ID of the one-time price
+   * @param params.quantity - Number of units
+   * @param params.currency - Three-letter currency code
+   * @param params.description - Invoice description
+   * @param params.metadata - Metadata written on the invoice and on its payment intent
+   * @param params.paymentMethodId - Payment method used to pay the invoice
+   * @returns The invoice ID and the invoice's payment intent after the payment attempt
+   * @throws {StripeError} If invoice creation or payment fails
+   */
+  @HandleStripeErrors()
+  async createAndPayOneTimeInvoice(params: {
+    stripeCustomerId: string;
+    stripePriceId: string;
+    quantity: number;
+    currency: string;
+    description: string;
+    metadata: Record<string, string>;
+    paymentMethodId: string;
+  }): Promise<{ invoiceId: string; paymentIntent: Stripe.PaymentIntent }> {
+    const stripe = this.stripeService.getClient();
+
+    const draft = await stripe.invoices.create({
+      customer: params.stripeCustomerId,
+      collection_method: "charge_automatically",
+      auto_advance: false,
+      currency: params.currency,
+      description: params.description,
+      metadata: params.metadata,
+    });
+    const invoiceId = draft.id;
+
+    await stripe.invoiceItems.create({
+      customer: params.stripeCustomerId,
+      invoice: invoiceId,
+      pricing: { price: params.stripePriceId },
+      quantity: params.quantity,
+    });
+
+    const finalized = await stripe.invoices.finalizeInvoice(invoiceId, {
+      expand: ["payments.data.payment.payment_intent"],
+    });
+
+    const invoicePaymentIntent = finalized.payments?.data[0]?.payment.payment_intent;
+    const paymentIntentId = typeof invoicePaymentIntent === "string" ? invoicePaymentIntent : invoicePaymentIntent?.id;
+    if (!paymentIntentId) {
+      await stripe.invoices.voidInvoice(invoiceId);
+      throw new Error(`Invoice ${invoiceId} has no payment intent after finalization`);
+    }
+
+    await stripe.paymentIntents.update(paymentIntentId, { metadata: params.metadata });
+
+    try {
+      await stripe.invoices.pay(invoiceId, { payment_method: params.paymentMethodId });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === "invoice_payment_intent_requires_action") {
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        return { invoiceId, paymentIntent };
+      }
+      await stripe.invoices.voidInvoice(invoiceId);
+      throw error;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    return { invoiceId, paymentIntent };
+  }
+
+  /**
    * Retrieve a payment method by ID
    *
    * @param paymentMethodId - The payment method ID

@@ -178,6 +178,7 @@ describe("StripeSubscriptionAdminService", () => {
     const mockStripePaymentService = {
       createPaymentIntent: vi.fn(),
       confirmPaymentIntent: vi.fn(),
+      createAndPayOneTimeInvoice: vi.fn(),
       retrievePaymentIntent: vi.fn(),
       cancelPaymentIntent: vi.fn(),
       createSetupIntent: vi.fn(),
@@ -661,6 +662,107 @@ describe("StripeSubscriptionAdminService", () => {
         requiresAction: false,
       });
       expect(jsonApiService.buildSingle).toHaveBeenCalledWith(expect.any(Object), MOCK_DB_SUBSCRIPTION);
+    });
+  });
+
+  describe("createSubscription one-time purchase", () => {
+    const MOCK_ONE_TIME_PRICE: StripePrice = {
+      ...MOCK_STRIPE_PRICE,
+      id: "price_db_one_time",
+      stripePriceId: "price_one_time_1",
+      currency: "eur",
+      unitAmount: 500,
+      type: "one_time",
+      priceType: "one_time",
+      recurringInterval: undefined,
+      recurringIntervalCount: undefined,
+      nickname: "Top-up",
+    };
+
+    const oneTimeParams = {
+      companyId: TEST_IDS.companyId,
+      priceId: MOCK_ONE_TIME_PRICE.id,
+      paymentMethodId: TEST_IDS.paymentMethodId,
+      quantity: 3,
+    };
+
+    beforeEach(() => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(MOCK_ONE_TIME_PRICE);
+      subscriptionRepository.create.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+    });
+
+    it("one-time purchase is charged through an invoice and recorded under the payment intent id", async () => {
+      stripePaymentService.createAndPayOneTimeInvoice.mockResolvedValue({
+        invoiceId: "in_1",
+        paymentIntent: { id: "pi_1", status: "succeeded", client_secret: "pi_1_secret" } as Stripe.PaymentIntent,
+      });
+
+      const result = await service.createSubscription(oneTimeParams);
+
+      expect(stripePaymentService.createAndPayOneTimeInvoice).toHaveBeenCalledWith({
+        stripeCustomerId: MOCK_STRIPE_CUSTOMER.stripeCustomerId,
+        stripePriceId: MOCK_ONE_TIME_PRICE.stripePriceId,
+        quantity: 3,
+        currency: MOCK_ONE_TIME_PRICE.currency,
+        description: "One-time purchase: Top-up",
+        metadata: { companyId: TEST_IDS.companyId, priceId: MOCK_ONE_TIME_PRICE.id, type: "one_time_purchase" },
+        paymentMethodId: TEST_IDS.paymentMethodId,
+      });
+      expect(stripePaymentService.createPaymentIntent).not.toHaveBeenCalled();
+      expect(stripePaymentService.confirmPaymentIntent).not.toHaveBeenCalled();
+      expect(stripeSubscriptionApiService.createSubscription).not.toHaveBeenCalled();
+      expect(subscriptionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stripeCustomerId: MOCK_STRIPE_CUSTOMER.id,
+          priceId: MOCK_ONE_TIME_PRICE.id,
+          stripeSubscriptionId: "pi_1",
+          status: "active",
+          quantity: 3,
+        }),
+      );
+      expect(result).toEqual({
+        data: MOCK_JSON_API_RESPONSE,
+        clientSecret: null,
+        paymentIntentId: "pi_1",
+        requiresAction: false,
+      });
+    });
+
+    it("one-time purchase needing card authentication is recorded incomplete with the client secret", async () => {
+      stripePaymentService.createAndPayOneTimeInvoice.mockResolvedValue({
+        invoiceId: "in_1",
+        paymentIntent: { id: "pi_1", status: "requires_action", client_secret: "pi_1_secret" } as Stripe.PaymentIntent,
+      });
+
+      const result = await service.createSubscription(oneTimeParams);
+
+      expect(subscriptionRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ stripeSubscriptionId: "pi_1", status: "incomplete" }),
+      );
+      expect(result).toEqual({
+        data: MOCK_JSON_API_RESPONSE,
+        clientSecret: "pi_1_secret",
+        paymentIntentId: "pi_1",
+        requiresAction: true,
+      });
+      expect(stripePaymentService.createPaymentIntent).not.toHaveBeenCalled();
+      expect(stripePaymentService.confirmPaymentIntent).not.toHaveBeenCalled();
+    });
+
+    it("one-time purchase uses the price description when it has one", async () => {
+      stripePriceRepository.findById.mockResolvedValue({ ...MOCK_ONE_TIME_PRICE, description: "500 credits" });
+      stripePaymentService.createAndPayOneTimeInvoice.mockResolvedValue({
+        invoiceId: "in_1",
+        paymentIntent: { id: "pi_1", status: "succeeded", client_secret: null } as Stripe.PaymentIntent,
+      });
+
+      await service.createSubscription(oneTimeParams);
+
+      expect(stripePaymentService.createAndPayOneTimeInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({ description: "500 credits" }),
+      );
     });
   });
 

@@ -609,10 +609,10 @@ export class StripeSubscriptionAdminService {
   }
 
   /**
-   * Create a one-time purchase using PaymentIntent flow
+   * Create a one-time purchase charged through a Stripe invoice
    *
    * Unlike recurring subscriptions, one-time purchases:
-   * - Use PaymentIntent API instead of Subscription API
+   * - Are charged through a one-off invoice instead of the Subscription API
    * - Don't block or get blocked by existing subscriptions
    * - Store as StripeSubscription record with PaymentIntent ID
    *
@@ -629,24 +629,20 @@ export class StripeSubscriptionAdminService {
   }): Promise<CreateSubscriptionResult> {
     const { customer, price, paymentMethodId, companyId, priceId, quantity } = params;
 
-    // Create PaymentIntent for the one-time amount
-    const paymentIntent = await this.stripePaymentService.createPaymentIntent({
-      amount: (price.unitAmount ?? 0) * quantity,
-      currency: price.currency,
+    // Charge the one-time price through an invoice so the customer gets an invoice
+    const { paymentIntent: confirmedPaymentIntent } = await this.stripePaymentService.createAndPayOneTimeInvoice({
       stripeCustomerId: customer.stripeCustomerId,
+      stripePriceId: price.stripePriceId,
+      quantity,
+      currency: price.currency,
+      description: price.description ?? `One-time purchase: ${price.nickname ?? priceId}`,
       metadata: {
         companyId,
         priceId,
         type: "one_time_purchase",
       },
-      description: price.description ?? `One-time purchase: ${price.nickname ?? priceId}`,
-    });
-
-    // Confirm the PaymentIntent with the payment method
-    const confirmedPaymentIntent = await this.stripePaymentService.confirmPaymentIntent(
-      paymentIntent.id,
       paymentMethodId,
-    );
+    });
 
     // Determine status and if SCA is required
     let clientSecret: string | null = null;

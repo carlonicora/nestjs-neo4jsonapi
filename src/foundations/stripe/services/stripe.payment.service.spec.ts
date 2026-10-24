@@ -593,6 +593,121 @@ describe("StripePaymentService", () => {
     });
   });
 
+  describe("createAndPayOneTimeInvoice", () => {
+    const metadata = { companyId: "company_1", priceId: "price_db_1", type: "one_time_purchase" };
+    const params = {
+      stripeCustomerId: "cus_1",
+      stripePriceId: "price_1",
+      quantity: 2,
+      currency: "eur",
+      description: "One-time purchase: Top-up",
+      metadata,
+      paymentMethodId: "pm_1",
+    };
+
+    let invoiceItemsCreate: ReturnType<typeof vi.fn>;
+    let invoicesCreate: ReturnType<typeof vi.fn>;
+    let invoicesFinalize: ReturnType<typeof vi.fn>;
+    let paymentIntentsUpdate: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      invoiceItemsCreate = vi.fn().mockResolvedValue({ id: "ii_1" });
+      invoicesCreate = vi.fn().mockResolvedValue({ id: "in_1", status: "draft" });
+      invoicesFinalize = vi.fn().mockResolvedValue({
+        id: "in_1",
+        status: "open",
+        payments: { data: [{ payment: { type: "payment_intent", payment_intent: { id: "pi_1" } } }] },
+      });
+      paymentIntentsUpdate = vi.fn().mockResolvedValue({ id: "pi_1" });
+
+      Object.assign(mockStripe, { invoiceItems: { create: invoiceItemsCreate } });
+      Object.assign(mockStripe.invoices, { create: invoicesCreate, finalizeInvoice: invoicesFinalize });
+      Object.assign(mockStripe.paymentIntents, { update: paymentIntentsUpdate });
+    });
+
+    it("createAndPayOneTimeInvoice creates a draft invoice, adds the price item, finalizes, tags the payment intent and pays", async () => {
+      const paymentIntent = { id: "pi_1", status: "succeeded", client_secret: "pi_1_secret" };
+      mockStripe.invoices.pay.mockResolvedValue({ id: "in_1", status: "paid" });
+      mockStripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+      const result = await service.createAndPayOneTimeInvoice(params);
+
+      expect(invoicesCreate).toHaveBeenCalledWith({
+        customer: "cus_1",
+        collection_method: "charge_automatically",
+        auto_advance: false,
+        currency: "eur",
+        description: "One-time purchase: Top-up",
+        metadata,
+      });
+      expect(invoiceItemsCreate).toHaveBeenCalledWith({
+        customer: "cus_1",
+        invoice: "in_1",
+        pricing: { price: "price_1" },
+        quantity: 2,
+      });
+      expect(invoicesFinalize).toHaveBeenCalledWith("in_1", {
+        expand: ["payments.data.payment.payment_intent"],
+      });
+      expect(paymentIntentsUpdate).toHaveBeenCalledWith("pi_1", { metadata });
+      expect(mockStripe.invoices.pay).toHaveBeenCalledWith("in_1", { payment_method: "pm_1" });
+      expect(mockStripe.paymentIntents.retrieve).toHaveBeenCalledWith("pi_1");
+
+      const order = [
+        invoicesCreate.mock.invocationCallOrder[0],
+        invoiceItemsCreate.mock.invocationCallOrder[0],
+        invoicesFinalize.mock.invocationCallOrder[0],
+        paymentIntentsUpdate.mock.invocationCallOrder[0],
+        mockStripe.invoices.pay.mock.invocationCallOrder[0],
+        mockStripe.paymentIntents.retrieve.mock.invocationCallOrder[0],
+      ];
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+
+      expect(result).toEqual({ invoiceId: "in_1", paymentIntent });
+      expect(mockStripe.invoices.voidInvoice).not.toHaveBeenCalled();
+    });
+
+    it("createAndPayOneTimeInvoice reads the payment intent id when the invoice payment is not expanded", async () => {
+      invoicesFinalize.mockResolvedValue({
+        id: "in_1",
+        payments: { data: [{ payment: { type: "payment_intent", payment_intent: "pi_1" } }] },
+      });
+      mockStripe.invoices.pay.mockResolvedValue({ id: "in_1", status: "paid" });
+      mockStripe.paymentIntents.retrieve.mockResolvedValue({ id: "pi_1", status: "succeeded" });
+
+      await service.createAndPayOneTimeInvoice(params);
+
+      expect(paymentIntentsUpdate).toHaveBeenCalledWith("pi_1", { metadata });
+      expect(mockStripe.paymentIntents.retrieve).toHaveBeenCalledWith("pi_1");
+    });
+
+    it("createAndPayOneTimeInvoice returns the payment intent needing action when the card requires authentication", async () => {
+      const paymentIntent = { id: "pi_1", status: "requires_action", client_secret: "pi_1_secret" };
+      mockStripe.invoices.pay.mockRejectedValue({
+        type: "StripeCardError",
+        message: "This payment requires additional user action",
+        code: "invoice_payment_intent_requires_action",
+      });
+      mockStripe.paymentIntents.retrieve.mockResolvedValue(paymentIntent);
+
+      const result = await service.createAndPayOneTimeInvoice(params);
+
+      expect(result).toEqual({ invoiceId: "in_1", paymentIntent });
+      expect(result.paymentIntent.status).toBe("requires_action");
+      expect(mockStripe.invoices.voidInvoice).not.toHaveBeenCalled();
+    });
+
+    it("createAndPayOneTimeInvoice voids the invoice when payment fails for another reason and rethrows", async () => {
+      mockStripe.invoices.pay.mockRejectedValue(STRIPE_CARD_ERROR);
+      mockStripe.invoices.voidInvoice.mockResolvedValue({ id: "in_1", status: "void" });
+
+      await expect(service.createAndPayOneTimeInvoice(params)).rejects.toThrow(StripeError);
+
+      expect(mockStripe.invoices.voidInvoice).toHaveBeenCalledWith("in_1");
+      expect(mockStripe.paymentIntents.retrieve).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Service Integration", () => {
     it("should use StripeService to get client", async () => {
       mockStripe.paymentIntents.create.mockResolvedValue(MOCK_PAYMENT_INTENT);
