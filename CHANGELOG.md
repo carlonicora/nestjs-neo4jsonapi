@@ -1,3 +1,19 @@
+## [7.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.9.0...v7.0.0) (2026-10-24)
+
+### ⚠ BREAKING CHANGES
+
+* **stripe:** @ValidateId and @CacheInvalidate(meta, "<id>") now throw when
+the class loads if the handler does not receive the request (@Req() or
+@Request()). Before, both silently did nothing on such handlers: the cache was
+never invalidated and a URL/body id mismatch was never refused. Add a request
+parameter to every handler that uses them.
+
+Claude-Session: https://claude.ai/code/session_014Ghc7phECDEwwKqYiTKmcA
+
+### 🚀 Features
+
+* **stripe:** discount codes, the founding-GM price and safer subscription payments ([5854301](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/58543011636163c9900d9d200af33f98e4c100c8))
+
 ## [6.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.8.0...v6.9.0) (2026-10-24)
 
 ### 🚀 Features
