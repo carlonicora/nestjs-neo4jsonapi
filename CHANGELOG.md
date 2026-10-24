@@ -1,3 +1,9 @@
+## [7.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v7.0.0...v7.1.0) (2026-10-24)
+
+### 🚀 Features
+
+* **stripe:** @Audit checks the request too, route metadata kept on wrapped handlers, coupon clean-ups ([2ff9841](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2ff984151be85cc1c0878e8bd5a5019167fe404c))
+
 ## [7.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v6.9.0...v7.0.0) (2026-10-24)
 
 ### ⚠ BREAKING CHANGES
