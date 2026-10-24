@@ -172,7 +172,7 @@ describe("AnalyticsAdminController", () => {
     const { controller, service } = makeController();
     const r = reply();
 
-    await controller.getSession(r, "session-1");
+    await controller.getSession({ params: { sessionId: "session-1" } } as any, r, "session-1");
 
     expect(service.findById).toHaveBeenCalledWith({ id: "session-1" });
     expect(r.send).toHaveBeenCalledWith({ data: { id: "session-1" } });

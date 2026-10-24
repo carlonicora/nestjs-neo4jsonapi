@@ -1,17 +1,5 @@
-import { ROUTE_ARGS_METADATA } from "@nestjs/common/constants";
-import { RouteParamtypes } from "@nestjs/common/enums/route-paramtypes.enum";
 import { DataMeta } from "../interfaces/datamodel.interface";
-
-/**
- * Nest passes the request to a handler only when one of its parameters is decorated with
- * `@Req()`. TypeScript applies parameter decorators before method decorators, so the route-args
- * metadata is already written when this runs.
- */
-function receivesRequest(target: any, propertyKey: string): boolean {
-  return Object.keys(Reflect.getMetadata(ROUTE_ARGS_METADATA, target.constructor, propertyKey) ?? {}).some((key) =>
-    key.startsWith(`${RouteParamtypes.REQUEST}:`),
-  );
-}
+import { copyMetadata, receivesRequest } from "./handler-wrapper";
 
 /**
  * Decorator that invalidates cache after the method executes.
@@ -56,6 +44,7 @@ export function CacheInvalidate(meta: DataMeta, id?: string) {
 
       return result;
     };
+    copyMetadata(originalMethod, descriptor.value);
     return descriptor;
   };
 }

@@ -1,9 +1,10 @@
-import { BadRequestException, Controller, Get, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { JwtAuthGuard, RoleId, Roles } from "../../../common";
 import { CoreModuleId } from "../../../common/constants/core-module.ids";
 import { ModuleACL } from "../../../common/decorators/module.decorator";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { StripeCouponCodeAutomaticQueryDTO } from "../dtos/stripe-coupon-code.automatic.query.dto";
 import { STRIPE_COUPON_CODE_AUTOMATIC_SEGMENT, stripeCouponCodeMeta } from "../entities/stripe-coupon-code.meta";
 import { StripeCouponCodeCheckoutService } from "../services/stripe-coupon-code-checkout.service";
 
@@ -25,14 +26,13 @@ export class StripeCouponCodeCheckoutController {
   async findAutomatic(
     @Req() req: AuthenticatedRequest,
     @Res() reply: FastifyReply,
+    // The raw query (unvalidated) keeps the pagination params the whitelisting DTO below strips
     @Query() query: any,
-    @Query("priceId") priceId?: string,
+    @Query() params: StripeCouponCodeAutomaticQueryDTO,
   ) {
-    if (!priceId) throw new BadRequestException("priceId is required");
-
     const response = await this.stripeCouponCodeCheckoutService.findAutomaticForPriceDocument({
       companyId: req.user.companyId,
-      priceId,
+      priceId: params.priceId,
       query,
     });
 

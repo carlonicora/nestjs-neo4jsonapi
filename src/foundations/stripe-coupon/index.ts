@@ -15,6 +15,7 @@ export * from "./dtos/stripe-coupon.post.dto";
 export * from "./dtos/stripe-coupon.patch.dto";
 export * from "./dtos/stripe-coupon-code.post.dto";
 export * from "./dtos/stripe-coupon-code.patch.dto";
+export * from "./dtos/stripe-coupon-code.automatic.query.dto";
 
 // Repositories
 export * from "./repositories/stripe-coupon.repository";

@@ -26,7 +26,7 @@ export const StripeCouponCodeDescriptor = defineEntity<StripeCouponCode>()({
 
   fields: {
     stripePromotionCodeId: { type: "string", required: true },
-    code: { type: "string", required: true },
+    code: { type: "string" },
     active: { type: "boolean", required: true, default: true },
     automatic: { type: "boolean", required: true, default: false },
     firstTimeTransaction: { type: "boolean", required: true, default: false },

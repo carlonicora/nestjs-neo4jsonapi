@@ -83,6 +83,7 @@ describe("RoleController", () => {
 
     const mockAuditService = {
       log: vi.fn(),
+      logRead: vi.fn().mockResolvedValue(undefined),
     };
 
     const mockCacheService = {
@@ -162,7 +163,7 @@ describe("RoleController", () => {
     it("should find role by ID", async () => {
       roleService.findById.mockResolvedValue(mockServiceResponse);
 
-      const result = await controller.findById(MOCK_ROLE_ID);
+      const result = await controller.findById({ params: { roleId: MOCK_ROLE_ID } } as any, MOCK_ROLE_ID);
 
       expect(roleService.findById).toHaveBeenCalledWith({
         roleId: MOCK_ROLE_ID,
@@ -173,13 +174,15 @@ describe("RoleController", () => {
     it("should handle service errors", async () => {
       roleService.findById.mockRejectedValue(new Error("Role not found"));
 
-      await expect(controller.findById(MOCK_ROLE_ID)).rejects.toThrow("Role not found");
+      await expect(controller.findById({ params: { roleId: MOCK_ROLE_ID } } as any, MOCK_ROLE_ID)).rejects.toThrow(
+        "Role not found",
+      );
     });
 
     it("should handle non-existent role", async () => {
       roleService.findById.mockResolvedValue(null);
 
-      const result = await controller.findById("non-existent-id");
+      const result = await controller.findById({ params: { roleId: "non-existent-id" } } as any, "non-existent-id");
 
       expect(result).toBeNull();
     });

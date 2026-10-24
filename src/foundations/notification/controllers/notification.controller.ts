@@ -30,7 +30,6 @@ export class NotificationController {
 
   @Patch(notificationMeta.endpoint)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @CacheInvalidate(notificationMeta, "notificationId")
   async markAsRead(@Req() request: any, @Query() query: any, @Body() body: NotificationPatchListDTO) {
     return await this.service.markAsRead({
       userId: request.user.userId,

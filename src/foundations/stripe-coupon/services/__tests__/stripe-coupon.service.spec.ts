@@ -87,9 +87,8 @@ describe("StripeCouponService", () => {
       expect(api.createCoupon).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Founding GM",
-          percentOff: 20,
-          amountOff: undefined,
-          duration: "forever",
+          discount: { discountType: "percent_off", percentOff: 20 },
+          duration: { duration: "forever" },
           maxRedemptions: 50,
           stripeProductIds: ["prod_1"],
         }),
@@ -128,6 +127,46 @@ describe("StripeCouponService", () => {
 
       expect(codeRepository.create).toHaveBeenCalledWith(expect.objectContaining({ automatic: false }));
       expect(codeRepository.setAutomatic).not.toHaveBeenCalled();
+    });
+
+    it("sends a fixed-amount repeating coupon as one shape and stores it flat", async () => {
+      await service.createWithFirstCode({
+        data: couponData({
+          discountType: "amount_off",
+          percentOff: undefined,
+          amountOff: 500,
+          currency: "EUR",
+          duration: "repeating",
+          durationInMonths: 3,
+        }),
+      });
+
+      expect(api.createCoupon).toHaveBeenCalledWith(
+        expect.objectContaining({
+          discount: { discountType: "amount_off", amountOff: 500, currency: "eur" },
+          duration: { duration: "repeating", durationInMonths: 3 },
+        }),
+      );
+      expect(couponRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          discountType: "amount_off",
+          percentOff: undefined,
+          amountOff: 500,
+          currency: "eur",
+          duration: "repeating",
+          durationInMonths: 3,
+        }),
+      );
+    });
+
+    it("stores a percentage coupon without amount fields or month count", async () => {
+      await service.createWithFirstCode({ data: couponData() });
+
+      const node = couponRepository.create.mock.calls[0][0];
+      expect(node).toMatchObject({ discountType: "percent_off", percentOff: 20, duration: "forever" });
+      expect(node.amountOff).toBeUndefined();
+      expect(node.currency).toBeUndefined();
+      expect(node.durationInMonths).toBeUndefined();
     });
 
     it("createWithFirstCode deletes the Stripe coupon when the code fails", async () => {

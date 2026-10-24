@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import Stripe from "stripe";
 import { HandleStripeErrors } from "../../stripe/errors/stripe.errors";
 import { StripeService } from "../../stripe/services/stripe.service";
-import type { StripeCouponDurationType } from "../entities/stripe-coupon";
+import type { StripeCouponDiscountTerms, StripeCouponDurationTerms } from "../entities/stripe-coupon";
 
 const toUnixSeconds = (date: Date): number => Math.floor(date.getTime() / 1000);
 
@@ -18,18 +18,15 @@ export class StripeCouponApiService {
   constructor(private readonly stripeService: StripeService) {}
 
   /**
-   * Create a coupon. `percentOff` makes a percentage coupon; otherwise `amountOff` + `currency`
-   * make a fixed-amount one.
+   * Create a coupon: a percentage or a fixed amount (with its currency), for once, for ever or
+   * for a number of months.
    */
   @HandleStripeErrors()
   async createCoupon(params: {
     id?: string;
     name: string;
-    percentOff?: number;
-    amountOff?: number;
-    currency?: string;
-    duration: StripeCouponDurationType;
-    durationInMonths?: number;
+    discount: StripeCouponDiscountTerms;
+    duration: StripeCouponDurationTerms;
     stripeProductIds?: string[];
     redeemBy?: Date;
     maxRedemptions?: number;
@@ -38,20 +35,20 @@ export class StripeCouponApiService {
 
     const couponParams: Stripe.CouponCreateParams = {
       name: params.name,
-      duration: params.duration,
+      duration: params.duration.duration,
     };
 
     if (params.id) couponParams.id = params.id;
 
-    if (params.percentOff !== undefined && params.percentOff !== null) {
-      couponParams.percent_off = params.percentOff;
+    if (params.discount.discountType === "percent_off") {
+      couponParams.percent_off = params.discount.percentOff;
     } else {
-      couponParams.amount_off = params.amountOff;
-      couponParams.currency = params.currency;
+      couponParams.amount_off = params.discount.amountOff;
+      couponParams.currency = params.discount.currency;
     }
 
-    if (params.duration === "repeating" && params.durationInMonths !== undefined) {
-      couponParams.duration_in_months = params.durationInMonths;
+    if (params.duration.duration === "repeating") {
+      couponParams.duration_in_months = params.duration.durationInMonths;
     }
 
     if (params.maxRedemptions !== undefined && params.maxRedemptions !== null) {

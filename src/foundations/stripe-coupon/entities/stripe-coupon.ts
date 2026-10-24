@@ -3,8 +3,22 @@ import type { StripeCouponCode } from "./stripe-coupon-code";
 import { stripeCouponCodeMeta } from "./stripe-coupon-code.meta";
 import { stripeCouponMeta } from "./stripe-coupon.meta";
 
-export type StripeCouponDiscountType = "percent_off" | "amount_off";
-export type StripeCouponDurationType = "once" | "repeating" | "forever";
+/**
+ * A coupon's discount, one shape per kind (input side). The entity and its descriptor keep the fields flat.
+ * `amountOff` is in minor units (cents); `currency` is lowercase ISO.
+ */
+export type StripeCouponDiscountTerms =
+  | { discountType: "percent_off"; percentOff: number }
+  | { discountType: "amount_off"; amountOff: number; currency: string };
+
+/**
+ * A coupon's duration, one shape per kind (input side). The entity and its descriptor keep the fields flat.
+ */
+export type StripeCouponDurationTerms =
+  { duration: "once" } | { duration: "forever" } | { duration: "repeating"; durationInMonths: number };
+
+export type StripeCouponDiscountType = StripeCouponDiscountTerms["discountType"];
+export type StripeCouponDurationType = StripeCouponDurationTerms["duration"];
 
 export type StripeCoupon = Entity & {
   stripeCouponId: string;
@@ -30,7 +44,7 @@ export const StripeCouponDescriptor = defineEntity<StripeCoupon>()({
   isCompanyScoped: false,
 
   fields: {
-    stripeCouponId: { type: "string", required: true },
+    stripeCouponId: { type: "string" },
     name: { type: "string", required: true },
     discountType: { type: "string", required: true },
     percentOff: { type: "number" },

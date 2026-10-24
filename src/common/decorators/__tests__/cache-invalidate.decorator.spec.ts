@@ -1,4 +1,5 @@
-import { Body, Delete, Param, Patch, Post, Req, Request, Res } from "@nestjs/common";
+import { Body, Delete, Param, Patch, Post, Req, Request, RequestMethod, Res } from "@nestjs/common";
+import { METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Audit } from "../audit.decorator";
 import { CacheInvalidate } from "../cache-invalidate.decorator";
@@ -174,5 +175,20 @@ describe("CacheInvalidate decorator", () => {
 
       expect(cacheService.invalidateByElement).not.toHaveBeenCalled();
     });
+  });
+
+  it.each([
+    ["with an id", "entityId"],
+    ["without an id", undefined],
+  ])("keeps the route metadata of a route decorator listed below it (%s)", (_label, id) => {
+    class TestController {
+      @CacheInvalidate(meta, id)
+      @Delete("tests/:entityId")
+      async remove(@Req() _req: any) {}
+    }
+
+    const handler = TestController.prototype.remove;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe("tests/:entityId");
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.DELETE);
   });
 });

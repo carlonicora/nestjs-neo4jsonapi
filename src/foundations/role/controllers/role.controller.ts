@@ -47,7 +47,11 @@ export class RoleController {
   // @Roles(UserRole.Administrator, UserRole.CompanyAdministrator)
   @Get(":roleId")
   @Audit(roleMeta, "roleId")
-  async findById(@Param("roleId") roleId: string) {
+  async findById(
+    // The request carries the route param @Audit reads.
+    @Req() _req: AuthenticatedRequest,
+    @Param("roleId") roleId: string,
+  ) {
     return await this.roleService.findById({ roleId: roleId });
   }
 

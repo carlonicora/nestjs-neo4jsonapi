@@ -27,7 +27,7 @@ describe("coupon routes that rely on @CacheInvalidate(meta, id) or @ValidateId",
   });
 
   it("tells a route without @Req() apart", () => {
-    expect(receivesRequest(StripeCouponController, "findById")).toBe(false);
+    expect(receivesRequest(StripeCouponController, "findAll")).toBe(false);
   });
 });
 

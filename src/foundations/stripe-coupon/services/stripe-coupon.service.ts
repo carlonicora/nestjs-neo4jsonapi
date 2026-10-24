@@ -7,11 +7,86 @@ import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service"
 import { StripeProductRepository } from "../../stripe-product/repositories/stripe-product.repository";
 import { StripeCouponPatchDataDTO } from "../dtos/stripe-coupon.patch.dto";
 import { StripeCouponPostAttributesDTO, StripeCouponPostDataDTO } from "../dtos/stripe-coupon.post.dto";
-import { StripeCoupon, StripeCouponDescriptor } from "../entities/stripe-coupon";
+import {
+  StripeCoupon,
+  StripeCouponDescriptor,
+  StripeCouponDiscountTerms,
+  StripeCouponDurationTerms,
+} from "../entities/stripe-coupon";
 import { StripeCouponCodeRepository } from "../repositories/stripe-coupon-code.repository";
 import { StripeCouponRepository } from "../repositories/stripe-coupon.repository";
 import { StripeCouponApiService } from "./stripe-coupon-api.service";
 import { assertCouponCodeAttributes, couponCodeNodeParams, couponCodeStripeParams } from "./stripe-coupon-code.service";
+
+type CouponDiscountAttributes = Pick<
+  StripeCouponPostAttributesDTO,
+  "discountType" | "percentOff" | "amountOff" | "currency"
+>;
+type CouponDurationAttributes = Pick<StripeCouponPostAttributesDTO, "duration" | "durationInMonths">;
+
+/**
+ * The POST's flat discount fields as one discount shape, run before any Stripe call.
+ * Refuses a mixed or incomplete discount; the currency is lowercased.
+ */
+export function toCouponDiscount(attributes: CouponDiscountAttributes): StripeCouponDiscountTerms {
+  if (attributes.discountType === "percent_off") {
+    if (attributes.percentOff === undefined) throw new BadRequestException("A percentage coupon needs percentOff");
+    if (attributes.amountOff !== undefined || attributes.currency !== undefined)
+      throw new BadRequestException("A percentage coupon cannot have amountOff or currency");
+    return { discountType: "percent_off", percentOff: attributes.percentOff };
+  }
+
+  if (attributes.amountOff === undefined || !attributes.currency)
+    throw new BadRequestException("A fixed-amount coupon needs amountOff and currency");
+  if (attributes.percentOff !== undefined)
+    throw new BadRequestException("A fixed-amount coupon cannot have percentOff");
+  return { discountType: "amount_off", amountOff: attributes.amountOff, currency: attributes.currency.toLowerCase() };
+}
+
+/**
+ * The POST's flat duration fields as one duration shape, run before any Stripe call.
+ * Refuses a month count on anything but a repeating coupon.
+ */
+export function toCouponDuration(attributes: CouponDurationAttributes): StripeCouponDurationTerms {
+  if (attributes.duration === "repeating") {
+    if (attributes.durationInMonths === undefined)
+      throw new BadRequestException("A repeating coupon needs durationInMonths");
+    return { duration: "repeating", durationInMonths: attributes.durationInMonths };
+  }
+
+  if (attributes.durationInMonths !== undefined)
+    throw new BadRequestException("durationInMonths applies only to a repeating coupon");
+  return { duration: attributes.duration };
+}
+
+/**
+ * A discount as the coupon node's flat fields; the fields of the other kind are undefined.
+ */
+export function couponDiscountFields(discount: StripeCouponDiscountTerms) {
+  return discount.discountType === "percent_off"
+    ? {
+        discountType: discount.discountType,
+        percentOff: discount.percentOff,
+        amountOff: undefined,
+        currency: undefined,
+      }
+    : {
+        discountType: discount.discountType,
+        percentOff: undefined,
+        amountOff: discount.amountOff,
+        currency: discount.currency,
+      };
+}
+
+/**
+ * A duration as the coupon node's flat fields; `durationInMonths` is undefined unless repeating.
+ */
+export function couponDurationFields(duration: StripeCouponDurationTerms) {
+  return {
+    duration: duration.duration,
+    durationInMonths: duration.duration === "repeating" ? duration.durationInMonths : undefined,
+  };
+}
 
 /**
  * StripeCouponService
@@ -46,7 +121,8 @@ export class StripeCouponService extends AbstractService<StripeCoupon, typeof St
     const attributes = params.data.attributes;
     const firstCode = attributes.firstCode;
 
-    this.assertCouponAttributes(attributes);
+    const discount = toCouponDiscount(attributes);
+    const duration = toCouponDuration(attributes);
     assertCouponCodeAttributes(firstCode);
 
     const stripeProductIds = await this.mapProductIds(attributes.productIds);
@@ -54,11 +130,8 @@ export class StripeCouponService extends AbstractService<StripeCoupon, typeof St
     const stripeCoupon = await this.stripeCouponApiService.createCoupon({
       id: attributes.stripeCouponId,
       name: attributes.name,
-      percentOff: attributes.discountType === "percent_off" ? attributes.percentOff : undefined,
-      amountOff: attributes.discountType === "amount_off" ? attributes.amountOff : undefined,
-      currency: attributes.discountType === "amount_off" ? attributes.currency?.toLowerCase() : undefined,
-      duration: attributes.duration,
-      durationInMonths: attributes.duration === "repeating" ? attributes.durationInMonths : undefined,
+      discount,
+      duration,
       stripeProductIds,
       redeemBy: attributes.redeemBy ? new Date(attributes.redeemBy) : undefined,
       maxRedemptions: attributes.maxRedemptions,
@@ -76,12 +149,8 @@ export class StripeCouponService extends AbstractService<StripeCoupon, typeof St
         id: params.data.id,
         stripeCouponId: stripeCoupon.id,
         name: attributes.name,
-        discountType: attributes.discountType,
-        percentOff: attributes.discountType === "percent_off" ? attributes.percentOff : undefined,
-        amountOff: attributes.discountType === "amount_off" ? attributes.amountOff : undefined,
-        currency: attributes.discountType === "amount_off" ? attributes.currency?.toLowerCase() : undefined,
-        duration: attributes.duration,
-        durationInMonths: attributes.duration === "repeating" ? attributes.durationInMonths : undefined,
+        ...couponDiscountFields(discount),
+        ...couponDurationFields(duration),
         stripeProductIds,
         redeemBy: attributes.redeemBy,
         maxRedemptions: attributes.maxRedemptions,
@@ -146,26 +215,6 @@ export class StripeCouponService extends AbstractService<StripeCoupon, typeof St
     }
 
     return this.findById({ id: coupon.id });
-  }
-
-  private assertCouponAttributes(attributes: StripeCouponPostAttributesDTO): void {
-    if (attributes.discountType === "percent_off") {
-      if (attributes.percentOff === undefined) throw new BadRequestException("A percentage coupon needs percentOff");
-      if (attributes.amountOff !== undefined || attributes.currency !== undefined)
-        throw new BadRequestException("A percentage coupon cannot have amountOff or currency");
-    } else {
-      if (attributes.amountOff === undefined || !attributes.currency)
-        throw new BadRequestException("A fixed-amount coupon needs amountOff and currency");
-      if (attributes.percentOff !== undefined)
-        throw new BadRequestException("A fixed-amount coupon cannot have percentOff");
-    }
-
-    if (attributes.duration === "repeating") {
-      if (attributes.durationInMonths === undefined)
-        throw new BadRequestException("A repeating coupon needs durationInMonths");
-    } else if (attributes.durationInMonths !== undefined) {
-      throw new BadRequestException("durationInMonths applies only to a repeating coupon");
-    }
   }
 
   /**

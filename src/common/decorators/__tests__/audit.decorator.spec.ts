@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Logger } from "@nestjs/common";
+import { Get, Logger, Req, Request, RequestMethod, Res } from "@nestjs/common";
+import { METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { Audit } from "../audit.decorator";
 import { DataMeta } from "../../interfaces/datamodel.interface";
 
@@ -13,7 +14,7 @@ function buildController(logRead: (...args: any[]) => any) {
     auditService = { logRead };
 
     @Audit(meta, "rollId")
-    async findById(req: any) {
+    async findById(@Req() req: any) {
       return { ok: true, id: req.params.rollId };
     }
   }
@@ -84,5 +85,70 @@ describe("Audit decorator", () => {
     await flush();
 
     expect(logRead).not.toHaveBeenCalled();
+  });
+
+  it("throws before the handler runs when the request does not arrive", async () => {
+    const logRead = vi.fn();
+    const work = vi.fn();
+    class TestController {
+      auditService = { logRead };
+
+      @Audit(meta, "rollId")
+      async findById(@Res() _reply: any, @Req() _req: any) {
+        return work();
+      }
+    }
+
+    await expect(new TestController().findById({ send: vi.fn() }, undefined)).rejects.toThrow(
+      '@Audit(meta, "rollId") on TestController.findById did not receive the request',
+    );
+    expect(work).not.toHaveBeenCalled();
+    expect(logRead).not.toHaveBeenCalled();
+  });
+
+  describe("definition-time check", () => {
+    it("throws when the handler does not declare @Req()", () => {
+      expect(() => {
+        class RollController {
+          @Audit(meta, "rollId")
+          async findById(@Res() reply: any) {
+            return reply;
+          }
+        }
+        return RollController;
+      }).toThrow('@Audit(meta, "rollId") on RollController.findById needs the request: add @Req() to its parameters');
+    });
+
+    it("accepts @Request(), Nest's alias of @Req()", () => {
+      expect(() => {
+        class RollController {
+          @Audit(meta, "rollId")
+          async findById(@Res() _reply: any, @Request() _request: any) {}
+        }
+        return RollController;
+      }).not.toThrow();
+    });
+
+    it("does not read meta while the class is defined (circular imports can leave it undefined)", () => {
+      expect(() => {
+        class RollController {
+          @Audit(undefined as any, "rollId")
+          async findById(@Req() _req: any) {}
+        }
+        return RollController;
+      }).not.toThrow();
+    });
+  });
+
+  it("keeps the route metadata of a route decorator listed below it", () => {
+    class RollController {
+      @Audit(meta, "rollId")
+      @Get("rolls/:rollId")
+      async findById(@Req() _req: any) {}
+    }
+
+    const handler = RollController.prototype.findById;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe("rolls/:rollId");
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
   });
 });

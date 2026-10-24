@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   Res,
   UseGuards,
 } from "@nestjs/common";
@@ -17,6 +18,7 @@ import { RoleId } from "../../../common/constants/system.roles";
 import { Roles } from "../../../common/decorators";
 import { Audit } from "../../../common/decorators/audit.decorator";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { AdminJwtAuthGuard, JwtAuthGuard } from "../../../common/guards";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { AuditService } from "../../audit/services/audit.service";
@@ -63,7 +65,12 @@ export class AiConnectionController {
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.Administrator)
   @Audit(aiConnectionMeta, "id")
-  async findById(@Res() reply: FastifyReply, @Param("id") id: string) {
+  async findById(
+    // The request carries the route param @Audit reads.
+    @Req() _req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("id") id: string,
+  ) {
     const response = await this.aiConnectionService.findById({ id });
     reply.send(response);
   }

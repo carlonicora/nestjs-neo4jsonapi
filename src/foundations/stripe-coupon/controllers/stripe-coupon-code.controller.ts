@@ -63,7 +63,12 @@ export class StripeCouponCodeController {
   @Get(`${stripeCouponCodeMeta.endpoint}/:codeId`)
   @Roles(RoleId.Administrator)
   @Audit(stripeCouponCodeMeta, "codeId")
-  async findById(@Res() reply: FastifyReply, @Param("codeId") codeId: string) {
+  async findById(
+    // The request carries the route param @Audit reads.
+    @Req() _req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("codeId") codeId: string,
+  ) {
     return this.crud.findById(reply, codeId);
   }
 

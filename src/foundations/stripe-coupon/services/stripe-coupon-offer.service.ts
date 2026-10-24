@@ -5,7 +5,7 @@ import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.pagi
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { StripeCouponCode, StripeCouponCodeDescriptor } from "../entities/stripe-coupon-code";
-import { StripeCouponOffer, StripeCouponOfferDescriptor } from "../entities/stripe-coupon-offer";
+import { StripeCouponOfferDescriptor, StripeCouponOfferRecord } from "../entities/stripe-coupon-offer";
 import { StripeCouponCodeRepository } from "../repositories/stripe-coupon-code.repository";
 import { placesLeft, placesTotal } from "../utils/places-left";
 
@@ -35,7 +35,7 @@ export class StripeCouponOfferService extends AbstractService<
     return this.jsonApiService.buildList(StripeCouponOfferDescriptor.model, offer ? [offer] : [], paginator);
   }
 
-  private async buildOffer(): Promise<StripeCouponOffer | null> {
+  private async buildOffer(): Promise<StripeCouponOfferRecord | null> {
     const code = await this.stripeCouponCodeRepository.findAutomatic();
     if (!code || !code.active || !code.automatic) return null;
 
@@ -60,6 +60,6 @@ export class StripeCouponOfferService extends AbstractService<
       durationInMonths: coupon.durationInMonths,
       placesLeft: left,
       placesTotal: total,
-    } as StripeCouponOffer;
+    };
   }
 }

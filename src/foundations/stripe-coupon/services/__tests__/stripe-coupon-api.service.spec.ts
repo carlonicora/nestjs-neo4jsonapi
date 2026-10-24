@@ -36,8 +36,8 @@ describe("StripeCouponApiService", () => {
 
       await service.createCoupon({
         name: "Founding GM",
-        percentOff: 20,
-        duration: "forever",
+        discount: { discountType: "percent_off", percentOff: 20 },
+        duration: { duration: "forever" },
         maxRedemptions: 50,
         stripeProductIds: ["prod_1"],
         redeemBy: new Date("2027-01-01T00:00:00Z"),
@@ -63,10 +63,8 @@ describe("StripeCouponApiService", () => {
       await service.createCoupon({
         id: "FIVE-OFF",
         name: "Five off",
-        amountOff: 500,
-        currency: "eur",
-        duration: "repeating",
-        durationInMonths: 3,
+        discount: { discountType: "amount_off", amountOff: 500, currency: "eur" },
+        duration: { duration: "repeating", durationInMonths: 3 },
         stripeProductIds: [],
       });
 

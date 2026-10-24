@@ -1,9 +1,10 @@
-import { BadRequestException, Controller, Get, Param, Query, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
 import { SystemRoles } from "../../../common/constants/system.roles";
 import { Roles } from "../../../common/decorators/roles.decorator";
 import { createCrudHandlers } from "../../../common/handlers/crud.handlers";
 import { Audit } from "../../../common/decorators/audit.decorator";
+import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuditService } from "../../audit/services/audit.service";
 import { analyticsBreakdownMeta } from "../entities/analytics-breakdown.meta";
@@ -136,7 +137,12 @@ export class AnalyticsAdminController {
   @Get(`${analyticsSessionMeta.endpoint}/:sessionId`)
   @Roles(SystemRoles.Administrator)
   @Audit(analyticsSessionMeta, "sessionId")
-  async getSession(@Res() reply: FastifyReply, @Param("sessionId") sessionId: string) {
+  async getSession(
+    // The request carries the route param @Audit reads.
+    @Req() _req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("sessionId") sessionId: string,
+  ) {
     return this.crud.findById(reply, sessionId);
   }
 

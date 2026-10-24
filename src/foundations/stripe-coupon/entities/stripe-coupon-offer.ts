@@ -16,6 +16,12 @@ export type StripeCouponOffer = Entity & {
   placesTotal: number;
 };
 
+/**
+ * The record the offer service hands to the serialiser: the offer without the node bookkeeping
+ * (`type`, `createdAt`, `updatedAt`) a synthetic resource never has.
+ */
+export type StripeCouponOfferRecord = Pick<StripeCouponOffer, "id"> & Omit<StripeCouponOffer, keyof Entity>;
+
 export const StripeCouponOfferDescriptor = defineEntity<StripeCouponOffer>()({
   ...stripeCouponOfferMeta,
   isCompanyScoped: false,

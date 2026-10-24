@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Body, Patch, PreconditionFailedException, Req, Request, Res } from "@nestjs/common";
+import { Body, Patch, PreconditionFailedException, Put, Req, Request, RequestMethod, Res } from "@nestjs/common";
+import { METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
 import { Audit } from "../audit.decorator";
 import { Roles } from "../roles.decorator";
 import { ValidateId } from "../validate-id.decorator";
@@ -408,5 +409,17 @@ describe("ValidateId decorator", () => {
         controller.m(reply, { params: { entityId: TEST_IDS.entityId } }, { data: { id: TEST_IDS.entityId } }),
       ).resolves.toBe("ok");
     });
+  });
+
+  it("keeps the route metadata of a route decorator listed below it", () => {
+    class TestController {
+      @ValidateId("entityId")
+      @Put("tests/:entityId")
+      async update(@Req() _req: any, @Body() _body: any) {}
+    }
+
+    const handler = TestController.prototype.update;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe("tests/:entityId");
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.PUT);
   });
 });

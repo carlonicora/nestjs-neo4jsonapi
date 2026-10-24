@@ -70,7 +70,12 @@ export class HandbookController {
 
   @Get(`${handbookPageMeta.endpoint}/:handbookPageId`)
   @Audit(handbookPageMeta, "handbookPageId")
-  async findById(@Res() reply: FastifyReply, @Param("handbookPageId") handbookPageId: string) {
+  async findById(
+    // The request carries the route param @Audit reads.
+    @Req() _req: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("handbookPageId") handbookPageId: string,
+  ) {
     return this.crud.findById(reply, handbookPageId);
   }
 
