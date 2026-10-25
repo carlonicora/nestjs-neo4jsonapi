@@ -1,3 +1,13 @@
+## [8.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.1.0...v8.2.0) (2026-10-25)
+
+### 🚀 Features
+
+* **analytics:** keep the visit in one session when the visitor accepts cookies ([a767cf7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a767cf7d346ca4a71478f99f406f8891548aa4c1))
+
+### 🐛 Bug Fixes
+
+* **analytics:** count excluded users' public page views as anonymous ([62e0004](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/62e0004f10c1fe88db4cd99c0f46d29a82447246))
+
 ## [8.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.0.0...v8.1.0) (2026-10-25)
 
 ### 🚀 Features
