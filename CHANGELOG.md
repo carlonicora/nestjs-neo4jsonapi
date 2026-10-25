@@ -1,3 +1,9 @@
+## [8.1.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.0.0...v8.1.0) (2026-10-25)
+
+### 🚀 Features
+
+* **analytics:** exclude page views by role or user id ([e0281ee](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e0281eeedec1d0cef96b0e8e09898dc6cff5eb78))
+
 ## [8.0.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v7.1.0...v8.0.0) (2026-10-24)
 
 ### ⚠ BREAKING CHANGES
