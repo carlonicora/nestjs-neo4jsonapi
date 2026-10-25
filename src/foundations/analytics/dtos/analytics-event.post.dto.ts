@@ -3,6 +3,7 @@ import {
   Equals,
   IsDefined,
   IsIn,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -63,6 +64,10 @@ export class AnalyticsEventPostAttributesDTO {
   @IsInt()
   @Min(0)
   screenWidth?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  consentGranted?: boolean;
 }
 
 export class AnalyticsEventPostDataDTO {

@@ -73,6 +73,17 @@ export class AnalyticsProcessor extends WorkerHost {
         receivedAt: input.receivedAt,
       });
 
+      // On the Accept event the visitor may already have an open session under
+      // their cookieless id: hand that id over so the repository can adopt it.
+      const adoptVisitorId =
+        input.consentGranted === true && input.visitorId
+          ? await this.visitorIds.dailyVisitorId({
+              clientIp: input.clientIp,
+              userAgent: input.userAgent,
+              receivedAt: input.receivedAt,
+            })
+          : null;
+
       const resolved: AnalyticsResolvedPageView = {
         visitorId,
         consented,
@@ -89,6 +100,7 @@ export class AnalyticsProcessor extends WorkerHost {
         userId: input.userId ?? null,
         receivedAt: input.receivedAt,
         sessionTimeoutMinutes: this.sessionTimeoutMinutes,
+        adoptVisitorId,
       };
 
       const { sessionId, created } = await this.repository.recordPageView(resolved);

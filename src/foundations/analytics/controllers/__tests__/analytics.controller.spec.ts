@@ -112,6 +112,14 @@ describe("AnalyticsController", () => {
     expect(service.track).toHaveBeenCalledWith(expect.objectContaining(attributes), { roles: undefined });
   });
 
+  it("copies consentGranted from the DTO", async () => {
+    const { controller, service } = makeController();
+
+    await controller.track({ ip: "10.0.0.1", headers: {} } as any, body({ consentGranted: true }));
+
+    expect(service.track).toHaveBeenCalledWith(expect.objectContaining({ consentGranted: true }), { roles: undefined });
+  });
+
   it("stamps receivedAt as an ISO instant", async () => {
     const { controller, service } = makeController();
 

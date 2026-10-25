@@ -24,6 +24,10 @@ describe("AnalyticsEventPostDTO", () => {
   it("rejects an empty path", async () => {
     expect((await validate(body({ path: "", section: "app" }))).length).toBeGreaterThan(0);
   });
+  it("accepts a boolean consentGranted and rejects any other value", async () => {
+    expect(await validate(body({ path: "/x", section: "public", consentGranted: true }))).toHaveLength(0);
+    expect((await validate(body({ path: "/x", section: "public", consentGranted: "yes" }))).length).toBeGreaterThan(0);
+  });
   it("rejects a wrong resource type", async () => {
     const dto = plainToInstance(AnalyticsEventPostDTO, {
       data: { type: "events", attributes: { path: "/x", section: "app" } },

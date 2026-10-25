@@ -31,6 +31,7 @@ describe("AnalyticsSessionRepository", () => {
     userId: null,
     receivedAt: "2026-10-03T10:00:00.000Z",
     sessionTimeoutMinutes: 30,
+    adoptVisitorId: null,
     ...overrides,
   });
 
@@ -89,8 +90,12 @@ describe("AnalyticsSessionRepository", () => {
 
       expect(query).toContain("lastSeenAt >= datetime($receivedAt) - duration({minutes: $sessionTimeoutMinutes})");
       expect(query).toContain("SET analyticsSession.lastSeenAt = datetime($receivedAt)");
-      expect(query).toContain("pageViews = analyticsSession.pageViews + 1");
-      expect(query).toContain("(analyticsPageView:AnalyticsPageView {");
+      expect(query).toContain("coalesce(openSession.id, adopted.id, $newSessionId)");
+      // Counter and page view sit together in the branch that skips only a
+      // repeated page on an adopted session.
+      expect(query).toContain("FOREACH (_ IN CASE WHEN repeatedView THEN [] ELSE [1] END |");
+      expect(query).toContain("SET analyticsSession.pageViews = analyticsSession.pageViews + 1");
+      expect(query).toContain("CREATE (analyticsPageView:AnalyticsPageView {");
       expect(query).toContain("createdAt: datetime($receivedAt)");
       expect(query).toContain("-[:IN_SESSION]->");
       expect(query).toContain("RETURN analyticsSession");
@@ -157,6 +162,39 @@ describe("AnalyticsSessionRepository", () => {
       expect(query).toContain("$userId IS NOT NULL");
       expect(query).toContain("NOT EXISTS { (analyticsSession)-[:BY_USER]->(:User) }");
       expect(queryParams).toMatchObject({ userId: "user-1" });
+    });
+
+    it("binds adoptVisitorId as null when absent", async () => {
+      neo4j.writeOne.mockImplementationOnce(async (q: any) => {
+        written.push({ query: q.query, queryParams: q.queryParams });
+        return { id: "existing-session" };
+      });
+      const { adoptVisitorId: _omit, ...withoutAdopt } = input();
+
+      await repository.recordPageView(withoutAdopt);
+
+      expect(written[0].queryParams).toMatchObject({ adoptVisitorId: null });
+    });
+
+    it("adopts the visitor's open daily session on the Accept event", async () => {
+      neo4j.writeOne.mockImplementationOnce(async (q: any) => {
+        written.push({ query: q.query, queryParams: q.queryParams });
+        return { id: "adopted-session" };
+      });
+
+      const result = await repository.recordPageView(input({ adoptVisitorId: "d:hash" }));
+
+      expect(result).toEqual({ sessionId: "adopted-session", created: false });
+      const { query, queryParams } = written[0];
+      expect(queryParams).toMatchObject({ adoptVisitorId: "d:hash" });
+      expect(query).toContain("openSession IS NULL AND $adoptVisitorId IS NOT NULL");
+      expect(query).toContain("adopted.visitorId = $adoptVisitorId");
+      expect(query).toContain(
+        "adopted.lastSeenAt >= datetime($receivedAt) - duration({minutes: $sessionTimeoutMinutes})",
+      );
+      expect(query).toContain("coalesce(openSession.id, adopted.id, $newSessionId)");
+      expect(query).toContain("analyticsSession.visitorId = $visitorId, analyticsSession.consented = true");
+      expect(query).toContain("adopted IS NOT NULL AND coalesce(lastPath = $path, false) AS repeatedView");
     });
 
     it("throws when the write returns no session", async () => {

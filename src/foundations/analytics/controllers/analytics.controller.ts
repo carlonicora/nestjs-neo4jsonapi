@@ -45,6 +45,7 @@ export class AnalyticsController {
       utmContent: attributes.utmContent,
       visitorId: attributes.visitorId,
       screenWidth: attributes.screenWidth,
+      consentGranted: attributes.consentGranted,
       clientIp: this._clientIp(request),
       userAgent: this._header(request.headers["user-agent"]) ?? "",
       userId: request.user?.userId,

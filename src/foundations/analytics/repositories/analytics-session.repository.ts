@@ -70,6 +70,12 @@ export class AnalyticsSessionRepository extends AbstractRepository<
    * pageViews; then create the page view and, when the event carries a user
    * and the session has none yet, the BY_USER edge.
    *
+   * On the Accept event (adoptVisitorId set) with no open session for the
+   * cookie id, the visitor's open cookieless session is adopted instead of
+   * creating one: it is re-keyed to the cookie id and marked consented. The
+   * re-sent page is skipped when it equals the adopted session's latest page
+   * view, so the page the visitor accepted on is not counted twice.
+   *
    * The new session id is generated here, so `created` is simply whether the
    * returned session carries it. The session is returned through the
    * descriptor serialiser (writeOne + serialiser), never as a raw record.
@@ -98,6 +104,7 @@ export class AnalyticsSessionRepository extends AbstractRepository<
       userId: input.userId ?? null,
       receivedAt: input.receivedAt,
       sessionTimeoutMinutes: input.sessionTimeoutMinutes,
+      adoptVisitorId: input.adoptVisitorId ?? null,
       ...this.getPolyLabelParams(),
     };
 
@@ -107,7 +114,19 @@ export class AnalyticsSessionRepository extends AbstractRepository<
       WITH openSession
       ORDER BY openSession.lastSeenAt DESC
       LIMIT 1
-      MERGE (${nodeName}:${labelName} {id: coalesce(openSession.id, $newSessionId)})
+      OPTIONAL MATCH (adopted:${labelName})
+      WHERE openSession IS NULL AND $adoptVisitorId IS NOT NULL
+        AND adopted.visitorId = $adoptVisitorId
+        AND adopted.lastSeenAt >= datetime($receivedAt) - duration({minutes: $sessionTimeoutMinutes})
+      WITH openSession, adopted
+      ORDER BY adopted.lastSeenAt DESC
+      LIMIT 1
+      OPTIONAL MATCH (lastView:${analyticsPageViewMeta.labelName})-[:IN_SESSION]->(adopted)
+      WITH openSession, adopted, lastView
+      ORDER BY lastView.createdAt DESC
+      LIMIT 1
+      WITH openSession, adopted, lastView.path AS lastPath
+      MERGE (${nodeName}:${labelName} {id: coalesce(openSession.id, adopted.id, $newSessionId)})
       ON CREATE SET ${nodeName} += {
         visitorId: $visitorId,
         consented: $consented,
@@ -125,16 +144,22 @@ export class AnalyticsSessionRepository extends AbstractRepository<
         createdAt: datetime($receivedAt)
       }
       SET ${nodeName}.lastSeenAt = datetime($receivedAt),
-        ${nodeName}.pageViews = ${nodeName}.pageViews + 1,
         ${nodeName}.updatedAt = datetime($receivedAt)
-      CREATE (${analyticsPageViewMeta.nodeName}:${analyticsPageViewMeta.labelName} {
-        id: $pageViewId,
-        path: $path,
-        route: $route,
-        section: $section,
-        createdAt: datetime($receivedAt),
-        updatedAt: datetime($receivedAt)
-      })-[:IN_SESSION]->(${nodeName})
+      FOREACH (_ IN CASE WHEN adopted IS NOT NULL THEN [1] ELSE [] END |
+        SET ${nodeName}.visitorId = $visitorId, ${nodeName}.consented = true
+      )
+      WITH ${nodeName}, adopted IS NOT NULL AND coalesce(lastPath = $path, false) AS repeatedView
+      FOREACH (_ IN CASE WHEN repeatedView THEN [] ELSE [1] END |
+        SET ${nodeName}.pageViews = ${nodeName}.pageViews + 1
+        CREATE (${analyticsPageViewMeta.nodeName}:${analyticsPageViewMeta.labelName} {
+          id: $pageViewId,
+          path: $path,
+          route: $route,
+          section: $section,
+          createdAt: datetime($receivedAt),
+          updatedAt: datetime($receivedAt)
+        })-[:IN_SESSION]->(${nodeName})
+      )
       WITH ${nodeName}
       OPTIONAL MATCH (${userMeta.nodeName}:${userMeta.labelName} {id: $userId})
       WITH ${nodeName}, ${userMeta.nodeName}

@@ -29,6 +29,11 @@ describe("AnalyticsVisitorIdService", () => {
     expect(a.visitorId).toMatch(/^d:[0-9a-f]{64}$/);
     expect(a.visitorId).not.toContain("1.1.1.1");
   });
+  it("dailyVisitorId is the id resolve() gives the same visitor without a cookie", async () => {
+    const request = { clientIp: "1.1.1.1", userAgent: "ua", receivedAt: "2026-10-03T10:00:00Z" };
+    const { visitorId } = await service.resolve(request);
+    await expect(service.dailyVisitorId(request)).resolves.toBe(visitorId);
+  });
   it("yields a different id under a different salt", async () => {
     const a = await service.resolve({ clientIp: "1.1.1.1", userAgent: "ua", receivedAt: "2026-10-03T10:00:00Z" });
     redisClient.get.mockResolvedValueOnce("salt-B");

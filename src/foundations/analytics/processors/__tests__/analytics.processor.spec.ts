@@ -21,6 +21,7 @@ describe("AnalyticsProcessor", () => {
     isBot: ReturnType<typeof vi.fn>;
     deviceType: ReturnType<typeof vi.fn>;
     resolve: ReturnType<typeof vi.fn>;
+    dailyVisitorId: ReturnType<typeof vi.fn>;
   };
   let logger: { debug: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   let clsValues: Record<string, unknown>;
@@ -36,6 +37,7 @@ describe("AnalyticsProcessor", () => {
           ? { visitorId: `c:${input.visitorId}`, consented: true }
           : { visitorId: "d:hash", consented: false },
       ),
+      dailyVisitorId: vi.fn(async () => "d:hash"),
     };
     logger = { debug: vi.fn(), error: vi.fn() };
     clsValues = {};
@@ -111,6 +113,7 @@ describe("AnalyticsProcessor", () => {
       userId: null,
       receivedAt: baseInput.receivedAt,
       sessionTimeoutMinutes: 30,
+      adoptVisitorId: null,
     });
     expect(logger.debug).toHaveBeenCalledWith("analytics pageView visitor=d:hash session=session-1 created=true");
   });
@@ -124,6 +127,32 @@ describe("AnalyticsProcessor", () => {
     expect(repository.recordPageView).toHaveBeenCalledTimes(2);
     expect(repository.recordPageView.mock.calls[0][0]).toMatchObject({ visitorId: `c:${cookieId}`, consented: true });
     expect(repository.recordPageView.mock.calls[1][0]).toMatchObject({ visitorId: "d:hash", consented: false });
+  });
+
+  it("passes the visitor's daily id to adopt on the Accept event", async () => {
+    const cookieId = "0c9e7b1a-1111-4111-8111-111111111111";
+    const resolve = visitorIds.resolve as unknown as (input: object) => Promise<{ visitorId: string }>;
+    const { visitorId: dailyId } = await resolve({ ...baseInput });
+
+    await processor.process(job("analytics:pageView", { ...baseInput, visitorId: cookieId, consentGranted: true }));
+
+    expect(visitorIds.dailyVisitorId).toHaveBeenCalledWith({
+      clientIp: baseInput.clientIp,
+      userAgent: baseInput.userAgent,
+      receivedAt: baseInput.receivedAt,
+    });
+    expect(repository.recordPageView).toHaveBeenCalledWith(
+      expect.objectContaining({ visitorId: `c:${cookieId}`, adoptVisitorId: dailyId }),
+    );
+  });
+
+  it("adopts nothing without the Accept flag", async () => {
+    const cookieId = "0c9e7b1a-1111-4111-8111-111111111111";
+
+    await processor.process(job("analytics:pageView", { ...baseInput, visitorId: cookieId }));
+
+    expect(visitorIds.dailyVisitorId).not.toHaveBeenCalled();
+    expect(repository.recordPageView).toHaveBeenCalledWith(expect.objectContaining({ adoptVisitorId: null }));
   });
 
   it("referrer on the same host is not an external referrer", async () => {

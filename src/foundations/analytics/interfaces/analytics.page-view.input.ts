@@ -18,6 +18,8 @@ export interface AnalyticsPageViewInput {
   /** UUID from the consent cookie; absent when the visitor has not consented. */
   visitorId?: string;
   screenWidth?: number;
+  /** True only on the event sent when the visitor clicks Accept. */
+  consentGranted?: boolean;
   /** First `X-Forwarded-For` hop or `request.ip`. Hashed in the worker, never stored. */
   clientIp: string;
   /** Hashed and classified in the worker, never stored. */

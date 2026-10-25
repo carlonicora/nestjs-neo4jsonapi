@@ -54,12 +54,21 @@ export class AnalyticsVisitorIdService {
   }): Promise<{ visitorId: string; consented: boolean }> {
     if (input.visitorId) return { visitorId: `${COOKIE_ID_PREFIX}${input.visitorId}`, consented: true };
 
+    return { visitorId: await this.dailyVisitorId(input), consented: false };
+  }
+
+  /**
+   * The cookieless `d:` id for this IP and user agent on the day of
+   * `receivedAt`. Also used on the Accept event, so the worker can find the
+   * session the visitor opened before consenting.
+   */
+  async dailyVisitorId(input: { clientIp: string; userAgent: string; receivedAt: string }): Promise<string> {
     const salt = await this.dailySalt(input.receivedAt.slice(0, 10));
     const hash = createHash("sha256")
       .update(salt + input.clientIp + input.userAgent)
       .digest("hex");
 
-    return { visitorId: `${DAILY_HASH_PREFIX}${hash}`, consented: false };
+    return `${DAILY_HASH_PREFIX}${hash}`;
   }
 
   async dailySalt(day: string): Promise<string> {

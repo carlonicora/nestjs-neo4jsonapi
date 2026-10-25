@@ -26,4 +26,10 @@ export interface AnalyticsResolvedPageView {
   /** ISO instant; becomes the page view's `createdAt` and the session's `lastSeenAt`. */
   receivedAt: string;
   sessionTimeoutMinutes: number;
+  /**
+   * The visitor's `d:` id, only on the Accept event; its open session is moved
+   * to `visitorId`. Optional so existing callers of this exported interface
+   * keep compiling; the repository binds `null` when absent.
+   */
+  adoptVisitorId?: string | null;
 }
