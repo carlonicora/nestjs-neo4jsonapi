@@ -65,6 +65,27 @@ export interface AnalyticsModuleConfig {
    * @default "analytics:pageView"
    */
   jobName?: string;
+
+  /**
+   * Role ids whose page views are never recorded. A logged-in caller holding
+   * any one of these roles is dropped before the queue; the endpoint still
+   * answers 202. Anonymous page views are unaffected.
+   *
+   * Not read from env: set it through `bootstrap({ analytics })`.
+   *
+   * @default []
+   */
+  excludedRoleIds?: string[];
+
+  /**
+   * User ids whose page views are never recorded. Dropped before the queue,
+   * exactly like `excludedRoleIds`.
+   *
+   * Not read from env: set it through `bootstrap({ analytics })`.
+   *
+   * @default []
+   */
+  excludedUserIds?: string[];
 }
 
 /**
@@ -91,4 +112,6 @@ export const DEFAULT_ANALYTICS_CONFIG: Required<AnalyticsModuleConfig> = {
   sessionTimeoutMinutes: 30,
   queueId: QueueId.ANALYTICS,
   jobName: "analytics:pageView",
+  excludedRoleIds: [],
+  excludedUserIds: [],
 };

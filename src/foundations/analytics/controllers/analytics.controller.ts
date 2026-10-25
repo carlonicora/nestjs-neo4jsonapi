@@ -29,7 +29,7 @@ export class AnalyticsController {
   @Throttle({ default: { limit: 60, ttl: 60000 }, ip: { limit: 60, ttl: 60000 } })
   @HttpCode(HttpStatus.ACCEPTED)
   async track(
-    @Req() request: FastifyRequest & { user?: { userId?: string } },
+    @Req() request: FastifyRequest & { user?: { userId?: string; roles?: string[] } },
     @Body() body: AnalyticsEventPostDTO,
   ): Promise<void> {
     const attributes = body.data.attributes;
@@ -51,7 +51,7 @@ export class AnalyticsController {
       receivedAt: new Date().toISOString(),
     };
 
-    await this.analyticsService.track(input);
+    await this.analyticsService.track(input, { roles: request.user?.roles });
   }
 
   /**

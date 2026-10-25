@@ -211,6 +211,9 @@ export interface BootstrapOptions {
    * ```typescript
    * // Force analytics off whatever ANALYTICS_ENABLED says
    * analytics: { enabled: false }
+   *
+   * // Keep ANALYTICS_ENABLED in charge; never record these roles or users
+   * analytics: { excludedRoleIds: ["<role-id>"], excludedUserIds: ["<user-id>"] }
    * ```
    */
   analytics?: AnalyticsModuleConfig;

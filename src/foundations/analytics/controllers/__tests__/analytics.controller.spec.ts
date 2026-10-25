@@ -43,7 +43,25 @@ describe("AnalyticsController", () => {
         userId: "u1",
         receivedAt: expect.any(String),
       }),
+      { roles: undefined },
     );
+  });
+
+  it("passes the token roles to the service", async () => {
+    const { controller, service } = makeController();
+    const request = { ip: "10.0.0.1", headers: {}, user: { userId: "u1", roles: ["r1"] } } as any;
+
+    await controller.track(request, body());
+
+    expect(service.track).toHaveBeenCalledWith(expect.objectContaining({ userId: "u1" }), { roles: ["r1"] });
+  });
+
+  it("passes undefined roles for an anonymous request", async () => {
+    const { controller, service } = makeController();
+
+    await controller.track({ ip: "10.0.0.1", headers: {} } as any, body());
+
+    expect(service.track.mock.calls[0][1]).toEqual({ roles: undefined });
   });
 
   it("takes the first forwarded hop", async () => {
@@ -91,7 +109,7 @@ describe("AnalyticsController", () => {
 
     await controller.track(request, body(attributes));
 
-    expect(service.track).toHaveBeenCalledWith(expect.objectContaining(attributes));
+    expect(service.track).toHaveBeenCalledWith(expect.objectContaining(attributes), { roles: undefined });
   });
 
   it("stamps receivedAt as an ISO instant", async () => {

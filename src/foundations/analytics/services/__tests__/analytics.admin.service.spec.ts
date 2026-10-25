@@ -76,6 +76,8 @@ function makeService(
     sessionTimeoutMinutes: 30,
     queueId: "analytics",
     jobName: "analytics:pageView",
+    excludedRoleIds: [],
+    excludedUserIds: [],
   };
 
   const service = new AnalyticsAdminService(

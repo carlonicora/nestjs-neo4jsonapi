@@ -44,6 +44,8 @@ vi.mock("../interfaces/analytics.config.interface", () => ({
     sessionTimeoutMinutes: 30,
     queueId: "analytics",
     jobName: "analytics:pageView",
+    excludedRoleIds: [],
+    excludedUserIds: [],
   },
 }));
 vi.mock("../repositories/analytics-session.repository", () => ({ AnalyticsSessionRepository: class {} }));
@@ -152,6 +154,8 @@ describe("AnalyticsModule.forRoot", () => {
       sessionTimeoutMinutes: 30,
       queueId: "analytics",
       jobName: "analytics:pageView",
+      excludedRoleIds: [],
+      excludedUserIds: [],
     });
 
     const alias = providers.find((p) => p.provide === ANALYTICS_QUEUE);
@@ -190,6 +194,8 @@ describe("AnalyticsModule.forRoot", () => {
       sessionTimeoutMinutes: 30,
       queueId: "custom-analytics",
       jobName: "analytics:pageView",
+      excludedRoleIds: [],
+      excludedUserIds: [],
     });
     expect(providers.find((p) => p.provide === ANALYTICS_QUEUE).useExisting).toBe(getQueueToken("custom-analytics"));
   });
@@ -208,7 +214,20 @@ describe("AnalyticsModule.forRoot", () => {
       sessionTimeoutMinutes: 30,
       queueId: "analytics",
       jobName: "analytics:pageView",
+      excludedRoleIds: [],
+      excludedUserIds: [],
     });
+  });
+
+  it("keeps ANALYTICS_ENABLED in charge when only the exclusion lists are passed", () => {
+    vi.stubEnv("ANALYTICS_ENABLED", "true");
+
+    const module = AnalyticsModule.forRoot({ excludedRoleIds: ["r"] });
+    const config = (module.providers as any[]).find((p) => p.provide === ANALYTICS_CONFIG).useValue;
+
+    expect(config.enabled).toBe(true);
+    expect(config.excludedRoleIds).toEqual(["r"]);
+    expect(config.excludedUserIds).toEqual([]);
   });
 
   it("is inert when ANALYTICS_ENABLED is unset and no config is passed", () => {
