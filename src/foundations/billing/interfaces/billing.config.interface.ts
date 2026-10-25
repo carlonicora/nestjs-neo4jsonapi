@@ -7,7 +7,16 @@ export type BillingEmailKey = "paymentFailed" | "cardExpiring" | "subscriptionEn
  * App-relative paths the billing emails link to. The sender prefixes each with
  * the app URL (`app.url`, trailing slash removed).
  */
-export type BillingLinks = { billing: string; paymentMethod: string; subscribe: string; resubscribe: string };
+export type BillingLinks = {
+  billing: string;
+  paymentMethod: string;
+  subscribe: string;
+  resubscribe: string;
+  /** Opens plan change on the current subscription (credit warning: subscribe / move up a plan). */
+  changePlan: string;
+  /** Opens credit pack purchase (credit warning: add a credit pack). */
+  buyCredits: string;
+};
 
 /**
  * One email job the library sender handles: the template id and the mapping from
@@ -40,6 +49,13 @@ export interface BillingModuleConfig {
   deletion?: { afterSubscriptionEndedDays?: number };
   /** App-relative paths used in billing emails. */
   links?: Partial<BillingLinks>;
+  /**
+   * Warn a company once per credit period, in the app and by email, when its
+   * credits left fall to `100 - thresholdPercent`% of what it was granted.
+   * OFF by default: with it off nothing runs and no Company field is written.
+   * `thresholdPercent` defaults to 80.
+   */
+  creditWarning?: { enabled?: boolean; thresholdPercent?: number };
 }
 
 export type ResolvedBillingConfig = {
@@ -48,6 +64,7 @@ export type ResolvedBillingConfig = {
   failedCardGrace: boolean;
   deletion: { afterSubscriptionEndedDays: number };
   links: BillingLinks;
+  creditWarning: { enabled: boolean; thresholdPercent: number };
 };
 
 export const DEFAULT_BILLING_CONFIG: ResolvedBillingConfig = {
@@ -60,7 +77,10 @@ export const DEFAULT_BILLING_CONFIG: ResolvedBillingConfig = {
     paymentMethod: "/settings/billing",
     subscribe: "/settings/billing?action=subscribe",
     resubscribe: "/settings/billing",
+    changePlan: "/settings/billing?action=change-plan",
+    buyCredits: "/settings/billing?action=subscribe",
   },
+  creditWarning: { enabled: false, thresholdPercent: 80 },
 };
 
 export const BILLING_CONFIG = Symbol("BILLING_CONFIG");
@@ -82,6 +102,11 @@ export function resolveBillingConfig(config?: BillingModuleConfig): ResolvedBill
         config?.deletion?.afterSubscriptionEndedDays ?? DEFAULT_BILLING_CONFIG.deletion.afterSubscriptionEndedDays,
     },
     links: { ...DEFAULT_BILLING_CONFIG.links, ...stripUndefined(config?.links) },
+    creditWarning: {
+      enabled: config?.creditWarning?.enabled ?? DEFAULT_BILLING_CONFIG.creditWarning.enabled,
+      thresholdPercent:
+        config?.creditWarning?.thresholdPercent ?? DEFAULT_BILLING_CONFIG.creditWarning.thresholdPercent,
+    },
   };
 }
 

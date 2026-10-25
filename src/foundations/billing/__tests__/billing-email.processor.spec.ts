@@ -367,6 +367,72 @@ describe("BillingEmailProcessor", () => {
     );
   });
 
+  it("maps credit-warning → creditWarning with the offer flags, isYearly and both links", async () => {
+    const { processor, emailService } = setup({
+      config: { links: { changePlan: "/settings?section=billing&action=change-plan" } },
+    });
+
+    await processor.process(
+      job("credit-warning", {
+        to: "gm@example.com",
+        customerName: "Ada",
+        offer: "upgrade-or-pack",
+        interval: "year",
+        locale: "it",
+      }),
+    );
+
+    expect(emailService.sendEmail).toHaveBeenCalledWith(
+      "creditWarning",
+      expect.objectContaining({
+        to: "gm@example.com",
+        customerName: "Ada",
+        offerSubscribe: false,
+        offerUpgrade: true,
+        offerPack: false,
+        isYearly: true,
+        changePlanUrl: `${APP_URL}/settings?section=billing&action=change-plan`,
+        buyCreditsUrl: `${APP_URL}/settings/billing?action=subscribe`,
+        locale: "it",
+      }),
+      "it",
+    );
+  });
+
+  it("maps credit-warning offers subscribe and pack, monthly", async () => {
+    const { processor, emailService } = setup();
+
+    await processor.process(
+      job("credit-warning", {
+        to: "gm@example.com",
+        customerName: "Ada",
+        offer: "subscribe",
+        interval: "month",
+        locale: "en",
+      }),
+    );
+    expect(emailService.sendEmail).toHaveBeenLastCalledWith(
+      "creditWarning",
+      expect.objectContaining({ offerSubscribe: true, offerUpgrade: false, offerPack: false, isYearly: false }),
+      "en",
+    );
+
+    await processor.process(
+      job("credit-warning", {
+        to: "gm@example.com",
+        customerName: "Ada",
+        offer: "pack",
+        interval: "month",
+        locale: "en",
+      }),
+    );
+    expect(emailService.sendEmail).toHaveBeenLastCalledWith(
+      "creditWarning",
+      expect.objectContaining({ offerSubscribe: false, offerUpgrade: false, offerPack: true }),
+      "en",
+    );
+  });
+
   it("extra job → uses the app's definition", async () => {
     const toTemplateData = vi.fn((payload: Record<string, unknown>) => ({ cullName: payload.cullName }));
     const { processor, emailService } = setup({

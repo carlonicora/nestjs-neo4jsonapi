@@ -1,5 +1,6 @@
 import type { Entity } from "../../../common/abstracts/entity";
 import { defineEntity } from "../../../common/helpers/define-entity";
+import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning.interface";
 import type { Feature } from "../../feature/entities/feature";
 import type { Module } from "../../module/entities/module.entity";
 import { featureMeta } from "../../feature/entities/feature.meta";
@@ -39,6 +40,12 @@ export type Company = Entity & {
 
   // Referral system
   referralCode?: string; // UUID referral code
+
+  // Credit warning (opt-in via billing.creditWarning.enabled; never written when off)
+  creditsGrantedThisPeriod?: number;
+  creditWarningSentAt?: Date;
+  creditWarningDismissedAt?: Date;
+  creditWarningOffer?: CreditWarningOffer;
 
   // Address fields
   legal_address?: string;
@@ -100,6 +107,10 @@ export const CompanyDescriptor = defineEntity<Company>()({
     scheduledDeletionAt: { type: "datetime" },
     deactivationReason: { type: "string" },
     referralCode: { type: "string" },
+    creditsGrantedThisPeriod: { type: "number" },
+    creditWarningSentAt: { type: "datetime" },
+    creditWarningDismissedAt: { type: "datetime" },
+    creditWarningOffer: { type: "string" },
     legal_address: { type: "string" },
     street_number: { type: "string" },
     street: { type: "string" },

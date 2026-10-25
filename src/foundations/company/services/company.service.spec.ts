@@ -23,7 +23,11 @@ import { WebSocketService } from "../../../core/websocket/services/websocket.ser
 import { QueueId } from "../../../config/enums/queue.id";
 import { Company } from "../entities/company";
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { COMPANY_AI_DISABLED_EVENT } from "../events/company.events";
+import {
+  COMPANY_AI_DISABLED_EVENT,
+  COMPANY_CREDITS_GRANTED_EVENT,
+  COMPANY_CREDITS_USED_EVENT,
+} from "../events/company.events";
 
 describe("CompanyService", () => {
   let service: CompanyService;
@@ -413,6 +417,28 @@ describe("CompanyService", () => {
 
       expect(mockRepository.updateTokens).toHaveBeenCalled();
     });
+
+    it("updateTokensAndAiFlag emits COMPANY_CREDITS_GRANTED_EVENT only when availableMonthlyCredits is passed", async () => {
+      mockRepository.findByCompanyId.mockResolvedValue({ id: MOCK_COMPANY_ID, aiEnabled: true } as Company);
+
+      await service.updateTokensAndAiFlag({
+        companyId: MOCK_COMPANY_ID,
+        monthlyCredits: 200,
+        availableMonthlyCredits: 200,
+        aiEnabled: true,
+      });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(COMPANY_CREDITS_GRANTED_EVENT, {
+        companyId: MOCK_COMPANY_ID,
+        grantedCredits: 200,
+      });
+
+      mockEventEmitter.emit.mockClear();
+
+      await service.updateTokensAndAiFlag({ companyId: MOCK_COMPANY_ID, monthlyCredits: 200, aiEnabled: true });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalledWith(COMPANY_CREDITS_GRANTED_EVENT, expect.anything());
+    });
   });
 
   describe("useCredits", () => {
@@ -461,6 +487,42 @@ describe("CompanyService", () => {
       await service.useCredits({ credits: 0 });
 
       expect(mockWebSocketService.sendMessageToCompany).not.toHaveBeenCalled();
+    });
+
+    it("useCredits emits COMPANY_CREDITS_USED_EVENT with the new balances", async () => {
+      mockClsService.get.mockReturnValue("c1");
+      mockRepository.useCredits.mockResolvedValue({ availableMonthlyCredits: 30, availableExtraCredits: 0 });
+
+      await service.useCredits({ credits: 5 });
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(COMPANY_CREDITS_USED_EVENT, {
+        companyId: "c1",
+        availableMonthlyCredits: 30,
+        availableExtraCredits: 0,
+      });
+    });
+
+    it("useCredits does not emit when nothing was consumed", async () => {
+      mockClsService.get.mockReturnValue("c1");
+      mockRepository.useCredits.mockResolvedValue(undefined);
+
+      await service.useCredits({ credits: 0 });
+
+      expect(mockEventEmitter.emit).not.toHaveBeenCalledWith(COMPANY_CREDITS_USED_EVENT, expect.anything());
+    });
+
+    it("useCredits emits even when the websocket push throws", async () => {
+      mockClsService.get.mockReturnValue("c1");
+      mockRepository.useCredits.mockResolvedValue({ availableMonthlyCredits: 30, availableExtraCredits: 0 });
+      mockWebSocketService.sendMessageToCompany.mockRejectedValueOnce(new Error("socket gone"));
+
+      await expect(service.useCredits({ credits: 5 })).rejects.toThrow("socket gone");
+
+      expect(mockEventEmitter.emit).toHaveBeenCalledWith(COMPANY_CREDITS_USED_EVENT, {
+        companyId: "c1",
+        availableMonthlyCredits: 30,
+        availableExtraCredits: 0,
+      });
     });
   });
 

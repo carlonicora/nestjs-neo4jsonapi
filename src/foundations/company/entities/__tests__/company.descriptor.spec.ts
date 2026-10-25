@@ -35,4 +35,11 @@ describe("CompanyDescriptor wire surface", () => {
     expect(CompanyDescriptor.relationships.module.dtoKey).toBe("modules");
     expect(CompanyDescriptor.relationships.module.relationship).toBe("HAS_MODULE");
   });
+
+  it("declares the credit-warning fields", () => {
+    expect(CompanyDescriptor.fields.creditWarningSentAt?.type).toBe("datetime");
+    expect(CompanyDescriptor.fields.creditWarningDismissedAt?.type).toBe("datetime");
+    expect(CompanyDescriptor.fields.creditsGrantedThisPeriod?.type).toBe("number");
+    expect(CompanyDescriptor.fields.creditWarningOffer?.type).toBe("string");
+  });
 });

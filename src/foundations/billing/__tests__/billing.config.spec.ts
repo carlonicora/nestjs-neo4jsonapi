@@ -46,4 +46,22 @@ describe("resolveBillingConfig", () => {
     expect(DEFAULT_BILLING_CONFIG.emails.paymentFailed).toBe(true);
     expect(DEFAULT_BILLING_CONFIG.links.billing).toBe("/settings/billing");
   });
+  it("keeps the credit warning off with an 80% threshold and the two new links by default", () => {
+    const config = resolveBillingConfig();
+
+    expect(config.creditWarning).toEqual({ enabled: false, thresholdPercent: 80 });
+    expect(config.links.changePlan).toBe("/settings/billing?action=change-plan");
+    expect(config.links.buyCredits).toBe("/settings/billing?action=subscribe");
+  });
+
+  it("merges creditWarning key by key", () => {
+    expect(resolveBillingConfig({ creditWarning: { enabled: true } }).creditWarning).toEqual({
+      enabled: true,
+      thresholdPercent: 80,
+    });
+    expect(resolveBillingConfig({ creditWarning: { thresholdPercent: 90 } }).creditWarning).toEqual({
+      enabled: false,
+      thresholdPercent: 90,
+    });
+  });
 });

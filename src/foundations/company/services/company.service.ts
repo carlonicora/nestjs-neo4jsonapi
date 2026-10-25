@@ -21,7 +21,14 @@ import { S3ClientKeyService } from "../../s3/services/s3-client-key.service";
 import { CompanyConfigurationsPutDataDTO } from "../dtos/company.configurations.put.dto";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CompanyDeletionHandler, COMPANY_DELETION_HANDLER } from "../interfaces/company-deletion-handler.interface";
-import { COMPANY_AI_DISABLED_EVENT, CompanyAiDisabledPayload } from "../events/company.events";
+import {
+  COMPANY_AI_DISABLED_EVENT,
+  COMPANY_CREDITS_GRANTED_EVENT,
+  COMPANY_CREDITS_USED_EVENT,
+  CompanyAiDisabledPayload,
+  CompanyCreditsGrantedPayload,
+  CompanyCreditsUsedPayload,
+} from "../events/company.events";
 import {
   JsonApiListDocument,
   JsonApiSingleDocument,
@@ -188,6 +195,14 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
       aiEnabled: params.aiEnabled,
     });
 
+    // A monthly grant starts a new credit period (renewal, trial grant, plan change).
+    if (params.availableMonthlyCredits !== undefined) {
+      this.eventEmitter?.emit(COMPANY_CREDITS_GRANTED_EVENT, {
+        companyId: params.companyId,
+        grantedCredits: params.availableMonthlyCredits,
+      } satisfies CompanyCreditsGrantedPayload);
+    }
+
     if (previous && !params.aiEnabled) {
       this.eventEmitter?.emit(COMPANY_AI_DISABLED_EVENT, {
         companyId: params.companyId,
@@ -222,6 +237,13 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     // directly; they must never need to refetch the user to read a credit count.
     const companyId = this.cls.get("companyId");
     if (companyId) {
+      // Emitted BEFORE the push: the push is not wrapped and can throw.
+      this.eventEmitter?.emit(COMPANY_CREDITS_USED_EVENT, {
+        companyId,
+        availableMonthlyCredits: balances.availableMonthlyCredits,
+        availableExtraCredits: balances.availableExtraCredits,
+      } satisfies CompanyCreditsUsedPayload);
+
       await this.webSocketService.sendMessageToCompany(companyId, "company:credits_updated", {
         type: "company:credits_updated",
         companyId,

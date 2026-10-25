@@ -11,7 +11,7 @@ import { ClsService } from "nestjs-cls";
 import { CompanyRepository } from "./company.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
-import { Company } from "../entities/company";
+import { Company, CompanyDescriptor } from "../entities/company";
 
 describe("CompanyRepository", () => {
   let repository: CompanyRepository;
@@ -800,6 +800,111 @@ describe("CompanyRepository", () => {
       const result = await repository.findCompaniesForDeletionWarning({ daysBeforeDeletion: 7 });
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe("credit warning writes", () => {
+    let capturedQuery: any;
+
+    beforeEach(() => {
+      capturedQuery = undefined;
+      mockNeo4jService.initQuery.mockImplementation(() => ({
+        query: "",
+        queryParams: { companyId: MOCK_COMPANY_ID, currentUserId: null },
+      }));
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+        return null;
+      });
+      mockClsService.get.mockReturnValue(MOCK_COMPANY_ID);
+    });
+
+    it("markCreditWarningSent locks, re-checks, then writes", async () => {
+      mockNeo4jService.writeOne.mockImplementation(async (query: any) => {
+        capturedQuery = query;
+        return MOCK_COMPANY;
+      });
+
+      const result = await repository.markCreditWarningSent({ thresholdPercent: 80, offer: "upgrade-or-pack" });
+
+      expect(result).toEqual(MOCK_COMPANY);
+      expect(mockNeo4jService.writeOne).toHaveBeenCalledTimes(1);
+      expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
+
+      const cypher: string = capturedQuery.query;
+      const lockAt = cypher.indexOf("SET company._creditWarningLock = true");
+      const sentNullAt = cypher.indexOf("creditWarningSentAt IS NULL");
+      const grantedAt = cypher.indexOf("creditsGrantedThisPeriod > 0");
+      const lteAt = cypher.indexOf("<=", sentNullAt);
+      const unlockAt = cypher.indexOf("REMOVE company._creditWarningLock");
+      const whereAt = cypher.indexOf("WHERE warn");
+      const writeAt = cypher.indexOf("creditWarningSentAt = datetime()");
+
+      // The lock-taking write comes first, the condition is read after it, the
+      // throwaway property is removed on every row, and only then are losers filtered.
+      expect(cypher).not.toContain("apoc.lock");
+      expect(lockAt).toBeGreaterThan(-1);
+      expect(sentNullAt).toBeGreaterThan(lockAt);
+      expect(grantedAt).toBeGreaterThan(lockAt);
+      expect(lteAt).toBeGreaterThan(sentNullAt);
+      expect(unlockAt).toBeGreaterThan(lteAt);
+      expect(whereAt).toBeGreaterThan(unlockAt);
+      expect(writeAt).toBeGreaterThan(whereAt);
+      expect(cypher).toContain("creditWarningOffer = $offer");
+
+      expect(capturedQuery.queryParams).toEqual(
+        expect.objectContaining({ thresholdPercent: 80, offer: "upgrade-or-pack", searchValue: MOCK_COMPANY_ID }),
+      );
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: CompanyDescriptor.model }),
+      );
+    });
+
+    it("markCreditWarningSent returns null when the condition no longer holds", async () => {
+      const result = await repository.markCreditWarningSent({ thresholdPercent: 80, offer: "pack" });
+
+      expect(result).toBeNull();
+    });
+
+    it("pins every write to the CLS company by id", async () => {
+      await repository.resetCreditWarningPeriod({ grantedCredits: 200 });
+      expect(capturedQuery.query).toContain("MATCH (company:Company {id: $searchValue})");
+      expect(capturedQuery.queryParams.searchValue).toBe(MOCK_COMPANY_ID);
+
+      await repository.markCreditWarningDismissed();
+      expect(capturedQuery.query).toContain("MATCH (company:Company {id: $searchValue})");
+      expect(capturedQuery.queryParams.searchValue).toBe(MOCK_COMPANY_ID);
+    });
+
+    it("resetCreditWarningPeriod clears markers", async () => {
+      await repository.resetCreditWarningPeriod({ grantedCredits: 200 });
+
+      const cypher: string = capturedQuery.query;
+      expect(cypher).toContain("creditsGrantedThisPeriod = $grantedCredits");
+      expect(cypher).toContain("creditWarningSentAt = null");
+      expect(cypher).toContain("creditWarningDismissedAt = null");
+      expect(cypher).toContain("creditWarningOffer = null");
+      expect(capturedQuery.queryParams.grantedCredits).toBe(200);
+      expect(mockNeo4jService.writeOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("markCreditWarningDismissed sets the dismissal time", async () => {
+      await repository.markCreditWarningDismissed();
+
+      expect(capturedQuery.query).toContain("creditWarningDismissedAt = datetime()");
+      expect(mockNeo4jService.writeOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws without a CLS company", async () => {
+      mockClsService.get.mockReturnValue(undefined);
+
+      await expect(repository.resetCreditWarningPeriod({ grantedCredits: 200 })).rejects.toThrow();
+      await expect(repository.markCreditWarningSent({ thresholdPercent: 80, offer: "pack" })).rejects.toThrow();
+      await expect(repository.markCreditWarningDismissed()).rejects.toThrow();
+
+      expect(mockNeo4jService.writeOne).not.toHaveBeenCalled();
+      expect(mockNeo4jService.readOne).not.toHaveBeenCalled();
+      expect(mockNeo4jService.read).not.toHaveBeenCalled();
     });
   });
 });

@@ -6,6 +6,7 @@ import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning.interface";
 import { Company, CompanyDescriptor } from "../../company/entities/company";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { moduleMeta } from "../../module/entities/module.meta";
@@ -805,6 +806,118 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     `;
 
     await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Starts a new credit-warning period for the CLS company: records the credits
+   * granted for the period and clears every warning marker.
+   *
+   * Called on every monthly grant (renewal, trial grant, plan change). Buying a
+   * credit pack never resets the period.
+   *
+   * @param params.grantedCredits - Credits granted for the new period
+   * @throws Error when CLS carries no companyId (an unscoped write must never run)
+   */
+  async resetCreditWarningPeriod(params: { grantedCredits: number }): Promise<void> {
+    const companyId = this.requireClsCompanyId("resetCreditWarningPeriod");
+
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+    query.queryParams = {
+      ...query.queryParams,
+      searchValue: companyId,
+      grantedCredits: params.grantedCredits,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      SET company.creditsGrantedThisPeriod = $grantedCredits,
+          company.creditWarningSentAt = null,
+          company.creditWarningDismissedAt = null,
+          company.creditWarningOffer = null
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Marks the credit warning as sent for the CLS company, but only when the
+   * warning condition still holds and no warning was sent this period.
+   *
+   * The node is write-locked BEFORE the condition is evaluated: a `WHERE` in a plain
+   * `MATCH … WHERE … SET` is evaluated before the write lock is taken, so two
+   * concurrent spends crossing the threshold would both pass it. The first `SET`
+   * of a throwaway property takes the lock (Neo4j's documented lost-update
+   * pattern); the condition is read after it, so the second spend re-checks once
+   * the first committed, finds `creditWarningSentAt` set and returns null.
+   * `apoc.lock.nodes` does NOT work here: the planner evaluates the filter before
+   * the procedure call (a live probe gave 12 winners out of 20 concurrent calls).
+   * The throwaway property is removed on every row, winner or not.
+   *
+   * @param params.thresholdPercent - Used-credit percentage that triggers the warning (e.g. 80)
+   * @param params.offer - Offer recorded with the warning
+   * @returns The updated company, or null when the condition did not hold (or another spend won)
+   * @throws Error when CLS carries no companyId (an unscoped write must never run)
+   */
+  async markCreditWarningSent(params: {
+    thresholdPercent: number;
+    offer: CreditWarningOffer;
+  }): Promise<Company | null> {
+    const companyId = this.requireClsCompanyId("markCreditWarningSent");
+
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+    query.queryParams = {
+      ...query.queryParams,
+      searchValue: companyId,
+      thresholdPercent: params.thresholdPercent,
+      offer: params.offer,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      SET company._creditWarningLock = true
+      WITH company,
+        company.creditWarningSentAt IS NULL
+          AND company.creditsGrantedThisPeriod > 0
+          AND toFloat(coalesce(company.availableMonthlyCredits, 0)) + toFloat(coalesce(company.availableExtraCredits, 0))
+              <= toFloat(company.creditsGrantedThisPeriod) * (100 - $thresholdPercent) / 100.0 AS warn
+      REMOVE company._creditWarningLock
+      WITH company, warn
+      WHERE warn
+      SET company.creditWarningSentAt = datetime(),
+          company.creditWarningOffer = $offer
+      WITH company
+      ${this.buildReturnStatement()}
+    `;
+
+    return this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Records that the CLS company dismissed the credit warning.
+   *
+   * @throws Error when CLS carries no companyId (an unscoped write must never run)
+   */
+  async markCreditWarningDismissed(): Promise<void> {
+    const companyId = this.requireClsCompanyId("markCreditWarningDismissed");
+
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+    query.queryParams = {
+      ...query.queryParams,
+      searchValue: companyId,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      SET company.creditWarningDismissedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  private requireClsCompanyId(method: string): string {
+    const companyId = this.clsService.get("companyId");
+    if (!companyId) throw new Error(`CompanyRepository.${method}: no companyId in the request context`);
+    return companyId;
   }
 
   /**

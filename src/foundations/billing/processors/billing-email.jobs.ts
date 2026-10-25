@@ -1,5 +1,6 @@
 import { formatEmailDate } from "../../../core/email/email.helpers";
 import { BillingEmailJobDefinition } from "../interfaces/billing.config.interface";
+import type { CreditWarningOffer } from "../interfaces/credit-warning.interface";
 
 /**
  * Job types the library billing email sender handles out of the box.
@@ -20,7 +21,8 @@ export type LibraryBillingJobType =
   | "company-deleted"
   | "referral-invite"
   | "referral-reward"
-  | "card-expiring";
+  | "card-expiring"
+  | "credit-warning";
 
 export interface BillingEmailJobData {
   jobType: string;
@@ -146,6 +148,14 @@ export interface CardExpiringEmailParams {
   cardBrand: string;
   cardLast4: string;
   locale?: string;
+}
+
+export interface CreditWarningEmailParams {
+  to: string;
+  customerName: string;
+  offer: CreditWarningOffer;
+  interval: "month" | "year";
+  locale: string;
 }
 
 /** Narrows the queued payload to the shape a job expects. */
@@ -349,6 +359,24 @@ export const LIBRARY_BILLING_EMAIL_JOBS: Record<LibraryBillingJobType, BillingEm
         cardBrand: params.cardBrand,
         cardLast4: params.cardLast4,
         updatePaymentUrl: `${appUrl}${links.paymentMethod}`,
+        locale,
+      };
+    },
+  },
+
+  "credit-warning": {
+    template: "creditWarning",
+    toTemplateData: (payload, { appUrl, locale, links }) => {
+      const params = asParams<CreditWarningEmailParams>(payload);
+      return {
+        to: params.to,
+        customerName: params.customerName,
+        offerSubscribe: params.offer === "subscribe",
+        offerUpgrade: params.offer === "upgrade-or-pack",
+        offerPack: params.offer === "pack",
+        isYearly: params.interval === "year",
+        changePlanUrl: `${appUrl}${links.changePlan}`,
+        buyCreditsUrl: `${appUrl}${links.buyCredits}`,
         locale,
       };
     },

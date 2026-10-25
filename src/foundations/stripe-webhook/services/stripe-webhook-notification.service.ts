@@ -15,6 +15,7 @@ import {
   DEFAULT_BILLING_CONFIG,
   ResolvedBillingConfig,
 } from "../../billing/interfaces/billing.config.interface";
+import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning.interface";
 
 export interface StripeWebhookPaymentFailureNotificationParams {
   stripeCustomerId: string;
@@ -30,6 +31,12 @@ export interface StripeWebhookCardExpiringNotificationParams {
   renewalDate: Date;
   cardBrand: string;
   cardLast4: string;
+}
+
+export interface StripeWebhookCreditWarningNotificationParams {
+  stripeCustomerId: string;
+  offer: CreditWarningOffer;
+  interval: "month" | "year";
 }
 
 export interface StripeWebhookPaymentSuccessNotificationParams {
@@ -612,6 +619,59 @@ export class StripeWebhookNotificationService {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       this.logger.error(`Failed to queue card expiring warning: ${errorMsg}`);
+      // Don't throw - notification failure shouldn't block processing
+    }
+  }
+
+  /**
+   * Send the credit warning to company admins, each in their own language.
+   *
+   * Sent once per credit period when the credits left fall to the warning
+   * threshold. No per-email switch: the only switch is `billing.creditWarning.enabled`,
+   * checked by `CreditWarningService` before this is ever called.
+   */
+  async sendCreditWarningEmail(params: StripeWebhookCreditWarningNotificationParams): Promise<void> {
+    const { stripeCustomerId, offer, interval } = params;
+
+    try {
+      await this.cls.run(async () => {
+        const companyAdmins = await this.userRepository.findCompanyAdminsByStripeCustomerId({ stripeCustomerId });
+
+        if (companyAdmins.length === 0) {
+          this.logger.warn(`No company admins found for Stripe customer ${stripeCustomerId} - skipping credit warning`);
+          return;
+        }
+
+        for (const admin of companyAdmins) {
+          await this.emailQueue.add(
+            "billing-notification",
+            {
+              jobType: "credit-warning" as const,
+              payload: {
+                to: admin.email,
+                customerName: admin.name || "Customer",
+                offer,
+                interval,
+                locale: (await this.responseLanguage.resolveForUser({ userId: admin.id })) ?? "en",
+              },
+            },
+            {
+              attempts: 3,
+              backoff: {
+                type: "exponential",
+                delay: 5000,
+              },
+            },
+          );
+        }
+
+        this.logger.log(
+          `Queued credit warning for ${companyAdmins.length} company admin(s) (customer: ${stripeCustomerId})`,
+        );
+      });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      this.logger.error(`Failed to queue credit warning: ${errorMsg}`);
       // Don't throw - notification failure shouldn't block processing
     }
   }
