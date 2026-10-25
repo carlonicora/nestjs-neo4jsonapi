@@ -78,8 +78,10 @@ export interface AnalyticsModuleConfig {
   excludedRoleIds?: string[];
 
   /**
-   * User ids whose page views are never recorded. Dropped before the queue,
-   * exactly like `excludedRoleIds`.
+   * User ids whose app page views are never recorded (dropped before the
+   * queue). Their public page views are counted as anonymous, with no user
+   * link: a login shared by many visitors, such as an embedded demo, must not
+   * hide the visitors behind it.
    *
    * Not read from env: set it through `bootstrap({ analytics })`.
    *

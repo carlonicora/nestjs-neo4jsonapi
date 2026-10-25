@@ -76,8 +76,21 @@ describe("AnalyticsService", () => {
         service = build({ ...DEFAULT_ANALYTICS_CONFIG, excludedRoleIds: ["role-x"], excludedUserIds: ["user-x"] });
       });
 
-      it("drops a page view from an excluded user", async () => {
+      it("drops an app page view from an excluded user", async () => {
+        await service.track({ ...input, section: "app", userId: "user-x" });
+
+        expect(queue.add).not.toHaveBeenCalled();
+      });
+
+      it("counts a public page view from an excluded user as anonymous", async () => {
         await service.track({ ...input, userId: "user-x" });
+
+        expect(queue.add).toHaveBeenCalledWith("analytics:pageView", input);
+        expect(queue.add.mock.calls[0][1]).not.toHaveProperty("userId");
+      });
+
+      it("drops a public page view when a role is excluded, even for an excluded user", async () => {
+        await service.track({ ...input, userId: "user-x" }, { roles: ["role-x"] });
 
         expect(queue.add).not.toHaveBeenCalled();
       });

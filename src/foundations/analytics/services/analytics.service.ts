@@ -37,26 +37,32 @@ export class AnalyticsService extends AbstractService<
    * Enqueue a page view for async write. Never throws — analytics must not
    * break the caller's request path.
    *
-   * A page view from an excluded user id, or from a caller holding any
-   * excluded role, is dropped before the queue. The roles only decide the
-   * drop; they are not added to the job.
+   * A page view from a caller holding any excluded role is dropped before the
+   * queue. A page view from an excluded user id is dropped on app pages; on
+   * public pages it is counted as anonymous (no user link), because a shared
+   * login such as an embedded demo must not hide the visitor behind it. The
+   * roles only decide the drop; they are not added to the job.
    */
   async track(input: AnalyticsPageViewInput, options?: { roles?: string[] }): Promise<void> {
-    if (this._isExcluded(input.userId, options?.roles)) {
+    const hasExcludedRole = (options?.roles ?? []).some((roleId) => this.excludedRoleIds.has(roleId));
+    const isExcludedUser = !!input.userId && this.excludedUserIds.has(input.userId);
+
+    if (hasExcludedRole || (isExcludedUser && input.section === "app")) {
       // Path only: raw IP and user agent must not reach the logs.
       this.logger.debug(`analytics pageView dropped reason=excluded path=${input.path}`);
       return;
     }
 
+    let job = input;
+    if (isExcludedUser) {
+      const { userId: _userId, ...anonymous } = input;
+      job = anonymous;
+    }
+
     try {
-      await this.queue.add(this.jobName, input);
+      await this.queue.add(this.jobName, job);
     } catch (err) {
       this.logger.error(`AnalyticsService.track enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-
-  private _isExcluded(userId: string | undefined, roles: string[] | undefined): boolean {
-    if (userId && this.excludedUserIds.has(userId)) return true;
-    return (roles ?? []).some((roleId) => this.excludedRoleIds.has(roleId));
   }
 }
