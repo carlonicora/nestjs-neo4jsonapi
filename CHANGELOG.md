@@ -1,3 +1,9 @@
+## [8.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.2.0...v8.3.0) (2026-10-25)
+
+### 🚀 Features
+
+* **billing:** warn company admins once per period when AI credits run low ([68c2071](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/68c20718d75b7ae30015550532c6668eeefb69ee))
+
 ## [8.2.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.1.0...v8.2.0) (2026-10-25)
 
 ### 🚀 Features
