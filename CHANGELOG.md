@@ -1,3 +1,9 @@
+## [8.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.3.0...v8.4.0) (2026-10-25)
+
+### 🚀 Features
+
+* **assistant:** notify an optional app listener once per user message ([1068a2a](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1068a2a3601a637748d2d20ba1b9259b1b78ed4d))
+
 ## [8.3.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.2.0...v8.3.0) (2026-10-25)
 
 ### 🚀 Features
