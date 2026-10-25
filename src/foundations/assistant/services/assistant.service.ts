@@ -31,6 +31,10 @@ import {
   ASSISTANT_TITLE_GENERATOR,
   AssistantTitleGenerator,
 } from "../../../common/interfaces/assistant.title.interface";
+import {
+  ASSISTANT_USER_MESSAGE_LISTENER,
+  AssistantUserMessageListener,
+} from "../../../common/interfaces/assistant.user-message.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import {
   ASSISTANT_SEED_CONTEXT_PROVIDERS,
@@ -135,6 +139,9 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     @Optional()
     @Inject(ASSISTANT_TITLE_GENERATOR)
     private readonly titleGenerator?: AssistantTitleGenerator,
+    @Optional()
+    @Inject(ASSISTANT_USER_MESSAGE_LISTENER)
+    private readonly userMessageListener?: AssistantUserMessageListener,
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
@@ -208,6 +215,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+    await this.notifyUserMessage({
+      userId: params.userId,
+      companyId: params.companyId,
+      assistantId,
+      boundContent: params.boundContent,
+    });
 
     // Name the thread and announce it before the (slow) agent turn runs.
     await this.announceNewThread({
@@ -339,6 +352,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+    await this.notifyUserMessage({
+      userId: params.userId,
+      companyId: params.companyId,
+      assistantId: params.assistantId,
+      boundContent: this.toBoundContent(contentScope),
+    });
 
     const turn = await this.runAgentTurn({
       ctx,
@@ -473,6 +492,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+    await this.notifyUserMessage({
+      userId: params.userId,
+      companyId: params.companyId,
+      assistantId,
+      boundContent: params.boundContent,
+    });
 
     // Name the thread and announce it before the (slow) operator turn runs.
     await this.announceNewThread({
@@ -575,6 +600,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
     await this.linkPinnedMentions({ messageId: userMessageId, pinned });
     const userMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+    await this.notifyUserMessage({
+      userId: params.userId,
+      companyId: params.companyId,
+      assistantId: params.assistantId,
+      boundContent: this.toBoundContent(contentScope),
+    });
 
     const threadId = `${params.assistantId}:${userMessageId}`;
     const result = await this.runOperatorTurn({
@@ -1657,6 +1688,26 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     } catch (err) {
       this.assistantLogger.warn(
         `announceNewThread: websocket push failed for id=${params.assistantId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Tells the app-bound ASSISTANT_USER_MESSAGE_LISTENER, if any, that a user
+   * turn was persisted. Best-effort: a failure is logged and the turn carries on.
+   */
+  private async notifyUserMessage(params: {
+    userId: string;
+    companyId: string;
+    assistantId: string;
+    boundContent?: { type: string; id: string };
+  }): Promise<void> {
+    if (!this.userMessageListener) return;
+    try {
+      await this.userMessageListener.onUserMessage(params);
+    } catch (err) {
+      this.assistantLogger.warn(
+        `notifyUserMessage: listener failed for id=${params.assistantId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

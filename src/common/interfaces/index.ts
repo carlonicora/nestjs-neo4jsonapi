@@ -1,5 +1,6 @@
 export * from "./assistant.scope.interface";
 export * from "./assistant.title.interface";
+export * from "./assistant.user-message.interface";
 export * from "./authenticated.request.interface";
 export * from "./datamodel.interface";
 export * from "./entity.descriptor.interface";
