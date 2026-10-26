@@ -406,8 +406,12 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
     token: string;
     expiration: Date;
     companyId?: string;
+    /** True when this login cleared a pending account deletion; stored so findAuthByCode returns it too. */
+    deletionCancelled?: boolean;
   }): Promise<Auth> {
     const user = await this.findUserById({ userId: params.userId, companyId: params.companyId });
+    // Fixed literal, no request input: only written when a login hook cancelled a deletion.
+    const deletionCancelledSet = params.deletionCancelled === true ? "SET auth.deletionCancelled = true" : "";
 
     let query = this.neo4j.initQuery({ serialiser: this.getAuthModel() });
     query.queryParams = {
@@ -432,6 +436,7 @@ export class AuthRepository extends AbstractRepository<Auth, typeof AuthDescript
         MATCH (auth_user:User {id: $userId})
         CREATE (auth:Auth {id: $authId, token: $token, expiration: datetime($expiration), createdAt: datetime(), updatedAt: datetime()})
         CREATE (auth_user)-[:HAS_AUTH]->(auth)
+      ${deletionCancelledSet}
 
         WITH auth, auth_user
         ${membershipRoleMatch({ userAlias: "auth_user", roleAlias: "auth_user_role" })}
@@ -512,6 +517,7 @@ WITH auth, auth_user,  auth_user_role, module,
       MATCH (auth_user:User {id: $userId})
       CREATE (auth:Auth {id: $authId, token: $token, expiration: datetime($expiration), createdAt: datetime(), updatedAt: datetime()})
       CREATE (auth_user)-[:HAS_AUTH]->(auth)
+      ${deletionCancelledSet}
 
       WITH auth, auth_user
       ${membershipRoleMatch({ userAlias: "auth_user", roleAlias: "auth_user_role" })}

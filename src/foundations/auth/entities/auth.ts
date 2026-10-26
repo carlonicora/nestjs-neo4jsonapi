@@ -17,6 +17,7 @@ export type Auth = Entity & {
 
   requiresCompanySelection?: boolean;
   selectionToken?: string;
+  deletionCancelled?: boolean;
 
   user?: User;
 };
@@ -70,6 +71,10 @@ export const AuthDescriptor = defineEntity<Auth>()({
       type: "string",
       description:
         "Short-lived, company-selection scoped JWT returned alongside requiresCompanySelection. It authenticates only the company listing and the company-selection exchange.",
+    },
+    deletionCancelled: {
+      type: "boolean",
+      description: "True on the session created by the login that cancelled a pending account deletion.",
     },
   },
 

@@ -8,6 +8,7 @@ import { ReferralModuleConfig } from "../foundations/referral/interfaces/referra
 import { HandbookModuleConfig } from "../foundations/handbook/interfaces/handbook.config.interface";
 import { HowToModuleConfig } from "../foundations/how-to/interfaces/how-to.config.interface";
 import { BlogModuleConfig } from "../foundations/blog/interfaces/blog.config.interface";
+import { AccountDeletionModuleConfig } from "../foundations/account-deletion/account-deletion.config";
 import { BillingModuleConfig } from "../foundations/billing/interfaces/billing.config.interface";
 import { EmailAutomationModuleConfig } from "../foundations/email-automation/interfaces/email-automation.config.interface";
 import { UserActivityModuleConfig } from "../foundations/user-activity/interfaces/user-activity.config.interface";
@@ -152,6 +153,20 @@ export interface BootstrapOptions {
    * ```
    */
   blog?: BlogModuleConfig;
+
+  /**
+   * Configuration for the account-deletion feature module.
+   * Forwarded to `FoundationsModule.forRoot({ accountDeletion })`. OPT-IN:
+   * omitted, nothing is mounted (no routes, cron, queue, processor or login
+   * hook) and `CompanyService.deleteImmediate` is unchanged. `{}` enables
+   * self-service deletion with the 7-day grace period.
+   *
+   * @example
+   * ```typescript
+   * accountDeletion: {}
+   * ```
+   */
+  accountDeletion?: AccountDeletionModuleConfig;
 
   /**
    * Configuration for the email-automation feature module.

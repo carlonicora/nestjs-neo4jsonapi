@@ -384,6 +384,34 @@ describe("AuthService", () => {
         }),
       );
     });
+
+    it("with a login hook that cancels, the session is created with deletionCancelled true", async () => {
+      // Arrange: the hook is what AccountDeletionModule provides when an app opts in
+      const cancelOnLogin = vi.fn().mockResolvedValue(true);
+      (service as any).accountDeletionLoginHook = { cancelOnLogin };
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      authRepository.setLastLogin.mockResolvedValue(undefined);
+
+      // Act
+      await service.createAuth({ user: MOCK_USER });
+
+      // Assert
+      expect(cancelOnLogin).toHaveBeenCalledWith({ userId: MOCK_USER.id });
+      expect(authRepository.createSession).toHaveBeenCalledWith(expect.objectContaining({ deletionCancelled: true }));
+    });
+
+    it("without a hook, createSession gets no deletionCancelled", async () => {
+      // Arrange: the default testing module provides no ACCOUNT_DELETION_LOGIN_HOOK
+      expect((service as any).accountDeletionLoginHook).toBeUndefined();
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      authRepository.setLastLogin.mockResolvedValue(undefined);
+
+      // Act
+      await service.createAuth({ user: MOCK_USER });
+
+      // Assert
+      expect(authRepository.createSession.mock.calls[0][0]).not.toHaveProperty("deletionCancelled");
+    });
   });
 
   describe("createToken", () => {
@@ -1617,7 +1645,14 @@ describe("Auth descriptors — serialiser parity", () => {
   it("pins the Auth attribute set (fields + virtual fields)", () => {
     const attributes = [...Object.keys(AuthDescriptor.fields), ...Object.keys(AuthDescriptor.virtualFields)].sort();
 
-    expect(attributes).toEqual(["expiration", "refreshToken", "requiresCompanySelection", "selectionToken", "token"]);
+    expect(attributes).toEqual([
+      "deletionCancelled",
+      "expiration",
+      "refreshToken",
+      "requiresCompanySelection",
+      "selectionToken",
+      "token",
+    ]);
   });
 
   it("pins the Auth relationship set", () => {

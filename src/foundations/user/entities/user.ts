@@ -36,6 +36,9 @@ export type User = Entity & {
   sourceUtmCampaign?: string;
   sourceReferrer?: string;
   sourceLandingPath?: string;
+  deletionRequestedAt?: Date;
+  deletionScheduledAt?: Date;
+  deletionUndoTokenHash?: string;
 
   role?: Role[];
   company?: Company;
@@ -88,6 +91,10 @@ export const UserDescriptor = defineEntity<User>()({
     sourceUtmCampaign: { type: "string", excludeFromJsonApi: true },
     sourceReferrer: { type: "string", excludeFromJsonApi: true },
     sourceLandingPath: { type: "string", excludeFromJsonApi: true },
+    // Account deletion request (opt-in accountDeletion feature) — stored, never serialised
+    deletionRequestedAt: { type: "datetime", excludeFromJsonApi: true },
+    deletionScheduledAt: { type: "datetime", excludeFromJsonApi: true },
+    deletionUndoTokenHash: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
   },
 
   // Virtual fields (output-only, not in entity type)

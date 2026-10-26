@@ -3,6 +3,7 @@
  * Consumers should extend this enum with their own queue IDs
  */
 export enum QueueId {
+  ACCOUNT_DELETION = "account-deletion",
   ANALYTICS = "analytics",
   CHUNK = "chunk",
   COMPANY = "company",

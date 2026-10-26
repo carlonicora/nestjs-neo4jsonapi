@@ -46,6 +46,10 @@ import { USER_ACTIVATED_EVENT, UserActivatedEvent } from "../events/auth.events"
 import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/registration-hook.interface";
 import { RegistrationPassInterface, RegistrationPassVerdict } from "../interfaces/registration-pass.interface";
 import { resolveRegistrationPass } from "../utils/resolve-registration-pass";
+import {
+  ACCOUNT_DELETION_LOGIN_HOOK,
+  AccountDeletionLoginHook,
+} from "../../account-deletion/interfaces/account-deletion-login-hook.interface";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
 import {
@@ -108,6 +112,10 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     private readonly twoFactorService: TwoFactorService | undefined,
     private readonly responseLanguage: ResponseLanguageService,
     private readonly eventEmitter: EventEmitter2,
+    // Provided only when the app opts into `accountDeletion`; absent, login is unchanged.
+    @Optional()
+    @Inject(ACCOUNT_DELETION_LOGIN_HOOK)
+    private readonly accountDeletionLoginHook?: AccountDeletionLoginHook,
   ) {
     super(jsonApiService, authRepository, clsService, AuthDescriptor.model);
   }
@@ -171,6 +179,11 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       userName: params.user.name,
     });
 
+    // A fresh login cancels a pending account deletion (refresh never reaches here).
+    const deletionCancelled = this.accountDeletionLoginHook
+      ? await this.accountDeletionLoginHook.cancelOnLogin({ userId })
+      : undefined;
+
     const auth = await this.authRepository.createSession({
       authId: randomUUID(),
       userId: params.user.id,
@@ -180,6 +193,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       // whose company and roles come from different memberships.
       companyId: companyId,
       expiration: this.security.refreshTokenExpiration,
+      ...(deletionCancelled ? { deletionCancelled: true } : {}),
     });
 
     (auth as any).refreshToken = auth.id;

@@ -6,6 +6,7 @@
 export * from "./foundations.modules";
 
 // Individual foundation modules with entities, metas, repositories, and services
+export * from "./account-deletion";
 export * from "./ai-connection";
 export * from "./assistant";
 export * from "./assistant-action";

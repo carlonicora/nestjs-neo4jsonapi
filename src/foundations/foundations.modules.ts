@@ -1,4 +1,6 @@
 import { DynamicModule, Module, Type } from "@nestjs/common";
+import { AccountDeletionModule } from "./account-deletion/account-deletion.module";
+import { AccountDeletionModuleConfig } from "./account-deletion/account-deletion.config";
 import { AiConnectionModule } from "./ai-connection/ai-connection.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { AnalyticsModuleConfig } from "./analytics/interfaces/analytics.config.interface";
@@ -74,6 +76,12 @@ export interface FoundationsModuleConfig {
    * mounted, so an app with the permission gate on needs no Blog section seed.
    */
   blog?: BlogModuleConfig;
+  /**
+   * Self-service account deletion with a grace period. OPT-IN: mounted only
+   * when this key is present (`accountDeletion: {}` for the 7-day default).
+   * Omitted, no route, cron, queue, processor or login hook exists.
+   */
+  accountDeletion?: AccountDeletionModuleConfig;
   /** Optional configuration for the email-automation feature module (the triggers the app declares) */
   emailAutomation?: EmailAutomationModuleConfig;
   /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
@@ -204,6 +212,10 @@ export class FoundationsModule {
       { classRef: BillingModule, factory: () => BillingModule.forRoot(config?.billing) },
       // Opt-in: mounted only when the app passes a `blog` config.
       ...(config?.blog ? [{ classRef: BlogModule, factory: () => BlogModule.forRoot(config.blog) }] : []),
+      // Opt-in: mounted only when the app passes an `accountDeletion` config.
+      ...(config?.accountDeletion
+        ? [{ classRef: AccountDeletionModule, factory: () => AccountDeletionModule.forRoot(config.accountDeletion) }]
+        : []),
     ].filter((entry) => !excluded.has(entry.classRef));
 
     return {
