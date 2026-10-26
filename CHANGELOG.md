@@ -1,3 +1,9 @@
+## [8.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.7.0...v8.8.0) (2026-10-26)
+
+### 🚀 Features
+
+* **company:** store the trial end and record referrals while the program is off ([659f5df](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/659f5dfecca2dcb2bb82f4bb358a9eade1480bbc))
+
 ## [8.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.6.0...v8.7.0) (2026-10-26)
 
 ### 🚀 Features
