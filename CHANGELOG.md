@@ -1,3 +1,9 @@
+## [8.7.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.6.0...v8.7.0) (2026-10-26)
+
+### 🚀 Features
+
+* **stripe-subscription:** find open trials ending in a window ([4f713e6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4f713e680d746e003da3c6301dc5aae9cfb56440))
+
 ## [8.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.5.0...v8.6.0) (2026-10-26)
 
 ### 🚀 Features
