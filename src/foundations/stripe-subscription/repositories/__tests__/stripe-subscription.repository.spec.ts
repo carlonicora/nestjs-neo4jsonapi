@@ -346,5 +346,38 @@ describe("StripeSubscriptionRepository", () => {
       await expect(repository.findRenewalsForCardCheck({ now, before })).rejects.toThrow(/worker cron only/);
       expect(neo4j.readMany).not.toHaveBeenCalled();
     });
+
+    const after = new Date("2026-10-29T08:00:00.000Z");
+    const upTo = new Date("2026-10-31T08:00:00.000Z");
+
+    it("findOpenTrialsEndingBetween refuses to run with a company in CLS", async () => {
+      cls.get.mockImplementation(((key: string) => (key === "companyId" ? "company-1" : undefined)) as never);
+
+      await expect(repository.findOpenTrialsEndingBetween({ after, upTo })).rejects.toThrow(/worker cron only/);
+      expect(neo4j.readMany).not.toHaveBeenCalled();
+    });
+
+    it("findOpenTrialsEndingBetween passes the window as ISO strings", async () => {
+      await repository.findOpenTrialsEndingBetween({ after, upTo });
+
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expect(issued.queryParams.after).toBe(after.toISOString());
+      expect(issued.queryParams.upTo).toBe(upTo.toISOString());
+    });
+
+    it("findOpenTrialsEndingBetween filters trialing subscriptions in the window and excludes paying customers", async () => {
+      await repository.findOpenTrialsEndingBetween({ after, upTo });
+
+      expect(neo4j.readMany).toHaveBeenCalledTimes(1);
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expectScopedRead(issued);
+      expect(issued.query).toContain('stripeSubscription.status = "trialing"');
+      expect(issued.query).toContain("stripeSubscription.trialEnd > datetime($after)");
+      expect(issued.query).toContain("stripeSubscription.trialEnd <= datetime($upTo)");
+      expect(issued.query).toContain("NOT EXISTS");
+      expect(issued.query).toContain("['active', 'past_due']");
+      expect(issued.query).toContain("isTrial");
+      expect(issued.query).toContain("unitAmount");
+    });
   });
 });

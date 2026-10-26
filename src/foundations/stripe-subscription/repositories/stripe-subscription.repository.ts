@@ -434,4 +434,37 @@ export class StripeSubscriptionRepository extends AbstractRepository<
 
     return this.neo4j.readMany(query);
   }
+
+  /**
+   * Worker cron only. Trialing subscriptions ending in (after, upTo] whose customer is not paying.
+   * A customer is paying when another of its subscriptions is active or past_due on a price that
+   * is not a trial and costs more than zero.
+   */
+  async findOpenTrialsEndingBetween(params: { after: Date; upTo: Date }): Promise<StripeSubscription[]> {
+    this.assertNoRequestCompany("findOpenTrialsEndingBetween");
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
+
+    query.queryParams = {
+      ...query.queryParams,
+      after: params.after.toISOString(),
+      upTo: params.upTo.toISOString(),
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      WHERE ${S}.status = "trialing"
+        AND ${S}.trialEnd > datetime($after)
+        AND ${S}.trialEnd <= datetime($upTo)
+        AND NOT EXISTS {
+          MATCH (${S})-[:BELONGS_TO]->(cust:${stripeCustomerMeta.labelName})<-[:BELONGS_TO]-(paid:${stripeSubscriptionMeta.labelName})-[:USES_PRICE]->(paidPrice:${stripePriceMeta.labelName})
+          WHERE paid.status IN ['active', 'past_due']
+            AND coalesce(paidPrice.isTrial, false) = false
+            AND coalesce(paidPrice.unitAmount, 0) > 0
+        }
+      ${this.buildReturnStatement()}
+      ORDER BY ${S}.trialEnd ASC
+    `;
+
+    return this.neo4j.readMany(query);
+  }
 }
