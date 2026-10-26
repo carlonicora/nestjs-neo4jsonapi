@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { ModuleRef } from "@nestjs/core";
 import axios from "axios";
 import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
@@ -16,6 +17,7 @@ import { discordUser } from "../../discord-user/types/discord.user.type";
 import { UserRepository } from "../../user";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { parseSignupSourceParam } from "../../waitlist/utils/signup-source";
+import { resolveRegistrationPass } from "../utils/resolve-registration-pass";
 import { PendingRegistrationService } from "./pending-registration.service";
 
 @Injectable()
@@ -28,6 +30,7 @@ export class AuthDiscordService {
     private readonly config: ConfigService<BaseConfigInterface>,
     private readonly clsService: ClsService,
     private readonly pendingRegistrationService: PendingRegistrationService,
+    private readonly moduleRef: ModuleRef,
     // Optional for the same reason as in AuthService: an app may compose auth
     // without WaitlistModule. The union type needs the explicit token.
     @Optional()
@@ -41,13 +44,14 @@ export class AuthDiscordService {
     return this.config.get<ConfigAuthInterface>("auth");
   }
 
-  generateLoginUrl(inviteCode?: string, referralCode?: string, source?: string): string {
-    // Encode invite code, referral code AND sign-up source (raw JSON string) in state parameter
+  generateLoginUrl(inviteCode?: string, referralCode?: string, source?: string, pass?: string): string {
+    // Encode invite code, referral code, sign-up source (raw JSON string) AND registration pass in state parameter
     const stateData = {
       nonce: randomUUID(),
       ...(inviteCode && { invite: inviteCode }),
       ...(referralCode && { referral: referralCode }),
       ...(source && { source }),
+      ...(pass && { pass }),
     };
     const state = Buffer.from(JSON.stringify(stateData)).toString("base64url");
 
@@ -62,13 +66,14 @@ export class AuthDiscordService {
     return `${this._discordApiUrl}oauth2/authorize?${params.toString()}`;
   }
 
-  parseStateData(state: string): { invite?: string; referral?: string; source?: string } | undefined {
+  parseStateData(state: string): { invite?: string; referral?: string; source?: string; pass?: string } | undefined {
     try {
       const stateData = JSON.parse(Buffer.from(state, "base64url").toString());
       return {
         invite: stateData.invite,
         referral: stateData.referral,
         source: typeof stateData.source === "string" ? stateData.source : undefined,
+        ...(typeof stateData.pass === "string" && { pass: stateData.pass }),
       };
     } catch {
       return undefined;
@@ -80,6 +85,7 @@ export class AuthDiscordService {
     inviteCode?: string;
     referralCode?: string;
     source?: string;
+    pass?: string;
   }): Promise<string> {
     const discordUser: DiscordUser = await this.discordUserRepository.findByDiscordId({
       discordId: params.userDetails.id,
@@ -117,13 +123,37 @@ export class AuthDiscordService {
     if (registrationMode === "closed") {
       return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=registration_closed`;
     }
-    if (registrationMode === "waitlist" && !params.inviteCode) {
+
+    // A new account needs an email; Discord accounts may have none.
+    if (!params.userDetails.email?.trim()) {
+      return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=email_required`;
+    }
+
+    // A registration pass (app-provided hook) can let this Discord user register
+    // past the waitlist. Without a hook, or with an invalid pass, it is ignored.
+    let passAccepted = false;
+    if (params.pass) {
+      const registrationPass = resolveRegistrationPass(this.moduleRef);
+      if (registrationPass) {
+        const verdict = await registrationPass.validate({
+          pass: params.pass,
+          provider: "discord",
+          providerUserId: params.userDetails.id,
+        });
+        if (verdict === "mismatch") {
+          return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=join_link_mismatch`;
+        }
+        passAccepted = verdict === "valid";
+      }
+    }
+
+    if (registrationMode === "waitlist" && !params.inviteCode && !passAccepted) {
       return `${this.config.get<ConfigAppInterface>("app").url}oauth/error?error=waitlist_required`;
     }
 
     // An invite registers only the email it was sent to. An invalid invite is
     // left to completeOAuthRegistration, which rejects it.
-    if (registrationMode === "waitlist" && params.inviteCode && this.waitlistService) {
+    if (registrationMode === "waitlist" && params.inviteCode && !passAccepted && this.waitlistService) {
       const inviteValidation = await this.waitlistService.validateInviteCode(params.inviteCode);
       if (
         inviteValidation?.valid &&
@@ -133,16 +163,18 @@ export class AuthDiscordService {
       }
     }
 
-    // Store pending registration in Redis (include invite code AND referral code if present)
+    // Store pending registration in Redis (include invite code AND referral code if present).
+    // An accepted pass is stored instead of the invite, so a pass sign-up never consumes an invite.
     const pendingId = await this.pendingRegistrationService.create({
       provider: "discord",
       providerUserId: params.userDetails.id,
       email: params.userDetails.email,
       name: params.userDetails.username,
       avatar: params.userDetails.avatar,
-      inviteCode: params.inviteCode,
+      inviteCode: passAccepted ? undefined : params.inviteCode,
       referralCode: params.referralCode,
       source: parseSignupSourceParam(params.source),
+      ...(passAccepted && { pass: params.pass }),
     });
 
     return `${this.config.get<ConfigAppInterface>("app").url}auth/consent?pending=${pendingId}`;

@@ -26,11 +26,12 @@ export class AuthDiscordController {
     @Query("invite") inviteCode?: string,
     @Query("referral") referralCode?: string,
     @Query("source") source?: string,
+    @Query("pass") pass?: string,
   ) {
     if (!this.discordConfig.clientId || !this.discordConfig.clientSecret)
       throw new HttpException("Login with Discord is not available", HttpStatus.NOT_IMPLEMENTED);
 
-    reply.redirect(this.authDiscordService.generateLoginUrl(inviteCode, referralCode, source), 302);
+    reply.redirect(this.authDiscordService.generateLoginUrl(inviteCode, referralCode, source, pass), 302);
   }
 
   @Get(`${authMeta.endpoint}/callback/discord`)
@@ -40,6 +41,7 @@ export class AuthDiscordController {
     const inviteCode = stateData?.invite;
     const referralCode = stateData?.referral;
     const source = stateData?.source;
+    const pass = stateData?.pass;
 
     const accessToken = await this.authDiscordService.exchangeCodeForToken(code);
     const userDetails = await this.authDiscordService.fetchUserDetails(accessToken);
@@ -49,6 +51,7 @@ export class AuthDiscordController {
       inviteCode,
       referralCode,
       source,
+      pass,
     });
 
     reply.redirect(redirectUrl, 302);

@@ -39,6 +39,7 @@ describe("AuthController", () => {
       acceptInvitation: vi.fn(),
       activateAccount: vi.fn(),
       completeOAuthRegistration: vi.fn(),
+      findPendingRegistration: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -265,6 +266,40 @@ describe("AuthController", () => {
 
       expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody, undefined);
       expect(result.code).toBeDefined();
+    });
+  });
+
+  describe("GET /auth/oauth/pending-registrations/:pendingId", () => {
+    it("GET oauth/pending-registrations/:pendingId sends the service document", async () => {
+      const document: JsonApiSingleDocument = {
+        data: { type: "pending-registrations", id: "pending-123", attributes: { hasPass: true } },
+      };
+      authService.findPendingRegistration.mockResolvedValue(document);
+      const reply = { send: vi.fn() };
+      const req = { params: { pendingId: "pending-123" } };
+
+      await controller.findPendingRegistration(req as any, reply as any, "pending-123");
+
+      expect(authService.findPendingRegistration).toHaveBeenCalledWith({ pendingId: "pending-123" });
+      expect(reply.send).toHaveBeenCalledWith(document);
+    });
+
+    it("is routed under the auth controller from the meta endpoint", () => {
+      const path = Reflect.getMetadata("path", AuthController.prototype.findPendingRegistration);
+      expect(path).toBe("oauth/pending-registrations/:pendingId");
+    });
+
+    it("limits the pending-registration read to 10 requests per minute on both throttlers", () => {
+      const handler = AuthController.prototype.findPendingRegistration;
+      expect(Reflect.getMetadata("THROTTLER:LIMITdefault", handler)).toBe(10);
+      expect(Reflect.getMetadata("THROTTLER:TTLdefault", handler)).toBe(60000);
+      expect(Reflect.getMetadata("THROTTLER:LIMITip", handler)).toBe(10);
+      expect(Reflect.getMetadata("THROTTLER:TTLip", handler)).toBe(60000);
+    });
+
+    it("still builds with only the service (subclasses call super(authService))", () => {
+      const subclassed = new AuthController(authService);
+      expect(subclassed).toBeInstanceOf(AuthController);
     });
   });
 

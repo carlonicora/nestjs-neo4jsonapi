@@ -28,6 +28,7 @@ vi.mock("crypto", () => ({
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
+import { ModuleRef } from "@nestjs/core";
 import { ClsService } from "nestjs-cls";
 import axios from "axios";
 
@@ -57,6 +58,7 @@ describe("AuthDiscordService", () => {
   let clsService: MockedObject<ClsService>;
   let pendingRegistrationService: MockedObject<PendingRegistrationService>;
   let waitlistService: { validateInviteCode: ReturnType<typeof vi.fn> };
+  let moduleRef: { get: ReturnType<typeof vi.fn> };
 
   const TEST_IDS = {
     userId: "user-123",
@@ -134,9 +136,16 @@ describe("AuthDiscordService", () => {
       create: vi.fn(),
     };
 
+    const mockModuleRef = {
+      get: vi.fn(() => {
+        throw new Error("No provider for REGISTRATION_PASS");
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthDiscordService,
+        { provide: ModuleRef, useValue: mockModuleRef },
         { provide: UserRepository, useValue: mockUserRepository },
         { provide: DiscordUserRepository, useValue: mockDiscordUserRepository },
         { provide: DiscordUserService, useValue: mockDiscordUserService },
@@ -157,6 +166,7 @@ describe("AuthDiscordService", () => {
     clsService = module.get(ClsService);
     pendingRegistrationService = module.get(PendingRegistrationService);
     waitlistService = module.get(WaitlistService);
+    moduleRef = module.get(ModuleRef) as unknown as { get: ReturnType<typeof vi.fn> };
   });
 
   afterEach(() => {
@@ -568,6 +578,142 @@ describe("AuthDiscordService", () => {
 
       expect(pendingRegistrationService.create.mock.calls[0][0].source).toBeUndefined();
       expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
+    });
+  });
+
+  describe("registration pass", () => {
+    const useMode = (registrationMode: "open" | "waitlist") =>
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") {
+          return { allowRegistration: true, registrationMode };
+        }
+        return mockConfig[key as keyof typeof mockConfig];
+      });
+
+    const provideHook = (verdict: "valid" | "mismatch" | "invalid") => {
+      const hook = { validate: vi.fn().mockResolvedValue(verdict), consume: vi.fn() };
+      moduleRef.get.mockImplementation((token: string) => {
+        if (token === "REGISTRATION_PASS") return hook;
+        throw new Error(`No provider for ${token}`);
+      });
+      return hook;
+    };
+
+    it("round-trips pass through the OAuth state", () => {
+      const url = service.generateLoginUrl(undefined, undefined, undefined, "code-1");
+      const stateMatch = url.match(/state=([^&]+)/);
+      const state = stateMatch![1];
+
+      expect(JSON.parse(Buffer.from(state, "base64url").toString()).pass).toBe("code-1");
+      expect(service.parseStateData(state)?.pass).toBe("code-1");
+    });
+
+    it("new user with no Discord email is sent to email_required", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+
+      const result = await service.handleDiscordLogin({
+        userDetails: { ...mockDiscordUserDetails, email: undefined as unknown as string },
+      });
+
+      expect(result).toBe("http://app.example.com/oauth/error?error=email_required");
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("waitlist: a valid pass skips the waitlist and is stored without the invite", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("waitlist");
+      const hook = provideHook("valid");
+      pendingRegistrationService.create.mockResolvedValue(TEST_IDS.pendingId);
+
+      const result = await service.handleDiscordLogin({
+        userDetails: mockDiscordUserDetails,
+        inviteCode: "inv",
+        pass: "code-1",
+      });
+
+      expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
+      expect(hook.validate).toHaveBeenCalledWith({
+        pass: "code-1",
+        provider: "discord",
+        providerUserId: mockDiscordUserDetails.id,
+      });
+      expect(pendingRegistrationService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ pass: "code-1", inviteCode: undefined }),
+      );
+      expect(waitlistService.validateInviteCode).not.toHaveBeenCalled();
+    });
+
+    it("waitlist: no pass still requires an invite", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("waitlist");
+      const hook = provideHook("valid");
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails });
+
+      expect(result).toBe("http://app.example.com/oauth/error?error=waitlist_required");
+      expect(hook.validate).not.toHaveBeenCalled();
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("waitlist: an invalid pass still requires an invite", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("waitlist");
+      provideHook("invalid");
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails, pass: "code-1" });
+
+      expect(result).toBe("http://app.example.com/oauth/error?error=waitlist_required");
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("mismatched pass is refused in open mode too", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("open");
+      provideHook("mismatch");
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails, pass: "code-1" });
+
+      expect(result).toBe("http://app.example.com/oauth/error?error=join_link_mismatch");
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("open mode: invalid pass registers normally without storing it", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("open");
+      provideHook("invalid");
+      pendingRegistrationService.create.mockResolvedValue(TEST_IDS.pendingId);
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails, pass: "code-1" });
+
+      expect(result).toBe(`http://app.example.com/auth/consent?pending=${TEST_IDS.pendingId}`);
+      expect(pendingRegistrationService.create.mock.calls[0][0].pass).toBeUndefined();
+    });
+
+    it("no hook provided: pass is ignored", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(null);
+      useMode("waitlist");
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails, pass: "code-1" });
+
+      expect(moduleRef.get).toHaveBeenCalledWith("REGISTRATION_PASS", { strict: false });
+      expect(result).toBe("http://app.example.com/oauth/error?error=waitlist_required");
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
+    });
+
+    it("existing user with a pass logs in and the hook is never called", async () => {
+      discordUserRepository.findByDiscordId.mockResolvedValue(mockExistingDiscordUser as any);
+      authService.createToken.mockResolvedValue({
+        data: { attributes: { refreshToken: "refresh-token-123" } },
+      } as any);
+      const hook = provideHook("valid");
+
+      const result = await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails, pass: "code-1" });
+
+      expect(result).toBe("http://app.example.com/auth?code=mock-uuid-12345");
+      expect(moduleRef.get).not.toHaveBeenCalled();
+      expect(hook.validate).not.toHaveBeenCalled();
+      expect(hook.consume).not.toHaveBeenCalled();
+      expect(pendingRegistrationService.create).not.toHaveBeenCalled();
     });
   });
 

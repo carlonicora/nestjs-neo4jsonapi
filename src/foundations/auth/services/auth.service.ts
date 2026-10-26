@@ -1,4 +1,13 @@
-import { forwardRef, HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import {
+  forwardRef,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
@@ -19,6 +28,7 @@ import { AuthPostRegisterDataDTO } from "../../auth/dtos/auth.post.register.dto"
 import { AuthCode } from "../../auth/entities/auth.code";
 import { Auth, AuthDescriptor } from "../../auth/entities/auth";
 import { PendingAuthDescriptor } from "../../auth/entities/pending-auth";
+import { PendingRegistrationDescriptor } from "../../auth/entities/pending-registration.resource";
 import { AuthRepository } from "../../auth/repositories/auth.repository";
 import { CompanyDescriptor } from "../../company";
 import { CompanyRepository } from "../../company/repositories/company.repository";
@@ -34,6 +44,8 @@ import { WaitlistService } from "../../waitlist/services/waitlist.service";
 import { hasSignupSource, sanitiseSignupSource } from "../../waitlist/utils/signup-source";
 import { USER_ACTIVATED_EVENT, UserActivatedEvent } from "../events/auth.events";
 import { REGISTRATION_HOOK, RegistrationHookInterface } from "../interfaces/registration-hook.interface";
+import { RegistrationPassInterface, RegistrationPassVerdict } from "../interfaces/registration-pass.interface";
+import { resolveRegistrationPass } from "../utils/resolve-registration-pass";
 import { PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
 import {
@@ -649,7 +661,19 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       throw new HttpException("Registration is currently closed", HttpStatus.FORBIDDEN);
     }
 
-    if (registrationMode === "waitlist") {
+    // A registration pass (app-provided REGISTRATION_PASS hook) is re-checked here:
+    // anything but "valid" refuses the sign-up in every mode. A valid pass skips
+    // the waitlist/invite checks.
+    let passHook: RegistrationPassInterface | undefined;
+    if (pending.pass) {
+      passHook = resolveRegistrationPass(this.moduleRef);
+      const verdict: RegistrationPassVerdict = passHook
+        ? await passHook.validate({ pass: pending.pass, provider: "discord", providerUserId: pending.providerUserId })
+        : "invalid";
+      if (verdict !== "valid") {
+        throw new HttpException("This registration pass is no longer valid", HttpStatus.FORBIDDEN);
+      }
+    } else if (registrationMode === "waitlist") {
       // Waitlist mode needs WaitlistModule - see register().
       if (!this.waitlistService) {
         throw new HttpException("Waitlist registration is not available", HttpStatus.NOT_IMPLEMENTED);
@@ -668,6 +692,12 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
       // Defence in depth: the provider callback already redirected on a mismatch
       this.assertInviteEmail({ email: pending.email, inviteEmail: inviteValidation.email });
+    }
+
+    // The User.email UNIQUE constraint ignores isDeleted, so a soft-deleted user
+    // also blocks the sign-up. Checked before any write.
+    if (await this.isEmailInUse(pending.email)) {
+      throw new HttpException("This email already has an account. Sign in with it.", HttpStatus.CONFLICT);
     }
 
     // Generate IDs for new user and company
@@ -732,8 +762,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       }
     }
 
+    // A pass sign-up gets no trial and no USER_ACTIVATED_EVENT (no GM email automations).
     // Queue trial creation (async, non-blocking) - see activateAccount()
-    if (this.trialQueueService) {
+    if (this.trialQueueService && !pending.pass) {
       await this.trialQueueService.queueTrialCreation({
         companyId: companyId,
         userId: userId,
@@ -759,9 +790,15 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     // Get created user
     const user = await this.users.findByUserId({ userId });
 
-    // Emitted here rather than right after the registration hook: the created user is loaded only now.
-    const event: UserActivatedEvent = { user, language };
-    this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
+    if (pending.pass) {
+      // The account exists: the pass cannot be reused. passHook is set: a pass
+      // without a hook was refused before any write.
+      await passHook?.consume({ pass: pending.pass });
+    } else {
+      // Emitted here rather than right after the registration hook: the created user is loaded only now.
+      const event: UserActivatedEvent = { user, language };
+      this.eventEmitter.emit(USER_ACTIVATED_EVENT, event);
+    }
 
     // Notify platform administrators (non-blocking)
     await this.notifyAdminsOfRegistration(user);
@@ -776,6 +813,33 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     });
 
     return { code: authCodeId };
+  }
+
+  /**
+   * Reads a pending OAuth sign-up for the consent page. `hasPass` tells the page
+   * the sign-up carries an application registration pass; `emailInUse` tells it
+   * the sign-up cannot complete because the email already has an account.
+   */
+  async findPendingRegistration(params: { pendingId: string }): Promise<JsonApiSingleDocument> {
+    const pending = await this.pendingRegistrationService.get(params.pendingId);
+    if (!pending) {
+      throw new NotFoundException("Pending registration not found or expired");
+    }
+
+    return this.jsonApiService.buildSingle(PendingRegistrationDescriptor.model, {
+      id: pending.id,
+      name: pending.name,
+      email: pending.email,
+      avatar: pending.avatar,
+      provider: pending.provider,
+      hasPass: !!pending.pass,
+      emailInUse: await this.isEmailInUse(pending.email),
+    });
+  }
+
+  /** True when any User, soft-deleted included, already has this email. */
+  private async isEmailInUse(email: string): Promise<boolean> {
+    return !!(await this.users.findByEmail({ email, includeDeleted: true }));
   }
 
   /**

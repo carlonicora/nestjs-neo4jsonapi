@@ -230,7 +230,12 @@ describe("AuthDiscordController", () => {
 
       await controller.loginWithDiscord(mockReply, "invite-code", "referral-code", source);
 
-      expect(authDiscordService.generateLoginUrl).toHaveBeenCalledWith("invite-code", "referral-code", source);
+      expect(authDiscordService.generateLoginUrl).toHaveBeenCalledWith(
+        "invite-code",
+        "referral-code",
+        source,
+        undefined,
+      );
       expect(mockReply.redirect).toHaveBeenCalledWith("https://provider.example.com/login", 302);
     });
 
@@ -258,6 +263,30 @@ describe("AuthDiscordController", () => {
       expect(authDiscordService.handleDiscordLogin).toHaveBeenCalledWith(
         expect.objectContaining({ inviteCode: "inv-1", source }),
       );
+    });
+  });
+
+  describe("registration pass", () => {
+    it("forwards the pass query param to the login URL and the state's pass to handleDiscordLogin", async () => {
+      authDiscordService.generateLoginUrl.mockReturnValue("https://discord.com/api/oauth2/authorize");
+
+      await controller.loginWithDiscord(mockReply, undefined, undefined, undefined, "code-1");
+
+      expect(authDiscordService.generateLoginUrl).toHaveBeenCalledWith(undefined, undefined, undefined, "code-1");
+
+      authDiscordService.parseStateData.mockReturnValue({ pass: "code-1" });
+      authDiscordService.exchangeCodeForToken.mockResolvedValue("access-token");
+      authDiscordService.fetchUserDetails.mockResolvedValue({
+        id: "discord-user-id",
+        username: "testuser",
+        email: "test@example.com",
+        avatar: "avatar-hash",
+      });
+      authDiscordService.handleDiscordLogin.mockResolvedValue("http://redirect.url");
+
+      await controller.callbackDiscord(mockReply, "auth-code", "encoded-state");
+
+      expect(authDiscordService.handleDiscordLogin).toHaveBeenCalledWith(expect.objectContaining({ pass: "code-1" }));
     });
   });
 

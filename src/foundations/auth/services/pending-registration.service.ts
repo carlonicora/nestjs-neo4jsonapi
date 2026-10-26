@@ -15,6 +15,8 @@ export interface PendingRegistration {
   inviteCode?: string;
   referralCode?: string;
   source?: SignupSource;
+  /** Registration pass accepted at sign-in (see REGISTRATION_PASS); re-checked at completion. */
+  pass?: string;
   createdAt: string;
 }
 

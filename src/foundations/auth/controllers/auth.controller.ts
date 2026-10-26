@@ -6,13 +6,16 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import { FastifyReply } from "fastify";
 
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthPostForgotDTO } from "../../auth/dtos/auth.post.forgot.dto";
@@ -23,11 +26,18 @@ import { authMeta } from "../../auth/entities/auth.meta";
 import { AuthService } from "../../auth/services/auth.service";
 import { ModuleACL } from "../../../common/decorators/module.decorator";
 import { CoreModuleId } from "../../../common/constants/core-module.ids";
+import { Audit } from "../../../common/decorators/audit.decorator";
+import { AuditService } from "../../audit/services/audit.service";
+import { pendingRegistrationMeta } from "../entities/pending-registration.meta";
 
 @ModuleACL({ module: CoreModuleId.Auth })
 @Controller(authMeta.endpoint)
 export class AuthController {
-  constructor(private readonly service: AuthService) {}
+  // auditService is optional: consumers subclass this controller with super(authService).
+  constructor(
+    private readonly service: AuthService,
+    @Optional() private readonly auditService?: AuditService,
+  ) {}
 
   @Post()
   async findAuth(@Query("code") code: string) {
@@ -110,6 +120,20 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async activateAccount(@Param("code") code: string, @Headers("x-language") language?: string) {
     await this.service.activateAccount(code, language);
+  }
+
+  // Public: the pending id is an unguessable UUID that expires after 15 minutes.
+  @Throttle({ default: { limit: 10, ttl: 60000 }, ip: { limit: 10, ttl: 60000 } })
+  @Get(`oauth/${pendingRegistrationMeta.endpoint}/:pendingId`)
+  @Audit(pendingRegistrationMeta, "pendingId")
+  async findPendingRegistration(
+    // The request carries the route param @Audit reads.
+    @Req() _req: any,
+    @Res() reply: FastifyReply,
+    @Param("pendingId") pendingId: string,
+  ) {
+    const response = await this.service.findPendingRegistration({ pendingId });
+    reply.send(response);
   }
 
   @Post("oauth/complete")

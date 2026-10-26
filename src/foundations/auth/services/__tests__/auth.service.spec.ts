@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
-import { HttpException, HttpStatus } from "@nestjs/common";
+import { HttpException, HttpStatus, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ModuleRef } from "@nestjs/core";
 import { EventEmitter2 } from "@nestjs/event-emitter";
@@ -24,6 +24,8 @@ import { ResponseLanguageService } from "../../../user/services/response-languag
 import { Auth, AuthDescriptor } from "../../entities/auth";
 import { AuthCode } from "../../entities/auth.code";
 import { PendingAuthDescriptor } from "../../entities/pending-auth";
+import { PendingRegistrationDescriptor } from "../../entities/pending-registration.resource";
+import { REGISTRATION_PASS } from "../../interfaces/registration-pass.interface";
 import { User } from "../../../user/entities/user";
 import { USER_ACTIVATED_EVENT } from "../../events/auth.events";
 
@@ -1038,6 +1040,207 @@ describe("AuthService", () => {
   });
 
   /**
+   * Registration pass (REGISTRATION_PASS hook) and email-in-use rules at completion.
+   */
+  describe("completeOAuthRegistration — registration pass and email in use", () => {
+    const oauthParams = {
+      pendingId: "pending-123",
+      termsAcceptedAt: "2026-10-25T00:00:00Z",
+      marketingConsent: false,
+      marketingConsentAt: null,
+    };
+
+    const pendingDiscord = (overrides: Record<string, unknown> = {}): PendingRegistration =>
+      ({
+        id: "pending-123",
+        provider: "discord",
+        providerUserId: "discord-123",
+        email: "player@example.com",
+        name: "Player",
+        createdAt: "2026-10-25T00:00:00Z",
+        ...overrides,
+      }) as PendingRegistration;
+
+    const PASS_REFUSED = new HttpException("This registration pass is no longer valid", HttpStatus.FORBIDDEN);
+
+    let hook: { validate: ReturnType<typeof vi.fn>; consume: ReturnType<typeof vi.fn> };
+    let findPlatformAdministrators: ReturnType<typeof vi.fn>;
+
+    const useRegistrationMode = (registrationMode: "open" | "waitlist") =>
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") return { allowRegistration: true, registrationMode };
+        if (key === "app") return MOCK_APP_CONFIG;
+        return undefined;
+      });
+
+    const provideHook = () =>
+      moduleRef.get.mockImplementation(((token: unknown) => {
+        if (token === REGISTRATION_PASS) return hook;
+        throw new Error(`no provider for ${String(token)}`);
+      }) as any);
+
+    beforeEach(() => {
+      hook = { validate: vi.fn().mockResolvedValue("valid"), consume: vi.fn().mockResolvedValue(undefined) };
+      findPlatformAdministrators = vi.fn().mockResolvedValue([]);
+      (userRepository as any).findPlatformAdministrators = findPlatformAdministrators;
+      useRegistrationMode("waitlist");
+      provideHook();
+      userRepository.findByEmail.mockResolvedValue(null as any);
+      discordUserService.create.mockResolvedValue(undefined);
+      googleUserService.create.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      jsonApiService.buildSingle.mockResolvedValue({
+        data: { attributes: { refreshToken: TEST_IDS.authId } },
+      });
+    });
+
+    it("pass sign-up in waitlist mode skips the invite check, queues no trial, emits no user.activated, consumes the pass, still notifies admins", async () => {
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1" }));
+
+      const result = await service.completeOAuthRegistration(oauthParams);
+
+      expect(hook.validate).toHaveBeenCalledWith({
+        pass: "code-1",
+        provider: "discord",
+        providerUserId: "discord-123",
+      });
+      expect(waitlistService.validateInviteCode).not.toHaveBeenCalled();
+      expect(discordUserService.create).toHaveBeenCalled();
+      expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(USER_ACTIVATED_EVENT, expect.anything());
+      expect(hook.consume).toHaveBeenCalledWith({ pass: "code-1" });
+      expect(discordUserService.create.mock.invocationCallOrder[0]).toBeLessThan(
+        hook.consume.mock.invocationCallOrder[0],
+      );
+      expect(findPlatformAdministrators).toHaveBeenCalled();
+      expect(result).toEqual({ code: "mock-random-uuid" });
+    });
+
+    it("pass that is now invalid is refused with 403 and nothing is created", async () => {
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1" }));
+      hook.validate.mockResolvedValue("invalid");
+
+      await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(PASS_REFUSED);
+
+      expect(discordUserService.create).not.toHaveBeenCalled();
+      expect(hook.consume).not.toHaveBeenCalled();
+    });
+
+    it("pass mismatch at completion is refused with 403", async () => {
+      useRegistrationMode("open");
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1" }));
+      hook.validate.mockResolvedValue("mismatch");
+
+      await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(PASS_REFUSED);
+
+      expect(discordUserService.create).not.toHaveBeenCalled();
+      expect(hook.consume).not.toHaveBeenCalled();
+    });
+
+    it("pass with no hook provided is refused with 403", async () => {
+      useRegistrationMode("open");
+      moduleRef.get.mockImplementation((() => {
+        throw new Error("no provider");
+      }) as any);
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1" }));
+
+      await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(PASS_REFUSED);
+
+      expect(discordUserService.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["discord", pendingDiscord()],
+      ["google", pendingDiscord({ provider: "google", providerUserId: "google-123" })],
+    ])("email already used (including soft-deleted) is refused with 409 before any write (%s)", async (_p, pending) => {
+      useRegistrationMode("open");
+      pendingRegistrationService.get.mockResolvedValue(pending);
+      userRepository.findByEmail.mockResolvedValue({ ...MOCK_USER, isDeleted: true } as User);
+
+      await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(
+        new HttpException("This email already has an account. Sign in with it.", HttpStatus.CONFLICT),
+      );
+
+      expect(userRepository.findByEmail).toHaveBeenCalledWith({ email: "player@example.com", includeDeleted: true });
+      expect(discordUserService.create).not.toHaveBeenCalled();
+      expect(googleUserService.create).not.toHaveBeenCalled();
+      expect(pendingRegistrationService.delete).not.toHaveBeenCalled();
+    });
+
+    it("sign-up without a pass still queues the trial, emits user.activated and returns { code }", async () => {
+      useRegistrationMode("open");
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord());
+
+      const result = await service.completeOAuthRegistration(oauthParams, "en");
+
+      expect(hook.validate).not.toHaveBeenCalled();
+      expect(hook.consume).not.toHaveBeenCalled();
+      expect(trialQueueService.queueTrialCreation).toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER, language: "en" });
+      expect(result).toEqual({ code: "mock-random-uuid" });
+    });
+  });
+
+  describe("findPendingRegistration", () => {
+    it("findPendingRegistration returns hasPass and emailInUse", async () => {
+      pendingRegistrationService.get.mockResolvedValue({
+        id: "pending-123",
+        provider: "discord",
+        providerUserId: "discord-123",
+        email: "player@example.com",
+        name: "Player",
+        avatar: "https://cdn.discordapp.com/a.png",
+        pass: "code-1",
+        createdAt: "2026-10-25T00:00:00Z",
+      } as PendingRegistration);
+      userRepository.findByEmail.mockResolvedValue(MOCK_USER);
+      const document = { data: { type: "pending-registrations", id: "pending-123" } };
+      jsonApiService.buildSingle.mockResolvedValue(document);
+
+      const result = await service.findPendingRegistration({ pendingId: "pending-123" });
+
+      expect(userRepository.findByEmail).toHaveBeenCalledWith({ email: "player@example.com", includeDeleted: true });
+      expect(jsonApiService.buildSingle).toHaveBeenCalledWith(PendingRegistrationDescriptor.model, {
+        id: "pending-123",
+        name: "Player",
+        email: "player@example.com",
+        avatar: "https://cdn.discordapp.com/a.png",
+        provider: "discord",
+        hasPass: true,
+        emailInUse: true,
+      });
+      expect(result).toBe(document);
+    });
+
+    it("findPendingRegistration reports no pass and a free email", async () => {
+      pendingRegistrationService.get.mockResolvedValue({
+        id: "pending-123",
+        provider: "google",
+        providerUserId: "google-123",
+        email: "gm@example.com",
+        name: "GM",
+        createdAt: "2026-10-25T00:00:00Z",
+      });
+      userRepository.findByEmail.mockResolvedValue(null as any);
+
+      await service.findPendingRegistration({ pendingId: "pending-123" });
+
+      expect(jsonApiService.buildSingle).toHaveBeenCalledWith(
+        PendingRegistrationDescriptor.model,
+        expect.objectContaining({ hasPass: false, emailInUse: false }),
+      );
+    });
+
+    it("findPendingRegistration throws NotFoundException when expired", async () => {
+      pendingRegistrationService.get.mockResolvedValue(null);
+
+      await expect(service.findPendingRegistration({ pendingId: "gone" })).rejects.toBeInstanceOf(NotFoundException);
+      expect(jsonApiService.buildSingle).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * The satellite foundation modules (TwoFactorModule, WaitlistModule,
    * DiscordUserModule, the trial queue) are @Optional() on AuthService so an
    * application can compose auth without them. These tests build the service
@@ -1439,5 +1642,19 @@ describe("Auth descriptors — serialiser parity", () => {
 
   it("keeps the two-factor challenge JSON:API type", () => {
     expect(PendingAuthDescriptor.model.type).toBe("two-factor-challenge");
+  });
+
+  it("pins the PendingRegistration attribute set and type", () => {
+    expect(Object.keys(PendingRegistrationDescriptor.fields).sort()).toEqual([
+      "avatar",
+      "email",
+      "emailInUse",
+      "hasPass",
+      "name",
+      "provider",
+    ]);
+    expect(PendingRegistrationDescriptor.relationships).toEqual({});
+    expect(PendingRegistrationDescriptor.model.type).toBe("pending-registrations");
+    expect(PendingRegistrationDescriptor.model.endpoint).toBe("pending-registrations");
   });
 });

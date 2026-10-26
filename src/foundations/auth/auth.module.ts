@@ -6,6 +6,7 @@ import { AuthController } from "./controllers/auth.controller";
 
 import { modelRegistry } from "../../common/registries/registry";
 import { QueueId } from "../../config/enums/queue.id";
+import { AuditModule } from "../audit/audit.module";
 import { CompanyModule } from "../company/company.module";
 import { DiscordUserModule } from "../discord-user/discord-user.module";
 import { GoogleUserModule } from "../google-user/google-user.module";
@@ -17,6 +18,7 @@ import { AuthGoogleController } from "./controllers/auth.google.controller";
 import { AuthDescriptor } from "./entities/auth";
 import { AuthCodeDescriptor } from "./entities/auth.code";
 import { PendingAuthDescriptor } from "./entities/pending-auth";
+import { PendingRegistrationDescriptor } from "./entities/pending-registration.resource";
 import { AuthRepository } from "./repositories/auth.repository";
 import { AuthDiscordService } from "./services/auth.discord.service";
 import { AuthGoogleService } from "./services/auth.google.service";
@@ -32,6 +34,7 @@ import { TrialQueueService } from "./services/trial-queue.service";
     AuthDescriptor.model.serialiser,
     AuthCodeDescriptor.model.serialiser,
     PendingAuthDescriptor.model.serialiser,
+    PendingRegistrationDescriptor.model.serialiser,
     AuthDiscordService,
     AuthGoogleService,
     PendingRegistrationService,
@@ -41,6 +44,7 @@ import { TrialQueueService } from "./services/trial-queue.service";
   imports: [
     UserModule,
     JwtModule,
+    AuditModule,
     CompanyModule,
     DiscordUserModule,
     GoogleUserModule,
@@ -54,5 +58,6 @@ export class AuthModule implements OnModuleInit {
     modelRegistry.register(AuthDescriptor.model);
     modelRegistry.register(AuthCodeDescriptor.model);
     modelRegistry.register(PendingAuthDescriptor.model);
+    modelRegistry.register(PendingRegistrationDescriptor.model);
   }
 }
