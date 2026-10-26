@@ -7,6 +7,7 @@ import {
   RankedCandidate,
 } from "../graph.search.service";
 import { modelRegistry } from "../../../../common/registries/registry";
+import { ExternalSourceUnavailableError } from "../../../../common/interfaces/external.entity.source.interface";
 
 function makeEntity(type: string, labelName: string, moduleId: string, summary?: (d: any) => string) {
   return {
@@ -724,6 +725,28 @@ describe("GraphSearchService.resolveEntity — external sources and access", () 
     expect(out.items).toEqual([{ type: "laws", id: "l1", summary: "Codice civile", score: 1 }]);
     expect(queried).toContain("account_chat_fulltext");
     expect(queried.some((name) => name.startsWith("law_"))).toBe(false);
+  });
+
+  it("names an external type whose source did not answer in unavailableTypes, without throwing", async () => {
+    const lawService = {
+      resolveByText: vi
+        .fn()
+        .mockRejectedValue(
+          new ExternalSourceUnavailableError({ message: "Il corpus non è raggiungibile.", code: "corpus_unavailable" }),
+        ),
+      findRecordById: vi.fn(),
+    };
+    const registry = { get: vi.fn((type: string) => (type === "laws" ? lawService : undefined)) };
+    const { neo4j } = neo4jFor({});
+    const svc = build([law], neo4j, registry);
+
+    const out = await svc.resolveEntity({ text: "Codice civile", companyId: "co1", userModuleIds: [MODULE] });
+
+    expect(out).toEqual({
+      matchMode: "none",
+      items: [],
+      unavailableTypes: [{ type: "laws", code: "corpus_unavailable", message: "Il corpus non è raggiungibile." }],
+    });
   });
 
   it("drops a DB candidate whose service findRecordById returns null", async () => {

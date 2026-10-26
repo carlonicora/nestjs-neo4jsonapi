@@ -3,6 +3,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServerFactory } from "../services/mcp.server.factory";
 import { McpController } from "../controllers/mcp.controller";
+import { McpEntityWriteService } from "../services/mcp.entity.write.service";
+import { McpGenericToolsService } from "../services/mcp.generic.tools.service";
+import { McpToolRegistry } from "../services/mcp.tool.registry";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
 
@@ -76,5 +79,68 @@ describe("McpController module visibility", () => {
     await expect(controller.handle({} as any, {} as any)).rejects.toBe(stop);
     expect(userModules.findModuleIdsForUser).toHaveBeenCalledWith("u1", "c1");
     expect(factory.create).toHaveBeenCalledWith(ctx);
+  });
+});
+
+/**
+ * LM-85 over the wire: the real generic tool set behind the real registry and
+ * server. tools/list carries the generic write tools only when the user's
+ * catalog has a chat.writable type; readOnlyHint is unchanged.
+ */
+describe("MCP server write tool gating (tools/list)", () => {
+  const WRITE_TOOLS = ["create_entity", "update_entity", "add_relationship", "remove_relationship"];
+  const idle = { invoke: vi.fn().mockResolvedValue({}) };
+
+  async function listFor(entities: Array<Record<string, unknown>>) {
+    const catalog = {
+      getAccessibleTypes: vi.fn((moduleIds: string[]) =>
+        entities.filter((e) => moduleIds.includes(e.moduleId as string)).map((e) => e.type as string),
+      ),
+      getEntityDetail: vi.fn(
+        (type: string, moduleIds: string[]) =>
+          entities.find((e) => e.type === type && moduleIds.includes(e.moduleId as string)) ?? null,
+      ),
+    };
+    const writeService = new McpEntityWriteService({ get: vi.fn() } as any, catalog as any, { can: vi.fn() } as any);
+    const generic = new McpGenericToolsService(
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      writeService,
+      catalog as any,
+      {} as any,
+    );
+    const registry = new McpToolRegistry(generic, { build: () => [] } as any);
+    const factory = new McpServerFactory(
+      { get: vi.fn().mockReturnValue({ serverName: "studio", instructions: "Read access." }) } as any,
+      registry,
+    );
+    const server = factory.create(ctx);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "test", version: "0.0.0" });
+    await client.connect(clientTransport);
+    return (await client.listTools()).tools;
+  }
+
+  it("lists no generic write tool when no type is chat.writable", async () => {
+    const tools = await listFor([{ type: "judgements", moduleId: "mod-orders", fields: [], relationships: [] }]);
+    const names = tools.map((t) => t.name);
+    for (const name of WRITE_TOOLS) expect(names).not.toContain(name);
+    for (const tool of tools) expect(tool.annotations?.readOnlyHint).toBe(true);
+  });
+
+  it("lists the four write tools with readOnlyHint false when a type is chat.writable", async () => {
+    const tools = await listFor([
+      { type: "judgements", moduleId: "mod-orders", fields: [], relationships: [] },
+      { type: "orders", moduleId: "mod-orders", writable: true, fields: [], relationships: [] },
+    ]);
+    for (const name of WRITE_TOOLS) {
+      expect(tools.find((t) => t.name === name)?.annotations?.readOnlyHint).toBe(false);
+    }
+    expect(tools.find((t) => t.name === "search_entities")?.annotations?.readOnlyHint).toBe(true);
   });
 });

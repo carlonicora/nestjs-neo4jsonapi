@@ -8,6 +8,10 @@ import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
 import { isDetailFieldsSource } from "../../../common/interfaces/detail.fields.source.interface";
+import {
+  externalSourceUnavailableResult,
+  isExternalSourceUnavailableError,
+} from "../../../common/interfaces/external.entity.source.interface";
 
 const inputSchema = z.object({
   type: z.string(),
@@ -109,17 +113,26 @@ export class ReadEntityTool {
             // Use edge-based lookup so this works for relationships that are
             // reverse-only on the catalog (not declared on the target descriptor).
             const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
-            const records: any[] = await this.filterInScope(
-              rel.targetType,
-              await targetSvc.findRelatedRecordsByEdge({
-                cypherLabel: rel.cypherLabel,
-                cypherDirection: targetDirection,
-                relatedLabel: entity.labelName,
-                relatedId: input.id,
-                limit: 50,
-              }),
-              ctx,
-            );
+            let records: any[];
+            try {
+              records = await this.filterInScope(
+                rel.targetType,
+                await targetSvc.findRelatedRecordsByEdge({
+                  cypherLabel: rel.cypherLabel,
+                  cypherDirection: targetDirection,
+                  relatedLabel: entity.labelName,
+                  relatedId: input.id,
+                  limit: 50,
+                }),
+                ctx,
+              );
+            } catch (e) {
+              // An external target that did not answer fails this relationship
+              // only: the record itself was read, and the other includes stand.
+              if (!isExternalSourceUnavailableError(e)) throw e;
+              related[name] = externalSourceUnavailableResult(e);
+              continue;
+            }
             const targetEntity = this.factory.resolveEntity(rel.targetType, ctx);
             const summariser =
               "error" in targetEntity

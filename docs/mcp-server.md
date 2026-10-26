@@ -82,7 +82,9 @@ at `POST /oauth/register`, and the tool surface below.
 
 ## Tool surface
 
-**Generic core** (always present):
+**Generic core** (read tools and `ping` always present; the four write tools
+only when the user's catalog has at least one `chat.writable` type, see
+`McpEntityWriteService.hasWritableTypes`):
 
 | Tool | Kind | Notes |
 |---|---|---|
@@ -95,6 +97,20 @@ at `POST /oauth/register`, and the tool surface below.
 | `create_entity` | write | Generates the id, dispatches `createFromDTO` |
 | `update_entity` | write | **Partial** update via `patchFromDTO` — only provided attributes change, relationships untouched |
 | `add_relationship` / `remove_relationship` | write | To-many edge changes via the relationship handlers |
+
+**Write tools are conditional.** An app (or a user whose readable modules hold)
+no `chat.writable` type gets no `create_entity` / `update_entity` /
+`add_relationship` / `remove_relationship` in `tools/list`: every call would
+answer `not_writable`, and a read-only server must not advertise writes. An app
+that declares a `chat.writable` type is unchanged: all four are listed.
+
+**Description divergence (documented).** The MCP descriptions of
+`resolve_entity` and `search_entities` (`mcp.generic.tools.service.ts`) do not
+tell the client to call `resolve_entity` first; when to use it is the job of the
+server instructions (`MCP_INSTRUCTIONS`). The operator copies in
+`agents/graph/tools/resolve-entity.tool.ts` and `search-entities.tool.ts` keep
+the "use this before" / "call resolve_entity first" wording, so the two
+surfaces deliberately differ.
 
 **Promoted tools:** every entity whose descriptor sets `chat.writable: true`
 also gets `search_<type>` / `get_<type>` / `create_<type>` / `update_<type>`
