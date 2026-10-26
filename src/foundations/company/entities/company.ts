@@ -34,6 +34,8 @@ export type Company = Entity & {
   configuration?: any;
 
   // Deletion scheduling fields
+  // Stored end of the free trial. Written once when the trial starts; never overwritten.
+  trialEndsAt?: Date;
   subscriptionEndedAt?: Date;
   scheduledDeletionAt?: Date;
   deactivationReason?: string;
@@ -103,6 +105,7 @@ export const CompanyDescriptor = defineEntity<Company>()({
     aiEnabled: { type: "boolean" },
     configurations: { type: "string" },
     configuration: { type: "string" },
+    trialEndsAt: { type: "datetime" },
     subscriptionEndedAt: { type: "datetime" },
     scheduledDeletionAt: { type: "datetime" },
     deactivationReason: { type: "string" },

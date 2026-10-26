@@ -66,6 +66,57 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
   }
 
   /**
+   * Create a pending referral unless the referred company already has one.
+   *
+   * A referral is written once per referred company and never changed. Both ids
+   * must be server-derived, never taken from a request.
+   *
+   * Company check: the referred company (the caller's own) goes through
+   * validateRelatedNodes. The REFERRED_BY link to the referrer company skips that
+   * check, because a link to another company is the point of the record.
+   * Owner-approved exception (Carlo, 2026-10-26, plan audit round 3 B1), scoped to
+   * this one link in this one method.
+   * @param params.id - The referral ID
+   * @param params.referrerCompanyId - The company that made the referral
+   * @param params.referredCompanyId - The company that was referred
+   */
+  async createReferralIfAbsent(params: {
+    id: string;
+    referrerCompanyId: string;
+    referredCompanyId: string;
+  }): Promise<void> {
+    await this.neo4j.validateRelatedNodes({
+      nodes: [{ id: params.referredCompanyId, label: companyMeta.labelName }],
+    });
+
+    const query = this.neo4j.initQuery({ serialiser: ReferralDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      id: params.id,
+      referrerCompanyId: params.referrerCompanyId,
+      referredCompanyId: params.referredCompanyId,
+      status: "pending",
+    };
+
+    query.query += `
+      MATCH (referrer:${companyMeta.labelName} {id: $referrerCompanyId})
+      MATCH (referred:${companyMeta.labelName} {id: $referredCompanyId})
+      WHERE NOT EXISTS { MATCH (:${referralMeta.labelName})-[:REFERS_TO]->(referred) }
+      CREATE (${referralMeta.nodeName}:${referralMeta.labelName} {
+        id: $id,
+        status: $status,
+        createdAt: datetime(),
+        updatedAt: datetime()
+      })
+      CREATE (${referralMeta.nodeName})-[:REFERRED_BY]->(referrer)
+      CREATE (${referralMeta.nodeName})-[:REFERS_TO]->(referred)
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
    * Find a pending referral by the referred company ID.
    * Uses custom result processing to properly load both referrer and referred relationships
    * (the entity factory can't handle multiple relationships to the same entity type).

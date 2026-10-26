@@ -42,4 +42,8 @@ describe("CompanyDescriptor wire surface", () => {
     expect(CompanyDescriptor.fields.creditsGrantedThisPeriod?.type).toBe("number");
     expect(CompanyDescriptor.fields.creditWarningOffer?.type).toBe("string");
   });
+
+  it("declares trialEndsAt as a datetime", () => {
+    expect(CompanyDescriptor.fields.trialEndsAt).toEqual({ type: "datetime" });
+  });
 });

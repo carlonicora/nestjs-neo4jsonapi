@@ -458,6 +458,34 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
+   * Store the end of the company's free trial.
+   *
+   * Written once: an existing `trialEndsAt` is never overwritten, so a retried
+   * trial job or a second start-trial call cannot extend the trial. The company id
+   * must be server-derived (the worker's trial job, or the caller's own CLS company).
+   *
+   * @param params.companyId - Company identifier
+   * @param params.trialEndsAt - ISO 8601 instant at which the trial ends
+   */
+  async markTrialEnd(params: { companyId: string; trialEndsAt: string }): Promise<void> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      companyId: params.companyId,
+      trialEndsAt: params.trialEndsAt,
+    };
+
+    query.query += `
+      MATCH (company:Company {id: $companyId})
+      SET company.trialEndsAt = coalesce(company.trialEndsAt, datetime($trialEndsAt)),
+          company.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
    * Update company credit allocation fields
    *
    * Used by TokenAllocationService to reset credits on subscription payment
@@ -538,7 +566,8 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
-   * Delete a company and cascade its Memberships.
+   * Delete a company and cascade its Memberships and the Referrals naming it on
+   * either side.
    *
    * KEPT under the name `delete` (overriding `AbstractRepository.delete()`) — the
    * Membership cascade below MUST run for every caller, including an application
@@ -560,6 +589,11 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       MATCH (company:Company {id: $companyId})
       OPTIONAL MATCH (:User)-[:HAS_MEMBERSHIP]->(orphan_ms:Membership)-[:IN_COMPANY]->(company)
       DETACH DELETE orphan_ms
+
+      // Referrals naming the company on either side go with it.
+      WITH DISTINCT company
+      OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)
+      DETACH DELETE referral
 
       WITH DISTINCT company
       DETACH DELETE company

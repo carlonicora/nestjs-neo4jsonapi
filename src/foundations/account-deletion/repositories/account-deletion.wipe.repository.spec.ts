@@ -122,6 +122,19 @@ describe("AccountDeletionWipeRepository", () => {
     expect(calls[0].params).toEqual({ companyId: COMPANY_ID });
   });
 
+  it("deleteCompanyShell deletes the company's referrals in the same transaction", async () => {
+    await repository.deleteCompanyShell({ companyId: COMPANY_ID });
+
+    expect(neo4j.executeInTransaction).toHaveBeenCalledTimes(1);
+    const query = calls[0].query as string;
+    const referralMatch = query.indexOf("OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)");
+    const referralDelete = query.indexOf("DETACH DELETE referral");
+    const companyDelete = query.indexOf("DETACH DELETE company");
+    expect(referralMatch).toBeGreaterThan(-1);
+    expect(referralDelete).toBeGreaterThan(referralMatch);
+    expect(companyDelete).toBeGreaterThan(referralDelete);
+  });
+
   it("deleteUserNode deletes one user by parameter", async () => {
     await repository.deleteUserNode({ userId: USER_ID });
 

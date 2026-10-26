@@ -54,6 +54,7 @@ const createMockCompanyRepository = () => ({
   findByCompanyId: vi.fn(),
   updateTokens: vi.fn(),
   markSubscriptionStatus: vi.fn(),
+  markTrialEnd: vi.fn(),
 });
 
 const createMockCompanyService = () => ({
@@ -187,6 +188,39 @@ describe("TrialService", () => {
         isActiveSubscription: true,
       });
       expect(logger.log).toHaveBeenCalledWith(expect.stringContaining("Trial started"));
+    });
+
+    it("writes trialEndsAt 14 days after start", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-26T10:00:00.000Z"));
+      try {
+        companyRepository.findByCompanyId.mockResolvedValue(MOCK_COMPANY);
+        stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
+        stripePriceRepository.findTrialPrice.mockResolvedValue(MOCK_TRIAL_PRICE);
+        stripeCustomerAdminService.createCustomer.mockResolvedValue({ data: { id: MOCK_CUSTOMER_ENTITY.id } });
+        stripeSubscriptionAdminService.createSubscription.mockResolvedValue({ data: { id: "sub_123" } });
+        companyService.updateTokensAndAiFlag.mockResolvedValue(undefined);
+        companyRepository.markSubscriptionStatus.mockResolvedValue(undefined);
+        companyRepository.markTrialEnd.mockResolvedValue(undefined);
+
+        await service.startTrial(trialParams);
+
+        expect(companyRepository.markTrialEnd).toHaveBeenCalledWith({
+          companyId: trialParams.companyId,
+          trialEndsAt: "2026-11-09T10:00:00.000Z",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not write trialEndsAt when the trial is skipped", async () => {
+      companyRepository.findByCompanyId.mockResolvedValue(MOCK_COMPANY);
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_CUSTOMER_ENTITY);
+
+      await service.startTrial(trialParams);
+
+      expect(companyRepository.markTrialEnd).not.toHaveBeenCalled();
     });
 
     it("should skip trial creation when company already has active subscription", async () => {

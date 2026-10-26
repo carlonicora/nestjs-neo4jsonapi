@@ -18,6 +18,7 @@ import { StripeSubscriptionAdminService } from "../../stripe-subscription/servic
  * - Database-driven trial price selection (isTrial: true)
  * - Creates Stripe customer and subscription
  * - Allocates tokens from trial price configuration
+ * - Stores the trial end on the company (`trialEndsAt`, never overwritten)
  * - Graceful error handling (doesn't block registration)
  *
  * @example
@@ -128,6 +129,13 @@ export class TrialService {
     await this.companyRepository.markSubscriptionStatus({
       companyId: params.companyId,
       isActiveSubscription: true,
+    });
+
+    // 6. Store when the trial ends, so access does not depend on Stripe state.
+    // Never overwrites an existing value.
+    await this.companyRepository.markTrialEnd({
+      companyId: params.companyId,
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
     this.logger.log(`Trial started for company ${params.companyId} with ${trialTokens} tokens`);

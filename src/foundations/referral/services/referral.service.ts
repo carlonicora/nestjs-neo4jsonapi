@@ -139,6 +139,26 @@ export class ReferralService implements ReferralCompletionHandler {
   }
 
   /**
+   * Records who referred whom without rewarding anyone. Works while the referral
+   * feature is disabled. A later payment completes it only if the feature is
+   * enabled then. Both ids must be server-derived, never taken from a request.
+   *
+   * Writes a `pending` Referral once per referred company; an existing one is never
+   * changed. A self-referral (equal ids) is ignored.
+   * @param params.referrerCompanyId - The company that brought the referred one in
+   * @param params.referredCompanyId - The company being referred
+   */
+  async recordReferral(params: { referrerCompanyId: string; referredCompanyId: string }): Promise<void> {
+    if (params.referrerCompanyId === params.referredCompanyId) return;
+
+    await this.referralRepository.createReferralIfAbsent({
+      id: randomUUID(),
+      referrerCompanyId: params.referrerCompanyId,
+      referredCompanyId: params.referredCompanyId,
+    });
+  }
+
+  /**
    * Queue a referral invite email to be sent.
    * Enforces a configurable cooldown per company+email to prevent spam.
    * @param params.email - The email address to send the invite to

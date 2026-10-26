@@ -536,6 +536,39 @@ describe("CompanyRepository", () => {
       expect(mockNeo4jService.initQuery).toHaveBeenCalled();
       expect(mockNeo4jService.writeOne).toHaveBeenCalled();
     });
+
+    it("delete removes the company's referrals", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.delete({ id: MOCK_COMPANY_ID });
+
+      const query = mockNeo4jService.writeOne.mock.calls[0][0] as { query: string };
+      const referralMatch = query.query.indexOf(
+        "OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)",
+      );
+      const referralDelete = query.query.indexOf("DETACH DELETE referral");
+      const companyDelete = query.query.indexOf("DETACH DELETE company");
+      expect(referralMatch).toBeGreaterThan(-1);
+      expect(referralDelete).toBeGreaterThan(referralMatch);
+      expect(companyDelete).toBeGreaterThan(referralDelete);
+      expect(query.query).toContain("DETACH DELETE orphan_ms");
+    });
+  });
+
+  describe("markTrialEnd", () => {
+    it("markTrialEnd never overwrites", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.markTrialEnd({ companyId: MOCK_COMPANY_ID, trialEndsAt: "2026-11-09T10:00:00.000Z" });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith({ serialiser: CompanyDescriptor.model });
+      const query = mockNeo4jService.writeOne.mock.calls[0][0] as { query: string; queryParams: any };
+      expect(query.query).toContain("MATCH (company:Company {id: $companyId})");
+      expect(query.query).toContain("company.trialEndsAt = coalesce(company.trialEndsAt, datetime($trialEndsAt))");
+      expect(query.queryParams).toEqual(
+        expect.objectContaining({ companyId: MOCK_COMPANY_ID, trialEndsAt: "2026-11-09T10:00:00.000Z" }),
+      );
+    });
   });
 
   describe("findByStripeCustomerId", () => {

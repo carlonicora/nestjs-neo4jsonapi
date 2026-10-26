@@ -74,6 +74,7 @@ describe("ReferralService", () => {
 
     mockReferralRepository = {
       createReferral: vi.fn(),
+      createReferralIfAbsent: vi.fn(),
       findPendingByReferredCompanyId: vi.fn(),
       completeReferral: vi.fn(),
       countCompletedByReferrerCompanyId: vi.fn(),
@@ -202,6 +203,23 @@ describe("ReferralService", () => {
 
     it("should not throw error when completeReferralOnPayment is called while disabled", async () => {
       await expect(service.completeReferralOnPayment({ referredCompanyId: "any-company" })).resolves.not.toThrow();
+    });
+
+    it("recordReferral writes while the feature is disabled", async () => {
+      await service.recordReferral({ referrerCompanyId: "gm", referredCompanyId: "player" });
+
+      expect(mockReferralRepository.createReferralIfAbsent).toHaveBeenCalledTimes(1);
+      expect(mockReferralRepository.createReferralIfAbsent).toHaveBeenCalledWith({
+        id: expect.any(String),
+        referrerCompanyId: "gm",
+        referredCompanyId: "player",
+      });
+    });
+
+    it("recordReferral ignores a self-referral", async () => {
+      await service.recordReferral({ referrerCompanyId: "x", referredCompanyId: "x" });
+
+      expect(mockReferralRepository.createReferralIfAbsent).not.toHaveBeenCalled();
     });
   });
 

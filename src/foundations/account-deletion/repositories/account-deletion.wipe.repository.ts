@@ -180,8 +180,8 @@ export class AccountDeletionWipeRepository extends AbstractRepository<User, type
 
   /**
    * Deletes the Company node and its Memberships in one transaction (a company has a handful
-   * of memberships; an orphaned Membership would read as a platform membership). Remaining
-   * edges, referrals included, go with the Company.
+   * of memberships; an orphaned Membership would read as a platform membership). Referrals
+   * naming the company on either side are deleted with it. Remaining edges go with the Company.
    */
   async deleteCompanyShell(params: { companyId: string }): Promise<void> {
     const { query, queryParams } = this._wipeQuery(
@@ -190,6 +190,9 @@ export class AccountDeletionWipeRepository extends AbstractRepository<User, type
       MATCH (company:Company {id: $companyId}) // nja-lint-ignore wipe-exception
       OPTIONAL MATCH (company)<-[:IN_COMPANY]-(membership:Membership)
       DETACH DELETE membership
+      WITH DISTINCT company
+      OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)
+      DETACH DELETE referral
       WITH DISTINCT company
       DETACH DELETE company
     `,
