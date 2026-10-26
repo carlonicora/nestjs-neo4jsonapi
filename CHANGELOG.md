@@ -1,3 +1,9 @@
+## [8.6.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.5.0...v8.6.0) (2026-10-26)
+
+### 🚀 Features
+
+* **account-deletion:** let users delete their account after a grace period ([5fb8d77](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5fb8d779e07e5c9d3ff85e08b2a3e0ac417a7ca9))
+
 ## [8.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.4.0...v8.5.0) (2026-10-26)
 
 ### 🚀 Features
