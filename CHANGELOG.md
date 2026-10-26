@@ -1,3 +1,9 @@
+## [8.5.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.4.0...v8.5.0) (2026-10-26)
+
+### 🚀 Features
+
+* **auth:** let an app approve Discord sign-ups with a registration pass ([af07c52](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/af07c52c388800cfbbd87ca60c7accb344e21d14))
+
 ## [8.4.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.3.0...v8.4.0) (2026-10-25)
 
 ### 🚀 Features
