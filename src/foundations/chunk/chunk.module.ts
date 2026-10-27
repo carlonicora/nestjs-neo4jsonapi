@@ -12,6 +12,7 @@ import { ChunkController } from "./controllers/chunk.controller";
 import { ChunkDescriptor } from "./entities/chunk.entity";
 import { ChunkEmbeddingProcessor } from "./processors/chunk.embedding.processor";
 import { ChunkProcessor } from "./processors/chunk.processor";
+import { ChunkStatusRepository } from "./repositories/chunk-status.repository";
 import { ChunkRepository } from "./repositories/chunk.repository";
 import { ChunkService } from "./services/chunk.service";
 
@@ -39,10 +40,11 @@ import { ChunkService } from "./services/chunk.service";
     ChunkDescriptor.model.serialiser,
     ChunkService,
     ChunkRepository,
+    ChunkStatusRepository,
     createWorkerProvider(ChunkProcessor),
     createWorkerProvider(ChunkEmbeddingProcessor),
   ],
-  exports: [ChunkService, ChunkRepository],
+  exports: [ChunkService, ChunkRepository, ChunkStatusRepository],
   imports: [
     AtomicFactModule,
     GraphCreatorModule,

@@ -19,6 +19,12 @@ export enum AiStatus {
   Summarising = "summarising",
   PendingCredits = "pending_credits",
   Discarded = "discarded",
+  /**
+   * Chunk created and kept for retrieval and summarising, but deliberately not sent
+   * to the graph creator (the owner's plan or scope builds no knowledge graph). Not a
+   * pending state: `getChunksInProgress` and the finalisation claim ignore it.
+   */
+  NotGraphed = "not_graphed",
 }
 
 /**

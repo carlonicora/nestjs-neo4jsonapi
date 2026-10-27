@@ -10,6 +10,7 @@ import { buildEmbedderAttribution } from "../../../agents/common/usage-attributi
 import { GraphCreatorService } from "../../../agents/graph.creator/services/graph.creator.service";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { ChunkAnalysisInterface } from "../../../common/interfaces/agents/graph.creator.interface";
+import { QueueId } from "../../../config/enums/queue.id";
 import { BaseConfigInterface } from "../../../config/interfaces/base.config.interface";
 import { ConfigEmbeddingContextInterface } from "../../../config/interfaces/config.embedding.context.interface";
 import { ConfigJobNamesInterface } from "../../../config/interfaces/config.job.names.interface";
@@ -206,6 +207,12 @@ export class ChunkService {
     chunkId: string;
     id: string;
     type: string;
+    /**
+     * `false` skips the content's `process_<type>` finalisation (summary, communities,
+     * status): set by a caller graphing chunks whose content was already summarised.
+     * Defaults to `true`.
+     */
+    finalise?: boolean;
   }): Promise<void> {
     this.tracer.startSpan("Graph Creation", {
       attributes: {
@@ -351,15 +358,37 @@ export class ChunkService {
 
     this.tracer.addSpanEvent("Update Chunk Status");
 
-    const nextJobType = this.jobNames.process[params.type] ?? this.jobNames.process[params.type.toLowerCase()];
     this.logger.debug("Chunk processing completed, queuing next job", "ChunkService", {
       chunkId: params.chunkId,
       hadAnalysis: !!chunkAnalysis,
-      nextJobType,
       relationshipId: params.id,
     });
 
     this.tracer.endSpan();
+
+    if (params.finalise === false) return;
+
+    await this.enqueueContentFinalisation({
+      id: params.id,
+      type: params.type,
+      companyId: params.companyId,
+      userId: params.userId,
+    });
+  }
+
+  /**
+   * Queues the content type's `process_<type>` job (summary, communities, status) for a
+   * content node. `generateGraph` calls it after every chunk; a caller that keeps chunks
+   * out of the graph (`AiStatus.NotGraphed`) calls it once, directly, so the node still
+   * gets finalised.
+   */
+  async enqueueContentFinalisation(params: {
+    id: string;
+    type: string;
+    companyId: string;
+    userId: string;
+  }): Promise<void> {
+    const nextJobType = this.jobNames.process[params.type] ?? this.jobNames.process[params.type.toLowerCase()];
 
     if (!nextJobType) {
       throw new Error(
@@ -389,6 +418,37 @@ export class ChunkService {
       companyId: params.companyId,
       userId: params.userId,
     });
+  }
+
+  /**
+   * Queues one `process_chunk` job per chunk on the chunk queue: the graph-creation fan-out
+   * for chunks that were created without being processed (e.g. kept `NotGraphed` until the
+   * owner's scope is upgraded). `finalise: false` graphs the chunks without re-running the
+   * content's finalisation (see `generateGraph`); omitted, the payload is unchanged.
+   */
+  async enqueueChunkProcessing(params: {
+    chunkIds: string[];
+    id: string;
+    type: string;
+    companyId: string;
+    userId: string;
+    finalise?: boolean;
+  }): Promise<void> {
+    if (params.chunkIds.length === 0) return;
+
+    const queue = this.selectQueue(QueueId.CHUNK);
+    const jobName = this.jobNames.process?.chunk ?? "process_chunk";
+
+    for (const chunkId of params.chunkIds) {
+      await queue.add(jobName, {
+        chunkId,
+        contentId: params.id,
+        contentType: params.type,
+        companyId: params.companyId,
+        userId: params.userId,
+        ...(params.finalise === false ? { finalise: false } : {}),
+      });
+    }
   }
 
   async propagateAndEmbedDates(params: { id: string; nodeType: string }): Promise<void> {

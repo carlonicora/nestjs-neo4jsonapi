@@ -1,6 +1,8 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
+import { getQueueToken } from "@nestjs/bullmq";
+import { QueueId } from "../../../../config/enums/queue.id";
 import { ModuleRef } from "@nestjs/core";
 import { ClsService } from "nestjs-cls";
 import { Document } from "@langchain/core/documents";
@@ -592,6 +594,56 @@ describe("ChunkService", () => {
       });
     });
 
+    it("generateGraph enqueues finalisation through enqueueContentFinalisation", async () => {
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
+      chunkRepository.findChunkById.mockResolvedValue(mockChunk);
+      graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+      const finalise = vi.spyOn(service, "enqueueContentFinalisation");
+
+      await service.generateGraph({
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        chunkId: TEST_IDS.chunkId,
+        id: TEST_IDS.contentId,
+        type: "content",
+      });
+
+      expect(finalise).toHaveBeenCalledTimes(1);
+      expect(finalise).toHaveBeenCalledWith({
+        id: TEST_IDS.contentId,
+        type: "content",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+      expect(mockQueue.add).toHaveBeenCalledWith("process-content", {
+        id: TEST_IDS.contentId,
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+    });
+
+    it("generateGraph with finalise false graphs the chunk and queues no finalisation", async () => {
+      const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
+      chunkRepository.findChunkById.mockResolvedValue(mockChunk);
+      graphCreatorService.generateGraph.mockResolvedValue(mockChunkAnalysis);
+      clsService.get.mockReturnValue(TEST_IDS.companyId);
+      const finalise = vi.spyOn(service, "enqueueContentFinalisation");
+
+      await service.generateGraph({
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        chunkId: TEST_IDS.chunkId,
+        id: TEST_IDS.contentId,
+        type: "content",
+        finalise: false,
+      });
+
+      expect(chunkRepository.updateStatus).toHaveBeenCalledWith({ id: TEST_IDS.chunkId, aiStatus: AiStatus.Completed });
+      expect(finalise).not.toHaveBeenCalled();
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
     it("should throw error when queue is not found", async () => {
       // Arrange
       const mockChunk = { id: TEST_IDS.chunkId, content: "Test content" } as Chunk;
@@ -615,6 +667,96 @@ describe("ChunkService", () => {
           type: "unknown",
         }),
       ).rejects.toThrow(/No queue found for type unknown/);
+    });
+  });
+
+  describe("enqueueContentFinalisation", () => {
+    it("queues the content type's process job on that type's queue, with no jobId", async () => {
+      await service.enqueueContentFinalisation({
+        id: TEST_IDS.contentId,
+        type: "content",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+
+      expect(moduleRef.get).toHaveBeenCalledWith(getQueueToken("content"), { strict: false });
+      expect(mockQueue.add).toHaveBeenCalledWith("process-content", {
+        id: TEST_IDS.contentId,
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+    });
+
+    it("throws when no job name is registered for the content type", async () => {
+      await expect(
+        service.enqueueContentFinalisation({
+          id: TEST_IDS.contentId,
+          type: "Missing",
+          companyId: TEST_IDS.companyId,
+          userId: TEST_IDS.userId,
+        }),
+      ).rejects.toThrow(/No job name registered for content type "Missing"/);
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("enqueueChunkProcessing", () => {
+    it("adds one process_chunk job per chunk id on the chunk queue", async () => {
+      await service.enqueueChunkProcessing({
+        chunkIds: ["ch-1", "ch-2"],
+        id: TEST_IDS.contentId,
+        type: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+
+      expect(moduleRef.get).toHaveBeenCalledWith(getQueueToken(QueueId.CHUNK), { strict: false });
+      expect(mockQueue.add).toHaveBeenCalledTimes(2);
+      expect(mockQueue.add).toHaveBeenNthCalledWith(1, "process_chunk", {
+        chunkId: "ch-1",
+        contentId: TEST_IDS.contentId,
+        contentType: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+      expect(mockQueue.add).toHaveBeenNthCalledWith(2, "process_chunk", {
+        chunkId: "ch-2",
+        contentId: TEST_IDS.contentId,
+        contentType: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+    });
+
+    it("carries finalise: false in each job when asked", async () => {
+      await service.enqueueChunkProcessing({
+        chunkIds: ["ch-1"],
+        id: TEST_IDS.contentId,
+        type: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        finalise: false,
+      });
+
+      expect(mockQueue.add).toHaveBeenCalledWith("process_chunk", {
+        chunkId: "ch-1",
+        contentId: TEST_IDS.contentId,
+        contentType: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+        finalise: false,
+      });
+    });
+
+    it("adds nothing for an empty list", async () => {
+      await service.enqueueChunkProcessing({
+        chunkIds: [],
+        id: TEST_IDS.contentId,
+        type: "ScopedItem",
+        companyId: TEST_IDS.companyId,
+        userId: TEST_IDS.userId,
+      });
+      expect(mockQueue.add).not.toHaveBeenCalled();
     });
   });
 

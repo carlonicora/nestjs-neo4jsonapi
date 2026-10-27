@@ -94,6 +94,7 @@ export class ChunkProcessor extends WorkerHost {
         chunkId: job.data.chunkId,
         id: job.data.contentId,
         type: job.data.contentType,
+        finalise: job.data.finalise !== false,
       });
     });
   }
