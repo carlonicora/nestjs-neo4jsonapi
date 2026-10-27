@@ -1,3 +1,12 @@
+## [8.11.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.2...v8.11.0) (2026-10-27)
+
+### 🚀 Features
+
+* **assistant:** export the assistant controller and read which content a thread is bound to ([00f42d9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/00f42d970b450082e166f9f92cfe4ec1ff4c75de))
+* **chunk:** keep chunks out of the graph, queue them later, and graph them without finalising again ([9f283b1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9f283b13f782a6acb984b7f57a36ffc5823119d9))
+* **community:** an optional app filter decides which scopes get topic groups, and one scope can be regrouped alone ([44629df](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/44629df81bdb0cdc3696aed0701fb876ddf396b7))
+* **stripe-subscription:** a plan change removes the features the new price does not grant ([4b2e8a8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4b2e8a8988cc0d608fca8eb03b0daca629155ee8))
+
 ## [8.10.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.1...v8.10.2) (2026-10-27)
 
 ### 🐛 Bug Fixes
