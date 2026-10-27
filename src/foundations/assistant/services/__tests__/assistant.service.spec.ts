@@ -186,6 +186,28 @@ describe("AssistantService", () => {
     vi.clearAllMocks();
   });
 
+  describe("findBoundContent", () => {
+    it("returns the thread's bound content from the typed BOUND_TO relationship", async () => {
+      const { service, repo } = buildSut();
+      repo.findById.mockResolvedValueOnce({
+        ...makePersistedAssistant(),
+        content: { id: "root-a", type: "scope-roots" },
+      });
+
+      await expect(service.findBoundContent({ assistantId: "asst-1" })).resolves.toEqual({
+        id: "root-a",
+        type: "scope-roots",
+      });
+      expect(repo.findById).toHaveBeenCalledWith({ id: "asst-1" });
+    });
+
+    it("returns undefined for an unbound thread", async () => {
+      const { service } = buildSut();
+
+      await expect(service.findBoundContent({ assistantId: "asst-1" })).resolves.toBeUndefined();
+    });
+  });
+
   describe("createWithFirstMessage", () => {
     it("auto-generates a title from the first message when none is provided", async () => {
       const { service } = buildSut();

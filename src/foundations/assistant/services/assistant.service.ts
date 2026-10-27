@@ -839,6 +839,19 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * The resource a thread is bound to (its `BOUND_TO` edge), or `undefined`
+   * for an unbound thread. Reads the Assistant through the inherited,
+   * company-scoped `findById` and takes `{ id, type }` from the typed `content`
+   * relationship. For callers that must judge the thread's stored scope, not
+   * whatever a request body claims.
+   */
+  async findBoundContent(params: { assistantId: string }): Promise<{ id: string; type: string } | undefined> {
+    const assistant = await this.repository.findById({ id: params.assistantId });
+    const content = assistant.content as { id?: string; type?: string } | undefined;
+    return content?.id && content?.type ? { id: content.id, type: content.type } : undefined;
+  }
+
+  /**
    * Build the run's UserContext once per turn. `scopeId`/`scopeType` are set
    * only when the thread is bound to a catalogued scope ROOT (a descriptor
    * whose compiled scope chain is empty, e.g. a campaign). A thread bound to
