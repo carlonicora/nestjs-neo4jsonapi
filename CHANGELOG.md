@@ -1,3 +1,9 @@
+## [8.10.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.0...v8.10.1) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* **s3:** S3 clients time out instead of waiting forever on a dead connection ([9354a6e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9354a6e5649c097379bb174212ddf2a33478f7c6))
+
 ## [8.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.9.0...v8.10.0) (2026-10-27)
 
 ### 🚀 Features
