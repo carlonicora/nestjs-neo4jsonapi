@@ -22,6 +22,7 @@ import { ReferralModuleConfig } from "./referral/interfaces/referral.config.inte
 import { DiscordUserModule } from "./discord-user/discord-user.module";
 import { EmailAutomationModule } from "./email-automation/email-automation.module";
 import { EmailAutomationModuleConfig } from "./email-automation/interfaces/email-automation.config.interface";
+import { EmailBlastModule } from "./email-blast/email-blast.module";
 import { FeatureModule } from "./feature/feature.module";
 import { HandbookModule } from "./handbook/handbook.module";
 import { HandbookModuleConfig } from "./handbook/interfaces/handbook.config.interface";
@@ -101,6 +102,7 @@ export interface FoundationsModuleConfig {
 /**
  * All static foundation modules. The dynamic ones (ContentModule,
  * UserActivityModule, ReferralModule, HandbookModule, HowToModule, BlogModule (opt-in), EmailAutomationModule,
+ * EmailBlastModule,
  * AnalyticsModule, BillingModule) are
  * assembled inside forRoot().
  *
@@ -208,6 +210,7 @@ export class FoundationsModule {
         classRef: EmailAutomationModule,
         factory: () => EmailAutomationModule.forRoot(config?.emailAutomation),
       },
+      { classRef: EmailBlastModule, factory: () => EmailBlastModule.forRoot() },
       { classRef: AnalyticsModule, factory: () => AnalyticsModule.forRoot(config?.analytics) },
       { classRef: BillingModule, factory: () => BillingModule.forRoot(config?.billing) },
       // Opt-in: mounted only when the app passes a `blog` config.

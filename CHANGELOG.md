@@ -1,3 +1,9 @@
+## [8.10.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.9.0...v8.10.0) (2026-10-27)
+
+### 🚀 Features
+
+* **email-blast:** administrators send one email now to everyone with marketing email on ([fd77667](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fd77667f9ba0a4b8163eceac7bc95ad32505ce7c))
+
 ## [8.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.8.0...v8.9.0) (2026-10-26)
 
 ### 🚀 Features

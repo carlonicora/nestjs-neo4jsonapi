@@ -59,6 +59,7 @@ const EMAIL_KEYED_MATCHES: string[] = [
   "MATCH (n:Waitlist) WHERE ($email <> '' AND toLower(n.email) = toLower($email)) OR n.userId = $userId",
   "MATCH (n:EmailAutomationEnrollment) WHERE $email <> '' AND toLower(n.email) = toLower($email)",
   "MATCH (n:EmailOptOut) WHERE $email <> '' AND toLower(n.email) = toLower($email)",
+  "MATCH (n:EmailBlastDelivery) WHERE ($email <> '' AND toLower(n.email) = toLower($email)) OR n.userId = $userId",
 ];
 
 /**
