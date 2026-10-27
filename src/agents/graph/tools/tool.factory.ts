@@ -1,6 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { GraphCatalogService } from "../services/graph.catalog.service";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import {
+  externalSourceUnavailableResult,
+  isExternalSourceUnavailableError,
+} from "../../../common/interfaces/external.entity.source.interface";
 import { CatalogEntity } from "../interfaces/graph.catalog.interface";
 
 export interface UserContext {
@@ -116,6 +120,13 @@ export class ToolFactory {
     return this.registry.get(type);
   }
 
+  /**
+   * Runs one tool call and records it. An ExternalSourceUnavailableError (an
+   * external source that did not answer) resolves to the value
+   * `{ error, code, retryable: true }` instead of rejecting, so the operator
+   * keeps running and the caller is told the source is down, never that the
+   * record does not exist. Every other rejection is rethrown.
+   */
   capture<T>(
     record: { tool: string; input: Record<string, unknown> },
     fn: () => Promise<T>,
@@ -153,6 +164,12 @@ export class ToolFactory {
           durationMs,
           error: err.message,
         });
+        if (isExternalSourceUnavailableError(err)) {
+          this.logger.warn(
+            `tool-call END: ${record.tool} in ${durationMs}ms ${err.code}: ${err.cause instanceof Error ? err.cause.message : String(err.cause ?? err.message)}`,
+          );
+          return externalSourceUnavailableResult(err) as T;
+        }
         this.logger.warn(`tool-call FAILED: ${record.tool} in ${durationMs}ms message=${err.message}`);
         throw err;
       },

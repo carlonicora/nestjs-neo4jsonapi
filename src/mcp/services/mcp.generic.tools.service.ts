@@ -33,10 +33,16 @@ import { McpEntityWriteService } from "./mcp.entity.write.service";
 // DynamicStructuredTool literal in the tool file; not exportable without
 // restructuring those files beyond the schema-export-only change).
 const DESCRIBE_DESCRIPTION = "Returns the described fields and relationships for an entity type.";
+//
+// Documented divergence (see docs/mcp-server.md): the MCP copies of
+// resolve_entity and search_entities do NOT tell the client to call
+// resolve_entity first. Over MCP the server instructions (MCP_INSTRUCTIONS)
+// decide when resolve_entity is the right tool; the operator copies in
+// resolve-entity.tool.ts and search-entities.tool.ts keep the original wording.
 const RESOLVE_DESCRIPTION =
-  "Resolve a user-named entity across every visible type. Returns ranked candidates from the highest-confidence tier that yielded any match anywhere. Use this before search_entities / read_entity / traverse whenever the user refers to a named record.";
+  "Resolve a user-named entity across every visible type. Returns ranked candidates from the highest-confidence tier that yielded any match anywhere. Pass types to restrict the search to the record kinds you mean.";
 const SEARCH_DESCRIPTION =
-  "Find records of a known type by filter and sort. Use this when you already have the type (from resolve_entity or because the user referred to a kind of record without identifying a specific one). To look up a specific record by its label, call resolve_entity first.";
+  "Find records of a known type by filter and sort. Use this when you already have the type, or to look up a specific record of a known type by its label, number or other identifying field.";
 const READ_DESCRIPTION = "Fetches one record by id, optionally pulling related records across described relationships.";
 const TRAVERSE_DESCRIPTION =
   "Walks a relationship from a known record to related records, optionally filtered and sorted.";
@@ -78,7 +84,8 @@ function withFilterSchemas(schema: z.ZodType): Record<string, unknown> {
 /**
  * Builds the generic MCP tool set for one authenticated request:
  * the five graph read tools, the document-retrieval tool, `ping`, and the four
- * entity write tools contributed by McpEntityWriteService.
+ * entity write tools contributed by McpEntityWriteService (only when the
+ * user's catalog has a `chat.writable` type).
  */
 @Injectable()
 export class McpGenericToolsService {
@@ -111,7 +118,10 @@ export class McpGenericToolsService {
     };
   }
 
-  /** Builds the per-request generic tool definitions (read tools + write tools). */
+  /**
+   * Builds the per-request generic tool definitions: the read tools, plus the
+   * write tools when {@link McpEntityWriteService.hasWritableTypes} is true.
+   */
   build(ctx: McpUserContext): McpToolDefinition[] {
     const recorder: ToolCallRecord[] = [];
     // The graph tools enforce a describe-first contract via the recorder. That
@@ -214,7 +224,10 @@ export class McpGenericToolsService {
           }
         },
       },
-      ...this.writeService.buildTools(ctx),
+      // The generic write tools are listed only when the user's catalog has a
+      // chat.writable type: without one every call would answer not_writable,
+      // and a server whose data is read-only must not advertise writes.
+      ...(this.writeService.hasWritableTypes(ctx) ? this.writeService.buildTools(ctx) : []),
     ];
   }
 }

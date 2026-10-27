@@ -3,6 +3,7 @@ import { GraphCatalogService } from "../../../agents/graph/services/graph.catalo
 import { ScopeGuard } from "../../../agents/graph/services/scope.guard";
 import { UserContext } from "../../../agents/graph/tools/tool.factory";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
+import { isExternalSourceUnavailableError } from "../../../common/interfaces/external.entity.source.interface";
 
 export interface ExtractedMention {
   /** JSON:API type, e.g. "npcs". */
@@ -81,12 +82,30 @@ export class AssistantMentionExtractor {
         continue;
       }
       const service = this.entityServices.get(mention.type);
-      if (!service || !(await service.findRecordById({ id: mention.id }))) {
+      if (!service || !(await this.isReadable(service, mention))) {
         this.logger.warn(`validate: dropping unreadable mention ${mention.type}/${mention.id}.`);
         continue;
       }
       kept.push(mention);
     }
     return kept;
+  }
+
+  /**
+   * True when the mention's record can be read. An external source that did
+   * not answer cannot confirm the record, so the mention is dropped, as a
+   * missing one is: an unverified pointer never reaches the LLM or an edge.
+   */
+  private async isReadable(
+    service: NonNullable<ReturnType<EntityServiceRegistry["get"]>>,
+    mention: ExtractedMention,
+  ): Promise<boolean> {
+    try {
+      return !!(await service.findRecordById({ id: mention.id }));
+    } catch (e) {
+      if (!isExternalSourceUnavailableError(e)) throw e;
+      this.logger.warn(`validate: ${mention.type}/${mention.id} cannot be checked: ${e.message}`);
+      return false;
+    }
   }
 }

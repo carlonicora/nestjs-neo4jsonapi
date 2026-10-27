@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ExternalSourceUnavailableError } from "../../../../common/interfaces/external.entity.source.interface";
 import { AssistantMentionExtractor } from "../assistant-mention.extractor";
 
 const doc = [
@@ -50,5 +51,29 @@ describe("AssistantMentionExtractor.validate", () => {
     });
 
     expect(validated).toEqual([{ type: "npcs", id: "keep", alias: "Keep" }]);
+  });
+
+  it("drops a mention its external source cannot confirm, without throwing", async () => {
+    const catalog = { getEntityDetail: () => ({ type: "massime" }) };
+    const guard = { isInScope: vi.fn(async () => true) };
+    const registry = {
+      get: () => ({
+        findRecordById: async ({ id }: any) => {
+          if (id === "down") throw new ExternalSourceUnavailableError({ message: "down", code: "corpus_unavailable" });
+          return { id };
+        },
+      }),
+    };
+
+    const extractor = new AssistantMentionExtractor(catalog as any, guard as any, registry as any);
+    const validated = await extractor.validate({
+      mentions: [
+        { type: "massime", id: "keep", alias: "Keep" },
+        { type: "massime", id: "down", alias: "Unconfirmed" },
+      ],
+      ctx: ctx as any,
+    });
+
+    expect(validated).toEqual([{ type: "massime", id: "keep", alias: "Keep" }]);
   });
 });

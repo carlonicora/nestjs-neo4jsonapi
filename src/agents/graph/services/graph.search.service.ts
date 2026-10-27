@@ -11,6 +11,7 @@ import { EntityServiceRegistry } from "../../../common/registries/entity.service
 import {
   ExternalEntitySource,
   isExternalEntitySource,
+  isExternalSourceUnavailableError,
 } from "../../../common/interfaces/external.entity.source.interface";
 
 export const GRAPH_EXACT_MAX_RESULTS = 10;
@@ -95,6 +96,12 @@ export interface ResolveEntityResult {
   excludedTypes?: string[];
   /** {@link EXCLUDED_TYPES_NOTE}, present with `excludedTypes`. */
   excludedTypesNote?: string;
+  /**
+   * External types whose source did not answer (ExternalSourceUnavailableError):
+   * they were not searched, so an empty or partial result says nothing about
+   * them. Absent when every type answered.
+   */
+  unavailableTypes?: Array<{ type: string; code: string; message: string }>;
 }
 
 const normaliseSummary = (value: string): string => value.trim().toLowerCase();
@@ -310,13 +317,18 @@ export class GraphSearchService {
       if (isExternalEntitySource(service)) externalByType.set(entity.type, service);
     }
     const entityByType = new Map(entities.map((entity) => [entity.type, entity]));
+    const unavailable: NonNullable<ResolveEntityResult["unavailableTypes"]> = [];
+    const unavailability = (): Pick<ResolveEntityResult, "unavailableTypes"> =>
+      unavailable.length ? { unavailableTypes: unavailable } : {};
 
     for (const [tier, label] of tiers) {
       const buckets = await Promise.all(
         entities.map((e) => {
           const external = externalByType.get(e.type);
           if (!external) return this.runTierForEntitySafe(e, params, tier);
-          return tier === "substring" ? this.runExternalForEntitySafe(e, external, params) : Promise.resolve([]);
+          return tier === "substring"
+            ? this.runExternalForEntitySafe(e, external, params, unavailable)
+            : Promise.resolve([]);
         }),
       );
       // One bucket per type: normalise within the type, then merge. Sort is
@@ -340,11 +352,12 @@ export class GraphSearchService {
           ...(recommendation ? { recommendation } : {}),
           ...(disambiguation ? { disambiguation } : {}),
           ...exclusion,
+          ...unavailability(),
         };
       }
     }
 
-    return { matchMode: "none", items: [], ...exclusion };
+    return { matchMode: "none", items: [], ...exclusion, ...unavailability() };
   }
 
   /**
@@ -427,11 +440,15 @@ export class GraphSearchService {
     }
   }
 
-  /** `ExternalEntitySource.resolveByText` for one type; errors drop the type, never the lookup. */
+  /**
+   * `ExternalEntitySource.resolveByText` for one type; errors drop the type, never
+   * the lookup. A source that did not answer is also pushed to `unavailable`.
+   */
   private async runExternalForEntitySafe(
     entity: CatalogEntity,
     source: ExternalEntitySource,
     params: ResolveEntityParams,
+    unavailable: NonNullable<ResolveEntityResult["unavailableTypes"]>,
   ): Promise<RankedCandidate[]> {
     try {
       const candidates = await source.resolveByText({ text: params.text, limit: GRAPH_EXACT_MAX_RESULTS });
@@ -447,6 +464,9 @@ export class GraphSearchService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`resolveEntity: external type=${entity.type} threw: ${message}`);
+      if (isExternalSourceUnavailableError(err)) {
+        unavailable.push({ type: entity.type, code: err.code, message: err.message });
+      }
       return [];
     }
   }

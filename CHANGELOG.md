@@ -1,3 +1,9 @@
+## [8.9.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.8.0...v8.9.0) (2026-10-26)
+
+### 🚀 Features
+
+* **mcp:** hide write tools on read-only servers and report an unreachable source as unavailable ([fca8e77](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fca8e774d920b80ed1dd6b01649834f4369335e1))
+
 ## [8.8.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.7.0...v8.8.0) (2026-10-26)
 
 ### 🚀 Features

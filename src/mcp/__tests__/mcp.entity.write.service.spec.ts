@@ -365,3 +365,33 @@ describe("McpEntityWriteService — richtext attributes", () => {
     }
   });
 });
+
+describe("McpEntityWriteService.hasWritableTypes", () => {
+  const readOnlyEntity = { ...orderEntity, type: "accounts", writable: undefined };
+  const otherModuleWritable = { ...orderEntity, type: "invoices", moduleId: "mod-invoices", writable: true };
+
+  function serviceWith(entities: Array<Record<string, unknown>>): McpEntityWriteService {
+    const catalog = {
+      getAccessibleTypes: vi.fn((moduleIds: string[]) =>
+        entities.filter((e) => moduleIds.includes(e.moduleId as string)).map((e) => e.type as string),
+      ),
+      getEntityDetail: vi.fn(
+        (type: string, moduleIds: string[]) =>
+          entities.find((e) => e.type === type && moduleIds.includes(e.moduleId as string)) ?? null,
+      ),
+    };
+    return new McpEntityWriteService({ get: vi.fn() } as any, catalog as any, { can: vi.fn() } as any);
+  }
+
+  it("is false when no visible type declares chat.writable", () => {
+    expect(serviceWith([readOnlyEntity]).hasWritableTypes(ctx)).toBe(false);
+  });
+
+  it("is true when one visible type declares chat.writable", () => {
+    expect(serviceWith([readOnlyEntity, orderEntity]).hasWritableTypes(ctx)).toBe(true);
+  });
+
+  it("ignores a writable type in a module the user cannot read", () => {
+    expect(serviceWith([readOnlyEntity, otherModuleWritable]).hasWritableTypes(ctx)).toBe(false);
+  });
+});

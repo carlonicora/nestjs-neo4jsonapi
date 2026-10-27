@@ -40,6 +40,22 @@ export class McpEntityWriteService {
   ) {}
 
   /**
+   * Whether the user's catalog holds at least one type the write tools can act
+   * on: a type visible to `ctx.userModuleIds` whose descriptor declares
+   * `chat.writable` (boolean or object form). McpGenericToolsService lists the
+   * four generic write tools only when this returns true, so a server with no
+   * writable type exposes no write tool that would only answer `not_writable`.
+   *
+   * @param ctx - The authenticated MCP user context.
+   * @returns `true` when one visible type is `chat.writable`, else `false`.
+   */
+  hasWritableTypes(ctx: McpUserContext): boolean {
+    return this.catalog
+      .getAccessibleTypes(ctx.userModuleIds)
+      .some((type) => this.catalog.getEntityDetail(type, ctx.userModuleIds)?.writable === true);
+  }
+
+  /**
    * The four write McpToolDefinitions (all `readOnly: false`) with hand-written
    * JSON Schemas matching the C4 method params. Consumed by McpGenericToolsService.
    */

@@ -1,5 +1,6 @@
 import { HttpException } from "@nestjs/common";
 import { ZodError } from "zod";
+import { isExternalSourceUnavailableError } from "../../common/interfaces/external.entity.source.interface";
 import type { McpToolResult } from "../interfaces/mcp.tool.interface";
 
 /**
@@ -18,6 +19,9 @@ export type McpErrorCode =
  * - `ZodError` → validation_failed with per-issue `issues` meta
  * - an error named `TimeoutError` (the `DOMException` an `AbortSignal.timeout`
  *   fetch rejects with) → timeout with `retryable: true`
+ * - `ExternalSourceUnavailableError` → its own `code` (e.g. corpus_unavailable)
+ *   with `retryable: true`: the source did not answer, so the record is
+ *   unknown, never not_found
  * - other `Error` → internal with the error message
  *
  * Never includes stack traces.
@@ -26,6 +30,9 @@ export function mcpError(e: unknown): McpToolResult {
   let code: McpErrorCode = "internal";
   let message = "Unexpected error";
   let meta: Record<string, unknown> = {};
+  if (isExternalSourceUnavailableError(e)) {
+    return mcpFlatError(e.code, e.message, { retryable: true });
+  }
   if (e instanceof HttpException) {
     const status = e.getStatus();
     code =
@@ -88,12 +95,14 @@ function toolErrorCode(error: string): McpErrorCode {
  * The ToolFactory's unknown-type error maps to `unknown_type`, a missing record
  * to `not_found`, an unregistered service to `internal`, every other tool-level
  * error to `validation_failed`; the extras (e.g. `schema`, `suggestion`) stay
- * on the payload.
+ * on the payload. A value that names its own `code` keeps it: an external
+ * source that did not answer reports e.g. `corpus_unavailable`
+ * (`ToolFactory.capture`), never `not_found`.
  */
 export function mcpToolResult(result: unknown): McpToolResult {
   if (typeof result === "object" && result !== null && typeof (result as { error?: unknown }).error === "string") {
-    const { error, ...extras } = result as { error: string } & Record<string, unknown>;
-    return mcpFlatError(toolErrorCode(error), error, extras);
+    const { error, code, ...extras } = result as { error: string; code?: unknown } & Record<string, unknown>;
+    return mcpFlatError(typeof code === "string" ? code : toolErrorCode(error), error, extras);
   }
   return { content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] };
 }

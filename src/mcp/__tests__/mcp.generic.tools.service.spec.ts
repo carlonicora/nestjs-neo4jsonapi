@@ -4,6 +4,7 @@ import { join } from "path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { McpGenericToolsService } from "../services/mcp.generic.tools.service";
 import { ResolveEntityTool } from "../../agents/graph/tools/resolve-entity.tool";
+import { McpEntityWriteService } from "../services/mcp.entity.write.service";
 import { FILTER_OPERATORS, filtersJsonSchema, sortJsonSchema } from "../../agents/graph/tools/traverse.tool";
 
 const ctx = { userId: "u1", companyId: "c1", userModuleIds: ["mod-orders"] };
@@ -22,7 +23,7 @@ describe("McpGenericToolsService describe-first seeding", () => {
   const describeTool = { invoke: vi.fn().mockResolvedValue({}) };
   const resolveTool = { invoke: vi.fn().mockResolvedValue({}) };
   const searchDocsTool = { invoke: vi.fn().mockResolvedValue("") };
-  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -77,7 +78,7 @@ describe("McpGenericToolsService filter contract", () => {
   const searchTool = { invoke: vi.fn().mockResolvedValue({ items: [] }) };
   const traverseTool = { invoke: vi.fn().mockResolvedValue({ items: [] }) };
   const idle = { invoke: vi.fn().mockResolvedValue({}) };
-  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -178,7 +179,7 @@ describe("McpGenericToolsService filter contract", () => {
 
 describe("McpGenericToolsService ping", () => {
   const idle = { invoke: vi.fn().mockResolvedValue({}) };
-  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
   const catalog = { getAccessibleTypes: vi.fn().mockReturnValue(["orders", "accounts", "judgements"]) };
   const configService = { get: vi.fn().mockReturnValue({ serverName: "studio" }) };
 
@@ -245,7 +246,7 @@ describe("McpGenericToolsService tool-level errors", () => {
   const searchTool = { invoke: vi.fn() };
   const describeTool = { invoke: vi.fn() };
   const idle = { invoke: vi.fn().mockResolvedValue({}) };
-  const writeService = { buildTools: vi.fn().mockReturnValue([]) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
 
   const build = (resolveTool: unknown = idle) =>
     new McpGenericToolsService(
@@ -339,5 +340,97 @@ describe("McpGenericToolsService tool-level errors", () => {
       .execute({ text: "Art. 2043", types: ["articles"] }, ctx);
     expect(out.isError).toBe(true);
     expect(payloadOf(out)).toEqual({ code: "validation_failed", message });
+  });
+});
+
+/**
+ * LM-85: the generic write tools are listed only when the user's catalog has at
+ * least one `chat.writable` type. An app that declares one keeps all four.
+ */
+describe("McpGenericToolsService write tool gating", () => {
+  const WRITE_TOOLS = ["create_entity", "update_entity", "add_relationship", "remove_relationship"];
+  const idle = { invoke: vi.fn().mockResolvedValue({}) };
+  const baseEntity = { moduleId: "mod-orders", fields: [], relationships: [] };
+
+  function toolsFor(entities: Array<Record<string, unknown>>) {
+    const catalog = {
+      getAccessibleTypes: vi.fn((moduleIds: string[]) =>
+        entities.filter((e) => moduleIds.includes(e.moduleId as string)).map((e) => e.type as string),
+      ),
+      getEntityDetail: vi.fn(
+        (type: string, moduleIds: string[]) =>
+          entities.find((e) => e.type === type && moduleIds.includes(e.moduleId as string)) ?? null,
+      ),
+    };
+    const writeService = new McpEntityWriteService({ get: vi.fn() } as any, catalog as any, { can: vi.fn() } as any);
+    return new McpGenericToolsService(
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      writeService,
+      catalog as any,
+      {} as any,
+    ).build(ctx);
+  }
+
+  it("lists no write tool when no type is chat.writable", () => {
+    const names = toolsFor([{ ...baseEntity, type: "judgements" }]).map((t) => t.name);
+    for (const name of WRITE_TOOLS) expect(names).not.toContain(name);
+    expect(names).toEqual([
+      "describe_entity",
+      "resolve_entity",
+      "search_entities",
+      "read_entity",
+      "traverse",
+      "search_documents",
+      "ping",
+    ]);
+  });
+
+  it("lists all four write tools, readOnly false, when one type is chat.writable", () => {
+    const tools = toolsFor([
+      { ...baseEntity, type: "judgements" },
+      { ...baseEntity, type: "orders", writable: true },
+    ]);
+    const names = tools.map((t) => t.name);
+    for (const name of WRITE_TOOLS) expect(names).toContain(name);
+    for (const tool of tools) expect(tool.readOnly).toBe(!WRITE_TOOLS.includes(tool.name));
+  });
+
+  it("keeps every read tool readOnly", () => {
+    for (const tool of toolsFor([{ ...baseEntity, type: "judgements" }])) expect(tool.readOnly).toBe(true);
+  });
+});
+
+/**
+ * LM-21(3): over MCP the server instructions route judgements, provvedimenti and
+ * norms to search_entities; the tool descriptions must not tell the client to
+ * call resolve_entity first. The operator copies in the tool files keep theirs.
+ */
+describe("McpGenericToolsService resolve/search descriptions", () => {
+  const idle = { invoke: vi.fn().mockResolvedValue({}) };
+  const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
+  const tools = () =>
+    new McpGenericToolsService(
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      idle as any,
+      writeService as any,
+      {} as any,
+      {} as any,
+    ).build(ctx);
+
+  it("resolve_entity and search_entities do not ask to call resolve_entity first", () => {
+    for (const name of ["resolve_entity", "search_entities"]) {
+      const description = tools().find((t) => t.name === name)!.description;
+      expect(description).not.toMatch(/first/i);
+      expect(description).not.toMatch(/use this before/i);
+    }
   });
 });

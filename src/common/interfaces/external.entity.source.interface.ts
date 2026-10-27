@@ -58,3 +58,46 @@ export interface ExternalEntitySource {
 export function isExternalEntitySource(svc: unknown): svc is ExternalEntitySource {
   return typeof (svc as any)?.resolveByText === "function";
 }
+
+/**
+ * Thrown by an external source's read when the source itself did not answer
+ * (network error, timeout, 5xx). It means "unknown", never "missing": a read
+ * that throws it must not be reported as not found.
+ *
+ * The graph tools turn it into a tool value, never a thrown error
+ * (`ToolFactory.capture`): `{ error: message, code, retryable: true }`. The
+ * operator keeps running, and the MCP client gets `isError` with `code`.
+ * `message` is the text shown to the user; the technical failure stays on `cause`.
+ */
+export class ExternalSourceUnavailableError extends Error {
+  readonly code: string;
+  readonly retryable = true;
+  readonly cause?: unknown;
+
+  constructor(params: { message: string; code?: string; cause?: unknown }) {
+    super(params.message);
+    this.name = "ExternalSourceUnavailableError";
+    this.code = params.code ?? "source_unavailable";
+    this.cause = params.cause;
+  }
+}
+
+/** True for an {@link ExternalSourceUnavailableError}, also across duplicated copies of this package. */
+export function isExternalSourceUnavailableError(e: unknown): e is ExternalSourceUnavailableError {
+  return (
+    e instanceof ExternalSourceUnavailableError ||
+    (typeof e === "object" &&
+      e !== null &&
+      (e as { name?: unknown }).name === "ExternalSourceUnavailableError" &&
+      typeof (e as { code?: unknown }).code === "string")
+  );
+}
+
+/** The tool value an {@link ExternalSourceUnavailableError} becomes: a status the caller reads, never a throw. */
+export function externalSourceUnavailableResult(e: ExternalSourceUnavailableError): {
+  error: string;
+  code: string;
+  retryable: true;
+} {
+  return { error: e.message, code: e.code, retryable: true };
+}
