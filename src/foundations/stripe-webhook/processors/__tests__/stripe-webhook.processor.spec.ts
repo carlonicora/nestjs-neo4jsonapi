@@ -71,6 +71,7 @@ describe("StripeWebhookProcessor", () => {
   let notificationService: Mocked<StripeWebhookNotificationService>;
   let stripeInvoiceApiService: Mocked<StripeInvoiceApiService>;
   let featureSyncService: Mocked<FeatureSyncService>;
+  let stripePriceRepository: Mocked<StripePriceRepository>;
   let logger: Mocked<AppLoggingService>;
 
   const TEST_DATA = {
@@ -137,6 +138,7 @@ describe("StripeWebhookProcessor", () => {
     const mockFeatureSyncService = {
       syncFeaturesOnPayment: vi.fn().mockResolvedValue({ success: true, featuresAdded: [] }),
       removeFeaturesOnSubscriptionEnd: vi.fn().mockResolvedValue({ success: true, featuresRemoved: [] }),
+      replaceFeaturesOnPlanChange: vi.fn().mockResolvedValue({ success: true, featuresAdded: [], featuresRemoved: [] }),
     };
 
     const mockNotificationService = {
@@ -264,6 +266,7 @@ describe("StripeWebhookProcessor", () => {
     notificationService = module.get(StripeWebhookNotificationService);
     stripeInvoiceApiService = module.get(StripeInvoiceApiService);
     featureSyncService = module.get(FeatureSyncService);
+    stripePriceRepository = module.get(StripePriceRepository);
     logger = module.get(AppLoggingService);
   };
 
@@ -382,6 +385,25 @@ describe("StripeWebhookProcessor", () => {
 
       // Should NOT mark subscription as active here - that happens on invoice.paid
       expect(companyRepository.markSubscriptionStatus).not.toHaveBeenCalled();
+    });
+
+    it("a price change calls replaceFeaturesOnPlanChange with the previous Stripe price id", async () => {
+      const job = createMockJob("customer.subscription.updated", MOCK_SUBSCRIPTION as unknown as Record<string, any>);
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+        id: "sub-internal",
+        stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+        status: "active",
+        stripePrice: { id: "price-internal-old", stripePriceId: "price_previous" },
+      } as any);
+      stripePriceRepository.findByStripePriceId.mockResolvedValue({ id: "price-internal-new" } as any);
+      subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
+
+      await processor.process(job);
+
+      expect(featureSyncService.replaceFeaturesOnPlanChange).toHaveBeenCalledWith({
+        stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+        previousStripePriceId: "price_previous",
+      });
     });
 
     it("should mark company subscription as inactive when subscription status is canceled", async () => {

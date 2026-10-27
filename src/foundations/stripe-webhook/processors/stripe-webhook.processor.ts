@@ -415,6 +415,28 @@ export class StripeWebhookProcessor extends WorkerHost {
             `New price ${currentStripePriceId} not found in database - skipping prorated token allocation`,
           );
         }
+
+        // Replace the previous price's features with the new price's (non-blocking)
+        try {
+          const featureResult = await this.featureSyncService.replaceFeaturesOnPlanChange({
+            stripeSubscriptionId: subscription.id,
+            previousStripePriceId,
+          });
+          if (featureResult.success) {
+            this.logger.debug(
+              `Plan change feature sync for subscription ${subscription.id}: ${featureResult.featuresAdded?.length ?? 0} added, ${featureResult.featuresRemoved?.length ?? 0} removed`,
+            );
+          } else {
+            this.logger.warn(
+              `Plan change feature sync skipped for subscription ${subscription.id}: ${featureResult.reason}`,
+            );
+          }
+        } catch (error) {
+          this.logger.error(
+            `Plan change feature sync failed for subscription ${subscription.id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          );
+          // Don't throw - feature sync failure should not fail webhook processing
+        }
       }
     }
   }

@@ -108,6 +108,7 @@ describe("FeatureSyncService", () => {
 
     const mockStripePriceRepository = {
       findById: vi.fn(),
+      findByStripePriceId: vi.fn(),
     };
 
     const mockLogger = {
@@ -371,6 +372,92 @@ describe("FeatureSyncService", () => {
       expect(result.success).toBe(true);
       expect(result.reason).toBe("No features configured for this price");
       expect(companyRepository.removeFeatures).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("replaceFeaturesOnPlanChange", () => {
+    const BASE_FEATURE = { id: "feat-base", name: "base" };
+    const EXTRA_FEATURE_ID = "feat-extra";
+    const EXTRA_FEATURE = { id: EXTRA_FEATURE_ID, name: "extra" };
+    const PREVIOUS_STRIPE_PRICE_ID = "price_stripe_previous";
+
+    const priceWith = (features: { id: string; name: string }[]) => ({
+      ...MOCK_PRICE_WITH_FEATURES,
+      feature: features,
+    });
+
+    it("replaceFeaturesOnPlanChange removes the previous price's features the new price lacks", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION_RECURRING as any);
+      stripePriceRepository.findById.mockResolvedValue(priceWith([BASE_FEATURE]) as any);
+      stripePriceRepository.findByStripePriceId.mockResolvedValue(priceWith([BASE_FEATURE, EXTRA_FEATURE]) as any);
+      companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY as any);
+      subscriptionRepository.findActiveByStripeCustomerId.mockResolvedValue([MOCK_SUBSCRIPTION_RECURRING as any]);
+      companyRepository.addFeatures.mockResolvedValue([]);
+      companyRepository.removeFeatures.mockResolvedValue([EXTRA_FEATURE_ID]);
+
+      const result = await service.replaceFeaturesOnPlanChange({
+        stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
+        previousStripePriceId: PREVIOUS_STRIPE_PRICE_ID,
+      });
+
+      expect(stripePriceRepository.findByStripePriceId).toHaveBeenCalledWith({
+        stripePriceId: PREVIOUS_STRIPE_PRICE_ID,
+      });
+      expect(companyRepository.removeFeatures).toHaveBeenCalledWith({
+        companyId: MOCK_COMPANY_ID,
+        featureIds: [EXTRA_FEATURE_ID],
+      });
+      expect(result.success).toBe(true);
+      expect(result.featuresRemoved).toEqual([EXTRA_FEATURE_ID]);
+    });
+
+    it("replaceFeaturesOnPlanChange keeps a feature another live subscription still grants", async () => {
+      const otherActiveSub = {
+        stripeSubscriptionId: "sub_other",
+        stripePrice: { id: "price-other", priceType: "recurring" as const },
+      };
+
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION_RECURRING as any);
+      stripePriceRepository.findById.mockImplementation(
+        async ({ id }) => (id === "price-other" ? priceWith([EXTRA_FEATURE]) : priceWith([BASE_FEATURE])) as any,
+      );
+      stripePriceRepository.findByStripePriceId.mockResolvedValue(priceWith([BASE_FEATURE, EXTRA_FEATURE]) as any);
+      companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY as any);
+      subscriptionRepository.findActiveByStripeCustomerId.mockResolvedValue([
+        MOCK_SUBSCRIPTION_RECURRING as any,
+        otherActiveSub as any,
+      ]);
+      companyRepository.addFeatures.mockResolvedValue([]);
+
+      const result = await service.replaceFeaturesOnPlanChange({
+        stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
+        previousStripePriceId: PREVIOUS_STRIPE_PRICE_ID,
+      });
+
+      expect(result.success).toBe(true);
+      expect(companyRepository.removeFeatures).not.toHaveBeenCalled();
+      expect(result.featuresRemoved).toEqual([]);
+    });
+
+    it("replaceFeaturesOnPlanChange adds the new price's features", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_SUBSCRIPTION_RECURRING as any);
+      stripePriceRepository.findById.mockResolvedValue(priceWith([BASE_FEATURE, EXTRA_FEATURE]) as any);
+      stripePriceRepository.findByStripePriceId.mockResolvedValue(priceWith([BASE_FEATURE]) as any);
+      companyRepository.findByStripeCustomerId.mockResolvedValue(MOCK_COMPANY as any);
+      subscriptionRepository.findActiveByStripeCustomerId.mockResolvedValue([MOCK_SUBSCRIPTION_RECURRING as any]);
+      companyRepository.addFeatures.mockResolvedValue([EXTRA_FEATURE_ID]);
+
+      const result = await service.replaceFeaturesOnPlanChange({
+        stripeSubscriptionId: MOCK_SUBSCRIPTION_ID,
+        previousStripePriceId: PREVIOUS_STRIPE_PRICE_ID,
+      });
+
+      expect(companyRepository.addFeatures).toHaveBeenCalledWith({
+        companyId: MOCK_COMPANY_ID,
+        featureIds: [BASE_FEATURE.id, EXTRA_FEATURE_ID],
+      });
+      expect(companyRepository.removeFeatures).not.toHaveBeenCalled();
+      expect(result.featuresAdded).toEqual([EXTRA_FEATURE_ID]);
     });
   });
 });
