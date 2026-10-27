@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { modelRegistry } from "../../../common/registries/registry";
 import { AgentScopeFilterService } from "../../../common/repositories/agent-scope.filter";
+import { AgentScope } from "../../../common/types/agent.scope";
 import { EmbedderService, ModelService } from "../../../core";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
@@ -271,6 +273,56 @@ export class CommunityRepository implements OnModuleInit {
       communityId: record.get("communityId") as string,
       companyId: record.get("companyId") as string,
     }));
+  }
+
+  /**
+   * The scope root a community was detected under (its `SCOPED_TO` target),
+   * for the current company (from CLS). `rootLabels` are the scope-root labels
+   * the caller knows (the graph catalog's roots); each is read as a typed node
+   * with its registered model's serialiser. `null` when the community has no
+   * scope root among them, or no company is in CLS. Both the community and the
+   * root must belong to the CLS company.
+   */
+  async findScopeRootForCommunity(params: { communityId: string; rootLabels: string[] }): Promise<AgentScope | null> {
+    for (const label of params.rootLabels) {
+      const model = modelRegistry.getByLabelName(label);
+      if (!model) continue;
+
+      const query = this.neo4j.initQuery({ serialiser: model });
+      if (!query.queryParams.companyId) return null;
+      query.queryParams = { ...query.queryParams, communityId: params.communityId };
+      query.query += `
+        MATCH (community:Community { id: $communityId })-[:BELONGS_TO]->(company)
+        MATCH (community)-[:SCOPED_TO]->(${model.nodeName}:${model.labelName})-[:BELONGS_TO]->(company)
+        RETURN ${model.nodeName}
+      `;
+      const root = await this.neo4j.readOne<{ id: string }>(query);
+      if (root?.id) return { id: root.id, type: model.type, label: model.labelName };
+    }
+
+    return null;
+  }
+
+  /**
+   * Delete every community detected under one scope root, for the current
+   * company (from CLS). Communities of other roots, and unpartitioned ones,
+   * are left alone. Does nothing when no company is in CLS.
+   */
+  async deleteCommunitiesForScope(params: { scope: AgentScope }): Promise<void> {
+    // The label goes into the query text, so it must be a registered model's.
+    const model = modelRegistry.getByLabelName(params.scope.label);
+    if (!model) return;
+
+    const query = this.neo4j.initQuery({ serialiser: CommunityModel });
+    if (!query.queryParams.companyId) return;
+    query.queryParams = { ...query.queryParams, scopeRootId: params.scope.id };
+    query.query += `
+      MATCH (scopeRoot:${model.labelName} { id: $scopeRootId })-[:BELONGS_TO]->(company)
+      MATCH (community:Community)-[:SCOPED_TO]->(scopeRoot)
+      MATCH (community)-[:BELONGS_TO]->(company)
+      DETACH DELETE community
+    `;
+    await this.neo4j.writeOne(query);
   }
 
   /**

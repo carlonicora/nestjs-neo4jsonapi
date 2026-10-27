@@ -1,5 +1,7 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { ClsService } from "nestjs-cls";
 import { SCOPE_PREDICATE_SOURCE, ScopePredicateSource } from "../../../common/repositories/scope-predicate.source";
+import { COMMUNITY_SCOPE_FILTER, CommunityScopeFilterInterface } from "../../../common/tokens";
 import { AgentScope } from "../../../common/types/agent.scope";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
@@ -25,8 +27,11 @@ export class CommunityDetectorService {
     private readonly neo4j: Neo4jService,
     private readonly logger: AppLoggingService,
     private readonly communityRepository: CommunityRepository,
+    private readonly cls: ClsService,
     @Optional() private readonly catalog?: GraphCatalogService,
     @Optional() @Inject(SCOPE_PREDICATE_SOURCE) private readonly scopePredicates?: ScopePredicateSource,
+    /** Unbound = every scope root and company is groupable (today's behaviour). */
+    @Optional() @Inject(COMMUNITY_SCOPE_FILTER) private readonly scopeFilter?: CommunityScopeFilterInterface,
   ) {}
 
   /**
@@ -37,9 +42,14 @@ export class CommunityDetectorService {
     this.logger.log("Starting community detection", "CommunityDetectorService");
 
     try {
-      // Delete existing communities for this company before regenerating
-      await this.communityRepository.deleteAllCommunities();
-      this.logger.debug("Deleted existing communities", "CommunityDetectorService");
+      // Unbound scope filter: delete every community of this company before
+      // regenerating, as always. Bound: each accepted partition is deleted just
+      // before it is rebuilt, so a root the gate rejects keeps its communities
+      // (switching a scope root off never deletes graph data).
+      if (!this.scopeFilter) {
+        await this.communityRepository.deleteAllCommunities();
+        this.logger.debug("Deleted existing communities", "CommunityDetectorService");
+      }
 
       // Check if GDS is available
       const gdsAvailable = await this.checkGdsAvailability();
@@ -61,7 +71,7 @@ export class CommunityDetectorService {
       // run confined to either of them — the partition is what makes community
       // retrieval usable in a scoped run at all. Apps with no scope roots get
       // a single company-wide partition, exactly as before.
-      const partitions = await this.listScopeRoots();
+      const { roots: partitions, rejected } = await this.listScopeRoots();
       this.logger.log(
         partitions.length
           ? `Detecting communities across ${partitions.length} scope root(s)`
@@ -69,44 +79,21 @@ export class CommunityDetectorService {
         "CommunityDetectorService",
       );
 
+      // The company-wide fallback is for apps with no scope roots. When the
+      // scope filter rejected every root it must not run: it would group the
+      // content of the rejected roots together.
+      if (!partitions.length && (rejected > 0 || !(await this.isCompanyGroupable()))) {
+        this.logger.log("No scope root groupable for community detection", "CommunityDetectorService");
+        return;
+      }
+
       let total = 0;
       for (const partition of partitions.length ? partitions : [undefined]) {
-        // GDS refuses a projection whose node query matches nothing
-        // ("Node-Query returned no nodes"), and an empty partition is the NORM
-        // once detection runs per scope root — most roots hold no ingested
-        // content at all. Checked here rather than caught downstream so an
-        // empty partition is a skip, not a failed company.
-        if (partition) {
-          const partitionKeyConcepts = await this.countKeyConceptsForCompany(partition);
-          if (partitionKeyConcepts === 0) {
-            this.logger.debug(
-              `No KeyConcepts under ${partition.type}:${partition.id} — skipping its partition`,
-              "CommunityDetectorService",
-            );
-            continue;
-          }
+        if (this.scopeFilter) {
+          if (partition) await this.communityRepository.deleteCommunitiesForScope({ scope: partition });
+          else await this.communityRepository.deleteAllCommunities();
         }
-
-        const detected: DetectedCommunity[] = [];
-
-        for (let levelIndex = 0; levelIndex < this.louvainResolutions.length; levelIndex++) {
-          const resolution = this.louvainResolutions[levelIndex];
-          const level = levelIndex;
-
-          const levelCommunities = await this.detectCommunitiesAtLevel(resolution, level, partition);
-          detected.push(...levelCommunities);
-
-          this.logger.debug(
-            `Detected ${levelCommunities.length} communities at level ${level}` +
-              (partition ? ` for ${partition.type}:${partition.id}` : ""),
-            "CommunityDetectorService",
-          );
-        }
-
-        // Hierarchy is built WITHIN a partition: a parent community must never
-        // adopt a child detected under a different scope root.
-        await this.buildHierarchy(detected);
-        total += detected.length;
+        total += await this.detectPartition(partition);
       }
 
       this.logger.log(`Community detection completed: ${total} total communities`, "CommunityDetectorService");
@@ -114,6 +101,91 @@ export class CommunityDetectorService {
       this.logger.error(`Community detection failed: ${error.message}`, "CommunityDetectorService");
       throw error;
     }
+  }
+
+  /**
+   * Delete one scope root's communities and re-detect only that partition.
+   * Communities of every other root, and unpartitioned ones, are untouched.
+   * Does not consult the scope filter: the caller decides the root is groupable.
+   */
+  async detectCommunitiesForScope(params: { scope: AgentScope }): Promise<void> {
+    const partition = params.scope;
+    this.logger.log(`Starting community detection for ${partition.type}:${partition.id}`, "CommunityDetectorService");
+
+    try {
+      await this.communityRepository.deleteCommunitiesForScope({ scope: partition });
+
+      const gdsAvailable = await this.checkGdsAvailability();
+      if (!gdsAvailable) {
+        this.logger.warn("Neo4j GDS not available, skipping community detection", "CommunityDetectorService");
+        return;
+      }
+
+      const total = await this.detectPartition(partition);
+      this.logger.log(
+        `Community detection completed for ${partition.type}:${partition.id}: ${total} communities`,
+        "CommunityDetectorService",
+      );
+    } catch (error) {
+      this.logger.error(
+        `Community detection failed for ${partition.type}:${partition.id}: ${error.message}`,
+        "CommunityDetectorService",
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Detect the communities of one partition (a scope root, or the whole
+   * company when `undefined`) and build their hierarchy. Returns how many
+   * communities were created.
+   */
+  private async detectPartition(partition?: AgentScope): Promise<number> {
+    // GDS refuses a projection whose node query matches nothing
+    // ("Node-Query returned no nodes"), and an empty partition is the NORM
+    // once detection runs per scope root — most roots hold no ingested
+    // content at all. Checked here rather than caught downstream so an
+    // empty partition is a skip, not a failed company.
+    if (partition) {
+      const partitionKeyConcepts = await this.countKeyConceptsForCompany(partition);
+      if (partitionKeyConcepts === 0) {
+        this.logger.debug(
+          `No KeyConcepts under ${partition.type}:${partition.id} — skipping its partition`,
+          "CommunityDetectorService",
+        );
+        return 0;
+      }
+    }
+
+    const detected: DetectedCommunity[] = [];
+
+    for (let levelIndex = 0; levelIndex < this.louvainResolutions.length; levelIndex++) {
+      const resolution = this.louvainResolutions[levelIndex];
+      const level = levelIndex;
+
+      const levelCommunities = await this.detectCommunitiesAtLevel(resolution, level, partition);
+      detected.push(...levelCommunities);
+
+      this.logger.debug(
+        `Detected ${levelCommunities.length} communities at level ${level}` +
+          (partition ? ` for ${partition.type}:${partition.id}` : ""),
+        "CommunityDetectorService",
+      );
+    }
+
+    // Hierarchy is built WITHIN a partition: a parent community must never
+    // adopt a child detected under a different scope root.
+    await this.buildHierarchy(detected);
+    return detected.length;
+  }
+
+  /**
+   * Scope filter for the company-wide partition (no scope root). Unbound
+   * filter → groupable.
+   */
+  private async isCompanyGroupable(): Promise<boolean> {
+    if (!this.scopeFilter) return true;
+    return this.scopeFilter.canGroup({ companyId: this.cls.get("companyId") });
   }
 
   /**
@@ -256,15 +328,20 @@ export class CommunityDetectorService {
    * Root types come from the catalog — an entity whose compiled scope chain is
    * empty IS a root. Without a catalog (a consumer that never loads the graph
    * layer) there are no roots, and detection stays company-wide.
+   *
+   * Roots the scope filter rejects are left out; `rejected` counts them so the
+   * caller can tell "no roots" from "no groupable roots".
    */
-  private async listScopeRoots(): Promise<AgentScope[]> {
-    if (!this.catalog || !this.scopePredicates) return [];
+  private async listScopeRoots(): Promise<{ roots: AgentScope[]; rejected: number }> {
+    if (!this.catalog || !this.scopePredicates) return { roots: [], rejected: 0 };
 
     const rootTypes = this.catalog
       .getAllEntities()
       .filter((entity) => entity.scope?.path.length === 0 && entity.scope.rootType === entity.type);
 
+    const companyId = this.cls.get("companyId");
     const roots: AgentScope[] = [];
+    let rejected = 0;
     for (const rootType of rootTypes) {
       const query = this.neo4j.initQuery();
       query.query += `
@@ -274,10 +351,15 @@ export class CommunityDetectorService {
       const result = await this.neo4j.read(query.query, query.queryParams);
       for (const record of result.records) {
         const id = record.get("id");
-        if (typeof id === "string") roots.push({ id, type: rootType.type, label: rootType.labelName });
+        if (typeof id !== "string") continue;
+        if (this.scopeFilter && !(await this.scopeFilter.canGroup({ companyId, scope: { id, type: rootType.type } }))) {
+          rejected++;
+          continue;
+        }
+        roots.push({ id, type: rootType.type, label: rootType.labelName });
       }
     }
-    return roots;
+    return { roots, rejected };
   }
 
   /**
@@ -549,8 +631,27 @@ export class CommunityDetectorService {
    * Detect or assign communities based on current state.
    * - If no communities exist: run full Louvain detection
    * - If communities exist: incrementally assign orphan KeyConcepts
+   * With a scope filter bound, content whose scope root the filter rejects (or, with
+   * no scope root, whose company it rejects) is left out entirely.
    */
   async detectAndAssignCommunities(contentId: string, label: string): Promise<void> {
+    if (this.scopeFilter) {
+      const scopeRoot = await this.resolveScopeRootForContent(contentId, label);
+      const groupable = scopeRoot
+        ? await this.scopeFilter.canGroup({
+            companyId: this.cls.get("companyId"),
+            scope: { id: scopeRoot.id, type: scopeRoot.type },
+          })
+        : await this.isCompanyGroupable();
+      if (!groupable) {
+        this.logger.debug(
+          `Scope filter rejects ${label}:${contentId} — skipping community detection`,
+          "CommunityDetectorService",
+        );
+        return;
+      }
+    }
+
     const levelCounts = await this.communityRepository.countByLevel();
     const totalCommunities = levelCounts.reduce((sum, lc) => sum + lc.count, 0);
 

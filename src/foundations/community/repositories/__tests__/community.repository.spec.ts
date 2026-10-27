@@ -7,6 +7,16 @@ import { ModelService } from "../../../../core/llm/services/model.service";
 import { EmbedderService } from "../../../../core/llm/services/embedder.service";
 import { Community } from "../../entities/community.entity";
 import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
+import { modelRegistry } from "../../../../common/registries/registry";
+
+const SCOPE_ROOT_MODEL = {
+  type: "scope-root-specs",
+  endpoint: "scope-root-specs",
+  nodeName: "scopeRootSpec",
+  labelName: "ScopeRootSpec",
+  entity: undefined,
+  mapper: undefined,
+};
 
 // Test IDs
 const TEST_IDS = {
@@ -659,6 +669,110 @@ describe("CommunityRepository", () => {
       expect(mockQuery.query).toContain("[:BELONGS_TO]->(company)");
       expect(mockQuery.query).toContain("DETACH DELETE community");
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
+    });
+  });
+
+  describe("findScopeRootForCommunity", () => {
+    beforeEach(() => {
+      modelRegistry.register(SCOPE_ROOT_MODEL as any);
+    });
+
+    it("reads the SCOPED_TO root as a typed node joined to the CLS company", async () => {
+      const rootQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(rootQuery);
+      neo4jService.readOne.mockResolvedValue({ id: "root-1" });
+
+      const result = await repository.findScopeRootForCommunity({
+        communityId: TEST_IDS.communityId,
+        rootLabels: ["ScopeRootSpec"],
+      });
+
+      expect(result).toEqual({ id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" });
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: SCOPE_ROOT_MODEL });
+      expect(rootQuery.query).toContain("MATCH (community:Community { id: $communityId })-[:BELONGS_TO]->(company)");
+      expect(rootQuery.query).toContain(
+        "MATCH (community)-[:SCOPED_TO]->(scopeRootSpec:ScopeRootSpec)-[:BELONGS_TO]->(company)",
+      );
+      expect(neo4jService.readOne).toHaveBeenCalledWith(rootQuery);
+      expect(neo4jService.read).not.toHaveBeenCalled();
+    });
+
+    it("returns null for a community with no scope root", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: TEST_IDS.companyId }));
+      neo4jService.readOne.mockResolvedValue(null);
+
+      const result = await repository.findScopeRootForCommunity({
+        communityId: TEST_IDS.communityId,
+        rootLabels: ["ScopeRootSpec"],
+      });
+
+      expect(result).toBeNull();
+    });
+
+    it("skips a root label with no registered model, without querying", async () => {
+      const result = await repository.findScopeRootForCommunity({
+        communityId: TEST_IDS.communityId,
+        rootLabels: ["UnregisteredRootSpec"],
+      });
+
+      expect(result).toBeNull();
+      expect(neo4jService.readOne).not.toHaveBeenCalled();
+    });
+
+    it("returns null without querying when no company is in CLS", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: null }));
+
+      const result = await repository.findScopeRootForCommunity({
+        communityId: TEST_IDS.communityId,
+        rootLabels: ["ScopeRootSpec"],
+      });
+
+      expect(result).toBeNull();
+      expect(neo4jService.readOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("deleteCommunitiesForScope", () => {
+    beforeEach(() => {
+      modelRegistry.register(SCOPE_ROOT_MODEL as any);
+    });
+
+    it("deletes only the communities SCOPED_TO that root, inside the CLS company", async () => {
+      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.deleteCommunitiesForScope({
+        scope: { id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" },
+      });
+
+      expect(mockQuery.query).toContain(
+        "MATCH (scopeRoot:ScopeRootSpec { id: $scopeRootId })-[:BELONGS_TO]->(company)",
+      );
+      expect(mockQuery.query).toContain("MATCH (community:Community)-[:SCOPED_TO]->(scopeRoot)");
+      expect(mockQuery.query).toContain("MATCH (community)-[:BELONGS_TO]->(company)");
+      expect(mockQuery.query).toContain("DETACH DELETE community");
+      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
+      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
+    });
+
+    it("deletes nothing for a scope label with no registered model", async () => {
+      await repository.deleteCommunitiesForScope({
+        scope: { id: "root-1", type: "roots", label: "Root) DETACH DELETE (x" },
+      });
+
+      expect(neo4jService.initQuery).not.toHaveBeenCalled();
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
+    });
+
+    it("deletes nothing when no company is in CLS", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: null }));
+
+      await repository.deleteCommunitiesForScope({
+        scope: { id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" },
+      });
+
+      expect(neo4jService.writeOne).not.toHaveBeenCalled();
     });
   });
 

@@ -4,6 +4,10 @@ import { CommunityDetectorService } from "../community.detector.service";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { CommunityRepository } from "../../../../foundations/community/repositories/community.repository";
+import { ClsService } from "nestjs-cls";
+import { CommunityScopeFilterInterface } from "../../../../common/tokens";
+import { ScopePredicateSource } from "../../../../common/repositories/scope-predicate.source";
+import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
 
 // NOTE: CommunitySummariserService import REMOVED - no longer a dependency
 
@@ -60,6 +64,7 @@ describe("CommunityDetectorService", () => {
     addMemberToCommunity: vi.fn(),
     findById: vi.fn(),
     countByLevel: vi.fn(),
+    deleteCommunitiesForScope: vi.fn(),
   });
 
   beforeEach(async () => {
@@ -74,6 +79,7 @@ describe("CommunityDetectorService", () => {
         { provide: Neo4jService, useValue: mockNeo4jService },
         { provide: AppLoggingService, useValue: mockLogger },
         { provide: CommunityRepository, useValue: mockCommunityRepository },
+        { provide: ClsService, useValue: { get: vi.fn().mockReturnValue(TEST_IDS.companyId) } },
       ],
     }).compile();
 
@@ -157,6 +163,156 @@ describe("CommunityDetectorService", () => {
 
       expect(communityRepository.findOrphanKeyConceptsForContent).toHaveBeenCalledWith(TEST_IDS.contentId, "Article");
       expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
+    });
+  });
+  describe("scope filter (COMMUNITY_SCOPE_FILTER seam)", () => {
+    const ROOT_A = { id: "root-a", type: "scope-roots", label: "ScopeRoot" };
+    const ROOT_B = { id: "root-b", type: "scope-roots", label: "ScopeRoot" };
+
+    let filter: { canGroup: ReturnType<typeof vi.fn> };
+    let filtered: CommunityDetectorService;
+    let detectAtLevel: ReturnType<typeof vi.spyOn>;
+
+    const catalog = {
+      getAllEntities: vi.fn(() => [
+        {
+          type: "scope-roots",
+          labelName: "ScopeRoot",
+          scope: { path: [], rootType: "scope-roots", rootLabel: "ScopeRoot" },
+        },
+      ]),
+    } as unknown as GraphCatalogService;
+    const scopePredicates = {
+      build: vi.fn(() => ({ cypher: "data.id = $agentScopeId", params: { agentScopeId: "x" } })),
+    } as unknown as ScopePredicateSource;
+    const cls = { get: vi.fn().mockReturnValue(TEST_IDS.companyId) } as unknown as ClsService;
+
+    beforeEach(() => {
+      // Accepts ROOT_A and the company-wide partition; rejects every other root.
+      filter = {
+        canGroup: vi.fn(async (params: { scope?: { id: string } }) => !params.scope || params.scope.id === ROOT_A.id),
+      };
+      filtered = new CommunityDetectorService(
+        neo4jService as unknown as Neo4jService,
+        logger as unknown as AppLoggingService,
+        communityRepository as unknown as CommunityRepository,
+        cls,
+        catalog,
+        scopePredicates,
+        filter as unknown as CommunityScopeFilterInterface,
+      );
+      neo4jService.read.mockImplementation(async (query: string) => {
+        if (query.includes("gds.version")) return { records: [{ get: () => "2.0" }] };
+        if (query.includes("RETURN root.id AS id"))
+          return { records: [{ get: () => ROOT_A.id }, { get: () => ROOT_B.id }] };
+        if (query.includes("count(DISTINCT kc)")) return { records: [{ get: () => 5 }] };
+        return { records: [] };
+      });
+      detectAtLevel = vi.spyOn(filtered as any, "detectCommunitiesAtLevel").mockResolvedValue([]);
+    });
+
+    it("detectCommunities skips scope roots the filter rejects", async () => {
+      await filtered.detectCommunities();
+
+      expect(filter.canGroup).toHaveBeenCalledWith({
+        companyId: TEST_IDS.companyId,
+        scope: { id: ROOT_B.id, type: ROOT_B.type },
+      });
+      expect(detectAtLevel).toHaveBeenCalledTimes(1);
+      expect(detectAtLevel).toHaveBeenCalledWith(1.0, 0, ROOT_A);
+      // A rejected root keeps its communities: filtering a root out never deletes graph data.
+      expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
+      expect(communityRepository.deleteCommunitiesForScope).toHaveBeenCalledTimes(1);
+      expect(communityRepository.deleteCommunitiesForScope).toHaveBeenCalledWith({ scope: ROOT_A });
+    });
+
+    it("detectCommunities does not fall back to company-wide when every root is rejected", async () => {
+      filter.canGroup.mockResolvedValue(false);
+
+      await filtered.detectCommunities();
+
+      expect(detectAtLevel).not.toHaveBeenCalled();
+      expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
+    });
+
+    describe("with no scope roots at all", () => {
+      let unpartitioned: CommunityDetectorService;
+      let detectAtLevelUnpartitioned: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        // No catalog: no scope roots, so detection uses the company-wide partition.
+        unpartitioned = new CommunityDetectorService(
+          neo4jService as unknown as Neo4jService,
+          logger as unknown as AppLoggingService,
+          communityRepository as unknown as CommunityRepository,
+          cls,
+          undefined,
+          undefined,
+          filter as unknown as CommunityScopeFilterInterface,
+        );
+        detectAtLevelUnpartitioned = vi.spyOn(unpartitioned as any, "detectCommunitiesAtLevel").mockResolvedValue([]);
+      });
+
+      it("runs the company-wide partition when the filter accepts the company", async () => {
+        await unpartitioned.detectCommunities();
+
+        expect(filter.canGroup).toHaveBeenCalledWith({ companyId: TEST_IDS.companyId });
+        expect(communityRepository.deleteAllCommunities).toHaveBeenCalledTimes(1);
+        expect(detectAtLevelUnpartitioned).toHaveBeenCalledWith(1.0, 0, undefined);
+      });
+
+      it("does nothing when the filter rejects the company", async () => {
+        filter.canGroup.mockResolvedValue(false);
+
+        await unpartitioned.detectCommunities();
+
+        expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
+        expect(detectAtLevelUnpartitioned).not.toHaveBeenCalled();
+      });
+    });
+
+    it("detectAndAssignCommunities does nothing for content whose scope root the filter rejects", async () => {
+      vi.spyOn(filtered as any, "resolveScopeRootForContent").mockResolvedValue(ROOT_B);
+      communityRepository.countByLevel.mockResolvedValue([]);
+
+      await filtered.detectAndAssignCommunities(TEST_IDS.contentId, "ScopedItem");
+
+      expect(communityRepository.countByLevel).not.toHaveBeenCalled();
+      expect(communityRepository.findOrphanKeyConceptsForContent).not.toHaveBeenCalled();
+      expect(detectAtLevel).not.toHaveBeenCalled();
+    });
+
+    it("detectAndAssignCommunities follows the company for content with no scope root", async () => {
+      vi.spyOn(filtered as any, "resolveScopeRootForContent").mockResolvedValue(undefined);
+      filter.canGroup.mockResolvedValue(false);
+
+      await filtered.detectAndAssignCommunities(TEST_IDS.contentId, "Note");
+
+      expect(filter.canGroup).toHaveBeenCalledWith({ companyId: TEST_IDS.companyId });
+      expect(communityRepository.countByLevel).not.toHaveBeenCalled();
+    });
+
+    it("detectAndAssignCommunities proceeds for content under an accepted root", async () => {
+      vi.spyOn(filtered as any, "resolveScopeRootForContent").mockResolvedValue(ROOT_A);
+      communityRepository.countByLevel.mockResolvedValue([{ level: 0, count: 2 }]);
+      communityRepository.findOrphanKeyConceptsForContent.mockResolvedValue([]);
+
+      await filtered.detectAndAssignCommunities(TEST_IDS.contentId, "ScopedItem");
+
+      expect(communityRepository.findOrphanKeyConceptsForContent).toHaveBeenCalledWith(
+        TEST_IDS.contentId,
+        "ScopedItem",
+      );
+    });
+
+    it("detectCommunitiesForScope deletes and rebuilds only that partition", async () => {
+      await filtered.detectCommunitiesForScope({ scope: ROOT_B });
+
+      expect(communityRepository.deleteCommunitiesForScope).toHaveBeenCalledTimes(1);
+      expect(communityRepository.deleteCommunitiesForScope).toHaveBeenCalledWith({ scope: ROOT_B });
+      expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
+      expect(detectAtLevel).toHaveBeenCalledTimes(1);
+      expect(detectAtLevel).toHaveBeenCalledWith(1.0, 0, ROOT_B);
     });
   });
 });

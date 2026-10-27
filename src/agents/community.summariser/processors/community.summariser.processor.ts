@@ -3,11 +3,18 @@ import { Inject, Optional } from "@nestjs/common";
 import { Job } from "bullmq";
 import { ClsService } from "nestjs-cls";
 import { hasAvailableCreditsVia, isAiEnabledVia } from "../../../common/helpers/credit-gate";
-import { CREDIT_VALIDATOR, CreditValidatorInterface } from "../../../common/tokens";
+import {
+  COMMUNITY_SCOPE_FILTER,
+  CommunityScopeFilterInterface,
+  CREDIT_VALIDATOR,
+  CreditValidatorInterface,
+} from "../../../common/tokens";
 import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
+import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
+import { isCommunityGroupable } from "../helpers/community-scope-filter";
 import { CommunitySummariserService } from "../services/community.summariser.service";
 
 interface CommunitySummariserJobData {
@@ -27,6 +34,12 @@ export class CommunitySummariserProcessor extends WorkerHost {
     @Optional()
     @Inject(CREDIT_VALIDATOR)
     private readonly creditValidator?: CreditValidatorInterface,
+    /** Unbound = every queued community is summarised (today's behaviour). */
+    @Optional()
+    @Inject(COMMUNITY_SCOPE_FILTER)
+    private readonly scopeFilter?: CommunityScopeFilterInterface,
+    /** Scope-root types for the scope filter, as the cron reads them. */
+    @Optional() private readonly catalog?: GraphCatalogService,
   ) {
     super();
   }
@@ -58,6 +71,25 @@ export class CommunitySummariserProcessor extends WorkerHost {
       // check so nothing is ever marked pending or deferred — an AI-free
       // company must accumulate no backlog.
       if (!(await isAiEnabledVia(this.creditValidator, { companyId }))) return;
+
+      // Scope filter, also BEFORE the credit check: every path that queues a
+      // community (the cron, an app's credit-backlog approval) ends here, so a
+      // community of a scope the filter rejects is never summarised. It stays
+      // stale and the filtered cron leaves it alone.
+      const groupable = await isCommunityGroupable({
+        filter: this.scopeFilter,
+        catalog: this.catalog,
+        communityRepository: this.communityRepository,
+        communityId,
+        companyId,
+      });
+      if (!groupable) {
+        this.logger.log(
+          `Skipped community summarisation for community ${communityId} (company ${companyId}) — rejected by the scope filter`,
+          "CommunitySummariserProcessor",
+        );
+        return;
+      }
 
       if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId }))) {
         // Leave isStale set; flag pendingCredits so the 10-minute cron stops

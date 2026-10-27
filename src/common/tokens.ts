@@ -181,3 +181,10 @@ export interface CreditValidatorInterface {
    */
   isAiEnabled?(params: { companyId: string }): Promise<boolean>;
 }
+
+/** Optional app-provided filter: which scope roots may get topic groups (communities). Unbound = every scope, as before. */
+export const COMMUNITY_SCOPE_FILTER = Symbol("COMMUNITY_SCOPE_FILTER");
+export interface CommunityScopeFilterInterface {
+  /** May topic groups be built and summarised for this scope root? `scope` undefined = the company-wide partition used when no scope roots exist. */
+  canGroup(params: { companyId: string; scope?: { id: string; type: string } }): Promise<boolean>;
+}
