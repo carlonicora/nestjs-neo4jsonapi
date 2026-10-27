@@ -6,6 +6,7 @@ import { EmailAutomation } from "../entities/email-automation";
 import { EmailAutomationEnrollment } from "../entities/email-automation-enrollment";
 import { EmailAutomationStep } from "../entities/email-automation-step";
 import { EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT, emailAutomationMeta } from "../entities/email-automation.meta";
+import { renderMarkdownEmail } from "../utils/email-markdown.renderer";
 
 export type EmailAutomationRendered = {
   subject: string;
@@ -15,14 +16,6 @@ export type EmailAutomationRendered = {
   unsubscribeUrl: string;
   unsubscribeAllUrl: string;
 };
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 
 /**
  * Renders one automation step for one enrolment: the subject and the HTML body
@@ -61,13 +54,7 @@ export class EmailAutomationRenderer {
       unsubscribeAllUrl: new Handlebars.SafeString(unsubscribeAllUrl),
     };
 
-    // The subject is a plain-text header, not HTML: escaping would show `&amp;` in the inbox.
-    const subject = Handlebars.compile(step.subject, { noEscape: true })(vars);
-
-    const markdown = Handlebars.compile(step.body)(vars);
-    const { Marked } = await import("marked");
-    const marked = new Marked({ renderer: { html: ({ text }) => escapeHtml(text) } });
-    const content = marked.parse(markdown, { async: false }) as string;
+    const { subject, content } = await renderMarkdownEmail({ subject: step.subject, body: step.body, vars });
 
     return {
       subject,

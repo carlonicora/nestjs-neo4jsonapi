@@ -106,6 +106,18 @@ describe("AccountDeletionWipeRepository", () => {
     expect(queries[1]).toContain("MATCH (n:KeyConcept) WHERE NOT (n)--()");
   });
 
+  it("wipe deletes EmailBlastDelivery by email or user id", async () => {
+    await repository.deleteEmailKeyed({ email: EMAIL, userId: USER_ID, batchSize: 1000 });
+
+    const delivery = calls.find((call) => call.query.includes("EmailBlastDelivery"));
+    expect(delivery).toBeDefined();
+    expect(delivery!.query).toContain(
+      "MATCH (n:EmailBlastDelivery) WHERE ($email <> '' AND toLower(n.email) = toLower($email)) OR n.userId = $userId",
+    );
+    expect(delivery!.query).toContain("DETACH DELETE n");
+    expect(delivery!.params).toMatchObject({ email: EMAIL, userId: USER_ID });
+  });
+
   it("deleteCompanyNodes never sweeps User nodes", async () => {
     await repository.deleteCompanyNodes({ companyId: COMPANY_ID, batchSize: 1000 });
 

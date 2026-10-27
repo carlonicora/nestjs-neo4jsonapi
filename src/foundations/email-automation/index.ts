@@ -42,5 +42,8 @@ export * from "./services/email-automation-renderer.service";
 export * from "./services/email-automation-sender.service";
 export * from "./services/email-automation-unsubscribe.service";
 
+// Utils
+export * from "./utils/email-markdown.renderer";
+
 // Cron
 export * from "./cron/email-automation-sender.cron";
