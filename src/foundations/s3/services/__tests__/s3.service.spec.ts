@@ -4,8 +4,9 @@ import { PassThrough, Readable, Transform } from "stream";
 // Mock AWS SDK
 const mockS3Send = vi.fn().mockResolvedValue({ Contents: [] });
 
-const { mockUploadDone, mockAzureBlockBlobClient, mockAzureBlobClient } = vi.hoisted(() => ({
+const { mockUploadDone, mockAzureBlockBlobClient, mockAzureBlobClient, mockS3ClientArgs } = vi.hoisted(() => ({
   mockUploadDone: vi.fn(),
+  mockS3ClientArgs: [] as Array<Record<string, unknown>>,
   mockAzureBlockBlobClient: {
     url: "https://azure.blob.core.windows.net/test",
     upload: vi.fn(),
@@ -27,6 +28,9 @@ vi.mock("@aws-sdk/lib-storage", () => ({
 vi.mock("@aws-sdk/client-s3", () => {
   class MockS3Client {
     send = mockS3Send;
+    constructor(config: Record<string, unknown>) {
+      mockS3ClientArgs.push(config);
+    }
   }
   return {
     S3Client: MockS3Client,
@@ -215,6 +219,46 @@ describe("S3Service", () => {
   describe("constructor", () => {
     it("should create the service", () => {
       expect(service).toBeDefined();
+    });
+  });
+
+  describe("S3 client timeouts", () => {
+    const MOCK_HETZNER_CONFIG = { ...MOCK_DO_CONFIG, type: "hetzner", endpoint: "https://fsn1.your-objectstorage.com" };
+
+    it.each([
+      ["s3", MOCK_S3_CONFIG],
+      ["hetzner", MOCK_HETZNER_CONFIG],
+      ["minio", MOCK_MINIO_CONFIG],
+    ])("the %s client is built with connection, socket and request timeouts that throw", async (_type, s3Config) => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          S3Service,
+          { provide: JsonApiService, useValue: createMockJsonApiService() },
+          { provide: ClsService, useValue: createMockClsService() },
+          { provide: ConfigService, useValue: createMockConfigService(s3Config) },
+          { provide: AppLoggingService, useValue: createMockAppLoggingService() },
+          { provide: S3CipherService, useValue: createMockCipherService() },
+        ],
+      }).compile();
+      mockS3ClientArgs.length = 0;
+
+      await module.get<S3Service>(S3Service).downloadFileAsBuffer({ key: "a.txt" });
+
+      expect(mockS3ClientArgs).toHaveLength(1);
+      expect(mockS3ClientArgs[0].requestHandler).toEqual({
+        connectionTimeout: 10_000,
+        socketTimeout: 5_000,
+        requestTimeout: 300_000,
+        throwOnRequestTimeout: true,
+      });
+    });
+
+    it("downloadFileAsBuffer returns null when the request times out", async () => {
+      mockS3Send.mockRejectedValue(Object.assign(new Error("socket timed out"), { name: "TimeoutError" }));
+
+      const result = await service.downloadFileAsBuffer({ key: "judgements/a.txt" });
+
+      expect(result).toBeNull();
     });
   });
 
