@@ -1,3 +1,9 @@
+## [8.10.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.1...v8.10.2) (2026-10-27)
+
+### 🐛 Bug Fixes
+
+* **s3:** the health check and sweep S3 clients time out too ([b54b9f2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b54b9f21d8fe2ff0d6e88960d1ae98c8ed47a47c))
+
 ## [8.10.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.0...v8.10.1) (2026-10-27)
 
 ### 🐛 Bug Fixes
