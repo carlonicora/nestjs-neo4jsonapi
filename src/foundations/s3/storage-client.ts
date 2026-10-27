@@ -1,5 +1,6 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { ConfigS3Interface } from "../../config/interfaces/config.s3.interface";
+import { S3_REQUEST_HANDLER } from "./s3-request-handler";
 
 /**
  * Builds an S3-compatible client for the configured storage type.
@@ -17,6 +18,7 @@ export function createS3Client(config: ConfigS3Interface): S3Client {
           accessKeyId: config.key,
           secretAccessKey: config.secret,
         },
+        requestHandler: S3_REQUEST_HANDLER,
       });
     case "digitalocean":
     case "hetzner":
@@ -27,6 +29,7 @@ export function createS3Client(config: ConfigS3Interface): S3Client {
           accessKeyId: config.key,
           secretAccessKey: config.secret,
         },
+        requestHandler: S3_REQUEST_HANDLER,
       });
     case "minio":
       return new S3Client({
@@ -37,6 +40,7 @@ export function createS3Client(config: ConfigS3Interface): S3Client {
           secretAccessKey: config.secret,
         },
         forcePathStyle: true,
+        requestHandler: S3_REQUEST_HANDLER,
       });
     default:
       throw new Error(`Unsupported storage type: ${type}`);
