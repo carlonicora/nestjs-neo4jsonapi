@@ -2,6 +2,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 import { z } from "zod";
 import { LLMService } from "../llm.service";
 import { TokenUsageService } from "../../../../foundations/tokenusage/services/tokenusage.service";
+import { convertZodToJsonSchema, sanitizeSchemaForGemini } from "../../utils/schema.utils";
 
 vi.mock("@langchain/core/messages", () => {
   class MockAIMessage {
@@ -75,7 +76,10 @@ type ModelTurn = { content?: string; tool_calls: Array<{ id: string; name: strin
 describe("LLMService tool loop — final_answer tool", () => {
   let conversation: any[];
 
-  const buildService = (turns: ModelTurn[]) => {
+  const buildService = (
+    turns: ModelTurn[],
+    resolvedConfig: { model: string; provider: string } = { model: "test-model", provider: "openrouter" },
+  ) => {
     const lookup: any = {
       name: "lookup",
       description: "Looks something up.",
@@ -117,10 +121,11 @@ describe("LLMService tool loop — final_answer tool", () => {
 
     const modelService = {
       getLLM: vi.fn().mockReturnValue(mockLLM),
-      getResolvedConfig: vi.fn().mockReturnValue({ model: "test-model", provider: "openrouter" }),
+      getResolvedConfig: vi.fn().mockReturnValue(resolvedConfig),
       supportsStrictStructuredOutput: vi.fn().mockReturnValue(true),
     } as any;
 
+    const close = vi.fn();
     const dumper = {
       startSession: () => ({
         isEnabled: false,
@@ -128,7 +133,7 @@ describe("LLMService tool loop — final_answer tool", () => {
         startIteration: vi.fn(),
         recordResponse: vi.fn(),
         recordToolResult: vi.fn(),
-        close: vi.fn(),
+        close,
       }),
     } as any;
 
@@ -141,7 +146,7 @@ describe("LLMService tool loop — final_answer tool", () => {
     const service = new LLMService(modelService, configService, dumper, tokenUsageService);
     const warn = vi.spyOn((service as any).logger, "warn").mockImplementation(() => undefined);
     vi.spyOn((service as any).logger, "log").mockImplementation(() => undefined);
-    return { service, bound, structured, mockLLM, lookup, warn };
+    return { service, bound, structured, mockLLM, lookup, warn, close };
   };
 
   beforeEach(() => {
@@ -299,5 +304,56 @@ describe("LLMService tool loop — final_answer tool", () => {
       .catch(() => undefined);
 
     expect(mockLLM.bindTools).toHaveBeenCalledWith([lookup]);
+  });
+
+  const boundFinalAnswer = (mockLLM: any) =>
+    (mockLLM.bindTools.mock.calls[0][0] as any[]).find((t) => t.name === "final_answer");
+
+  it("binds a Gemini-sanitised final_answer schema on the Requesty Gemini path", async () => {
+    const { service, mockLLM, lookup } = buildService(
+      [{ tool_calls: [{ id: "c1", name: "final_answer", args: { answer: "a", confidence: 1 } }] }],
+      { model: "google/gemini-2.5-flash", provider: "requesty" },
+    );
+
+    const result = await run(service, lookup);
+
+    const schema = boundFinalAnswer(mockLLM).schema;
+    expect(schema).toEqual(sanitizeSchemaForGemini(convertZodToJsonSchema(outputSchema)));
+    for (const key of ["$schema", "$id", "$defs", "$ref", "$comment"]) expect(schema).not.toHaveProperty(key);
+    // Parsing still validates against the original Zod schema.
+    expect(result.answer).toBe("a");
+  });
+
+  it("binds the raw output schema on other providers", async () => {
+    const { service, mockLLM, lookup } = buildService(
+      [{ tool_calls: [{ id: "c1", name: "final_answer", args: { answer: "a", confidence: 1 } }] }],
+      { model: "google/gemini-2.5-flash", provider: "openrouter" },
+    );
+
+    await run(service, lookup);
+
+    expect(boundFinalAnswer(mockLLM).schema).toBe(outputSchema);
+  });
+
+  it("records final_answer fallbacks in the dump warnings", async () => {
+    // invalid args, then prose
+    const first = buildService([{ tool_calls: [{ id: "bad", name: "final_answer", args: { answer: "a" } }] }]);
+    await run(first.service, first.lookup);
+    const firstWarnings: string[] = first.close.mock.calls[0][0].warnings;
+    expect(firstWarnings.some((w) => /final_answer fallback: .*invalid/i.test(w))).toBe(true);
+    expect(firstWarnings.some((w) => /final_answer fallback: .*prose/i.test(w))).toBe(true);
+
+    // detector: valid answer alongside other calls
+    const second = buildService([
+      {
+        tool_calls: [
+          { id: "c1", name: "lookup", args: { q: "x" } },
+          { id: "c2", name: "final_answer", args: { answer: "together", confidence: 0.7 } },
+        ],
+      },
+    ]);
+    await run(second.service, second.lookup);
+    const secondWarnings: string[] = second.close.mock.calls[0][0].warnings;
+    expect(secondWarnings.some((w) => w.includes("final_answer detector: sent alongside other tool calls"))).toBe(true);
   });
 });

@@ -76,22 +76,26 @@ describe("GraphNodeService", () => {
     (llm.call as unknown as Mock).mockImplementation(async () => {
       // Simulate the LLM having actually called tools so the honesty-rewrite
       // path doesn't fire after the initial call.
-      capturedRecorder.push({ tool: "resolve_entity", input: { text: "Acme" }, durationMs: 1 });
+      // Entity fields come from what the tools returned, not from the model.
+      capturedRecorder.push({
+        tool: "read_entity",
+        input: { type: "Account", id: "acc-1" },
+        durationMs: 1,
+        entities: [
+          { type: "Account", id: "acc-1", fields: { name: "Acme Corp", country_code: "GB" }, stage: "detail" },
+        ],
+      });
+      capturedRecorder.push({
+        tool: "traverse",
+        input: {},
+        durationMs: 1,
+        entities: [{ type: "Order", id: "ord-1", fields: { number: "ORD-2026-0001", status: "open" }, stage: "list" }],
+      });
       return {
         answer: "Acme Corp has one open order: ORD-2026-0001.",
         entities: [
-          {
-            type: "Account",
-            id: "acc-1",
-            reason: "the account asked about",
-            fields: { name: "Acme Corp", country_code: "GB" },
-          },
-          {
-            type: "Order",
-            id: "ord-1",
-            reason: "an order on that account",
-            fields: { number: "ORD-2026-0001", status: "open" },
-          },
+          { type: "Account", id: "acc-1", reason: "the account asked about" },
+          { type: "Order", id: "ord-1", reason: "an order on that account" },
         ],
         stop: true,
         tokenUsage: { input: 100, output: 50 },

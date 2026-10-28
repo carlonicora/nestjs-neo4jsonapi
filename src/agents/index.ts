@@ -86,7 +86,7 @@ export { ReadEntityTool } from "./graph/tools/read-entity.tool";
 export { TraverseTool } from "./graph/tools/traverse.tool";
 export { ToolFieldFormatterService } from "./graph/services/field-formatting";
 export { RelatedEdgesService } from "./graph/services/related-edges.service";
-export type { UserContext, ToolCallRecord } from "./graph/tools/tool.factory";
+export type { UserContext, ToolCallRecord, RecordedEntity } from "./graph/tools/tool.factory";
 
 // Operator
 export { OperatorModule } from "./operator/operator.module";

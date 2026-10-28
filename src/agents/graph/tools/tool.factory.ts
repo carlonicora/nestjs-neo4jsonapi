@@ -23,6 +23,18 @@ export interface UserContext {
   scopeLabel?: string;
 }
 
+/**
+ * A record a successful tool call returned, as the tool returned it. "detail"
+ * is a single top-level record (read_entity); "list" is one of an items array
+ * (search_entities, traverse, bridge envelopes alike).
+ */
+export interface RecordedEntity {
+  type: string;
+  id: string;
+  fields: Record<string, unknown>;
+  stage: "list" | "detail";
+}
+
 export interface ToolCallRecord {
   tool: string;
   input: Record<string, unknown>;
@@ -37,6 +49,36 @@ export interface ToolCallRecord {
    * sets it. Read by the graph node's traversal detector.
    */
   walkedEdge?: boolean;
+  /**
+   * Records the call returned, harvested by capture() from a successful
+   * result. The graph node fills its output entities' fields from these, so
+   * field values are the tool's own, never the model's copy.
+   */
+  entities?: RecordedEntity[];
+}
+
+function asRecordedEntity(value: unknown, stage: RecordedEntity["stage"]): RecordedEntity | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.id !== "string" || typeof v.type !== "string") return null;
+  if (!v.fields || typeof v.fields !== "object" || Array.isArray(v.fields)) return null;
+  return { type: v.type, id: v.id, fields: v.fields as Record<string, unknown>, stage };
+}
+
+/** Top-level { id, type, fields } → one detail entity; items[] → list entities. */
+function recordedEntitiesOf(result: unknown): RecordedEntity[] {
+  if (!result || typeof result !== "object") return [];
+  const out: RecordedEntity[] = [];
+  const detail = asRecordedEntity(result, "detail");
+  if (detail) out.push(detail);
+  const items = (result as Record<string, unknown>).items;
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      const listed = asRecordedEntity(item, "list");
+      if (listed) out.push(listed);
+    }
+  }
+  return out;
 }
 
 function normaliseTypeName(input: string): string {
@@ -148,11 +190,13 @@ export class ToolFactory {
           result && typeof result === "object" && "error" in (result as any)
             ? String((result as any).error)
             : undefined;
+        const entities = resultError ? [] : recordedEntitiesOf(result);
         recorder.push({
           tool: record.tool,
           input: record.input,
           durationMs,
           ...(resultError ? { error: resultError } : {}),
+          ...(entities.length ? { entities } : {}),
         });
         const hint =
           result && typeof result === "object" && "items" in (result as any) && Array.isArray((result as any).items)

@@ -124,11 +124,12 @@ describe("renderGraphNodeSystemPrompt", () => {
     expect(out).toMatch(/be strict/i);
   });
 
-  it("entities contract instructs the LLM to populate `fields` with quoted values", () => {
+  it("entities contract asks only for type, id and reason (fields come from the tool results)", () => {
     const out = renderGraphNodeSystemPrompt("any");
     const outputBlock = out.substring(out.indexOf("## Output"));
-    expect(outputBlock).toContain("`fields`");
-    expect(outputBlock).toMatch(/values you quoted in `?answer`?/i);
+    expect(outputBlock).toContain("`{ type, id, reason }`");
+    expect(outputBlock).not.toContain("`fields`");
+    expect(outputBlock).not.toMatch(/values you quoted in `?answer`?/i);
   });
 
   it("Tools section instructs describe-first + error recovery (do not stop on first error)", () => {

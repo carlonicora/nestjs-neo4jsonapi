@@ -1068,12 +1068,15 @@ export class LLMService {
    * @param params.maxToolIterations - Optional max tool call iterations (default: 5)
    *
    * **The `final_answer` tool.** When a call has both `tools` and `outputSchema`, the
-   * tool loop also binds a tool named `final_answer` whose schema is `outputSchema`.
+   * tool loop also binds a tool named `final_answer` whose schema is `outputSchema`
+   * (on Requesty + Gemini, the same Gemini-sanitised JSON schema the structured round
+   * uses; its arguments are still validated against the Zod `outputSchema`).
    * A `final_answer` call whose arguments parse against `outputSchema` ends the loop
    * and IS the result: no ToolMessage is sent for it and no separate structured round
    * runs. Sent in the same round as other tool calls, those calls still execute and
    * the detector line `final_answer detector: sent alongside other tool calls` is
-   * logged. Fallbacks, each logging `[label] final_answer fallback: <reason>`:
+   * logged. Fallbacks, each logging `[label] final_answer fallback: <reason>`
+   * (the detector and every fallback line are also recorded in the dump warnings):
    * - arguments that fail the schema are answered with a ToolMessage naming the Zod
    *   issues, and the loop continues;
    * - a model that ends in prose, a loop abandoned after repeated tool rejections,
@@ -1270,6 +1273,23 @@ export class LLMService {
     }
   }
 
+  /**
+   * The output schema as Requesty + Gemini must receive it: Zod converted to JSON
+   * Schema with the keys Gemini rejects ($schema, $defs, $ref, ...) stripped.
+   * `undefined` on every other provider/model, which keep the Zod schema. Shared
+   * by the tool loop's `final_answer` tool and the final structured round, so both
+   * decide the provider condition the same way. Resolves against the same weight
+   * `getLLM` used, so lite/large Gemini models are detected correctly.
+   */
+  private geminiSanitisedOutputSchema(modelWeight: ModelWeight | undefined, outputSchema: ZodType): any | undefined {
+    const aiConfig = this.modelService.getResolvedConfig(modelWeight);
+    // Handles both "gemini-..." and "google/gemini-..." formats.
+    const modelLower = aiConfig.model.toLowerCase();
+    const isGeminiModel = modelLower.startsWith("gemini") || modelLower.includes("/gemini");
+    if (aiConfig.provider !== "requesty" || !isGeminiModel) return undefined;
+    return sanitizeSchemaForGemini(convertZodToJsonSchema(outputSchema));
+  }
+
   private async _invokeOriginal<T>(
     params: LLMCallParams<T>,
     session: DumpSession,
@@ -1386,6 +1406,9 @@ export class LLMService {
       // arguments ARE the structured answer: a valid call ends the loop and
       // saves the separate structured round. It is bound beside the caller's
       // tools but never added to `toolMap` — it is not executed, it is parsed.
+      // On Requesty + Gemini the tool gets the same sanitised JSON schema the
+      // structured round uses — the provider rejects the raw one. Its args are
+      // still parsed against the Zod `outputSchema`.
       const offerFinalAnswer = !!params.outputSchema;
       const modelWithTools = offerFinalAnswer
         ? baseModel.bindTools([
@@ -1393,7 +1416,7 @@ export class LLMService {
             {
               name: FINAL_ANSWER_TOOL_NAME,
               description: FINAL_ANSWER_TOOL_DESCRIPTION,
-              schema: params.outputSchema,
+              schema: this.geminiSanitisedOutputSchema(params.modelWeight, params.outputSchema) ?? params.outputSchema,
             },
           ])
         : baseModel.bindTools(params.tools);
@@ -1506,7 +1529,9 @@ export class LLMService {
         if (acceptedFinalAnswer && otherToolCalls.length > 0) {
           // Valid output is never re-asked: the other calls still run (their
           // ToolMessages keep the pairing), the answer ships.
-          this.logger.warn(`[${label}] final_answer detector: sent alongside other tool calls`);
+          const msg = `[${label}] final_answer detector: sent alongside other tool calls`;
+          this.logger.warn(msg);
+          addWarning(msg);
         }
 
         // Execute each tool call
@@ -1515,7 +1540,9 @@ export class LLMService {
             // An accepted answer ends the conversation: no ToolMessage follows it.
             if (acceptedFinalAnswer) continue;
             const rejection = finalAnswerRejections.get(toolCall) ?? "";
-            this.logger.warn(`[${label}] final_answer fallback: invalid arguments, rejection sent back`);
+            const msg = `[${label}] final_answer fallback: invalid arguments, rejection sent back`;
+            this.logger.warn(msg);
+            addWarning(msg);
             conversationMessages.push(new ToolMessage({ content: rejection, tool_call_id: toolCall.id ?? "" }));
             session.recordToolResult(toolCall.id ?? "", toolCall.name, rejection);
             continue;
@@ -1617,7 +1644,9 @@ export class LLMService {
           : abandonToolLoop
             ? "tool loop abandoned after repeated rejections"
             : `reached maxToolIterations (${maxIterations})`;
-        this.logger.warn(`[${label}] final_answer fallback: ${reason}`);
+        const msg = `[${label}] final_answer fallback: ${reason}`;
+        this.logger.warn(msg);
+        addWarning(msg);
       }
     }
 
@@ -1636,23 +1665,15 @@ export class LLMService {
 
     // Get final structured response (unified path for both tool and non-tool flows)
     // For Requesty + Gemini: sanitize schema to remove $schema, $defs, etc. that Gemini rejects.
-    // Resolve against the same weight getLLM used, so lite/large Gemini models are detected correctly.
-    const aiConfig = this.modelService.getResolvedConfig(params.modelWeight);
-    // Check if model is Gemini (handles both "gemini-..." and "google/gemini-..." formats)
-    const modelLower = aiConfig.model.toLowerCase();
-    const isGeminiModel = modelLower.startsWith("gemini") || modelLower.includes("/gemini");
-    const needsGeminiSanitization = aiConfig.provider === "requesty" && isGeminiModel;
+    const geminiSchema = this.geminiSanitisedOutputSchema(params.modelWeight, params.outputSchema);
 
     let structuredLlm;
     // Set only when the schema had to be rewritten for strict mode. It is the schema
     // BEFORE rewriting, and therefore the source of truth for which nulls the model was
     // forced to emit — see `normaliseStrictOutput` below.
     let originalJsonSchema: any | undefined;
-    if (needsGeminiSanitization) {
-      // Convert Zod to JSON Schema and remove Gemini-incompatible properties
-      const jsonSchema = convertZodToJsonSchema(params.outputSchema);
-      const sanitizedSchema = sanitizeSchemaForGemini(jsonSchema);
-      structuredLlm = baseModel.withStructuredOutput(sanitizedSchema, {
+    if (geminiSchema) {
+      structuredLlm = baseModel.withStructuredOutput(geminiSchema, {
         includeRaw: true,
       });
     } else if (!this.modelService.supportsStrictStructuredOutput(params.modelWeight)) {

@@ -59,18 +59,57 @@ Do not return the previous answer unchanged unless the first case truly applies.
 
 const APOLOGY_REGEX = /^\s*(i am sorry|i'm sorry|i am unable|i cannot|please provide|could you (please )?specify)/i;
 
+// Entity field values are not part of this schema: the node fills them from
+// the records the tools actually returned (fillEntityFields below).
 const graphOutputSchema = z.object({
-  answer: z.string(),
-  entities: z.array(
-    z.object({
-      type: z.string(),
-      id: z.string(),
-      reason: z.string(),
-      fields: z.record(z.string(), z.any()).optional(),
-    }),
-  ),
-  stop: z.boolean(),
+  answer: z
+    .string()
+    .describe(
+      "A concise prose reply built from the field values and traversal results you looked up: 2 to 4 sentences for a single record, a markdown bullet list when enumerating. Use real field values, never a type name.",
+    ),
+  entities: z
+    .array(
+      z.object({
+        type: z.string().describe("The entity type exactly as the tools returned it for this record."),
+        id: z.string().describe("The record id copied verbatim from a tool result. Never invent or alter an id."),
+        reason: z
+          .string()
+          .describe(
+            "One short clause naming the record's role in the answer, for example the record the user asked about, or one of the records listed in the answer.",
+          ),
+      }),
+    )
+    .describe(
+      "Every record that contributes to the meaning of the answer: the subject the user asked about, or a record the answer reports a fact about. Leave out records you retrieved, inspected and discarded. Empty when no record contributes.",
+    ),
+  stop: z.boolean().describe("True once the answer is complete and entities is the matching set of records."),
 });
+
+/**
+ * Fills each output entity's fields from the records the tools returned during
+ * the turn: the latest detail read wins over list results, list results merge
+ * across calls, and an entity no tool returned carries no fields at all.
+ */
+export function fillEntityFields(
+  entities: Array<{ type: string; id: string; reason: string }>,
+  recorder: ToolCallRecord[],
+): Array<{ type: string; id: string; reason: string; fields?: Record<string, unknown> }> {
+  const detail = new Map<string, Record<string, unknown>>();
+  const listed = new Map<string, Record<string, unknown>>();
+  for (const call of recorder) {
+    if (call.error || !call.entities) continue;
+    for (const e of call.entities) {
+      const key = `${e.type}:${e.id}`;
+      if (e.stage === "detail") detail.set(key, e.fields);
+      else listed.set(key, { ...(listed.get(key) ?? {}), ...e.fields });
+    }
+  }
+  return entities.map((e) => {
+    const key = `${e.type}:${e.id}`;
+    const fields = detail.get(key) ?? listed.get(key);
+    return fields && Object.keys(fields).length > 0 ? { ...e, fields } : { ...e };
+  });
+}
 
 /**
  * Scaffold fields placed BEFORE answer when
@@ -318,7 +357,7 @@ Steps to take now:
   2. Call describe_entity on the type(s) the question is about (both the resolved entity's type AND any target type the user is asking about).
   3. Call traverse from the resolved entity along the relationship that leads to the records the user wants. If no direct relationship is listed, use search_entities on the target type with appropriate filters.
   4. Call read_entity on each result to get the full fields.
-  5. Return the records in entities, with their fields populated.
+  5. Return the records in entities.
 
 Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         this.logger.warn(
@@ -367,13 +406,10 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
       const iterationsHit = recorder.length >= MAX_TOOL_ITERATIONS;
       const status: GraphNodeOutput["status"] = wallclockHit || iterationsHit ? "partial" : "success";
 
-      const entities = (response.entities ?? []).map((e: any, idx: number) => ({
-        type: e.type,
-        id: e.id,
-        reason: e.reason ?? "",
-        foundAtHop: idx,
-        ...(e.fields && Object.keys(e.fields).length > 0 ? { fields: e.fields } : {}),
-      }));
+      const entities = fillEntityFields(
+        (response.entities ?? []).map((e: any) => ({ type: e.type, id: e.id, reason: e.reason ?? "" })),
+        recorder,
+      ).map((e, idx) => ({ ...e, foundAtHop: idx }));
 
       const answerText = typeof response.answer === "string" ? response.answer : "";
 
