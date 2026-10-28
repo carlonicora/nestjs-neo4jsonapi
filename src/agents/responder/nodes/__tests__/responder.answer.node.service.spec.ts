@@ -130,6 +130,39 @@ describe("ResponderAnswerNodeService.execute", () => {
     service = moduleRef.get(ResponderAnswerNodeService);
   });
 
+  it("passes the conversation's user and assistant turns to the answer call as history", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({
+      state: buildState({
+        question: "Suggest another place for the PC",
+        chatHistory: [
+          { type: "system", content: "reference memory" },
+          { type: "user", content: "The PC will not go to the harbour" },
+          { type: "assistant", content: "Then the old mill." },
+          { type: "assistant", content: "   " },
+          { type: "user", content: "That cannot be done either" },
+        ],
+      }),
+    });
+
+    const callArgs = (llm.call as unknown as Mock).mock.calls[0][0];
+    expect(callArgs.history).toEqual([
+      { role: "user", content: "The PC will not go to the harbour" },
+      { role: "assistant", content: "Then the old mill." },
+      { role: "user", content: "That cannot be done either" },
+    ]);
+    expect(callArgs.inputParams.question).toBe("Suggest another place for the PC");
+  });
+
+  it("sends an empty history when the conversation has none", async () => {
+    (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());
+
+    await service.execute({ state: buildState({ chatHistory: undefined }) });
+
+    expect((llm.call as unknown as Mock).mock.calls[0][0].history).toEqual([]);
+  });
+
   it("bills the answer node to the conversation scope, translated to its Neo4j label", async () => {
     modelRegistry.register({ nodeName: "campaign", labelName: "Campaign", type: "campaigns" } as any);
     (llm.call as unknown as Mock).mockResolvedValue(makeLLMResponse());

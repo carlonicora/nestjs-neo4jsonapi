@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { BaseConfigInterface, ConfigPromptsInterface } from "../../../config/interfaces";
+import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import { LLMService } from "../../../core/llm/services/llm.service";
 import { NOTEBOOK_BUDGET_CHARS } from "../../../foundations/chunk/repositories/retrieval.constants";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
@@ -41,6 +42,11 @@ Each turn arrives with these inputs:
 - \`scopeSection\` — optional scope hint when the conversation is bound to a
   single content.
 - \`branchesUsed\` — list of branches that produced data this turn.
+
+The conversation so far arrives as the chat messages before this turn, the
+last of them the user's own wording of this question. Read the refined
+\`question\` in its light: what the user asked for, ruled out or corrected
+earlier still holds unless they change it.
 
 A section is the empty string \`""\` when its branch did not run. When all
 data sections are empty, you have no information for this turn — say so
@@ -298,8 +304,17 @@ export class ResponderAnswerNodeService {
     );
     if (graphSection.length) this.logger.debug(`answer node graphSection:\n${graphSection}`);
 
+    // User/assistant turns only: the conversation as the model should read it back. Without it
+    // the answer sees just the refined question, and a constraint the user stated a few turns
+    // earlier ("not there") is lost by the time the reply is written.
+    const history = (state.chatHistory ?? [])
+      .filter((m) => m.type === AgentMessageType.User || m.type === AgentMessageType.Assistant)
+      .map((m) => ({ role: m.type, content: m.content }))
+      .filter((entry) => entry.content.trim() !== "");
+
     const llmResponse = await this.llmService.call<ResponderAnswerOutput>({
       inputSchema,
+      history,
       inputParams: {
         question: state.question ?? "",
         notebookSection,
