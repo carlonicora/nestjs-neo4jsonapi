@@ -387,6 +387,35 @@ function toolArgCandidates(args: unknown): unknown[] {
   return candidates;
 }
 
+/**
+ * Name of the tool `call()` binds beside the caller's tools when a call has both
+ * `tools` and an `outputSchema`. Its arguments ARE the structured answer: a valid
+ * call ends the tool loop without a separate structured-output round.
+ */
+const FINAL_ANSWER_TOOL_NAME = "final_answer";
+const FINAL_ANSWER_TOOL_DESCRIPTION =
+  "Call this exactly once, alone and after your last lookup, when you have everything you need, with your complete answer. Do not answer in plain text.";
+
+/**
+ * Validates a `final_answer` call against the output schema, accepting the same
+ * arg shapes `extractViaTool` accepts (as-is, JSON string, single-key wrapper).
+ * Returns the parsed answer, or the rejection text to send back as the call's
+ * ToolMessage (the Zod issues named, so the retry carries a negative example).
+ */
+function parseFinalAnswerCall<T>(outputSchema: ZodType, args: unknown): { value: T } | { rejection: string } {
+  const candidates = toolArgCandidates(args);
+  for (const candidate of candidates) {
+    const parsed = outputSchema.safeParse(candidate);
+    if (parsed.success) return { value: parsed.data as T };
+  }
+  // Describe the issues against the most object-like shape the model sent.
+  const described = candidates.find((c) => c && typeof c === "object") ?? args;
+  const rejection =
+    describeToolInputRejection({ toolName: FINAL_ANSWER_TOOL_NAME, schema: outputSchema, args: described }) ??
+    `Tool error: the call to "${FINAL_ANSWER_TOOL_NAME}" was rejected — its arguments did not match the answer schema. Reissue ${FINAL_ANSWER_TOOL_NAME} with a complete, valid answer.`;
+  return { rejection };
+}
+
 @Injectable()
 export class LLMService {
   private readonly logger = new Logger(LLMService.name);
@@ -1038,6 +1067,20 @@ export class LLMService {
    * @param params.tools - Optional array of tools to bind to the LLM
    * @param params.maxToolIterations - Optional max tool call iterations (default: 5)
    *
+   * **The `final_answer` tool.** When a call has both `tools` and `outputSchema`, the
+   * tool loop also binds a tool named `final_answer` whose schema is `outputSchema`.
+   * A `final_answer` call whose arguments parse against `outputSchema` ends the loop
+   * and IS the result: no ToolMessage is sent for it and no separate structured round
+   * runs. Sent in the same round as other tool calls, those calls still execute and
+   * the detector line `final_answer detector: sent alongside other tool calls` is
+   * logged. Fallbacks, each logging `[label] final_answer fallback: <reason>`:
+   * - arguments that fail the schema are answered with a ToolMessage naming the Zod
+   *   issues, and the loop continues;
+   * - a model that ends in prose, a loop abandoned after repeated tool rejections,
+   *   or `maxToolIterations` reached → the final structured round runs as before.
+   * Every tool call id stays paired with a ToolMessage. Calls without `tools` are
+   * unaffected.
+   *
    * @returns Promise resolving to parsed output + token usage metadata
    * @throws {Error} If LLM call fails or returns invalid structured output
    *
@@ -1339,14 +1382,30 @@ export class LLMService {
         toolMap.set(tool.name, tool);
       }
 
-      // Bind tools to model
-      const modelWithTools = baseModel.bindTools(params.tools);
+      // With an output schema, the loop also offers `final_answer`, whose
+      // arguments ARE the structured answer: a valid call ends the loop and
+      // saves the separate structured round. It is bound beside the caller's
+      // tools but never added to `toolMap` — it is not executed, it is parsed.
+      const offerFinalAnswer = !!params.outputSchema;
+      const modelWithTools = offerFinalAnswer
+        ? baseModel.bindTools([
+            ...params.tools,
+            {
+              name: FINAL_ANSWER_TOOL_NAME,
+              description: FINAL_ANSWER_TOOL_DESCRIPTION,
+              schema: params.outputSchema,
+            },
+          ])
+        : baseModel.bindTools(params.tools);
+      const validToolNames = [...toolMap.keys(), ...(offerFinalAnswer ? [FINAL_ANSWER_TOOL_NAME] : [])];
 
       // Signature → consecutive rejections. A model that cannot fix a malformed
       // call re-emits it verbatim; without this it does so until the iteration
       // budget is gone.
       const failureStreaks = new Map<string, number>();
       let abandonToolLoop = false;
+      // Why the loop ended without an accepted final_answer, when it did.
+      let endedInProse = false;
 
       // Tool calling loop
       for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -1422,21 +1481,53 @@ export class LLMService {
           // discarded 20,943 output tokens across 8 iterations — every one of them
           // a complete answer the next call then regenerated from scratch.
           conversationMessages.push(toolResponse);
+          endedInProse = true;
           break;
         }
 
         // Add AI message with tool calls to conversation
         conversationMessages.push(toolResponse);
 
+        // Parse every final_answer call of this round up front: the first valid
+        // one is the result. Invalid ones are answered in place below with their
+        // Zod issues, so every call id stays paired with a ToolMessage.
+        let acceptedFinalAnswer: { value: T } | undefined;
+        const finalAnswerRejections = new Map<(typeof toolCalls)[number], string>();
+        if (offerFinalAnswer) {
+          for (const toolCall of toolCalls) {
+            if (toolCall.name !== FINAL_ANSWER_TOOL_NAME) continue;
+            const outcome = parseFinalAnswerCall<T>(params.outputSchema, toolCall.args);
+            // strictNullChecks is off in this package, so narrow with `in`.
+            if ("rejection" in outcome) finalAnswerRejections.set(toolCall, outcome.rejection);
+            else if (!acceptedFinalAnswer) acceptedFinalAnswer = outcome;
+          }
+        }
+        const otherToolCalls = toolCalls.filter((c) => !offerFinalAnswer || c.name !== FINAL_ANSWER_TOOL_NAME);
+        if (acceptedFinalAnswer && otherToolCalls.length > 0) {
+          // Valid output is never re-asked: the other calls still run (their
+          // ToolMessages keep the pairing), the answer ships.
+          this.logger.warn(`[${label}] final_answer detector: sent alongside other tool calls`);
+        }
+
         // Execute each tool call
         for (const toolCall of toolCalls) {
+          if (offerFinalAnswer && toolCall.name === FINAL_ANSWER_TOOL_NAME) {
+            // An accepted answer ends the conversation: no ToolMessage follows it.
+            if (acceptedFinalAnswer) continue;
+            const rejection = finalAnswerRejections.get(toolCall) ?? "";
+            this.logger.warn(`[${label}] final_answer fallback: invalid arguments, rejection sent back`);
+            conversationMessages.push(new ToolMessage({ content: rejection, tool_call_id: toolCall.id ?? "" }));
+            session.recordToolResult(toolCall.id ?? "", toolCall.name, rejection);
+            continue;
+          }
+
           const tool = toolMap.get(toolCall.name);
 
           if (!tool) {
             console.warn(`[LLMService] Tool not found: ${toolCall.name}`);
             // Name the valid tools in the reply: a bare "not found" is too weak
             // a signal for small models, which just retry the same wrong name.
-            const notFound = `Tool "${toolCall.name}" does not exist. Use EXACTLY one of: ${[...toolMap.keys()].join(", ")}`;
+            const notFound = `Tool "${toolCall.name}" does not exist. Use EXACTLY one of: ${validToolNames.join(", ")}`;
             conversationMessages.push(
               new ToolMessage({
                 content: notFound,
@@ -1501,7 +1592,32 @@ export class LLMService {
           }
         }
 
+        if (acceptedFinalAnswer) {
+          // Every iteration's tokens already went to `addTokens` above, so the
+          // result carries the loop totals and nothing is reported twice.
+          this.logger.log(
+            `[${label}] complete (final_answer): ${iterationsUsed} tool iteration(s), ${failedToolCalls} failed tool call(s), ` +
+              `in=${totalInputTokens} out=${totalOutputTokens} cached=${totalCachedTokens}`,
+          );
+          return {
+            ...(acceptedFinalAnswer.value as T),
+            tokenUsage: { input: totalInputTokens, output: totalOutputTokens, cached: totalCachedTokens },
+          };
+        }
+
         if (abandonToolLoop) break;
+      }
+
+      // No accepted final_answer: today's structured round answers instead.
+      // Every rejected final_answer was already paired with its ToolMessage in
+      // its own round, so no call is left unanswered when that round starts.
+      if (offerFinalAnswer) {
+        const reason = endedInProse
+          ? "model answered in prose"
+          : abandonToolLoop
+            ? "tool loop abandoned after repeated rejections"
+            : `reached maxToolIterations (${maxIterations})`;
+        this.logger.warn(`[${label}] final_answer fallback: ${reason}`);
       }
     }
 

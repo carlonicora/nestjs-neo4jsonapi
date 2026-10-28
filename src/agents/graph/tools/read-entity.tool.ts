@@ -51,6 +51,9 @@ export class ReadEntityTool {
     readIds?: Set<string>,
   ): Promise<unknown> {
     const localMaterialised: Array<{ relName: string; count: number }> = [];
+    // Linked records the include returned, across all relationships — feeds
+    // ToolCallRecord.walkedEdge for the graph node's traversal detector.
+    let linkedRecords = 0;
     const result = await this.factory.capture(
       { tool: "read_entity", input },
       async () => {
@@ -133,6 +136,7 @@ export class ReadEntityTool {
               related[name] = externalSourceUnavailableResult(e);
               continue;
             }
+            linkedRecords += records.length;
             const targetEntity = this.factory.resolveEntity(rel.targetType, ctx);
             const summariser =
               "error" in targetEntity
@@ -211,6 +215,9 @@ export class ReadEntityTool {
     // Attach materialised summary to the recorder entry that capture() just pushed.
     if (localMaterialised.length && recorder.length) {
       recorder[recorder.length - 1].materialised = localMaterialised;
+    }
+    if (linkedRecords > 0 && recorder.length) {
+      recorder[recorder.length - 1].walkedEdge = true;
     }
     return result;
   }

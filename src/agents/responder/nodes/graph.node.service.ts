@@ -24,6 +24,12 @@ import { collectEntityLabels, humanizeTool } from "../../graph/services/humanize
 import type { GraphNodeOutput } from "../../graph/interfaces/graph.node.output.interface";
 import { ResponderContextState } from "../contexts/responder.context";
 
+/** What the graph call reads besides the history; every key is described. */
+const graphInputSchema = z.object({
+  question: z.string().describe("The user's question, refined for retrieval."),
+  contentScope: z.string().nullable().describe("type:id of the single content the conversation is bound to, or null."),
+});
+
 export const MAX_TOOL_ITERATIONS = 15;
 // Enforced at retry boundaries: once a turn has spent this budget (or the
 // iteration cap) no further retry pass is launched — the in-flight llm.call
@@ -38,6 +44,11 @@ You must call at least one tool BEFORE producing a final answer. For a question 
 
 Inspect the returned candidates, pick a type, then call describe_entity and proceed with the typed tools (read_entity, search_entities, traverse) until you have the data the answer needs. Do not respond with prose alone — call the tool now.`;
 
+/**
+ * @deprecated No effect since the traversal guard became a detector: a turn
+ * that walked no edge is logged and counted in the trace, never re-called.
+ * Kept exported because it is public library API.
+ */
 export const TRAVERSAL_RETRY_INSTRUCTION = `Your previous attempt answered without a single successful traverse call. A record's own fields describe it as it was when the record was written; what has happened to it since lives on the records that reference it, and those are reachable only by walking a relationship.
 
 Decide which case this question is:
@@ -60,6 +71,42 @@ const graphOutputSchema = z.object({
   ),
   stop: z.boolean(),
 });
+
+/**
+ * Scaffold fields placed BEFORE answer when
+ * `responder.graph.requireTraversalBeforeAnswer` is on: constrained decoding
+ * fills an object in order, so the model states the basis of its answer and
+ * the relationships it walked before it may commit to the answer.
+ */
+const traversalScaffoldShape = {
+  basisKind: z
+    .enum(["identity-only", "current-state"])
+    .describe(
+      "Fill this BEFORE the answer. identity-only: the question only asks what a record is. current-state: the question asks how something stands now, what happened to it, or where it is.",
+    ),
+  relationshipsWalked: z
+    .string()
+    .describe(
+      "The relationships you walked to establish the current state, comma-separated. A record's own fields describe it as it was when written; what happened since lives on the records that reference it. Empty only when basisKind is identity-only.",
+    ),
+};
+
+const graphOutputSchemaWithScaffold = z.object({
+  ...traversalScaffoldShape,
+  ...graphOutputSchema.shape,
+});
+
+/**
+ * Edges a turn walked: successful traverse calls plus successful calls whose
+ * record says they returned linked records (read_entity with a non-empty
+ * include). search_entities never counts — it rejects relationship filters,
+ * and its scope path runs on every scoped search.
+ */
+export function walkedEdgeCount(recorder: ToolCallRecord[]): number {
+  return recorder.filter((c) => !c.error && (c.tool === "traverse" || c.walkedEdge === true)).length;
+}
+
+type TraversalDetectorTrace = { fired: boolean; basisKind: string; edgesWalked: number };
 
 @Injectable()
 export class GraphNodeService implements OnModuleInit {
@@ -195,7 +242,10 @@ export class GraphNodeService implements OnModuleInit {
         systemPrompts: extraInstruction ? [systemPrompt, extraInstruction] : [systemPrompt],
         skipResponseLanguage: true,
         history,
-        outputSchema: graphOutputSchema,
+        outputSchema: this.graphTuning?.requireTraversalBeforeAnswer
+          ? graphOutputSchemaWithScaffold
+          : graphOutputSchema,
+        inputSchema: graphInputSchema,
         inputParams: {
           question: state.question,
           contentScope: state.contentId && state.contentType ? `${state.contentType}:${state.contentId}` : null,
@@ -277,23 +327,24 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         response = await call(dataLoadingRetry);
       }
 
-      // Traversal guard (opt-in via responder.graph.requireTraversalBeforeAnswer):
-      // tool calls happened — data may even have been read — but no edge was
-      // walked. That is the shape that answers a state question from the
-      // subject's own stale fields and presents the past as the present. One
-      // structural retry; the instruction explicitly lets a fields-only answer
-      // stand when the question is a pure identity lookup.
-      const successfulTraverses = recorder.filter((c) => c.tool === "traverse" && !c.error).length;
-      if (this.graphTuning?.requireTraversalBeforeAnswer && recorder.length > 0 && successfulTraverses === 0) {
-        if (retryBudgetLeft()) {
+      // Traversal detector (opt-in via responder.graph.requireTraversalBeforeAnswer):
+      // the model declared a current-state basis but no edge was walked. That
+      // is the shape that answers a state question from the subject's own
+      // stale fields and presents the past as the present. It is logged and
+      // counted in the trace, never re-called: the scaffold fields in the
+      // output schema carry the rule, and a firing count says they are weak.
+      let traversalDetector: TraversalDetectorTrace | undefined;
+      if (this.graphTuning?.requireTraversalBeforeAnswer) {
+        const basisKind = typeof response.basisKind === "string" ? response.basisKind : "";
+        const edgesWalked = walkedEdgeCount(recorder);
+        const fired = basisKind === "current-state" && recorder.length > 0 && edgesWalked === 0;
+        traversalDetector = { fired, basisKind, edgesWalked };
+        if (fired) {
+          const relationshipsWalked =
+            typeof response.relationshipsWalked === "string" ? response.relationshipsWalked : "";
           this.logger.warn(
-            `graph node: ${recorder.length} tool call(s), 0 successful traverses — retrying with traversal instruction`,
-          );
-          response = await call(this.domain?.traversalRetry?.trim() || TRAVERSAL_RETRY_INSTRUCTION);
-        } else {
-          this.logger.warn(
-            `graph node: traversal guard skipped — budget exhausted ` +
-              `(calls=${recorder.length}, elapsedMs=${Date.now() - startedAt})`,
+            `graph node: traversal detector — ${recorder.length} tool call(s), 0 edges walked, ` +
+              `relationshipsWalked="${relationshipsWalked}" sequence=${recorder.map((r) => r.tool).join(" → ") || "(none)"}`,
           );
         }
       }
@@ -355,7 +406,7 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
         graphContext: out,
         graphError: null,
         tokens: out.tokens,
-        trace: { graph: this.traceFromOutput(out) } as any,
+        trace: { graph: this.traceFromOutput(out, traversalDetector) } as any,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -377,7 +428,7 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
     }
   }
 
-  private traceFromOutput(out: GraphNodeOutput) {
+  private traceFromOutput(out: GraphNodeOutput, traversalDetector?: TraversalDetectorTrace) {
     const materialisedBridges: { tool: string; type: string; count: number }[] = [];
     for (const c of out.toolCalls) {
       if (!c.materialised?.length) continue;
@@ -397,6 +448,7 @@ Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
       errorMessage: out.errorMessage,
       tokens: out.tokens,
       ...(materialisedBridges.length ? { materialisedBridges } : {}),
+      ...(traversalDetector ? { traversalDetector } : {}),
     };
   }
 

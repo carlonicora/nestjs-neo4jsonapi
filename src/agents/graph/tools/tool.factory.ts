@@ -30,6 +30,13 @@ export interface ToolCallRecord {
   error?: string;
   /** When set, the tool result included one or more bridge fanouts. */
   materialised?: Array<{ relName: string; count: number }>;
+  /**
+   * True when the call walked a relationship and got linked records back:
+   * set by read_entity when its include returned at least one record across
+   * all relationships. traverse counts by tool name; search_entities never
+   * sets it. Read by the graph node's traversal detector.
+   */
+  walkedEdge?: boolean;
 }
 
 function normaliseTypeName(input: string): string {

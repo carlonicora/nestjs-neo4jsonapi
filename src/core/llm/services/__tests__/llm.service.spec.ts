@@ -494,7 +494,7 @@ describe("LLMService", () => {
         tools: [mockTool as any],
       });
 
-      expect(mockLLM.bindTools).toHaveBeenCalledWith([mockTool]);
+      expect(mockLLM.bindTools).toHaveBeenCalledWith([mockTool, expect.objectContaining({ name: "final_answer" })]);
     });
 
     it("should handle errors from the LLM", async () => {

@@ -140,6 +140,9 @@ export class SearchEntitiesTool {
         // chains fall back to an unrestricted read plus a ScopeGuard filter.
         // Probe one extra record so truncation is visible to the model:
         // without this, a silently clipped list is reported as complete.
+        // The scoped relationship read never sets ToolCallRecord.walkedEdge:
+        // it runs on every scoped search, so counting it would silence the
+        // graph node's traversal detector.
         const fetched =
           useScopedRead && scopeRelKey
             ? await svc.findRelatedRecords({

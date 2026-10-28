@@ -10,10 +10,10 @@ export interface GraphNodeDomainPrompts {
   /** How to render values in `answer` — formatting, output language. */
   outputRules?: string;
   /**
-   * Not a kernel slot: overrides the traversal-guard retry instruction sent
-   * when `responder.graph.requireTraversalBeforeAnswer` is on and a turn made
-   * tool calls without one successful `traverse`. Falls back to the library's
-   * neutral instruction when unset.
+   * @deprecated No effect since the traversal guard became a detector: a turn
+   * that walked no edge is logged and counted in the trace, never re-called,
+   * so there is no retry instruction to override. Kept declared so apps that
+   * still set it keep compiling; the value is ignored.
    */
   traversalRetry?: string;
 }

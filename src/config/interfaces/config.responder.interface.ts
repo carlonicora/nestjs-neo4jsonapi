@@ -37,12 +37,13 @@ export interface ConfigResponderInterface {
      */
     reasoningEffort?: ReasoningEffort;
     /**
-     * When true, a turn that made tool calls but ended with zero successful
-     * `traverse` calls gets one structural retry telling the model to walk
-     * the graph — or to explicitly stand by a fields-only answer when the
-     * question is a pure identity lookup. Off by default: identity lookups
-     * legitimately need no traversal, and the retry costs one model round.
-     * The instruction is overridable via `prompts.graphNodeDomain.traversalRetry`.
+     * When true, the graph output schema gains two required scaffold fields
+     * before `answer` — `basisKind` (identity-only | current-state) and
+     * `relationshipsWalked` — and a traversal DETECTOR runs: a current-state
+     * answer with zero edges walked (successful `traverse`, or `read_entity`
+     * whose include returned linked records) is logged and recorded in the
+     * trace as `graph.traversalDetector`. It never re-calls the model. Off by
+     * default: the schema and behaviour are then unchanged.
      */
     requireTraversalBeforeAnswer?: boolean;
   };

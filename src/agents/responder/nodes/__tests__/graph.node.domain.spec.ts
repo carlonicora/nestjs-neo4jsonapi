@@ -147,31 +147,31 @@ describe("GraphNodeService — graph tuning knobs", () => {
   });
 });
 
-describe("GraphNodeService — traversal guard", () => {
-  it("retries once with the traversal instruction when tools ran but nothing traversed", async () => {
+describe("GraphNodeService — traversal guard (now a detector, never a re-call)", () => {
+  it("does not re-call when tools ran but nothing traversed", async () => {
     const seen: any[] = [];
     const service = buildTunedService(
       async (args: any) => {
         seen.push(args);
-        if (seen.length === 1) await args.tools.find((t: any) => t.name === "read_entity").func({});
-        return { answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
+        await args.tools.find((t: any) => t.name === "read_entity").func({});
+        return { basisKind: "current-state", answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
       },
       { responder: { graph: { requireTraversalBeforeAnswer: true } } },
     );
 
     await service.execute({ state: tunedState });
 
-    expect(seen).toHaveLength(2);
-    expect(seen[1].systemPrompts[1]).toBe(TRAVERSAL_RETRY_INSTRUCTION);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].systemPrompts).toHaveLength(1);
   });
 
-  it("prefers the domain traversalRetry override over the library default", async () => {
+  it("ignores the deprecated domain traversalRetry override", async () => {
     const seen: any[] = [];
     const service = buildTunedService(
       async (args: any) => {
         seen.push(args);
-        if (seen.length === 1) await args.tools.find((t: any) => t.name === "read_entity").func({});
-        return { answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
+        await args.tools.find((t: any) => t.name === "read_entity").func({});
+        return { basisKind: "current-state", answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
       },
       {
         prompts: { graphNodeDomain: { traversalRetry: "CUSTOM_TRAVERSAL_RETRY." } },
@@ -181,8 +181,8 @@ describe("GraphNodeService — traversal guard", () => {
 
     await service.execute({ state: tunedState });
 
-    expect(seen).toHaveLength(2);
-    expect(seen[1].systemPrompts[1]).toBe("CUSTOM_TRAVERSAL_RETRY.");
+    expect(seen).toHaveLength(1);
+    expect(seen[0].systemPrompts).not.toContain("CUSTOM_TRAVERSAL_RETRY.");
   });
 
   it("does not fire when a traverse succeeded", async () => {
@@ -191,17 +191,18 @@ describe("GraphNodeService — traversal guard", () => {
       async (args: any) => {
         seen.push(args);
         await args.tools.find((t: any) => t.name === "traverse").func({});
-        return { answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
+        return { basisKind: "current-state", answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
       },
       { responder: { graph: { requireTraversalBeforeAnswer: true } } },
     );
 
-    await service.execute({ state: tunedState });
+    const result: any = await service.execute({ state: tunedState });
 
     expect(seen).toHaveLength(1);
+    expect(result.trace.graph.traversalDetector.fired).toBe(false);
   });
 
-  it("does not fire when the flag is off", async () => {
+  it("does not run when the flag is off", async () => {
     const seen: any[] = [];
     const service = buildTunedService(async (args: any) => {
       seen.push(args);
@@ -209,25 +210,27 @@ describe("GraphNodeService — traversal guard", () => {
       return { answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
     }, {});
 
-    await service.execute({ state: tunedState });
+    const result: any = await service.execute({ state: tunedState });
 
     expect(seen).toHaveLength(1);
+    expect(result.trace.graph.traversalDetector).toBeUndefined();
   });
 
-  it("is skipped when the iteration budget is already spent", async () => {
+  it("still detects when the iteration budget is already spent, without a re-call", async () => {
     const seen: any[] = [];
     const service = buildTunedService(
       async (args: any) => {
         seen.push(args);
         const read = args.tools.find((t: any) => t.name === "read_entity");
         for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) await read.func({});
-        return { answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
+        return { basisKind: "current-state", answer: "…", entities: [], tokenUsage: { input: 1, output: 1 } };
       },
       { responder: { graph: { requireTraversalBeforeAnswer: true } } },
     );
 
-    await service.execute({ state: tunedState });
+    const result: any = await service.execute({ state: tunedState });
 
     expect(seen).toHaveLength(1);
+    expect(result.trace.graph.traversalDetector.fired).toBe(true);
   });
 });
