@@ -23,7 +23,11 @@ import { CommunitySummariserCron } from "./cron/community.summariser.cron";
     CommunityModule,
     BullModule.registerQueue({ name: QueueId.COMMUNITY_SUMMARISER }),
   ],
-  providers: [CommunitySummariserService, CommunitySummariserProcessor, createWorkerProvider(CommunitySummariserCron)],
+  providers: [
+    CommunitySummariserService,
+    createWorkerProvider(CommunitySummariserProcessor),
+    createWorkerProvider(CommunitySummariserCron),
+  ],
   exports: [CommunitySummariserService],
 })
 export class CommunitySummariserModule {}

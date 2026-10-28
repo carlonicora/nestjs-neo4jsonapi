@@ -39,7 +39,7 @@ describe("CommunitySummariserService", () => {
   });
 
   const createMockCommunityRepository = () => ({
-    findById: vi.fn(),
+    findCommunityById: vi.fn(),
     findMemberKeyConcepts: vi.fn(),
     findMemberRelationships: vi.fn(),
     updateSummary: vi.fn(),
@@ -152,7 +152,7 @@ describe("CommunitySummariserService", () => {
   describe("generateSummaryById", () => {
     it("should skip when community not found", async () => {
       // Arrange
-      communityRepository.findById.mockResolvedValue(null);
+      communityRepository.findCommunityById.mockResolvedValue(null);
 
       // Act
       await service.generateSummaryById("nonexistent");
@@ -168,7 +168,7 @@ describe("CommunitySummariserService", () => {
     it("should find community and generate summary", async () => {
       // Arrange
       const community = createMockCommunity();
-      communityRepository.findById.mockResolvedValue(community);
+      communityRepository.findCommunityById.mockResolvedValue(community);
       communityRepository.findMemberKeyConcepts.mockResolvedValue([
         { id: "kc1", value: "Concept 1", description: "Description 1" },
       ]);
@@ -187,7 +187,7 @@ describe("CommunitySummariserService", () => {
       await service.generateSummaryById(TEST_IDS.communityId);
 
       // Assert
-      expect(communityRepository.findById).toHaveBeenCalledWith(TEST_IDS.communityId);
+      expect(communityRepository.findCommunityById).toHaveBeenCalledWith(TEST_IDS.communityId);
       expect(communityRepository.updateSummary).toHaveBeenCalled();
     });
   });

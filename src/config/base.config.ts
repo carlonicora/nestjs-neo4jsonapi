@@ -4,6 +4,7 @@ import { BaseConfigInterface } from "./interfaces/base.config.interface";
 import { ConfigChunkQueuesInterface } from "./interfaces/config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./interfaces/config.content.types.interface";
 import { ConfigJobNamesInterface } from "./interfaces/config.job.names.interface";
+import { ConfigCommunityInterface } from "./interfaces/config.community.interface";
 import { ConfigOperatorInterface } from "./interfaces/config.operator.interface";
 import { ConfigAssistantInterface } from "./interfaces/config.assistant.interface";
 import { ConfigPromptsInterface } from "./interfaces/config.prompts.interface";
@@ -235,6 +236,12 @@ export interface BaseConfigOptions {
    * Optional - `approvalTtlDays` defaults to 7 when omitted.
    */
   operator?: ConfigOperatorInterface;
+
+  /**
+   * Topic-group (community) layer.
+   * Optional - omitted, groups are built per company.
+   */
+  community?: ConfigCommunityInterface;
 
   /**
    * Assistant behaviour switches (inline entity links).
@@ -649,6 +656,7 @@ export function createBaseConfig(options?: BaseConfigOptions): BaseConfigInterfa
     responder: options?.responder ?? {},
     summariser: options?.summariser ?? {},
     operator: options?.operator ?? {},
+    community: options?.community ?? {},
     assistant: options?.assistant ?? {},
     chunker: {
       strategy: (process.env.CHUNKER_STRATEGY as "markdown-structural" | "semantic") || "markdown-structural",

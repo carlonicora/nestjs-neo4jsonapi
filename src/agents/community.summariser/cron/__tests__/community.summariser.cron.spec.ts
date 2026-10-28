@@ -4,8 +4,14 @@ import { CommunityRepository } from "../../../../foundations/community/repositor
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import { CommunityScopeFilterInterface, CreditValidatorInterface } from "../../../../common/tokens";
 import { ClsService } from "nestjs-cls";
-import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
 import { Queue } from "bullmq";
+import { ConfigService } from "@nestjs/config";
+import { CommunityLayerService } from "../../../../foundations/community/services/community-layer.service";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
+import { EmbedderService } from "../../../../core/llm/services/embedder.service";
+import { ModelService } from "../../../../core/llm/services/model.service";
+import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../../core/security/services/security.service";
 
 describe("CommunitySummariserCron", () => {
   let cron: CommunitySummariserCron;
@@ -158,20 +164,11 @@ describe("CommunitySummariserCron", () => {
         cls as unknown as ClsService,
         creditValidator as unknown as CreditValidatorInterface,
         filter as unknown as CommunityScopeFilterInterface,
-        catalog as unknown as GraphCatalogService,
       );
       summariserQueue.add.mockResolvedValue({} as any);
     });
 
-    // One scope root (ScopeRoot) and one non-root entity (ScopedItem, scoped under it).
-    const catalog = {
-      getAllEntities: () => [
-        { type: "scope-roots", labelName: "ScopeRoot", scope: { path: [], rootType: "scope-roots" } },
-        { type: "scoped-items", labelName: "ScopedItem", scope: { path: ["scopeRoot"], rootType: "scope-roots" } },
-      ],
-    };
-
-    it("asks the repository for the catalog's scope-root labels only", async () => {
+    it("asks the repository for the scope root by community id only", async () => {
       communityRepository.findAllStaleCommunities.mockResolvedValue([
         { communityId: "comm-1", companyId: "company-1" },
       ]);
@@ -180,10 +177,8 @@ describe("CommunitySummariserCron", () => {
 
       await filtered.handleStaleCommunities();
 
-      expect(communityRepository.findScopeRootForCommunity).toHaveBeenCalledWith({
-        communityId: "comm-1",
-        rootLabels: ["ScopeRoot"],
-      });
+      expect(communityRepository.findScopeRootForCommunity).toHaveBeenCalledTimes(1);
+      expect(communityRepository.findScopeRootForCommunity.mock.calls[0]).toStrictEqual([{ communityId: "comm-1" }]);
     });
 
     it("does not enqueue a stale community whose scope root the filter rejects", async () => {
@@ -213,7 +208,7 @@ describe("CommunitySummariserCron", () => {
       });
     });
 
-    it("follows the company for a stale community with no scope root", async () => {
+    it("groups by company when the community has no scope root", async () => {
       communityRepository.findAllStaleCommunities.mockResolvedValue([
         { communityId: "comm-1", companyId: "company-1" },
       ]);
@@ -238,6 +233,46 @@ describe("CommunitySummariserCron", () => {
         communityId: "comm-1",
         companyId: "company-1",
       });
+    });
+  });
+
+  describe("an app with no community setting and no groups (a360ai)", () => {
+    it("reads every company's stale groups once, finds none and enqueues nothing", async () => {
+      // No `community` key and no catalog: the company layer, resolved without error.
+      const layer = new CommunityLayerService({ get: vi.fn(() => undefined) } as unknown as ConfigService);
+      layer.onApplicationBootstrap();
+      expect(layer.current()).toBeUndefined();
+
+      // The cron runs with no company in CLS, so initQuery binds none.
+      const neo4j = {
+        initQuery: vi.fn(() => ({ query: "", queryParams: { companyId: null } })),
+        readMany: vi.fn().mockResolvedValue([]),
+        read: vi.fn(),
+        writeOne: vi.fn(),
+      };
+      const repository = new CommunityRepository(
+        neo4j as unknown as Neo4jService,
+        {} as SecurityService,
+        cls as unknown as ClsService,
+        {} as EmbedderService,
+        {} as ModelService,
+        {} as AgentScopeFilterService,
+        layer,
+      );
+      const a360ai = new CommunitySummariserCron(
+        repository,
+        summariserQueue,
+        logger,
+        cls as unknown as ClsService,
+        creditValidator as unknown as CreditValidatorInterface,
+      );
+
+      await a360ai.handleStaleCommunities();
+
+      expect(neo4j.readMany).toHaveBeenCalledTimes(1);
+      expect(neo4j.read).not.toHaveBeenCalled();
+      expect(neo4j.writeOne).not.toHaveBeenCalled();
+      expect(summariserQueue.add).not.toHaveBeenCalled();
     });
   });
 });

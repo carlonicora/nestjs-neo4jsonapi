@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach, Mocked, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { CommunityDetectorService } from "../community.detector.service";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
@@ -8,6 +8,7 @@ import { ClsService } from "nestjs-cls";
 import { CommunityScopeFilterInterface } from "../../../../common/tokens";
 import { ScopePredicateSource } from "../../../../common/repositories/scope-predicate.source";
 import { GraphCatalogService } from "../../../graph/services/graph.catalog.service";
+import { CommunityLayerService } from "../../../../foundations/community/services/community-layer.service";
 
 // NOTE: CommunitySummariserService import REMOVED - no longer a dependency
 
@@ -16,6 +17,7 @@ describe("CommunityDetectorService", () => {
   let neo4jService: MockedObject<Neo4jService>;
   let logger: MockedObject<AppLoggingService>;
   let communityRepository: MockedObject<CommunityRepository>;
+  let layer: Mocked<CommunityLayerService>;
 
   const TEST_IDS = {
     companyId: "550e8400-e29b-41d4-a716-446655440000",
@@ -65,6 +67,7 @@ describe("CommunityDetectorService", () => {
     findById: vi.fn(),
     countByLevel: vi.fn(),
     deleteCommunitiesForScope: vi.fn(),
+    findLayerRootIds: vi.fn().mockResolvedValue([]),
   });
 
   beforeEach(async () => {
@@ -72,6 +75,10 @@ describe("CommunityDetectorService", () => {
     const mockNeo4jService = createMockNeo4jService();
     const mockLogger = createMockLogger();
     const mockCommunityRepository = createMockCommunityRepository();
+    layer = {
+      current: vi.fn().mockReturnValue(undefined),
+      ready: vi.fn(async () => layer.current()),
+    } as unknown as Mocked<CommunityLayerService>;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -80,6 +87,7 @@ describe("CommunityDetectorService", () => {
         { provide: AppLoggingService, useValue: mockLogger },
         { provide: CommunityRepository, useValue: mockCommunityRepository },
         { provide: ClsService, useValue: { get: vi.fn().mockReturnValue(TEST_IDS.companyId) } },
+        { provide: CommunityLayerService, useValue: layer },
       ],
     }).compile();
 
@@ -188,6 +196,7 @@ describe("CommunityDetectorService", () => {
     const cls = { get: vi.fn().mockReturnValue(TEST_IDS.companyId) } as unknown as ClsService;
 
     beforeEach(() => {
+      layer.current.mockReturnValue({ type: "scope-roots", labelName: "ScopeRoot", nodeName: "scopeRoot" });
       // Accepts ROOT_A and the company-wide partition; rejects every other root.
       filter = {
         canGroup: vi.fn(async (params: { scope?: { id: string } }) => !params.scope || params.scope.id === ROOT_A.id),
@@ -197,17 +206,17 @@ describe("CommunityDetectorService", () => {
         logger as unknown as AppLoggingService,
         communityRepository as unknown as CommunityRepository,
         cls,
+        layer,
         catalog,
         scopePredicates,
         filter as unknown as CommunityScopeFilterInterface,
       );
       neo4jService.read.mockImplementation(async (query: string) => {
         if (query.includes("gds.version")) return { records: [{ get: () => "2.0" }] };
-        if (query.includes("RETURN root.id AS id"))
-          return { records: [{ get: () => ROOT_A.id }, { get: () => ROOT_B.id }] };
         if (query.includes("count(DISTINCT kc)")) return { records: [{ get: () => 5 }] };
         return { records: [] };
       });
+      communityRepository.findLayerRootIds.mockResolvedValue([ROOT_A.id, ROOT_B.id]);
       detectAtLevel = vi.spyOn(filtered as any, "detectCommunitiesAtLevel").mockResolvedValue([]);
     });
 
@@ -240,12 +249,14 @@ describe("CommunityDetectorService", () => {
       let detectAtLevelUnpartitioned: ReturnType<typeof vi.spyOn>;
 
       beforeEach(() => {
+        layer.current.mockReturnValue(undefined);
         // No catalog: no scope roots, so detection uses the company-wide partition.
         unpartitioned = new CommunityDetectorService(
           neo4jService as unknown as Neo4jService,
           logger as unknown as AppLoggingService,
           communityRepository as unknown as CommunityRepository,
           cls,
+          layer,
           undefined,
           undefined,
           filter as unknown as CommunityScopeFilterInterface,
@@ -313,6 +324,117 @@ describe("CommunityDetectorService", () => {
       expect(communityRepository.deleteAllCommunities).not.toHaveBeenCalled();
       expect(detectAtLevel).toHaveBeenCalledTimes(1);
       expect(detectAtLevel).toHaveBeenCalledWith(1.0, 0, ROOT_B);
+    });
+  });
+  describe("community layer (CommunityLayerService)", () => {
+    const CAMPAIGN_LAYER = { type: "campaigns", labelName: "Campaign", nodeName: "campaign" };
+    const catalog = {
+      getAllEntities: vi.fn(() => [
+        { type: "campaigns", labelName: "Campaign", scope: { path: [], rootType: "campaigns", rootLabel: "Campaign" } },
+        {
+          type: "proceedings",
+          labelName: "Proceeding",
+          scope: { path: [], rootType: "proceedings", rootLabel: "Proceeding" },
+        },
+      ]),
+    } as unknown as GraphCatalogService;
+    const scopePredicates = {
+      build: vi.fn(() => ({ cypher: "data.id = $agentScopeId", params: { agentScopeId: "x" } })),
+    } as unknown as ScopePredicateSource;
+    const cls = { get: vi.fn().mockReturnValue(TEST_IDS.companyId) } as unknown as ClsService;
+
+    let layered: CommunityDetectorService;
+
+    beforeEach(() => {
+      layered = new CommunityDetectorService(
+        neo4jService as unknown as Neo4jService,
+        logger as unknown as AppLoggingService,
+        communityRepository as unknown as CommunityRepository,
+        cls,
+        layer,
+        catalog,
+        scopePredicates,
+      );
+      neo4jService.read.mockImplementation(async (query: string) => {
+        if (query.includes("gds.version")) return { records: [{ get: () => "2.0" }] };
+        if (query.includes("count(DISTINCT kc)")) return { records: [{ get: () => 5 }] };
+        return { records: [] };
+      });
+      communityRepository.findLayerRootIds.mockResolvedValue(["camp-1"]);
+    });
+
+    it("detects one company-wide partition on the company layer", async () => {
+      layer.current.mockReturnValue(undefined);
+      vi.spyOn(layered as any, "projectGraph").mockResolvedValue(true);
+      vi.spyOn(layered as any, "runLouvain").mockResolvedValue(
+        new Map([
+          ["kc1", 0],
+          ["kc2", 0],
+          ["kc3", 0],
+        ]),
+      );
+      communityRepository.createCommunity.mockResolvedValue({ id: TEST_IDS.communityId } as any);
+
+      await layered.detectCommunities();
+
+      expect(communityRepository.findLayerRootIds).not.toHaveBeenCalled();
+      expect(communityRepository.createCommunity).toHaveBeenCalledTimes(1);
+      expect(communityRepository.createCommunity).toHaveBeenCalledWith(
+        expect.objectContaining({ scopeRoot: undefined }),
+      );
+      expect(communityRepository.deleteCommunitiesForScope).not.toHaveBeenCalled();
+    });
+
+    it("detects one partition per root of the layer type only", async () => {
+      layer.current.mockReturnValue(CAMPAIGN_LAYER);
+      const detectAtLevel = vi.spyOn(layered as any, "detectCommunitiesAtLevel").mockResolvedValue([]);
+
+      await layered.detectCommunities();
+
+      expect(communityRepository.findLayerRootIds).toHaveBeenCalledTimes(1);
+      expect(detectAtLevel).toHaveBeenCalledTimes(1);
+      expect(detectAtLevel).toHaveBeenCalledWith(1.0, 0, { id: "camp-1", type: "campaigns", label: "Campaign" });
+    });
+
+    it("falls back to a company-wide partition when the layer has no roots", async () => {
+      layer.current.mockReturnValue(CAMPAIGN_LAYER);
+      neo4jService.read.mockImplementation(async (query: string) => {
+        if (query.includes("gds.version")) return { records: [{ get: () => "2.0" }] };
+        if (query.includes("count(DISTINCT kc)")) return { records: [{ get: () => 5 }] };
+        return { records: [] };
+      });
+      communityRepository.findLayerRootIds.mockResolvedValue([]);
+      const detectAtLevel = vi.spyOn(layered as any, "detectCommunitiesAtLevel").mockResolvedValue([]);
+
+      await layered.detectCommunities();
+
+      expect(detectAtLevel).toHaveBeenCalledTimes(1);
+      expect(detectAtLevel).toHaveBeenCalledWith(1.0, 0, undefined);
+    });
+
+    it("assigns content to no root on the company layer", async () => {
+      layer.current.mockReturnValue(undefined);
+
+      const root = await (layered as any).resolveScopeRootForContent("camp-1", "Campaign");
+
+      expect(root).toBeUndefined();
+      expect(neo4jService.read).not.toHaveBeenCalled();
+    });
+
+    it("assigns content to no root when its chain ends at a type other than the layer", async () => {
+      layer.current.mockReturnValue(CAMPAIGN_LAYER);
+
+      const root = await (layered as any).resolveScopeRootForContent("proc-1", "Proceeding");
+
+      expect(root).toBeUndefined();
+    });
+
+    it("assigns content to its root when the chain ends at the layer type", async () => {
+      layer.current.mockReturnValue(CAMPAIGN_LAYER);
+
+      const root = await (layered as any).resolveScopeRootForContent("camp-1", "Campaign");
+
+      expect(root).toEqual({ id: "camp-1", type: "campaigns", label: "Campaign" });
     });
   });
 });

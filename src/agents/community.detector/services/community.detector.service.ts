@@ -6,6 +6,7 @@ import { AgentScope } from "../../../common/types/agent.scope";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
+import { CommunityLayerService } from "../../../foundations/community/services/community-layer.service";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { buildScopePattern } from "../../graph/services/scope.pattern";
 
@@ -28,6 +29,7 @@ export class CommunityDetectorService {
     private readonly logger: AppLoggingService,
     private readonly communityRepository: CommunityRepository,
     private readonly cls: ClsService,
+    private readonly layer: CommunityLayerService,
     @Optional() private readonly catalog?: GraphCatalogService,
     @Optional() @Inject(SCOPE_PREDICATE_SOURCE) private readonly scopePredicates?: ScopePredicateSource,
     /** Unbound = every scope root and company is groupable (today's behaviour). */
@@ -323,41 +325,28 @@ export class CommunityDetectorService {
   }
 
   /**
-   * Every scope-root node the current company owns.
+   * Every node of the community layer's type the current company owns.
    *
-   * Root types come from the catalog — an entity whose compiled scope chain is
-   * empty IS a root. Without a catalog (a consumer that never loads the graph
-   * layer) there are no roots, and detection stays company-wide.
+   * The layer comes from CommunityLayerService (app config `community.scope`).
+   * On the company layer (no layer configured) there are no roots, and
+   * detection stays company-wide.
    *
    * Roots the scope filter rejects are left out; `rejected` counts them so the
    * caller can tell "no roots" from "no groupable roots".
    */
   private async listScopeRoots(): Promise<{ roots: AgentScope[]; rejected: number }> {
-    if (!this.catalog || !this.scopePredicates) return { roots: [], rejected: 0 };
-
-    const rootTypes = this.catalog
-      .getAllEntities()
-      .filter((entity) => entity.scope?.path.length === 0 && entity.scope.rootType === entity.type);
+    const layer = await this.layer.ready();
+    if (!layer || !this.scopePredicates) return { roots: [], rejected: 0 };
 
     const companyId = this.cls.get("companyId");
     const roots: AgentScope[] = [];
     let rejected = 0;
-    for (const rootType of rootTypes) {
-      const query = this.neo4j.initQuery();
-      query.query += `
-        MATCH (root:${rootType.labelName})-[:BELONGS_TO]->(company)
-        RETURN root.id AS id
-      `;
-      const result = await this.neo4j.read(query.query, query.queryParams);
-      for (const record of result.records) {
-        const id = record.get("id");
-        if (typeof id !== "string") continue;
-        if (this.scopeFilter && !(await this.scopeFilter.canGroup({ companyId, scope: { id, type: rootType.type } }))) {
-          rejected++;
-          continue;
-        }
-        roots.push({ id, type: rootType.type, label: rootType.labelName });
+    for (const id of await this.communityRepository.findLayerRootIds()) {
+      if (this.scopeFilter && !(await this.scopeFilter.canGroup({ companyId, scope: { id, type: layer.type } }))) {
+        rejected++;
+        continue;
       }
+      roots.push({ id, type: layer.type, label: layer.labelName });
     }
     return { roots, rejected };
   }
@@ -365,17 +354,21 @@ export class CommunityDetectorService {
   /**
    * The scope root a single content node sits under — the inverse of
    * `listScopeRoots`, walking the catalog chain up rather than enumerating
-   * down. `undefined` when the app has no catalog, the label is not
-   * catalogued, or the node has no chain to a root; the caller then falls back
+   * down. `undefined` when the app is on the company layer, has no catalog, the
+   * label is not catalogued, its chain ends at a type other than the layer, or
+   * the node has no chain to a root; the caller then falls back
    * to unpartitioned behaviour, which is correct for content that genuinely
    * belongs to no root.
    */
   private async resolveScopeRootForContent(contentId: string, label: string): Promise<AgentScope | undefined> {
-    if (!this.catalog) return undefined;
+    const layer = await this.layer.ready();
+    if (!layer || !this.catalog) return undefined;
 
     const entity = this.catalog.getAllEntities().find((candidate) => candidate.labelName === label);
     const scope = entity?.scope;
     if (!entity || !scope) return undefined;
+    // Only the layer's root partitions groups: a chain ending elsewhere belongs to no partition.
+    if (scope.rootType !== layer.type) return undefined;
     // A `chat.scopeByService` type has an empty path but is NOT a root: its
     // scope edge is outside the app database, so no root can be walked to here.
     if (scope.viaService) return undefined;

@@ -11,6 +11,7 @@ export * from "./config.auth.interface";
 export * from "./config.cache.interface";
 export * from "./config.chunker.interface";
 export * from "./config.chunk.queues.interface";
+export * from "./config.community.interface";
 export * from "./config.content.types.interface";
 export * from "./config.cors.interface";
 export * from "./config.credits.interface";

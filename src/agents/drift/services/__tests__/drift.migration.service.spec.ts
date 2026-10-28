@@ -74,7 +74,7 @@ describe("DriftMigrationService", () => {
     findOrphanKeyConceptsForContent: vi.fn(),
     findCommunitiesByRelatedKeyConcepts: vi.fn(),
     addMemberToCommunity: vi.fn(),
-    findById: vi.fn(),
+    findCommunityById: vi.fn(),
     countByLevel: vi.fn(),
     countStaleCommunities: vi.fn(),
   });

@@ -1,66 +1,25 @@
-import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
-import { Test, TestingModule } from "@nestjs/testing";
-import { CommunityService } from "../community.service";
-import { CommunityRepository } from "../../repositories/community.repository";
+import { describe, expect, it, vi } from "vitest";
+import type { Mocked } from "vitest";
+import { ClsService } from "nestjs-cls";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { AbstractService } from "../../../../core/neo4j/abstracts/abstract.service";
+import { CommunityDescriptor } from "../../entities/community.entity";
+import { CommunityRepository } from "../../repositories/community.repository";
+import { CommunityService } from "../community.service";
 
 describe("CommunityService", () => {
-  let service: CommunityService;
-  let communityRepository: MockedObject<CommunityRepository>;
-  let jsonApiService: MockedObject<JsonApiService>;
+  const create = () =>
+    new CommunityService(
+      { buildSingle: vi.fn(), buildList: vi.fn() } as unknown as Mocked<JsonApiService>,
+      { findById: vi.fn() } as unknown as Mocked<CommunityRepository>,
+      { get: vi.fn(), has: vi.fn() } as unknown as Mocked<ClsService>,
+    );
 
-  const createMockCommunityRepository = () => ({
-    deleteAllCommunities: vi.fn(),
-    createCommunity: vi.fn(),
-    updateCommunityMembers: vi.fn(),
-    setParentCommunity: vi.fn(),
-    markAsStale: vi.fn(),
-    findCommunitiesByKeyConcept: vi.fn(),
-    findOrphanKeyConceptsForContent: vi.fn(),
-    findCommunitiesByRelatedKeyConcepts: vi.fn(),
-    addMemberToCommunity: vi.fn(),
-    findById: vi.fn(),
-    countByLevel: vi.fn(),
-    findAllStaleCommunities: vi.fn(),
-  });
+  it("extends AbstractService on the Community descriptor", () => {
+    const service = create();
 
-  const createMockJsonApiService = () => ({
-    buildSingle: vi.fn(),
-    buildList: vi.fn(),
-    buildError: vi.fn(),
-  });
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        CommunityService,
-        { provide: CommunityRepository, useValue: createMockCommunityRepository() },
-        { provide: JsonApiService, useValue: createMockJsonApiService() },
-      ],
-    }).compile();
-
-    service = module.get<CommunityService>(CommunityService);
-    communityRepository = module.get(CommunityRepository) as MockedObject<CommunityRepository>;
-    jsonApiService = module.get(JsonApiService) as MockedObject<JsonApiService>;
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  describe("constructor", () => {
-    it("should create the service", () => {
-      expect(service).toBeDefined();
-    });
-
-    it("should inject CommunityRepository", () => {
-      expect(communityRepository).toBeDefined();
-    });
-
-    it("should inject JsonApiService", () => {
-      expect(jsonApiService).toBeDefined();
-    });
+    expect(service).toBeInstanceOf(AbstractService);
+    expect((service as any).descriptor).toBe(CommunityDescriptor);
+    expect((service as any).model).toBe(CommunityDescriptor.model);
   });
 });

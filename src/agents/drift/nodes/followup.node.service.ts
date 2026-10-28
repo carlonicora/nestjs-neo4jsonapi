@@ -164,7 +164,7 @@ export class FollowUpNodeService {
 
     for (const communityId of communityIds.slice(0, 3)) {
       try {
-        const community = await this.communityRepository.findById(communityId);
+        const community = await this.communityRepository.findCommunityById(communityId);
         if (!community) continue;
 
         const members = await this.communityRepository.findMemberKeyConcepts(communityId);

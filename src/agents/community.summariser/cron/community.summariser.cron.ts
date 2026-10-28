@@ -13,7 +13,6 @@ import {
 import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
-import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { isCommunityGroupable } from "../helpers/community-scope-filter";
 
 @Injectable()
@@ -32,8 +31,6 @@ export class CommunitySummariserCron {
     @Optional()
     @Inject(COMMUNITY_SCOPE_FILTER)
     private readonly scopeFilter?: CommunityScopeFilterInterface,
-    /** Scope-root types, as CommunityDetectorService.listScopeRoots reads them. */
-    @Optional() private readonly catalog?: GraphCatalogService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_MINUTES)
@@ -77,7 +74,6 @@ export class CommunitySummariserCron {
       this.cls.set("companyId", params.companyId);
       return isCommunityGroupable({
         filter: this.scopeFilter,
-        catalog: this.catalog,
         communityRepository: this.communityRepository,
         communityId: params.communityId,
         companyId: params.companyId,

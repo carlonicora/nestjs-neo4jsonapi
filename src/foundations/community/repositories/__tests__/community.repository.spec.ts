@@ -1,13 +1,16 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Test, TestingModule } from "@nestjs/testing";
-import { COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES, CommunityRepository } from "../community.repository";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mocked } from "vitest";
+import { ClsService } from "nestjs-cls";
+import { modelRegistry } from "../../../../common/registries/registry";
+import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
+import { EmbedderService } from "../../../../core/llm/services/embedder.service";
+import { ModelService } from "../../../../core/llm/services/model.service";
 import { Neo4jService } from "../../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../../core/security/services/security.service";
-import { ModelService } from "../../../../core/llm/services/model.service";
-import { EmbedderService } from "../../../../core/llm/services/embedder.service";
-import { Community } from "../../entities/community.entity";
-import { AgentScopeFilterService } from "../../../../common/repositories/agent-scope.filter";
-import { modelRegistry } from "../../../../common/registries/registry";
+import { KeyConceptModel } from "../../../keyconcept/entities/key.concept.model";
+import { CommunityDescriptor } from "../../entities/community.entity";
+import { CommunityLayerService } from "../../services/community-layer.service";
+import { COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES, CommunityRepository } from "../community.repository";
 
 const SCOPE_ROOT_MODEL = {
   type: "scope-root-specs",
@@ -16,1090 +19,501 @@ const SCOPE_ROOT_MODEL = {
   labelName: "ScopeRootSpec",
   entity: undefined,
   mapper: undefined,
-};
+} as any;
 
-// Test IDs
-const TEST_IDS = {
-  companyId: "550e8400-e29b-41d4-a716-446655440000",
-  userId: "660e8400-e29b-41d4-a716-446655440001",
-  communityId: "770e8400-e29b-41d4-a716-446655440002",
-  parentCommunityId: "880e8400-e29b-41d4-a716-446655440003",
-  childCommunityId: "990e8400-e29b-41d4-a716-446655440004",
-  keyConceptId1: "aa0e8400-e29b-41d4-a716-446655440005",
-  keyConceptId2: "bb0e8400-e29b-41d4-a716-446655440006",
-  contentId: "cc0e8400-e29b-41d4-a716-446655440007",
-};
+const CONTENT_MODEL = {
+  type: "content-specs",
+  endpoint: "content-specs",
+  nodeName: "contentSpec",
+  labelName: "ContentSpec",
+  entity: undefined,
+  mapper: undefined,
+} as any;
 
-// Mock embedding vector
-const MOCK_EMBEDDING = [0.1, 0.2, 0.3, 0.4, 0.5];
-
-// Mock factories
-const createMockNeo4jService = () => ({
-  writeOne: vi.fn(),
-  readOne: vi.fn(),
-  readMany: vi.fn(),
-  read: vi.fn(),
-  initQuery: vi.fn(),
-});
-
-const createMockModelService = () => ({
-  getEmbedderDimensions: vi.fn().mockReturnValue(1536),
-});
-
-const createMockEmbedderService = () => ({
-  vectoriseText: vi.fn().mockResolvedValue(MOCK_EMBEDDING),
-});
-
-const createMockSecurityService = () => ({
-  userHasAccess: vi.fn((params: { validator: () => string }) => params.validator()),
-  isCurrentUserCompanyAdmin: vi.fn().mockReturnValue(true),
-});
-
-const createMockAgentScopeFilter = () => ({
-  current: vi.fn(() => undefined as any),
-  build: vi.fn(() => ({ cypher: "", params: {}, applied: false })),
-  predicate: vi.fn(() => null as any),
-});
+const LAYER = { type: "scope-root-specs", labelName: "ScopeRootSpec", nodeName: "scopeRootSpec" };
 
 describe("CommunityRepository", () => {
+  let companyId: string | null;
+  let neo4j: Record<string, any>;
+  let cls: Record<string, any>;
+  let agentScope: Record<string, any>;
+  let layer: Mocked<CommunityLayerService>;
   let repository: CommunityRepository;
-  let agentScopeFilter: ReturnType<typeof createMockAgentScopeFilter>;
-  let neo4jService: ReturnType<typeof createMockNeo4jService>;
-  let modelService: ReturnType<typeof createMockModelService>;
-  let embedderService: ReturnType<typeof createMockEmbedderService>;
-  let securityService: ReturnType<typeof createMockSecurityService>;
 
-  // `queryParams` mirrors what Neo4jService.initQuery() actually returns: it always
-  // sets companyId, and binds the `company` Cypher variable ONLY when that id is
-  // present. Tests asserting on the company edge must pass the id in explicitly.
-  const createMockQuery = (queryParams: Record<string, any> = {}) => ({
-    query: "",
-    queryParams,
+  /** Every query text the repository sent, in order. */
+  const sentQueries = (): string[] => {
+    const texts: { order: number; text: string }[] = [];
+    for (const method of ["writeOne", "readOne", "readMany"]) {
+      neo4j[method].mock.calls.forEach((call: any[], i: number) =>
+        texts.push({ order: neo4j[method].mock.invocationCallOrder[i], text: call[0].query }),
+      );
+    }
+    neo4j.read.mock.calls.forEach((call: any[], i: number) =>
+      texts.push({ order: neo4j.read.mock.invocationCallOrder[i], text: call[0] }),
+    );
+    return texts.sort((a, b) => a.order - b.order).map((t) => t.text);
+  };
+
+  beforeAll(() => {
+    modelRegistry.register(SCOPE_ROOT_MODEL);
+    modelRegistry.register(CONTENT_MODEL);
   });
 
-  const MOCK_COMMUNITY: Community = {
-    id: TEST_IDS.communityId,
-    name: "Test Community",
-    summary: "A test community summary",
-    level: 1,
-    rating: 0.85,
-    memberCount: 5,
-    isStale: false,
-    createdAt: new Date("2025-01-01T00:00:00Z"),
-    updatedAt: new Date("2025-01-01T00:00:00Z"),
-  } as Community;
-
-  const MOCK_CHILD_COMMUNITY: Community = {
-    id: TEST_IDS.childCommunityId,
-    name: "Child Community",
-    summary: "A child community",
-    level: 0,
-    rating: 0.75,
-    memberCount: 3,
-    isStale: false,
-    createdAt: new Date("2025-01-01T00:00:00Z"),
-    updatedAt: new Date("2025-01-01T00:00:00Z"),
-  } as Community;
-
-  beforeEach(async () => {
-    agentScopeFilter = createMockAgentScopeFilter();
-    neo4jService = createMockNeo4jService();
-    modelService = createMockModelService();
-    embedderService = createMockEmbedderService();
-    securityService = createMockSecurityService();
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        { provide: AgentScopeFilterService, useValue: agentScopeFilter },
-        CommunityRepository,
-        { provide: Neo4jService, useValue: neo4jService },
-        { provide: ModelService, useValue: modelService },
-        { provide: EmbedderService, useValue: embedderService },
-        { provide: SecurityService, useValue: securityService },
-      ],
-    }).compile();
-
-    repository = module.get<CommunityRepository>(CommunityRepository);
+  afterAll(() => {
+    vi.restoreAllMocks();
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
-  describe("onModuleInit", () => {
-    it("should create unique constraint on id field", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.onModuleInit();
-
-      expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (community:Community) REQUIRE community.id IS UNIQUE",
-      });
-    });
-
-    it("should create vector index with embedder dimensions", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.onModuleInit();
-
-      expect(modelService.getEmbedderDimensions).toHaveBeenCalled();
-      expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: expect.stringContaining("CREATE VECTOR INDEX communities IF NOT EXISTS"),
-      });
-      expect(neo4jService.writeOne).toHaveBeenCalledWith({
-        query: expect.stringContaining("1536"),
-      });
-    });
-
-    it("should create both constraint and index", async () => {
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.onModuleInit();
-
-      expect(neo4jService.writeOne).toHaveBeenCalledTimes(2);
-    });
-
-    it("should handle errors", async () => {
-      const error = new Error("Index creation failed");
-      neo4jService.writeOne.mockRejectedValue(error);
-
-      await expect(repository.onModuleInit()).rejects.toThrow("Index creation failed");
-    });
-  });
-
-  describe("createCommunity", () => {
-    it("should create community with required fields", async () => {
-      // companyId bound: initQuery() emits `MATCH (company:Company {id: $companyId})`,
-      // so the BELONGS_TO edge has a real node to attach to.
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
-
-      const result = await repository.createCommunity({
-        name: "Test Community",
-        level: 1,
-        memberCount: 5,
-      });
-
-      expect(mockQuery.queryParams).toMatchObject({
-        name: "Test Community",
-        level: 1,
-        memberCount: 5,
-        rating: 0,
-      });
-      expect(mockQuery.queryParams.id).toBeDefined();
-      expect(mockQuery.query).toContain("CREATE (community:Community");
-      expect(mockQuery.query).toContain("CREATE (community)-[:BELONGS_TO]->(company)");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-      expect(result).toEqual(MOCK_COMMUNITY);
-    });
-
-    it("should create community with optional rating", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
-
-      await repository.createCommunity({
-        name: "Test Community",
-        level: 1,
-        memberCount: 5,
-        rating: 0.9,
-      });
-
-      expect(mockQuery.queryParams.rating).toBe(0.9);
-    });
-
-    it("should generate UUID for new community", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
-
-      await repository.createCommunity({
-        name: "Test Community",
-        level: 1,
-        memberCount: 5,
-      });
-
-      expect(mockQuery.queryParams.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    });
-
-    it("should set isStale to true on creation", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
-
-      await repository.createCommunity({
-        name: "Test Community",
-        level: 1,
-        memberCount: 5,
-      });
-
-      expect(mockQuery.query).toContain("isStale: true");
-    });
-  });
-
-  describe("updateCommunityMembers", () => {
-    it("should remove existing and add new members", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.updateCommunityMembers({
-        communityId: TEST_IDS.communityId,
-        keyConceptIds: [TEST_IDS.keyConceptId1, TEST_IDS.keyConceptId2],
-      });
-
-      // Should be called 3 times: delete, add, update count
-      expect(neo4jService.writeOne).toHaveBeenCalledTimes(3);
-    });
-
-    it("should only remove members when keyConceptIds is empty", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.updateCommunityMembers({
-        communityId: TEST_IDS.communityId,
-        keyConceptIds: [],
-      });
-
-      // Should be called only 1 time: delete only
-      expect(neo4jService.writeOne).toHaveBeenCalledTimes(1);
-      expect(mockQuery.query).toContain("DELETE r");
-    });
-
-    it("should update memberCount when adding members", async () => {
-      let callCount = 0;
-      neo4jService.initQuery.mockImplementation(() => {
-        callCount++;
-        return createMockQuery();
-      });
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.updateCommunityMembers({
-        communityId: TEST_IDS.communityId,
-        keyConceptIds: [TEST_IDS.keyConceptId1, TEST_IDS.keyConceptId2],
-      });
-
-      expect(callCount).toBe(3);
-    });
-  });
-
-  describe("setParentCommunity", () => {
-    it("should create PARENT_OF relationship", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.setParentCommunity({
-        childCommunityId: TEST_IDS.childCommunityId,
-        parentCommunityId: TEST_IDS.parentCommunityId,
-      });
-
-      expect(mockQuery.queryParams).toMatchObject({
-        childCommunityId: TEST_IDS.childCommunityId,
-        parentCommunityId: TEST_IDS.parentCommunityId,
-      });
-      expect(mockQuery.query).toContain("MERGE (parent)-[:PARENT_OF]->(child)");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-  });
-
-  describe("markAsStale", () => {
-    it("should mark communities as stale", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      const communityIds = [TEST_IDS.communityId, TEST_IDS.childCommunityId];
-      await repository.markAsStale(communityIds);
-
-      expect(mockQuery.queryParams.communityIds).toEqual(communityIds);
-      expect(mockQuery.query).toContain("SET community.isStale = true");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("should do nothing when communityIds is empty", async () => {
-      await repository.markAsStale([]);
-
-      expect(neo4jService.initQuery).not.toHaveBeenCalled();
-      expect(neo4jService.writeOne).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("findAllStaleCommunities", () => {
-    it("should find all stale communities with their company IDs", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "communityId") return TEST_IDS.communityId;
-            if (key === "companyId") return TEST_IDS.companyId;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findAllStaleCommunities();
-
-      expect(mockQuery.query).toContain("community:Community {isStale: true}");
-      expect(mockQuery.query).toContain("ORDER BY community.staleSince ASC");
-      expect(result).toEqual([{ communityId: TEST_IDS.communityId, companyId: TEST_IDS.companyId }]);
-    });
-
-    it("should return empty array when no stale communities found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: [] });
-
-      const result = await repository.findAllStaleCommunities();
-
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe("updateSummary", () => {
-    it("should update community summary and embedding", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      await repository.updateSummary({
-        communityId: TEST_IDS.communityId,
-        name: "Updated Name",
-        summary: "Updated summary",
-        embedding: MOCK_EMBEDDING,
-        rating: 0.95,
-      });
-
-      expect(mockQuery.queryParams).toMatchObject({
-        communityId: TEST_IDS.communityId,
-        name: "Updated Name",
-        summary: "Updated summary",
-        embedding: MOCK_EMBEDDING,
-        rating: 0.95,
-      });
-      expect(mockQuery.query).toContain("SET community.name = $name");
-      expect(mockQuery.query).toContain("community.isStale = false");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-  });
-
-  describe("findByVector", () => {
-    // findByVector first counts the company's (and scope's) communities, then
-    // ranks them: two initQuery() calls, one count read, one readMany.
-    const arrange = (scopedCount: number) => {
-      const countQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValueOnce(countQuery).mockReturnValueOnce(mockQuery);
-      neo4jService.read.mockResolvedValue({
-        records: [{ get: (key: string) => (key === "scopedCount" ? scopedCount : undefined) }],
-      });
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
-      return { countQuery, mockQuery };
+  beforeEach(() => {
+    companyId = "company-1";
+    neo4j = {
+      bindsRequestContext: true,
+      initQuery: vi.fn(() => ({ query: "PREAMBLE", queryParams: { companyId } })),
+      writeOne: vi.fn().mockResolvedValue(null),
+      readOne: vi.fn().mockResolvedValue(null),
+      readMany: vi.fn().mockResolvedValue([]),
+      read: vi.fn().mockResolvedValue({ records: [] }),
+      validateRelatedNodes: vi.fn().mockResolvedValue(undefined),
     };
+    cls = {
+      get: vi.fn((key: string) => (key === "companyId" ? companyId : undefined)),
+      has: vi.fn((key: string) => key === "companyId" && !!companyId),
+    };
+    agentScope = { current: vi.fn(() => undefined) };
+    layer = {
+      current: vi.fn(() => undefined),
+      ready: vi.fn(async () => layer.current()),
+    } as unknown as Mocked<CommunityLayerService>;
 
-    it("should find communities by vector similarity", async () => {
-      const { mockQuery } = arrange(10);
+    repository = new CommunityRepository(
+      neo4j as unknown as Neo4jService,
+      {} as SecurityService,
+      cls as unknown as ClsService,
+      { vectoriseText: vi.fn() } as unknown as EmbedderService,
+      { getEmbedderDimensions: vi.fn(() => 1536) } as unknown as ModelService,
+      agentScope as unknown as AgentScopeFilterService,
+      layer,
+    );
+  });
 
-      const result = await repository.findByVector({
-        embedding: MOCK_EMBEDDING,
-        topK: 5,
-      });
+  it("starts every Community query from the initQuery preamble and the default match", async () => {
+    await repository.findCommunityById("c1");
+    await repository.findByLevel({ level: 0 });
+    await repository.markAsStale(["c1"]);
+    await repository.updateSummary({ communityId: "c1", name: "n", summary: "s", embedding: [1], rating: 1 });
+    await repository.deleteCommunity("c1");
+    await repository.clearStaleness({ communityIds: ["c1"] });
 
-      expect(mockQuery.queryParams.embedding).toEqual(MOCK_EMBEDDING);
-      expect(mockQuery.queryParams.topK).toBe(5);
-      expect(mockQuery.query).toContain("ORDER BY score DESC");
-      expect(result).toEqual([MOCK_COMMUNITY]);
-    });
+    const queries = sentQueries();
+    expect(queries).toHaveLength(6);
+    for (const query of queries) {
+      expect(query.startsWith("PREAMBLE")).toBe(true);
+      expect(query).toContain("MATCH (community:Community");
+      expect(query).toContain("$companyId IS NULL");
+    }
+  });
 
-    it("ranks the company's communities by exact cosine when the scoped set is small", async () => {
-      const { countQuery, mockQuery } = arrange(10);
+  it("never joins the company by hand", async () => {
+    layer.current.mockReturnValue(LAYER);
+    neo4j.read.mockResolvedValue({ records: [{ get: () => 1 }] });
 
-      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
+    await repository.createCommunity({ name: "n", level: 0, memberCount: 1, scopeRoot: { id: "r1", label: "X" } });
+    await repository.updateCommunityMembers({ communityId: "c1", keyConceptIds: ["k1"] });
+    await repository.setParentCommunity({ childCommunityId: "c1", parentCommunityId: "c2" });
+    await repository.markAsStale(["c1"]);
+    await repository.markPendingCredits("c1");
+    await repository.countPendingCredits();
+    await repository.countStaleCommunities();
+    await repository.findAllStaleCommunities();
+    await repository.findScopeRootForCommunity({ communityId: "c1" });
+    await repository.deleteCommunitiesForScope({ scope: { id: "r1", type: LAYER.type, label: LAYER.labelName } });
+    await repository.updateSummary({ communityId: "c1", name: "n", summary: "s", embedding: [1], rating: 1 });
+    await repository.findByVector({ embedding: [1], topK: 3 });
+    await repository.findByLevel({ level: 0 });
+    await repository.findMemberKeyConcepts("c1");
+    await repository.findMemberRelationships("c1");
+    await repository.getHierarchy("c1");
+    await repository.getChildren("c1");
+    await repository.deleteCommunity("c1");
+    await repository.deleteAllCommunities();
+    await repository.findCommunitiesByKeyConcept("k1");
+    await repository.countByLevel();
+    await repository.findCommunityById("c1");
+    await repository.findCommunitiesByRelatedKeyConcepts("k1", { id: "r1", label: "X" });
+    await repository.addMemberToCommunity("c1", "k1");
+    await repository.findOrphanKeyConceptsForContent("content-1", "ContentSpec");
+    await repository.clearStaleness({ communityIds: ["c1"] });
 
-      expect(countQuery.query).toContain("(community:Community)-[:BELONGS_TO]->(company)");
-      expect(countQuery.query).toContain("count(community) AS scopedCount");
-      expect(mockQuery.query).toContain("vector.similarity.cosine(community.embedding, $embedding)");
-      expect(mockQuery.query).toContain("(community:Community)-[:BELONGS_TO]->(company)");
-      expect(mockQuery.query.indexOf("(community:Community)-[:BELONGS_TO]->(company)")).toBeLessThan(
-        mockQuery.query.indexOf("vector.similarity.cosine"),
-      );
-      expect(mockQuery.query).toContain("community.isStale = false");
-      expect(mockQuery.query).toContain("LIMIT toInteger($topK)");
-      expect(mockQuery.query).not.toContain("db.index.vector.queryNodes");
-    });
-
-    it("falls back to the vector index over-fetch above COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES", async () => {
-      const { mockQuery } = arrange(COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES + 1);
-
-      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
-
-      expect(mockQuery.query).toContain("db.index.vector.queryNodes");
-      expect(mockQuery.query).not.toContain("vector.similarity.cosine");
-    });
-
-    it("returns nothing and skips ranking when the company has no embedded communities", async () => {
-      arrange(0);
-
-      const result = await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5 });
-
-      expect(result).toEqual([]);
-      expect(neo4jService.readMany).not.toHaveBeenCalled();
-    });
-
-    it("keeps the SCOPED_TO filter and level filter in the exact scan", async () => {
-      agentScopeFilter.current.mockReturnValue({ id: "campaign-1", label: "Campaign" });
-      const { countQuery, mockQuery } = arrange(10);
-
-      await repository.findByVector({ embedding: MOCK_EMBEDDING, topK: 5, level: 1 });
-
-      const scopedTo = "EXISTS { MATCH (community)-[:SCOPED_TO]->(:Campaign { id: $agentScopeId }) }";
-      for (const query of [countQuery, mockQuery]) {
-        expect(query.query).toContain(scopedTo);
-        expect(query.query).toContain("community.level = $level");
-        expect(query.queryParams.agentScopeId).toBe("campaign-1");
-        expect(query.queryParams.level).toBe(1);
+    for (const query of sentQueries()) {
+      for (const line of query.split("\n")) {
+        if (line.includes("-[:BELONGS_TO]->(company)")) expect(line.trim().startsWith("CREATE")).toBe(true);
+        expect(line).not.toMatch(/MATCH \(community[^)]*\)-\[:BELONGS_TO\]->\(company\)/);
       }
-      expect(mockQuery.query).toContain("vector.similarity.cosine(community.embedding, $embedding)");
-    });
-
-    it("should filter by level when provided", async () => {
-      const { mockQuery } = arrange(10);
-
-      await repository.findByVector({
-        embedding: MOCK_EMBEDDING,
-        topK: 5,
-        level: 1,
-      });
-
-      expect(mockQuery.queryParams.level).toBe(1);
-      expect(mockQuery.query).toContain("community.level = $level");
-    });
-
-    it("should not filter by level when not provided", async () => {
-      const { mockQuery } = arrange(10);
-
-      await repository.findByVector({
-        embedding: MOCK_EMBEDDING,
-        topK: 5,
-      });
-
-      expect(mockQuery.queryParams.level).toBeUndefined();
-    });
+    }
   });
 
-  describe("findByLevel", () => {
-    it("should find communities by level", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+  it("returns [] from findByVector and findOrphanKeyConceptsForContent with no company", async () => {
+    companyId = null;
 
-      const result = await repository.findByLevel({ level: 1 });
-
-      expect(mockQuery.queryParams.level).toBe(1);
-      expect(mockQuery.query).toContain("WHERE community.level = $level");
-      expect(mockQuery.query).toContain("ORDER BY community.rating DESC");
-      expect(result).toEqual([MOCK_COMMUNITY]);
-    });
+    expect(await repository.findByVector({ embedding: [1], topK: 3 })).toEqual([]);
+    expect(await repository.findOrphanKeyConceptsForContent("content-1", "ContentSpec")).toEqual([]);
+    expect(sentQueries()).toEqual([]);
   });
 
-  describe("findMemberKeyConcepts", () => {
-    it("should find member key concepts", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "id") return TEST_IDS.keyConceptId1;
-            if (key === "value") return "Concept 1";
-            if (key === "description") return "Description 1";
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
+  it("uses the layer label, not the caller's, in findCommunitiesByRelatedKeyConcepts", async () => {
+    layer.current.mockReturnValue(LAYER);
 
-      const result = await repository.findMemberKeyConcepts(TEST_IDS.communityId);
+    await repository.findCommunitiesByRelatedKeyConcepts("k1", { id: "r1", label: "Injected" });
 
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("[:HAS_MEMBER]->(keyconcept:KeyConcept)");
-      expect(result).toEqual([{ id: TEST_IDS.keyConceptId1, value: "Concept 1", description: "Description 1" }]);
-    });
-
-    it("should handle null description", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "id") return TEST_IDS.keyConceptId1;
-            if (key === "value") return "Concept 1";
-            if (key === "description") return null;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findMemberKeyConcepts(TEST_IDS.communityId);
-
-      expect(result[0].description).toBeUndefined();
-    });
+    const [query] = sentQueries();
+    expect(query).toContain("[:SCOPED_TO]->(:ScopeRootSpec { id: $scopeRootId })");
+    expect(query).not.toContain("Injected");
   });
 
-  describe("findMemberRelationships", () => {
-    it("should find relationships between members", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "keyConcept1") return "Concept A";
-            if (key === "keyConcept2") return "Concept B";
-            if (key === "weight") return 0.85;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
+  it("throws on createCommunity with no company in context", async () => {
+    companyId = null;
 
-      const result = await repository.findMemberRelationships(TEST_IDS.communityId);
-
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("KeyConceptRelationship");
-      expect(result).toEqual([{ keyConcept1: "Concept A", keyConcept2: "Concept B", weight: 0.85 }]);
-    });
-
-    it("should handle Neo4j Integer weights with toNumber()", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "keyConcept1") return "Concept A";
-            if (key === "keyConcept2") return "Concept B";
-            if (key === "weight") return { toNumber: () => 1.5 };
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findMemberRelationships(TEST_IDS.communityId);
-
-      expect(result[0].weight).toBe(1.5);
-    });
-
-    it("should default weight to 1.0 when null", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "keyConcept1") return "Concept A";
-            if (key === "keyConcept2") return "Concept B";
-            if (key === "weight") return null;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findMemberRelationships(TEST_IDS.communityId);
-
-      expect(result[0].weight).toBe(1.0);
-    });
+    await expect(repository.createCommunity({ name: "n", level: 0, memberCount: 1 })).rejects.toThrow(
+      "CommunityRepository.createCommunity: no company in context",
+    );
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
   });
 
-  describe("getHierarchy", () => {
-    it("should get parent community chain", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+  it("returns null from findScopeRootForCommunity with no company", async () => {
+    layer.current.mockReturnValue(LAYER);
+    companyId = null;
 
-      const result = await repository.getHierarchy(TEST_IDS.communityId);
-
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("[:PARENT_OF*]->(child)");
-      expect(mockQuery.query).toContain("ORDER BY community.level DESC");
-      expect(result).toEqual([MOCK_COMMUNITY]);
-    });
+    expect(await repository.findScopeRootForCommunity({ communityId: "c1" })).toBeNull();
+    expect(neo4j.readOne).not.toHaveBeenCalled();
   });
 
-  describe("getChildren", () => {
-    it("should get child communities", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_CHILD_COMMUNITY]);
-
-      const result = await repository.getChildren(TEST_IDS.communityId);
-
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("-[:PARENT_OF]->(child:Community)");
-      expect(mockQuery.query).toContain("ORDER BY child.rating DESC");
-      expect(result).toEqual([MOCK_CHILD_COMMUNITY]);
-    });
+  it("returns null from findScopeRootForCommunity on the company layer", async () => {
+    expect(await repository.findScopeRootForCommunity({ communityId: "c1", rootLabels: ["ScopeRootSpec"] })).toBeNull();
+    expect(neo4j.readOne).not.toHaveBeenCalled();
   });
 
-  describe("deleteCommunity", () => {
-    it("should delete community by ID", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
+  it("scopes the scope root to the company in findScopeRootForCommunity", async () => {
+    layer.current.mockReturnValue(LAYER);
+    neo4j.readOne.mockResolvedValue({ id: "r1" });
 
-      await repository.deleteCommunity(TEST_IDS.communityId);
+    const root = await repository.findScopeRootForCommunity({ communityId: "c1" });
 
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("DETACH DELETE community");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
+    expect(root).toEqual({ id: "r1", type: LAYER.type, label: LAYER.labelName });
+    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: SCOPE_ROOT_MODEL });
+    const { query, queryParams } = neo4j.readOne.mock.calls[0][0];
+    expect(queryParams.searchValue).toBe("c1");
+    expect(query).toContain("MATCH (community:Community {id: $searchValue})");
+    expect(query).toContain("MATCH (community)-[:SCOPED_TO]->(scopeRootSpec:ScopeRootSpec)");
+    expect(query).toContain("EXISTS { MATCH (scopeRootSpec)-[:BELONGS_TO]-(company) }");
+    expect(query).toContain("RETURN scopeRootSpec");
   });
 
-  describe("deleteAllCommunities", () => {
-    it("should delete all communities for company", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
+  it("validates the scope root before writing SCOPED_TO", async () => {
+    layer.current.mockReturnValue(LAYER);
 
-      await repository.deleteAllCommunities();
+    await repository.createCommunity({ name: "n", level: 0, memberCount: 1, scopeRoot: { id: "r1", label: "X" } });
 
-      expect(mockQuery.query).toContain("[:BELONGS_TO]->(company)");
-      expect(mockQuery.query).toContain("DETACH DELETE community");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
+    expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [{ id: "r1", label: "ScopeRootSpec" }] });
+    expect(neo4j.validateRelatedNodes.mock.invocationCallOrder[0]).toBeLessThan(
+      neo4j.writeOne.mock.invocationCallOrder[0],
+    );
+    const { query } = neo4j.writeOne.mock.calls[0][0];
+    expect(query).toContain("MATCH (scopeRoot:ScopeRootSpec { id: $scopeRootId })");
+    expect(query).toContain("CREATE (community)-[:SCOPED_TO]->(scopeRoot)");
+    expect(query).not.toContain(":X");
   });
 
-  describe("findScopeRootForCommunity", () => {
-    beforeEach(() => {
-      modelRegistry.register(SCOPE_ROOT_MODEL as any);
-    });
-
-    it("reads the SCOPED_TO root as a typed node joined to the CLS company", async () => {
-      const rootQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(rootQuery);
-      neo4jService.readOne.mockResolvedValue({ id: "root-1" });
-
-      const result = await repository.findScopeRootForCommunity({
-        communityId: TEST_IDS.communityId,
-        rootLabels: ["ScopeRootSpec"],
-      });
-
-      expect(result).toEqual({ id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" });
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: SCOPE_ROOT_MODEL });
-      expect(rootQuery.query).toContain("MATCH (community:Community { id: $communityId })-[:BELONGS_TO]->(company)");
-      expect(rootQuery.query).toContain(
-        "MATCH (community)-[:SCOPED_TO]->(scopeRootSpec:ScopeRootSpec)-[:BELONGS_TO]->(company)",
-      );
-      expect(neo4jService.readOne).toHaveBeenCalledWith(rootQuery);
-      expect(neo4jService.read).not.toHaveBeenCalled();
-    });
-
-    it("returns null for a community with no scope root", async () => {
-      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: TEST_IDS.companyId }));
-      neo4jService.readOne.mockResolvedValue(null);
-
-      const result = await repository.findScopeRootForCommunity({
-        communityId: TEST_IDS.communityId,
-        rootLabels: ["ScopeRootSpec"],
-      });
-
-      expect(result).toBeNull();
-    });
-
-    it("skips a root label with no registered model, without querying", async () => {
-      const result = await repository.findScopeRootForCommunity({
-        communityId: TEST_IDS.communityId,
-        rootLabels: ["UnregisteredRootSpec"],
-      });
-
-      expect(result).toBeNull();
-      expect(neo4jService.readOne).not.toHaveBeenCalled();
-    });
-
-    it("returns null without querying when no company is in CLS", async () => {
-      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: null }));
-
-      const result = await repository.findScopeRootForCommunity({
-        communityId: TEST_IDS.communityId,
-        rootLabels: ["ScopeRootSpec"],
-      });
-
-      expect(result).toBeNull();
-      expect(neo4jService.readOne).not.toHaveBeenCalled();
-    });
+  it("throws on createCommunity with a scope root and no layer", async () => {
+    await expect(
+      repository.createCommunity({ name: "n", level: 0, memberCount: 1, scopeRoot: { id: "r1", label: "X" } }),
+    ).rejects.toThrow();
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
   });
 
-  describe("deleteCommunitiesForScope", () => {
-    beforeEach(() => {
-      modelRegistry.register(SCOPE_ROOT_MODEL as any);
-    });
+  it("does nothing in deleteCommunitiesForScope when the scope type is not the layer", async () => {
+    layer.current.mockReturnValue(LAYER);
 
-    it("deletes only the communities SCOPED_TO that root, inside the CLS company", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
+    await repository.deleteCommunitiesForScope({ scope: { id: "r1", type: "other-roots", label: "OtherRoot" } });
 
-      await repository.deleteCommunitiesForScope({
-        scope: { id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" },
-      });
-
-      expect(mockQuery.query).toContain(
-        "MATCH (scopeRoot:ScopeRootSpec { id: $scopeRootId })-[:BELONGS_TO]->(company)",
-      );
-      expect(mockQuery.query).toContain("MATCH (community:Community)-[:SCOPED_TO]->(scopeRoot)");
-      expect(mockQuery.query).toContain("MATCH (community)-[:BELONGS_TO]->(company)");
-      expect(mockQuery.query).toContain("DETACH DELETE community");
-      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
-
-    it("deletes nothing for a scope label with no registered model", async () => {
-      await repository.deleteCommunitiesForScope({
-        scope: { id: "root-1", type: "roots", label: "Root) DETACH DELETE (x" },
-      });
-
-      expect(neo4jService.initQuery).not.toHaveBeenCalled();
-      expect(neo4jService.writeOne).not.toHaveBeenCalled();
-    });
-
-    it("deletes nothing when no company is in CLS", async () => {
-      neo4jService.initQuery.mockReturnValue(createMockQuery({ companyId: null }));
-
-      await repository.deleteCommunitiesForScope({
-        scope: { id: "root-1", type: "scope-root-specs", label: "ScopeRootSpec" },
-      });
-
-      expect(neo4jService.writeOne).not.toHaveBeenCalled();
-    });
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
   });
 
-  describe("findCommunitiesByKeyConcept", () => {
-    it("should find communities containing a key concept", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_COMMUNITY]);
+  it("deletes the layer root's groups in deleteCommunitiesForScope", async () => {
+    layer.current.mockReturnValue(LAYER);
 
-      const result = await repository.findCommunitiesByKeyConcept(TEST_IDS.keyConceptId1);
+    await repository.deleteCommunitiesForScope({ scope: { id: "r1", type: LAYER.type, label: "Ignored" } });
 
-      expect(mockQuery.queryParams.keyConceptId).toBe(TEST_IDS.keyConceptId1);
-      expect(mockQuery.query).toContain("[:HAS_MEMBER]->(keyconcept:KeyConcept {id: $keyConceptId})");
-      expect(mockQuery.query).toContain("ORDER BY community.level ASC");
-      expect(result).toEqual([MOCK_COMMUNITY]);
-    });
+    const { query, queryParams } = neo4j.writeOne.mock.calls[0][0];
+    expect(queryParams.scopeRootId).toBe("r1");
+    expect(query).toContain("[:SCOPED_TO]->(:ScopeRootSpec { id: $scopeRootId })");
+    expect(query).toContain("DETACH DELETE community");
+    expect(query).not.toContain("Ignored");
   });
 
-  describe("countByLevel", () => {
-    it("should count communities by level", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "level") return 1;
-            if (key === "count") return 5;
-            return null;
-          }),
-        },
-        {
-          get: vi.fn((key: string) => {
-            if (key === "level") return 2;
-            if (key === "count") return 3;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
+  it("returns [] from findByVector when the chat scope type differs from the layer", async () => {
+    layer.current.mockReturnValue(LAYER);
+    agentScope.current.mockReturnValue({ id: "p1", type: "proceedings", label: "Proceeding" });
 
-      const result = await repository.countByLevel();
-
-      expect(mockQuery.query).toContain("COUNT(community) AS count");
-      expect(mockQuery.query).toContain("ORDER BY level ASC");
-      expect(result).toEqual([
-        { level: 1, count: 5 },
-        { level: 2, count: 3 },
-      ]);
-    });
-
-    it("should handle Neo4j Integer values with toNumber()", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "level") return { toNumber: () => 1 };
-            if (key === "count") return { toNumber: () => 10 };
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.countByLevel();
-
-      expect(result[0]).toEqual({ level: 1, count: 10 });
-    });
+    expect(await repository.findByVector({ embedding: [1], topK: 3 })).toEqual([]);
+    expect(neo4j.read).not.toHaveBeenCalled();
+    expect(neo4j.readMany).not.toHaveBeenCalled();
   });
 
-  describe("findById", () => {
-    it("should find community by ID", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_COMMUNITY);
+  it("returns [] from findByVector on the company layer in a scoped chat", async () => {
+    agentScope.current.mockReturnValue({ id: "p1", type: "proceedings", label: "Proceeding" });
 
-      const result = await repository.findById(TEST_IDS.communityId);
-
-      expect(mockQuery.queryParams.communityId).toBe(TEST_IDS.communityId);
-      expect(mockQuery.query).toContain("Community {id: $communityId}");
-      expect(mockQuery.query).toContain("[:BELONGS_TO]->(company)");
-      expect(result).toEqual(MOCK_COMMUNITY);
-    });
-
-    it("should return null when community not found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(null);
-
-      const result = await repository.findById("nonexistent");
-
-      expect(result).toBeNull();
-    });
+    expect(await repository.findByVector({ embedding: [1], topK: 3 })).toEqual([]);
+    expect(neo4j.read).not.toHaveBeenCalled();
+    expect(neo4j.readMany).not.toHaveBeenCalled();
   });
 
-  describe("findCommunitiesByRelatedKeyConcepts", () => {
-    it("should find communities by related key concepts with affinity scores", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "communityId") return TEST_IDS.communityId;
-            if (key === "memberCount") return 5;
-            if (key === "relationshipCount") return 3;
-            if (key === "totalWeight") return 2.5;
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
+  it("keeps the exact scan up to 5000 groups and the vector index above it", async () => {
+    layer.current.mockReturnValue(LAYER);
+    agentScope.current.mockReturnValue({ id: "r1", type: LAYER.type, label: LAYER.labelName });
+    expect(COMMUNITY_EXACT_SCAN_MAX_SCOPED_NODES).toBe(5000);
 
-      const result = await repository.findCommunitiesByRelatedKeyConcepts(TEST_IDS.keyConceptId1);
+    neo4j.read.mockResolvedValueOnce({ records: [{ get: () => 5000 }] });
+    await repository.findByVector({ embedding: [1], topK: 3, level: 1 });
+    const exact = neo4j.readMany.mock.calls[0][0];
+    expect(exact.query).not.toContain("db.index.vector.queryNodes");
+    expect(exact.query).toContain("vector.similarity.cosine(community.embedding, $embedding)");
+    expect(exact.query).toContain("$companyId IS NULL");
+    expect(exact.query).toContain("[:SCOPED_TO]->(:ScopeRootSpec { id: $agentScopeId })");
+    expect(exact.queryParams).toMatchObject({ agentScopeId: "r1", level: 1, topK: 3 });
 
-      expect(mockQuery.queryParams.keyConceptId).toBe(TEST_IDS.keyConceptId1);
-      expect(mockQuery.query).toContain("KeyConceptRelationship");
-      expect(mockQuery.query).toContain("ORDER BY totalWeight DESC");
-      expect(result).toEqual([
-        {
-          communityId: TEST_IDS.communityId,
-          memberCount: 5,
-          relationshipCount: 3,
-          totalWeight: 2.5,
-        },
-      ]);
-    });
+    const count = neo4j.read.mock.calls[0];
+    expect(count[0]).toContain("$companyId IS NULL");
+    expect(count[0]).toContain("RETURN count(community) AS scopedCount");
 
-    it("should handle Neo4j Integer values", async () => {
-      const mockRecords = [
-        {
-          get: vi.fn((key: string) => {
-            if (key === "communityId") return TEST_IDS.communityId;
-            if (key === "memberCount") return { toNumber: () => 10 };
-            if (key === "relationshipCount") return { toNumber: () => 5 };
-            if (key === "totalWeight") return { toNumber: () => 3.5 };
-            return null;
-          }),
-        },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findCommunitiesByRelatedKeyConcepts(TEST_IDS.keyConceptId1);
-
-      expect(result[0]).toEqual({
-        communityId: TEST_IDS.communityId,
-        memberCount: 10,
-        relationshipCount: 5,
-        totalWeight: 3.5,
-      });
-    });
+    neo4j.read.mockResolvedValueOnce({ records: [{ get: () => 5001 }] });
+    await repository.findByVector({ embedding: [1], topK: 3 });
+    const indexed = neo4j.readMany.mock.calls[1][0].query as string;
+    expect(indexed).toContain("CALL db.index.vector.queryNodes('communities', $topK * 2, $embedding)");
+    expect(indexed.indexOf("WHERE EXISTS { MATCH (community)-[:BELONGS_TO]-(company) }")).toBeGreaterThan(
+      indexed.indexOf("CALL db.index.vector.queryNodes"),
+    );
+    expect(indexed).toContain("[:SCOPED_TO]->(:ScopeRootSpec { id: $agentScopeId })");
   });
 
-  describe("addMemberToCommunity", () => {
-    it("should add member to community", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
+  it("returns [] from findByVector when the company has no embedded groups", async () => {
+    neo4j.read.mockResolvedValueOnce({ records: [{ get: () => 0 }] });
 
-      await repository.addMemberToCommunity(TEST_IDS.communityId, TEST_IDS.keyConceptId1);
-
-      expect(mockQuery.queryParams).toMatchObject({
-        communityId: TEST_IDS.communityId,
-        keyConceptId: TEST_IDS.keyConceptId1,
-      });
-      expect(mockQuery.query).toContain("MERGE (community)-[:HAS_MEMBER]->(keyconcept)");
-      expect(mockQuery.query).toContain("community.memberCount = community.memberCount + 1");
-      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
-    });
+    expect(await repository.findByVector({ embedding: [1], topK: 3 })).toEqual([]);
+    expect(neo4j.readMany).not.toHaveBeenCalled();
   });
 
-  describe("findOrphanKeyConceptsForContent", () => {
-    it("should find orphan key concepts for content", async () => {
-      const mockRecords = [
-        { get: vi.fn().mockReturnValue(TEST_IDS.keyConceptId1) },
-        { get: vi.fn().mockReturnValue(TEST_IDS.keyConceptId2) },
-      ];
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: mockRecords });
-
-      const result = await repository.findOrphanKeyConceptsForContent(TEST_IDS.contentId, "Content");
-
-      expect(mockQuery.queryParams.contentId).toBe(TEST_IDS.contentId);
-      expect(mockQuery.query).toContain("content:Content {id: $contentId}");
-      expect(mockQuery.query).toContain("NOT EXISTS { (kc)<-[:HAS_MEMBER]-(:Community) }");
-      expect(result).toEqual([TEST_IDS.keyConceptId1, TEST_IDS.keyConceptId2]);
-    });
-
-    it("should return empty array when no orphans found", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: [] });
-
-      const result = await repository.findOrphanKeyConceptsForContent(TEST_IDS.contentId, "Content");
-
-      expect(result).toEqual([]);
-    });
+  it("returns [] from findOrphanKeyConceptsForContent for an unregistered label", async () => {
+    expect(await repository.findOrphanKeyConceptsForContent("content-1", "Evil) DETACH DELETE (n")).toEqual([]);
+    expect(sentQueries()).toEqual([]);
   });
 
-  describe("Edge Cases", () => {
-    it("should preserve exact UUID values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_COMMUNITY);
+  it("scopes findOrphanKeyConceptsForContent to this company's content and groups", async () => {
+    neo4j.readMany.mockResolvedValue([{ id: "k1" }, { id: "k2" }]);
 
-      const exactId = "123e4567-e89b-12d3-a456-426614174000";
-      await repository.findById(exactId);
+    const ids = await repository.findOrphanKeyConceptsForContent("content-1", "contentspec");
 
-      expect(mockQuery.queryParams.communityId).toBe(exactId);
-    });
-
-    it("should handle special characters in community name", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(MOCK_COMMUNITY);
-
-      const specialName = "Community with 'quotes' and \"double quotes\" & special <chars>";
-      await repository.createCommunity({
-        name: specialName,
-        level: 1,
-        memberCount: 0,
-      });
-
-      expect(mockQuery.queryParams.name).toBe(specialName);
-    });
-
-    it("should handle very long summary in updateSummary", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue(undefined);
-
-      const longSummary = "a".repeat(10000);
-      await repository.updateSummary({
-        communityId: TEST_IDS.communityId,
-        name: "Test",
-        summary: longSummary,
-        embedding: MOCK_EMBEDDING,
-        rating: 0.5,
-      });
-
-      expect(mockQuery.queryParams.summary).toBe(longSummary);
-    });
+    expect(ids).toEqual(["k1", "k2"]);
+    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: KeyConceptModel });
+    const { query, queryParams } = neo4j.readMany.mock.calls[0][0];
+    expect(queryParams.contentId).toBe("content-1");
+    expect(query).toContain("MATCH (content:ContentSpec {id: $contentId})");
+    expect(query).toContain("EXISTS { MATCH (content)-[:BELONGS_TO]-(company) }");
+    expect(query).toContain(
+      "NOT EXISTS { MATCH (keyconcept)<-[:HAS_MEMBER]-(community:Community) WHERE EXISTS { MATCH (community)-[:BELONGS_TO]-(company) } }",
+    );
+    expect(query).toContain("RETURN DISTINCT keyconcept");
   });
 
-  // A community summarises many members at once, so a single unscoped hit hands
-  // the answer content from every scope root it drew on. Communities are
-  // therefore detected per scope root and retrieved per scope root.
-  describe("scope isolation", () => {
-    const SCOPE = { id: "root-1", type: "roots", label: "Root" };
+  it("throws on every write with no company in context", async () => {
+    companyId = null;
 
-    it("ties a community to the scope root it was detected under", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({} as any);
+    await expect(repository.deleteAllCommunities()).rejects.toThrow(
+      "CommunityRepository.deleteAllCommunities: no company in context",
+    );
+    await expect(repository.markAsStale(["c1"])).rejects.toThrow(
+      "CommunityRepository.markAsStale: no company in context",
+    );
+    await expect(
+      repository.updateSummary({ communityId: "c1", name: "n", summary: "s", embedding: [1], rating: 1 }),
+    ).rejects.toThrow("CommunityRepository.updateSummary: no company in context");
+    await expect(repository.clearPendingCredits()).rejects.toThrow("no company in context");
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
+  });
 
-      await repository.createCommunity({
-        name: "C",
-        level: 0,
-        memberCount: 3,
-        scopeRoot: { id: "root-1", label: "Root" },
-      });
+  it("does nothing in deleteCommunitiesForScope with no company in context", async () => {
+    companyId = null;
+    layer.current.mockReturnValue(LAYER);
 
-      expect(mockQuery.query).toContain("MATCH (scopeRoot:Root { id: $scopeRootId })");
-      expect(mockQuery.query).toContain("CREATE (community)-[:SCOPED_TO]->(scopeRoot)");
-      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
+    await repository.deleteCommunitiesForScope({ scope: { id: "r1", type: LAYER.type, label: LAYER.labelName } });
+
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
+  });
+
+  it("scopes parent and child groups to the company", async () => {
+    await repository.setParentCommunity({ childCommunityId: "c1", parentCommunityId: "c2" });
+    await repository.getHierarchy("c1");
+    await repository.getChildren("c1");
+
+    expect(neo4j.writeOne.mock.calls[0][0].query).toContain("EXISTS { MATCH (parent)-[:BELONGS_TO]-(company) }");
+    expect(neo4j.readMany.mock.calls[0][0].query).toContain(
+      "all(node IN nodes(path) WHERE EXISTS { MATCH (node)-[:BELONGS_TO]-(company) })",
+    );
+    expect(neo4j.readMany.mock.calls[1][0].query).toContain("EXISTS { MATCH (child)-[:BELONGS_TO]-(company) }");
+  });
+
+  it("reads the layer's root ids through the layer label, scoped to the company", async () => {
+    layer.current.mockReturnValue(LAYER);
+    neo4j.readMany.mockResolvedValue([{ id: "r1" }, { id: "r2" }]);
+
+    expect(await repository.findLayerRootIds()).toEqual(["r1", "r2"]);
+
+    const query = neo4j.readMany.mock.calls[0][0];
+    expect(query.query.startsWith("PREAMBLE")).toBe(true);
+    expect(query.query).toContain("MATCH (scopeRootSpec:ScopeRootSpec)");
+    expect(query.query).toContain("EXISTS { MATCH (scopeRootSpec)-[:BELONGS_TO]-(company) }");
+    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: SCOPE_ROOT_MODEL });
+  });
+
+  it("returns no layer roots on the company layer or with no company", async () => {
+    expect(await repository.findLayerRootIds()).toEqual([]);
+    layer.current.mockReturnValue(LAYER);
+    companyId = null;
+    expect(await repository.findLayerRootIds()).toEqual([]);
+    expect(neo4j.readMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the deprecated findById(id) string form", async () => {
+    neo4j.readOne.mockResolvedValue({ id: "c1" });
+
+    expect(await repository.findById("c1")).toEqual({ id: "c1" });
+    expect(neo4j.readOne.mock.calls[0][0].queryParams.searchValue).toBe("c1");
+  });
+
+  it("validates related nodes before writing HAS_MEMBER and PARENT_OF", async () => {
+    await repository.updateCommunityMembers({ communityId: "c1", keyConceptIds: ["k1", "k2"] });
+    expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({
+      nodes: [
+        { id: "k1", label: "KeyConcept" },
+        { id: "k2", label: "KeyConcept" },
+      ],
+    });
+    const memberWrite = neo4j.writeOne.mock.calls.findIndex((c: any[]) =>
+      c[0].query.includes("MERGE (community)-[:HAS_MEMBER]"),
+    );
+    expect(neo4j.validateRelatedNodes.mock.invocationCallOrder[0]).toBeLessThan(
+      neo4j.writeOne.mock.invocationCallOrder[memberWrite],
+    );
+
+    neo4j.validateRelatedNodes.mockClear();
+    neo4j.writeOne.mockClear();
+    await repository.addMemberToCommunity("c1", "k3");
+    expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [{ id: "k3", label: "KeyConcept" }] });
+    expect(neo4j.validateRelatedNodes.mock.invocationCallOrder[0]).toBeLessThan(
+      neo4j.writeOne.mock.invocationCallOrder[0],
+    );
+
+    neo4j.validateRelatedNodes.mockClear();
+    neo4j.writeOne.mockClear();
+    await repository.setParentCommunity({ childCommunityId: "c1", parentCommunityId: "c2" });
+    expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [{ id: "c2", label: "Community" }] });
+    const { query, queryParams } = neo4j.writeOne.mock.calls[0][0];
+    expect(queryParams).toMatchObject({ searchValue: "c1", parentCommunityId: "c2" });
+    expect(query).toContain("MERGE (parent)-[:PARENT_OF]->(community)");
+  });
+
+  it("refuses an invalid related node without writing", async () => {
+    neo4j.validateRelatedNodes.mockRejectedValue(new Error("400"));
+
+    await expect(repository.addMemberToCommunity("c1", "k-other")).rejects.toThrow("400");
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
+  });
+
+  it("maps findAllStaleCommunities to community and company ids with no company in context", async () => {
+    companyId = null;
+    neo4j.readMany.mockResolvedValue([
+      { id: "c1", company: { id: "co1" } },
+      { id: "c2", company: { id: "co2" } },
+    ]);
+
+    const stale = await repository.findAllStaleCommunities();
+
+    expect(stale).toEqual([
+      { communityId: "c1", companyId: "co1" },
+      { communityId: "c2", companyId: "co2" },
+    ]);
+    const { query } = neo4j.readMany.mock.calls[0][0];
+    expect(query).toContain("$companyId IS NULL");
+    expect(query).toContain("MATCH (community)-[:BELONGS_TO]->(community_company:Company)");
+    expect(query).toContain("RETURN community, community_company");
+    expect(query).toContain("ORDER BY community.staleSince ASC");
+  });
+
+  it("clears staleness for the given ids", async () => {
+    await repository.clearStaleness({ communityIds: ["c1", "c2"] });
+
+    const { query, queryParams } = neo4j.writeOne.mock.calls[0][0];
+    expect(queryParams.communityIds).toEqual(["c1", "c2"]);
+    expect(query).toContain("WHERE community.id IN $communityIds");
+    expect(query).toContain("community.isStale = false");
+    expect(query).toContain("community.staleSince = null");
+    expect(query).toContain("community.updatedAt = datetime()");
+  });
+
+  it("does nothing in clearStaleness for no ids", async () => {
+    await repository.clearStaleness({ communityIds: [] });
+    expect(neo4j.writeOne).not.toHaveBeenCalled();
+  });
+
+  it("maps findCommunitiesByRelatedKeyConcepts computed totals", async () => {
+    neo4j.readMany.mockResolvedValue([
+      { id: "c1", memberCount: 4, relationshipCount: 2, totalWeight: 1.5 },
+      { id: "c2", memberCount: undefined, relationshipCount: undefined, totalWeight: undefined },
+    ]);
+
+    const rows = await repository.findCommunitiesByRelatedKeyConcepts("k1");
+
+    expect(rows).toEqual([
+      { communityId: "c1", memberCount: 4, relationshipCount: 2, totalWeight: 1.5 },
+      { communityId: "c2", memberCount: 0, relationshipCount: 0, totalWeight: 0 },
+    ]);
+    const { query } = neo4j.readMany.mock.calls[0][0];
+    expect(query).toContain("RETURN community, relationshipCount, totalWeight");
+    expect(query).not.toContain("SCOPED_TO");
+  });
+
+  it("reads the computed totals from the record in the descriptor", () => {
+    const record = {
+      has: (key: string) => key === "relationshipCount" || key === "totalWeight",
+      get: (key: string) => (key === "relationshipCount" ? { toNumber: () => 3 } : 2.5),
+    };
+    const mapped = CommunityDescriptor.model.mapper({
+      data: { id: "c1", name: "n", memberCount: 2 },
+      record,
+      entityFactory: undefined as any,
     });
 
-    it("creates no scope edge when detection ran company-wide", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.writeOne.mockResolvedValue({} as any);
+    expect(mapped.relationshipCount).toBe(3);
+    expect(mapped.totalWeight).toBe(2.5);
+    expect(CommunityDescriptor.isCompanyScoped).toBe(true);
+    expect(CommunityDescriptor.indexes).toEqual([]);
+  });
 
-      await repository.createCommunity({ name: "C", level: 0, memberCount: 3 });
+  it("maps findMemberKeyConcepts through KeyConceptModel", async () => {
+    neo4j.readMany.mockResolvedValue([{ id: "k1", value: "v", description: null }]);
 
-      expect(mockQuery.query).not.toContain("SCOPED_TO");
-    });
+    expect(await repository.findMemberKeyConcepts("c1")).toEqual([{ id: "k1", value: "v", description: undefined }]);
+    expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: KeyConceptModel });
+    expect(neo4j.readMany.mock.calls[0][0].query).toContain("RETURN keyconcept");
+  });
 
-    it("restricts vector search to communities detected under the run's root", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-      agentScopeFilter.current.mockReturnValue(SCOPE as any);
+  it("creates the constraint then the communities vector index", async () => {
+    await repository.onModuleInit();
 
-      await repository.findByVector({ embedding: [0.1], topK: 5 });
-
-      expect(mockQuery.query).toContain("EXISTS { MATCH (community)-[:SCOPED_TO]->(:Root { id: $agentScopeId }) }");
-      expect((mockQuery.queryParams as any).agentScopeId).toBe("root-1");
-    });
-
-    // A community with no SCOPED_TO edge predates the partition, so it is
-    // assumed to mix roots and excluded from a scoped run.
-    it("excludes unpartitioned communities from a scoped run", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-      agentScopeFilter.current.mockReturnValue(SCOPE as any);
-
-      await repository.findByVector({ embedding: [0.1], topK: 5 });
-
-      expect(mockQuery.query).toContain("EXISTS { MATCH (community)-[:SCOPED_TO]->");
-      expect(mockQuery.query).not.toContain("OR NOT EXISTS");
-    });
-
-    it("leaves vector search unrestricted for an unscoped run", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([]);
-
-      await repository.findByVector({ embedding: [0.1], topK: 5 });
-
-      expect(mockQuery.query).not.toContain("SCOPED_TO");
-      expect((mockQuery.queryParams as any).agentScopeId).toBeUndefined();
-    });
-
-    it("keeps incremental assignment inside the content's own partition", async () => {
-      const mockQuery = createMockQuery({ companyId: TEST_IDS.companyId });
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.read.mockResolvedValue({ records: [] });
-
-      await repository.findCommunitiesByRelatedKeyConcepts("kc-1", { id: "root-1", label: "Root" });
-
-      expect(mockQuery.query).toContain(
-        "WHERE EXISTS { MATCH (community)-[:SCOPED_TO]->(:Root { id: $scopeRootId }) }",
-      );
-      expect((mockQuery.queryParams as any).scopeRootId).toBe("root-1");
-    });
+    const queries = neo4j.writeOne.mock.calls.map((c: any[]) => c[0].query as string);
+    expect(queries[0]).toContain(
+      "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (community:Community) REQUIRE community.id IS UNIQUE",
+    );
+    expect(queries[1]).toContain("CREATE VECTOR INDEX communities IF NOT EXISTS");
+    expect(queries[1]).toContain("`vector.dimensions`: 1536");
+    expect(queries).toHaveLength(2);
   });
 });

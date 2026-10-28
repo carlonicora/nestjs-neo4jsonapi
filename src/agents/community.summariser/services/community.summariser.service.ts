@@ -77,7 +77,7 @@ export class CommunitySummariserService {
    * Find a community by ID and generate its summary
    */
   async generateSummaryById(communityId: string): Promise<void> {
-    const community = await this.communityRepository.findById(communityId);
+    const community = await this.communityRepository.findCommunityById(communityId);
     if (!community) {
       this.logger.warn(`Community ${communityId} not found, skipping`, "CommunitySummariserService");
       return;

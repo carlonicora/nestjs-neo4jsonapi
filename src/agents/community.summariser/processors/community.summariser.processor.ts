@@ -13,7 +13,6 @@ import { QueueId } from "../../../config";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
-import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
 import { isCommunityGroupable } from "../helpers/community-scope-filter";
 import { CommunitySummariserService } from "../services/community.summariser.service";
 
@@ -38,8 +37,6 @@ export class CommunitySummariserProcessor extends WorkerHost {
     @Optional()
     @Inject(COMMUNITY_SCOPE_FILTER)
     private readonly scopeFilter?: CommunityScopeFilterInterface,
-    /** Scope-root types for the scope filter, as the cron reads them. */
-    @Optional() private readonly catalog?: GraphCatalogService,
   ) {
     super();
   }
@@ -78,7 +75,6 @@ export class CommunitySummariserProcessor extends WorkerHost {
       // stale and the filtered cron leaves it alone.
       const groupable = await isCommunityGroupable({
         filter: this.scopeFilter,
-        catalog: this.catalog,
         communityRepository: this.communityRepository,
         communityId,
         companyId,

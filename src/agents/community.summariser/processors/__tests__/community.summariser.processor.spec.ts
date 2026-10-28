@@ -3,12 +3,6 @@ import type { Job } from "bullmq";
 import { CommunitySummariserProcessor } from "../community.summariser.processor";
 
 describe("CommunitySummariserProcessor", () => {
-  const catalog = {
-    getAllEntities: () => [
-      { type: "scope-roots", labelName: "ScopeRoot", scope: { path: [], rootType: "scope-roots" } },
-    ],
-  };
-
   const build = (params: { filter?: { canGroup: any } }) => {
     const summariserService = { generateSummaryById: vi.fn(async () => undefined) };
     const cls = { run: vi.fn(async (fn: () => Promise<void>) => fn()), set: vi.fn() };
@@ -29,7 +23,6 @@ describe("CommunitySummariserProcessor", () => {
       { sendMessageToCompany: vi.fn() } as any,
       creditValidator as any,
       params.filter as any,
-      catalog as any,
     );
     return { processor, summariserService, communityRepository, creditValidator };
   };
@@ -42,10 +35,6 @@ describe("CommunitySummariserProcessor", () => {
 
     await processor.process(job);
 
-    expect(communityRepository.findScopeRootForCommunity).toHaveBeenCalledWith({
-      communityId: "comm-1",
-      rootLabels: ["ScopeRoot"],
-    });
     expect(filter.canGroup).toHaveBeenCalledWith({
       companyId: "c-1",
       scope: { id: "root-a", type: "scope-roots" },
@@ -53,6 +42,16 @@ describe("CommunitySummariserProcessor", () => {
     expect(creditValidator.hasAvailableCredits).not.toHaveBeenCalled();
     expect(communityRepository.markPendingCredits).not.toHaveBeenCalled();
     expect(summariserService.generateSummaryById).not.toHaveBeenCalled();
+  });
+
+  it("asks the repository for the scope root by community id only", async () => {
+    const filter = { canGroup: vi.fn(async () => true) };
+    const { processor, communityRepository } = build({ filter });
+
+    await processor.process(job);
+
+    expect(communityRepository.findScopeRootForCommunity).toHaveBeenCalledTimes(1);
+    expect(communityRepository.findScopeRootForCommunity.mock.calls[0]).toStrictEqual([{ communityId: "comm-1" }]);
   });
 
   it("summarises a community whose scope root the filter accepts", async () => {
@@ -64,7 +63,7 @@ describe("CommunitySummariserProcessor", () => {
     expect(summariserService.generateSummaryById).toHaveBeenCalledWith("comm-1");
   });
 
-  it("asks the filter about the company for a community with no scope root", async () => {
+  it("groups by company when the community has no scope root", async () => {
     const filter = { canGroup: vi.fn(async () => false) };
     const { processor, summariserService, communityRepository } = build({ filter });
     communityRepository.findScopeRootForCommunity.mockResolvedValue(null as never);

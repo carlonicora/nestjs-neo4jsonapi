@@ -4,6 +4,7 @@ import { ConfigApiInterface } from "./config.api.interface";
 import { ConfigAppInterface } from "./config.app.interface";
 import { ConfigAuthInterface } from "./config.auth.interface";
 import { ConfigCacheInterface } from "./config.cache.interface";
+import { ConfigCommunityInterface } from "./config.community.interface";
 import { ConfigChunkerInterface } from "./config.chunker.interface";
 import { ConfigChunkQueuesInterface } from "./config.chunk.queues.interface";
 import { ConfigContentTypesInterface } from "./config.content.types.interface";
@@ -61,6 +62,7 @@ export interface BaseConfigInterface {
   responder?: ConfigResponderInterface;
   summariser?: ConfigSummariserInterface;
   operator?: ConfigOperatorInterface;
+  community?: ConfigCommunityInterface;
   assistant?: ConfigAssistantInterface;
   chunker: ConfigChunkerInterface;
   chunkQueues: ConfigChunkQueuesInterface;
