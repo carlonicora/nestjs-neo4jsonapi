@@ -1,3 +1,13 @@
+## [8.11.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.11.0...v8.11.1) (2026-10-28)
+
+### 🐛 Bug Fixes
+
+* a plan change clears a pending cancellation and charges the difference at once ([58befd6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/58befd656e8734ae29ebf7bdce99415b39969979))
+* a plan change gives the company the new price's features and credits ([c45afa5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c45afa56b2aa165362b62523c276071aa9464cce))
+* a price with 0 credits turns AI off instead of keeping the old credits ([0e7b6b7](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0e7b6b70864b6c6ac46b88530cb8be09c65755bf))
+* archived prices no longer appear in the plan picker ([5e51948](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5e5194849d287d2bacfb1fa7762d793fbe82a12c))
+* invoice webhooks arriving together no longer fail to save the invoice ([d54bcf4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d54bcf42724ed87356880383499d268a7df5bb6d))
+
 ## [8.11.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.10.2...v8.11.0) (2026-10-27)
 
 ### 🚀 Features
