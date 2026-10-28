@@ -16,7 +16,7 @@ import { AnalyticsProcessor } from "../analytics.processor";
 
 describe("AnalyticsProcessor", () => {
   let processor: AnalyticsProcessor;
-  let repository: { recordPageView: ReturnType<typeof vi.fn> };
+  let repository: { recordPageView: ReturnType<typeof vi.fn>; deleteAnonymousSessions: ReturnType<typeof vi.fn> };
   let visitorIds: {
     isBot: ReturnType<typeof vi.fn>;
     deviceType: ReturnType<typeof vi.fn>;
@@ -28,7 +28,10 @@ describe("AnalyticsProcessor", () => {
   let cls: ClsService;
 
   const build = (config = DEFAULT_ANALYTICS_CONFIG) => {
-    repository = { recordPageView: vi.fn(async () => ({ sessionId: "session-1", created: true })) };
+    repository = {
+      recordPageView: vi.fn(async () => ({ sessionId: "session-1", created: true })),
+      deleteAnonymousSessions: vi.fn(async () => ({ sessions: 1, pageViews: 3 })),
+    };
     visitorIds = {
       isBot: vi.fn(() => false),
       deviceType: vi.fn(() => "mobile"),
@@ -160,6 +163,40 @@ describe("AnalyticsProcessor", () => {
     await processor.process(job("analytics:pageView", { ...baseInput, referrer: "https://only35.com/pricing" }));
 
     expect(repository.recordPageView).toHaveBeenCalledWith(expect.objectContaining({ referrerHost: "only35.com" }));
+  });
+
+  describe("visitor purge", () => {
+    const purgeInput = {
+      clientIp: baseInput.clientIp,
+      userAgent: baseInput.userAgent,
+      receivedAt: baseInput.receivedAt,
+    };
+
+    it("deletes the anonymous sessions under the visitor's daily id", async () => {
+      await processor.process(job("analytics:pageView:purgeVisitor", purgeInput));
+
+      expect(clsValues.isAutomatedJob).toBe(true);
+      expect(visitorIds.dailyVisitorId).toHaveBeenCalledWith(purgeInput);
+      expect(repository.deleteAnonymousSessions).toHaveBeenCalledWith({ visitorIds: ["d:hash"] });
+      expect(repository.recordPageView).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith("analytics visitor purged sessions=1 pageViews=3");
+    });
+
+    it("also deletes the sessions under the cookie id when the visitor consented", async () => {
+      const cookieId = "0c9e7b1a-1111-4111-8111-111111111111";
+
+      await processor.process(job("analytics:pageView:purgeVisitor", { ...purgeInput, visitorId: cookieId }));
+
+      expect(repository.deleteAnonymousSessions).toHaveBeenCalledWith({ visitorIds: ["d:hash", `c:${cookieId}`] });
+    });
+
+    it("follows a caller-supplied job name", async () => {
+      processor = build({ ...DEFAULT_ANALYTICS_CONFIG, jobName: "app:analytics" });
+
+      await processor.process(job("app:analytics:purgeVisitor", purgeInput));
+
+      expect(repository.deleteAnonymousSessions).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("rejects a foreign job name", async () => {

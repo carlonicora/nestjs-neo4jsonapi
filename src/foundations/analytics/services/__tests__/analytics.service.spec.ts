@@ -92,17 +92,36 @@ describe("AnalyticsService", () => {
       it("drops a public page view when a role is excluded, even for an excluded user", async () => {
         await service.track({ ...input, userId: "user-x" }, { roles: ["role-x"] });
 
-        expect(queue.add).not.toHaveBeenCalled();
+        expect(queue.add).not.toHaveBeenCalledWith("analytics:pageView", expect.anything());
       });
 
       it("drops a page view when any role is excluded", async () => {
         await service.track({ ...input, userId: "u1" }, { roles: ["role-a", "role-x"] });
 
-        expect(queue.add).not.toHaveBeenCalled();
+        expect(queue.add).not.toHaveBeenCalledWith("analytics:pageView", expect.anything());
         const message = logger.debug.mock.calls[0][0] as string;
         expect(message).toContain("/pricing");
         expect(message).not.toContain("1.2.3.4");
         expect(message).not.toContain("Mozilla");
+      });
+
+      it("queues a visitor purge instead of the page view when a role is excluded", async () => {
+        await service.track({ ...input, userId: "u1", visitorId: "cookie-1" }, { roles: ["role-x"] });
+
+        expect(queue.add).toHaveBeenCalledTimes(1);
+        expect(queue.add).toHaveBeenCalledWith("analytics:pageView:purgeVisitor", {
+          visitorId: "cookie-1",
+          clientIp: input.clientIp,
+          userAgent: input.userAgent,
+          receivedAt: input.receivedAt,
+        });
+      });
+
+      it("does not purge the visitor for an excluded user", async () => {
+        await service.track({ ...input, section: "app", userId: "user-x" });
+        await service.track({ ...input, userId: "user-x" });
+
+        expect(queue.add).not.toHaveBeenCalledWith("analytics:pageView:purgeVisitor", expect.anything());
       });
 
       it("queues an anonymous page view", async () => {

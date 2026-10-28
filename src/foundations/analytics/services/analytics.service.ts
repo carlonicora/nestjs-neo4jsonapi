@@ -7,6 +7,7 @@ import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service"
 import { AnalyticsSession, AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { ANALYTICS_CONFIG, ANALYTICS_QUEUE, AnalyticsModuleConfig } from "../interfaces/analytics.config.interface";
 import { AnalyticsPageViewInput } from "../interfaces/analytics.page-view.input";
+import { ANALYTICS_PURGE_JOB_SUFFIX, AnalyticsPurgeVisitorInput } from "../interfaces/analytics.purge-visitor.input";
 import { AnalyticsSessionRepository } from "../repositories/analytics-session.repository";
 
 @Injectable()
@@ -38,7 +39,8 @@ export class AnalyticsService extends AbstractService<
    * break the caller's request path.
    *
    * A page view from a caller holding any excluded role is dropped before the
-   * queue. A page view from an excluded user id is dropped on app pages; on
+   * queue, and a purge job is queued instead: the worker deletes the anonymous
+   * sessions this visitor recorded before logging in. A page view from an excluded user id is dropped on app pages; on
    * public pages it is counted as anonymous (no user link), because a shared
    * login such as an embedded demo must not hide the visitor behind it. The
    * roles only decide the drop; they are not added to the job.
@@ -47,8 +49,19 @@ export class AnalyticsService extends AbstractService<
     const hasExcludedRole = (options?.roles ?? []).some((roleId) => this.excludedRoleIds.has(roleId));
     const isExcludedUser = !!input.userId && this.excludedUserIds.has(input.userId);
 
-    if (hasExcludedRole || (isExcludedUser && input.section === "app")) {
+    if (hasExcludedRole) {
       // Path only: raw IP and user agent must not reach the logs.
+      this.logger.debug(`analytics pageView dropped reason=excluded path=${input.path}`);
+      await this.enqueue(`${this.jobName}${ANALYTICS_PURGE_JOB_SUFFIX}`, {
+        visitorId: input.visitorId,
+        clientIp: input.clientIp,
+        userAgent: input.userAgent,
+        receivedAt: input.receivedAt,
+      } satisfies AnalyticsPurgeVisitorInput);
+      return;
+    }
+
+    if (isExcludedUser && input.section === "app") {
       this.logger.debug(`analytics pageView dropped reason=excluded path=${input.path}`);
       return;
     }
@@ -59,8 +72,12 @@ export class AnalyticsService extends AbstractService<
       job = anonymous;
     }
 
+    await this.enqueue(this.jobName, job);
+  }
+
+  private async enqueue(name: string, data: AnalyticsPageViewInput | AnalyticsPurgeVisitorInput): Promise<void> {
     try {
-      await this.queue.add(this.jobName, job);
+      await this.queue.add(name, data);
     } catch (err) {
       this.logger.error(`AnalyticsService.track enqueue failed: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -258,6 +258,46 @@ export class AnalyticsSessionRepository extends AbstractRepository<
     return { sessions, pageViews };
   }
 
+  /**
+   * Deletes the page views, then the sessions, recorded under any of
+   * `visitorIds` with no user linked. Sessions already linked to a user are
+   * kept. Used when a visitor turns out to hold an excluded role.
+   */
+  async deleteAnonymousSessions(params: { visitorIds: string[] }): Promise<{ sessions: number; pageViews: number }> {
+    const { nodeName, labelName } = this.descriptor.model;
+    const pv = analyticsPageViewMeta;
+    const anonymous = `
+      MATCH (${nodeName}:${labelName})
+      WHERE ${nodeName}.visitorId IN $visitorIds
+        AND NOT EXISTS { (${nodeName})-[:BY_USER]->(:${userMeta.labelName}) }
+    `;
+
+    const [pageViews, sessions] = await this.neo4j.executeInTransaction([
+      {
+        query: `
+          ${anonymous}
+          MATCH (${pv.nodeName}:${pv.labelName})-[:IN_SESSION]->(${nodeName})
+          DETACH DELETE ${pv.nodeName}
+          RETURN count(*) AS deleted
+        `,
+        params: { visitorIds: params.visitorIds },
+      },
+      {
+        query: `
+          ${anonymous}
+          DETACH DELETE ${nodeName}
+          RETURN count(*) AS deleted
+        `,
+        params: { visitorIds: params.visitorIds },
+      },
+    ]);
+
+    return {
+      sessions: toNumber(sessions?.records?.[0]?.get("deleted")),
+      pageViews: toNumber(pageViews?.records?.[0]?.get("deleted")),
+    };
+  }
+
   /** Removes every BY_USER edge whose user has been soft-deleted. Returns the edges removed. */
   async unlinkDeletedUsers(): Promise<number> {
     const [result] = await this.neo4j.executeInTransaction([

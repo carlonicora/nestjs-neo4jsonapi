@@ -267,6 +267,27 @@ describe("AnalyticsSessionRepository", () => {
     });
   });
 
+  describe("deleteAnonymousSessions", () => {
+    it("deletes page views then sessions of the visitor ids that have no user linked", async () => {
+      neo4j.executeInTransaction.mockResolvedValueOnce([
+        { records: [record({ deleted: int(3) })] },
+        { records: [record({ deleted: int(1) })] },
+      ]);
+
+      const result = await repository.deleteAnonymousSessions({ visitorIds: ["d:hash", "c:cookie"] });
+
+      expect(result).toEqual({ sessions: 1, pageViews: 3 });
+      const [pageViews, sessions] = neo4j.executeInTransaction.mock.calls[0][0];
+      for (const call of [pageViews, sessions]) {
+        expect(call.query).toContain("analyticsSession.visitorId IN $visitorIds");
+        expect(call.query).toContain("NOT EXISTS { (analyticsSession)-[:BY_USER]->(:User) }");
+        expect(call.params).toEqual({ visitorIds: ["d:hash", "c:cookie"] });
+      }
+      expect(pageViews.query).toContain("DETACH DELETE analyticsPageView");
+      expect(sessions.query).toContain("DETACH DELETE analyticsSession");
+    });
+  });
+
   describe("unlinkDeletedUsers", () => {
     it("removes BY_USER edges of soft-deleted users", async () => {
       neo4j.executeInTransaction.mockResolvedValueOnce([{ records: [record({ unlinked: int(3) })] }]);

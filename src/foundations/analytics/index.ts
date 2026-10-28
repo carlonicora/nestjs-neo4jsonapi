@@ -47,6 +47,7 @@ export { AnalyticsProcessor } from "./processors/analytics.processor";
 export { AnalyticsRetentionCron } from "./cron/analytics-retention.cron";
 export { AnalyticsPageViewInput } from "./interfaces/analytics.page-view.input";
 export { AnalyticsResolvedPageView } from "./interfaces/analytics.resolved-page-view";
+export { AnalyticsPurgeVisitorInput, ANALYTICS_PURGE_JOB_SUFFIX } from "./interfaces/analytics.purge-visitor.input";
 export {
   AnalyticsModuleConfig,
   ANALYTICS_CONFIG,

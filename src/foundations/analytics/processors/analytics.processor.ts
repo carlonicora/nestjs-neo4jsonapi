@@ -6,6 +6,7 @@ import { QueueId } from "../../../config/enums/queue.id";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { ANALYTICS_CONFIG, AnalyticsModuleConfig } from "../interfaces/analytics.config.interface";
 import { AnalyticsPageViewInput } from "../interfaces/analytics.page-view.input";
+import { ANALYTICS_PURGE_JOB_SUFFIX, AnalyticsPurgeVisitorInput } from "../interfaces/analytics.purge-visitor.input";
 import { AnalyticsResolvedPageView } from "../interfaces/analytics.resolved-page-view";
 import { AnalyticsSessionRepository } from "../repositories/analytics-session.repository";
 import { AnalyticsVisitorIdService } from "../services/analytics.visitor-id.service";
@@ -30,6 +31,7 @@ const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 @Processor(QueueId.ANALYTICS, { concurrency: 1 })
 export class AnalyticsProcessor extends WorkerHost {
   private readonly jobName: string;
+  private readonly purgeJobName: string;
   private readonly sessionTimeoutMinutes: number;
 
   constructor(
@@ -41,6 +43,7 @@ export class AnalyticsProcessor extends WorkerHost {
   ) {
     super();
     this.jobName = config.jobName;
+    this.purgeJobName = `${config.jobName}${ANALYTICS_PURGE_JOB_SUFFIX}`;
     this.sessionTimeoutMinutes = config.sessionTimeoutMinutes;
   }
 
@@ -49,12 +52,17 @@ export class AnalyticsProcessor extends WorkerHost {
     this.logger.error(`Analytics pageView failed (jobId=${job.id}): ${job.failedReason ?? "unknown"}`);
   }
 
-  async process(job: Job<AnalyticsPageViewInput>): Promise<void> {
+  async process(job: Job<AnalyticsPageViewInput | AnalyticsPurgeVisitorInput>): Promise<void> {
+    if (job.name === this.purgeJobName) {
+      await this.purgeVisitor(job.data as AnalyticsPurgeVisitorInput);
+      return;
+    }
+
     if (job.name !== this.jobName) {
       throw new Error(`Job ${job.name} not handled by AnalyticsProcessor`);
     }
 
-    const input = job.data;
+    const input = job.data as AnalyticsPageViewInput;
 
     if (this.visitorIds.isBot(input.userAgent)) {
       this.logger.debug(`analytics pageView dropped reason=bot path=${input.path}`);
@@ -106,6 +114,32 @@ export class AnalyticsProcessor extends WorkerHost {
       const { sessionId, created } = await this.repository.recordPageView(resolved);
 
       this.logger.debug(`analytics pageView visitor=${visitorId} session=${sessionId} created=${created}`);
+    });
+  }
+
+  /**
+   * A caller with an excluded role has logged in: delete the anonymous
+   * sessions recorded under this visitor's ids before the login. The cookie id
+   * covers every session from this browser; the daily id changes each day, so
+   * it only reaches today's.
+   */
+  private async purgeVisitor(input: AnalyticsPurgeVisitorInput): Promise<void> {
+    await this.cls.run(async () => {
+      this.cls.set("isAutomatedJob", true);
+
+      const dailyVisitorId = await this.visitorIds.dailyVisitorId({
+        clientIp: input.clientIp,
+        userAgent: input.userAgent,
+        receivedAt: input.receivedAt,
+      });
+      const visitorIds = [dailyVisitorId];
+      if (input.visitorId) visitorIds.push((await this.visitorIds.resolve(input)).visitorId);
+
+      const { sessions, pageViews } = await this.repository.deleteAnonymousSessions({ visitorIds });
+
+      if (sessions > 0) {
+        this.logger.debug(`analytics visitor purged sessions=${sessions} pageViews=${pageViews}`);
+      }
     });
   }
 
