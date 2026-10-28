@@ -1190,7 +1190,8 @@ describe("StripeSubscriptionAdminService", () => {
       expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith({
         subscriptionId: MOCK_DB_SUBSCRIPTION.stripeSubscriptionId,
         priceId: newStripePrice.stripePriceId,
-        prorationBehavior: "create_prorations",
+        prorationBehavior: "always_invoice",
+        cancelAtPeriodEnd: false,
         defaultPaymentMethodId: MOCK_STRIPE_CUSTOMER.defaultPaymentMethodId,
       });
       expect(result).toEqual(MOCK_JSON_API_RESPONSE);
@@ -1312,7 +1313,7 @@ describe("StripeSubscriptionAdminService", () => {
       expect(stripeSubscriptionApiService.updateSubscription).not.toHaveBeenCalled();
     });
 
-    it("should use create_prorations proration behavior", async () => {
+    it("a paid change invoices the difference at once (always_invoice)", async () => {
       subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
       stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
       stripePriceRepository.findById.mockResolvedValue(newStripePrice);
@@ -1325,8 +1326,47 @@ describe("StripeSubscriptionAdminService", () => {
 
       expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
         expect.objectContaining({
-          prorationBehavior: "create_prorations",
+          prorationBehavior: "always_invoice",
         }),
+      );
+    });
+
+    it("a trial upgrade keeps proration none", async () => {
+      subscriptionRepository.findById.mockResolvedValue({ ...MOCK_DB_SUBSCRIPTION, status: "trialing" });
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripeCustomerApiService.listPaymentMethods.mockResolvedValue([MOCK_PAYMENT_METHOD]);
+      stripePriceRepository.findById.mockResolvedValue(newStripePrice);
+      stripeSubscriptionApiService.updateSubscription.mockResolvedValue(mockUpdatedSubscription);
+      subscriptionRepository.updatePrice.mockResolvedValue(undefined);
+      subscriptionRepository.update.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+
+      await service.changePlan(validParams);
+
+      expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ prorationBehavior: "none", trialEnd: "now" }),
+      );
+    });
+
+    it("clears a pending cancellation and stores what Stripe returns", async () => {
+      subscriptionRepository.findById.mockResolvedValue({ ...MOCK_DB_SUBSCRIPTION, cancelAtPeriodEnd: true });
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(newStripePrice);
+      stripeSubscriptionApiService.updateSubscription.mockResolvedValue({
+        ...mockUpdatedSubscription,
+        cancel_at_period_end: false,
+      });
+      subscriptionRepository.updatePrice.mockResolvedValue(undefined);
+      subscriptionRepository.update.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      jsonApiService.buildSingle.mockResolvedValue(MOCK_JSON_API_RESPONSE);
+
+      await service.changePlan(validParams);
+
+      expect(stripeSubscriptionApiService.updateSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ cancelAtPeriodEnd: false }),
+      );
+      expect(subscriptionRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: validParams.id, cancelAtPeriodEnd: false }),
       );
     });
 
@@ -1495,6 +1535,37 @@ describe("StripeSubscriptionAdminService", () => {
           },
         ],
       });
+    });
+
+    it("reads the proration flag from parent item details (current Stripe API versions)", async () => {
+      const toCurrentShape = (line: any, parent: Record<string, unknown>) => {
+        const { proration: _proration, ...rest } = line;
+        return { ...rest, parent };
+      };
+      const [remaining, unused] = mockUpcomingInvoice.lines.data;
+      subscriptionRepository.findById.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      stripePriceRepository.findById.mockResolvedValue(newStripePrice);
+      stripeSubscriptionApiService.previewProration.mockResolvedValue({
+        ...mockUpcomingInvoice,
+        lines: {
+          ...mockUpcomingInvoice.lines,
+          data: [
+            toCurrentShape(remaining, { subscription_item_details: { proration: true } }),
+            toCurrentShape(unused, { invoice_item_details: { proration: true } }),
+            {
+              ...toCurrentShape(remaining, { subscription_item_details: { proration: false } }),
+              id: "il_test_3",
+              amount: 1000,
+            },
+          ],
+        },
+      } as any);
+
+      const result = await service.previewProration(validParams);
+
+      expect(result.immediateCharge).toBe(550);
+      expect(result.lines.map((line: any) => line.proration)).toEqual([true, true, false]);
     });
 
     it("should throw NOT_FOUND when subscription does not exist", async () => {

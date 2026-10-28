@@ -293,7 +293,7 @@ describe("StripeSubscriptionAdminService coupon integration", () => {
 
       expect(checkout.findAutomaticForPrice).not.toHaveBeenCalled();
       expect(subscriptionApi.updateSubscription).toHaveBeenCalledWith(
-        expect.objectContaining({ promotionCode: undefined, prorationBehavior: "create_prorations" }),
+        expect.objectContaining({ promotionCode: undefined, prorationBehavior: "always_invoice" }),
       );
       expect(checkout.refreshCountsByStripePromotionCodeId).not.toHaveBeenCalled();
     });

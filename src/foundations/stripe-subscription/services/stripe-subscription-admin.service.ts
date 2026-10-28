@@ -45,6 +45,18 @@ export interface CreateSubscriptionResult {
  *
  * All operations update both Stripe and the local Neo4j database to maintain consistency.
  */
+/**
+ * Whether an invoice line is a proration. Current Stripe API versions carry the flag
+ * under `parent.*_item_details`; older ones put it on the line itself.
+ */
+function isProrationLine(line: Stripe.InvoiceLineItem): boolean {
+  return (
+    line.parent?.subscription_item_details?.proration ??
+    line.parent?.invoice_item_details?.proration ??
+    (line as any).proration === true
+  );
+}
+
 @Injectable()
 export class StripeSubscriptionAdminService extends AbstractService<
   StripeSubscription,
@@ -382,7 +394,9 @@ export class StripeSubscriptionAdminService extends AbstractService<
   /**
    * Change subscription plan
    *
-   * Updates the subscription to a new price with automatic proration.
+   * Updates the subscription to a new price. A paid change invoices and charges the
+   * prorated difference at once; a trial upgrade ends the trial and charges the full price.
+   * A pending cancellation at period end is cleared.
    *
    * @param params - Parameters
    * @param params.id - Subscription ID
@@ -457,7 +471,10 @@ export class StripeSubscriptionAdminService extends AbstractService<
         this.stripeSubscriptionApiService.updateSubscription({
           subscriptionId: subscription.stripeSubscriptionId,
           priceId: newPrice.stripePriceId,
-          prorationBehavior: isTrialUpgrade ? "none" : "create_prorations",
+          // always_invoice charges the difference now; create_prorations would leave it pending until renewal
+          prorationBehavior: isTrialUpgrade ? "none" : "always_invoice",
+          // Changing plan means staying: a pending cancellation would otherwise end the new plan at period end
+          cancelAtPeriodEnd: false,
           promotionCode,
           trialEnd: isTrialUpgrade ? "now" : undefined,
           defaultPaymentMethodId,
@@ -477,12 +494,13 @@ export class StripeSubscriptionAdminService extends AbstractService<
       status: stripeSubscription.status as StripeSubscriptionStatus,
       currentPeriodStart: new Date(subscriptionItem.current_period_start * 1000),
       currentPeriodEnd: new Date(subscriptionItem.current_period_end * 1000),
+      cancelAtPeriodEnd: stripeSubscription.cancel_at_period_end,
       discount: discountFromStripeSubscription(stripeSubscription),
     });
 
     const document = await this.jsonApiService.buildSingle(StripeSubscriptionDescriptor.model, updatedSubscription);
 
-    // A trial upgrade charges at once; a card that asks for 3D Secure leaves the
+    // A trial upgrade and a paid change charge at once; a card that asks for 3D Secure leaves the
     // invoice open. The browser confirms it with the client secret in meta.
     const confirmation = subscriptionPaymentConfirmation(stripeSubscription);
     if (!confirmation.requiresAction) return document;
@@ -574,7 +592,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
     // Calculate immediate charge from proration line items only
     // This represents the net amount charged NOW for the plan change
     const immediateCharge = prorationPreview.lines.data
-      .filter((line: Stripe.InvoiceLineItem) => (line as any).proration === true)
+      .filter((line: Stripe.InvoiceLineItem) => isProrationLine(line))
       .reduce((sum: number, line: Stripe.InvoiceLineItem) => sum + line.amount, 0);
 
     return {
@@ -588,7 +606,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
       lines: prorationPreview.lines.data.map((line: Stripe.InvoiceLineItem) => ({
         description: line.description,
         amount: line.amount,
-        proration: (line as any).proration,
+        proration: isProrationLine(line),
         period: {
           start: line.period?.start ? new Date(line.period.start * 1000) : new Date(),
           end: line.period?.end ? new Date(line.period.end * 1000) : new Date(),

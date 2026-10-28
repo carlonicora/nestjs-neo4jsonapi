@@ -52,7 +52,7 @@ function clientSecretOf(invoice: LegacyInvoice): string | null {
  * It must when the latest invoice is still `open` (not paid) and the
  * subscription waits on it: `incomplete` after a create with
  * `payment_behavior: "default_incomplete"`, or `past_due` after a trial upgrade
- * whose card asked for 3D Secure.
+ * or a paid plan change whose card asked for 3D Secure.
  */
 export function subscriptionPaymentConfirmation(subscription: Stripe.Subscription): SubscriptionPaymentConfirmation {
   const none: SubscriptionPaymentConfirmation = { clientSecret: null, paymentIntentId: null, requiresAction: false };

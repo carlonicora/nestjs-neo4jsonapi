@@ -112,6 +112,7 @@ export class StripeSubscriptionApiService {
    * @param params.subscriptionId - The subscription ID to update
    * @param params.priceId - New price ID to change plan (optional)
    * @param params.prorationBehavior - How to handle proration (optional)
+   * @param params.cancelAtPeriodEnd - Sets or clears a pending cancellation at period end (optional)
    * @param params.metadata - Updated metadata (optional)
    * @returns Promise resolving to the updated subscription
    * @throws {StripeError} If update fails
@@ -121,7 +122,7 @@ export class StripeSubscriptionApiService {
    * const subscription = await service.updateSubscription({
    *   subscriptionId: 'sub_abc123',
    *   priceId: 'price_new789',
-   *   prorationBehavior: 'create_prorations',
+   *   prorationBehavior: 'always_invoice',
    * });
    * ```
    */
@@ -130,6 +131,7 @@ export class StripeSubscriptionApiService {
     subscriptionId: string;
     priceId?: string;
     prorationBehavior?: Stripe.SubscriptionUpdateParams.ProrationBehavior;
+    cancelAtPeriodEnd?: boolean;
     metadata?: Record<string, string>;
     promotionCode?: string;
     trialEnd?: "now";
@@ -151,6 +153,10 @@ export class StripeSubscriptionApiService {
       updateParams.proration_behavior = params.prorationBehavior;
     }
 
+    if (params.cancelAtPeriodEnd !== undefined) {
+      updateParams.cancel_at_period_end = params.cancelAtPeriodEnd;
+    }
+
     if (params.metadata) {
       updateParams.metadata = params.metadata;
     }
@@ -168,7 +174,7 @@ export class StripeSubscriptionApiService {
       updateParams.default_payment_method = params.defaultPaymentMethodId;
     }
 
-    // A change that charges at once (trial upgrade) can leave the invoice open
+    // A change that charges at once (trial upgrade, paid plan change) can leave the invoice open
     // when the card needs 3D Secure; the caller reads the client secret from it
     // The discount is expanded so the caller can store what the subscription carries after the update.
     updateParams.expand = [...SUBSCRIPTION_PAYMENT_EXPAND, STRIPE_SUBSCRIPTION_DISCOUNT_EXPAND];
@@ -218,6 +224,9 @@ export class StripeSubscriptionApiService {
   /**
    * Preview proration amounts for a subscription plan change
    *
+   * Previews with `always_invoice`, as `changePlan` charges a paid change, so the
+   * preview is the invoice the change creates at once.
+   *
    * @param subscriptionId - The subscription ID
    * @param newPriceId - The new price ID to preview
    * @returns Promise resolving to the upcoming invoice preview with proration details
@@ -240,7 +249,7 @@ export class StripeSubscriptionApiService {
       subscription: subscriptionId,
       subscription_details: {
         items: [{ id: itemId, price: newPriceId }],
-        proration_behavior: "create_prorations",
+        proration_behavior: "always_invoice",
       },
     });
   }

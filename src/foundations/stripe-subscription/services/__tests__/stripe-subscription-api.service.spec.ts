@@ -291,6 +291,25 @@ describe("StripeSubscriptionApiService", () => {
       });
     });
 
+    it("sends cancel_at_period_end when cancelAtPeriodEnd is given", async () => {
+      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.updateSubscription({ subscriptionId: TEST_IDS.subscriptionId, cancelAtPeriodEnd: false });
+
+      expect(mockStripe.subscriptions.update).toHaveBeenCalledWith(
+        TEST_IDS.subscriptionId,
+        expect.objectContaining({ cancel_at_period_end: false }),
+      );
+    });
+
+    it("leaves cancel_at_period_end alone when cancelAtPeriodEnd is not given", async () => {
+      mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.updateSubscription({ subscriptionId: TEST_IDS.subscriptionId });
+
+      expect(mockStripe.subscriptions.update.mock.calls[0][1]).not.toHaveProperty("cancel_at_period_end");
+    });
+
     it("should update subscription with metadata", async () => {
       mockStripe.subscriptions.update.mockResolvedValue(MOCK_SUBSCRIPTION);
 
@@ -459,7 +478,7 @@ describe("StripeSubscriptionApiService", () => {
         subscription: TEST_IDS.subscriptionId,
         subscription_details: {
           items: [{ id: "si_test_123", price: "price_new_123" }],
-          proration_behavior: "create_prorations",
+          proration_behavior: "always_invoice",
         },
       });
       expect(result).toEqual(MOCK_INVOICE);
