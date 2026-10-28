@@ -1,3 +1,9 @@
+## [8.12.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.12.0...v8.12.1) (2026-10-28)
+
+### 🐛 Bug Fixes
+
+* **s3:** wait 30 s for a slow S3 answer and guard the body read ([d6b0eab](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d6b0eab4c9eddfccde51a488b8daec0c2edf18be))
+
 ## [8.12.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.11.1...v8.12.0) (2026-10-28)
 
 ### 🚀 Features
