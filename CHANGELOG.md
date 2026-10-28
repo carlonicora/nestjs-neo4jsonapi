@@ -1,3 +1,18 @@
+## [8.12.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.11.1...v8.12.0) (2026-10-28)
+
+### 🚀 Features
+
+* an app chooses the layer topic groups are built in with community.scope (per company when omitted), and summaries queued while the worker starts no longer fail ([4be615d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/4be615d4ce1bed93dabe6e62132b8380391f8cc8))
+
+### 🐛 Bug Fixes
+
+* an administrator who logs in no longer leaves the anonymous visit from before the login in Analytics ([eada6a3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/eada6a3a909e4473cd2eb5be2650d0d1868adba4))
+* the Assistant looks up campaign records without paying for a second lookup pass or an extra formatting round ([71f4114](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/71f41148c136f175a904fd9ddb400fcb338f7c67))
+* the Assistant's answer prompt names the refined question in plain quotes instead of backticks ([6fae6fa](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6fae6fa075504cfcfd866ec717c2eee0b2ea9249))
+* the Assistant's answer reads the earlier turns of the conversation, so what the user ruled out or corrected a few messages ago still holds ([8811fcf](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8811fcfc326c9081c797b430bc9b2d38aab95c81))
+* the Assistant's record lookup gets every type description up front in a compact form, so it no longer spends rounds describing types before reading them ([a5d3b78](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a5d3b780e251278a2fb90dd65a726541cfc25554))
+* the Assistant's record lookup reports field values exactly as the records hold them, and AI calls on Gemini through Requesty keep working with the new answer tool ([e024706](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/e02470640efe99b7e5ceedece0498eb564ccc470))
+
 ## [8.11.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.11.0...v8.11.1) (2026-10-28)
 
 ### 🐛 Bug Fixes
