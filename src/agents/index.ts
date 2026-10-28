@@ -54,6 +54,7 @@ export { ResponderService } from "./responder/services/responder.service";
 export { ResponderResponseInterface } from "./responder/interfaces/responder.response.interface";
 export type { EntityReference } from "./responder/interfaces/entity.reference.interface";
 export type { UnifiedTrace } from "./responder/interfaces/unified.trace.interface";
+export { UPFRONT_CATALOG_MAX_TOKENS } from "./responder/nodes/graph.node.service";
 
 // Summariser
 export { SummariserModule } from "./summariser/summariser.module";
@@ -80,7 +81,17 @@ export { UserModulesRepository } from "./graph/repositories/user-modules.reposit
 // The graph tool builders, for app-side agents that bind the catalog tools to
 // their own LLM calls (each .build(ctx, recorder) returns a DynamicStructuredTool).
 export { ResolveEntityTool } from "./graph/tools/resolve-entity.tool";
-export { DescribeEntityTool } from "./graph/tools/describe-entity.tool";
+export { DescribeEntityTool, describeCatalogEntity, renderEntitySchema } from "./graph/tools/describe-entity.tool";
+export type { DescribeEntityResult } from "./graph/tools/describe-entity.tool";
+// The compact text form of type descriptions: describe_entity's output, and a
+// catalog of many types rendered together with one shared preamble.
+export { renderCompactDescriptions } from "./graph/services/compact-description";
+export type {
+  EntityDescription,
+  EntityFieldDescription,
+  EntityRelationshipDescription,
+  EntityDetailFieldDescription,
+} from "./graph/services/compact-description";
 export { SearchEntitiesTool } from "./graph/tools/search-entities.tool";
 export { ReadEntityTool } from "./graph/tools/read-entity.tool";
 export { TraverseTool } from "./graph/tools/traverse.tool";

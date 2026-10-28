@@ -1,4 +1,5 @@
 import { DescribeEntityTool } from "../describe-entity.tool";
+import { renderCompactDescriptions } from "../../services/compact-description";
 
 describe("DescribeEntityTool", () => {
   const catalog = {
@@ -39,12 +40,12 @@ describe("DescribeEntityTool", () => {
   };
   const tool = new DescribeEntityTool(factory);
 
-  it("returns entity detail stripped of internal cypher fields", async () => {
-    const out = await tool.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+  it("buildDescription returns entity detail stripped of internal cypher fields", async () => {
+    const out = tool.buildDescription("accounts", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
     expect(out).toEqual({
       type: "accounts",
       description: "A customer or supplier.",
@@ -60,6 +61,29 @@ describe("DescribeEntityTool", () => {
       ],
       relationships: [{ name: "orders", targetType: "orders", cardinality: "many", description: "Orders placed." }],
     });
+  });
+
+  it("returns the compact schema", async () => {
+    const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] };
+    const recorder: any[] = [];
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, recorder);
+    const description = tool.buildDescription("accounts", ctx);
+    if ("error" in description) throw new Error(description.error);
+    expect(out).toEqual({ type: "accounts", schema: renderCompactDescriptions([description], { standalone: true }) });
+    expect(out.schema).toContain("## accounts");
+    expect(out.schema).toContain("- name (string) [filter O1]: Display name.");
+    expect(out.schema).toContain("- orders -> orders (many): Orders placed.");
+    // The call is still recorded: the read tools' describe-first gate depends on it.
+    expect(recorder).toHaveLength(1);
+  });
+
+  it("invoke returns the error object for an unknown type", async () => {
+    const out = await tool.invoke(
+      { type: "widgets" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+    expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
   });
 
   describe("filter operators", () => {
@@ -82,11 +106,11 @@ describe("DescribeEntityTool", () => {
         resolveService: () => svc,
         capture: factory.capture,
       };
-      const out: any = await new DescribeEntityTool(opsFactory).invoke(
-        { type: "judgements" },
-        { companyId: "c", userId: "u", userModuleIds: ["m"] },
-        [],
-      );
+      const out: any = new DescribeEntityTool(opsFactory).buildDescription("judgements", {
+        companyId: "c",
+        userId: "u",
+        userModuleIds: ["m"],
+      });
       return Object.fromEntries(out.fields.map((f: any) => [f.name, f.operators]));
     };
 
@@ -134,11 +158,11 @@ describe("DescribeEntityTool", () => {
         }),
         capture: factory.capture,
       };
-      const out: any = await new DescribeEntityTool(opsFactory).invoke(
-        { type: "judgements" },
-        { companyId: "c", userId: "u", userModuleIds: ["m"] },
-        [],
-      );
+      const out: any = new DescribeEntityTool(opsFactory).buildDescription("judgements", {
+        companyId: "c",
+        userId: "u",
+        userModuleIds: ["m"],
+      });
       const byName = Object.fromEntries(out.fields.map((f: any) => [f.name, f]));
       expect(byName.source).toMatchObject({ filterable: true, operators: ["eq"], values: ["SNCASS", "EURLEX"] });
       expect(byName.year).toMatchObject({ filterable: true, operators: ["eq", "gt", "gte", "lt", "lte"] });
@@ -154,11 +178,11 @@ describe("DescribeEntityTool", () => {
   });
 
   it("returns error object for unknown type without throwing", async () => {
-    const out = await tool.invoke(
-      { type: "widgets" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out = tool.buildDescription("widgets", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
     expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
   });
 
@@ -175,21 +199,21 @@ describe("DescribeEntityTool", () => {
       },
     };
     const t = new DescribeEntityTool(suggestionFactory);
-    const out: any = await t.invoke(
-      { type: "bom" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out: any = t.buildDescription("bom", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
     expect(out.error).toMatch(/Retry this call now with type "boms"\./);
     expect(out.suggestion).toBe("boms");
   });
 
   it("returns error object for type outside user modules", async () => {
-    const out = await tool.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModuleIds: ["22222222-2222-2222-2222-222222222222"] },
-      [],
-    );
+    const out = tool.buildDescription("accounts", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["22222222-2222-2222-2222-222222222222"],
+    });
     expect((out as any).error).toMatch(/not available/);
   });
 
@@ -222,11 +246,11 @@ describe("DescribeEntityTool", () => {
     };
 
     const listTool = new DescribeEntityTool(listFactory);
-    const out: any = await listTool.invoke(
-      { type: "npcs" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out: any = listTool.buildDescription("npcs", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
 
     const name = out.fields.find((f: any) => f.name === "name");
     const notes = out.fields.find((f: any) => f.name === "notes");
@@ -235,11 +259,11 @@ describe("DescribeEntityTool", () => {
   });
 
   it("emits no stage key for an entity without chat.list", async () => {
-    const out: any = await tool.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out: any = tool.buildDescription("accounts", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
 
     for (const field of out.fields) {
       expect(field).not.toHaveProperty("stage");
@@ -331,11 +355,11 @@ describe("DescribeEntityTool", () => {
           return v;
         },
       };
-      return (await new DescribeEntityTool(writableFactory).invoke(
-        { type: "npcs" },
-        { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-        [],
-      )) as any;
+      return new DescribeEntityTool(writableFactory).buildDescription("npcs", {
+        companyId: "c",
+        userId: "u",
+        userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+      }) as any;
     };
 
     const flags = (entries: any[]) =>
@@ -362,11 +386,11 @@ describe("DescribeEntityTool", () => {
     });
 
     it("omits the flag entirely for a read-only entity", async () => {
-      const out: any = await tool.invoke(
-        { type: "accounts" },
-        { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-        [],
-      );
+      const out: any = tool.buildDescription("accounts", {
+        companyId: "c",
+        userId: "u",
+        userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+      });
       for (const field of out.fields) expect(field).not.toHaveProperty("writable");
       for (const relationship of out.relationships) expect(relationship).not.toHaveProperty("writable");
     });
@@ -409,11 +433,11 @@ describe("DescribeEntityTool", () => {
     };
 
     const bridgeTool = new DescribeEntityTool(bridgeFactory);
-    const out = await bridgeTool.invoke(
-      { type: "bom-entries" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out = bridgeTool.buildDescription("bom-entries", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
 
     expect((out as any).bridge).toEqual({ materialiseTo: ["item"] });
     expect((out as any).type).toBe("bom-entries");
@@ -434,11 +458,11 @@ describe("DescribeEntityTool", () => {
       resolveService: () => undefined,
     };
     const t = new DescribeEntityTool(detailFactory);
-    const out: any = await t.invoke(
-      { type: "accounts" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out: any = t.buildDescription("accounts", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
     expect(out.detailFields).toEqual([{ name: "body", type: "string", description: "b", availableOn: "read_entity" }]);
     expect(out.fields).toEqual([
       {
@@ -500,11 +524,11 @@ describe("DescribeEntityTool — richtext fields", () => {
   };
 
   it('marks a richtext field format: "markdown" and leaves every other kind alone', async () => {
-    const out: any = await new DescribeEntityTool(factory).invoke(
-      { type: "npcs" },
-      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
-      [],
-    );
+    const out: any = new DescribeEntityTool(factory).buildDescription("npcs", {
+      companyId: "c",
+      userId: "u",
+      userModuleIds: ["11111111-1111-1111-1111-111111111111"],
+    });
     const byName = new Map(out.fields.map((field: any) => [field.name, field]));
 
     expect(byName.get("description")).toEqual({

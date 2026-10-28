@@ -129,7 +129,7 @@ describe("GraphNodeService — entity fields from the recorder", () => {
       { getTypeIndexFor: vi.fn(() => "- demo — anything") } as any,
       {} as any,
       noopTool("resolve_entity"),
-      noopTool("describe_entity"),
+      { ...noopTool("describe_entity"), renderCatalog: () => ({ text: "", types: [], approxTokens: 0 }) },
       noopTool("search_entities"),
       noopTool("read_entity"),
       noopTool("traverse"),

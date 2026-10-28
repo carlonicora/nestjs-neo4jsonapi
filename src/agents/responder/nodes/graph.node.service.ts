@@ -13,7 +13,7 @@ import { LLMService } from "../../../core/llm/services/llm.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { buildScopeAttribution } from "../../common/usage-attribution";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
-import { ToolFactory, ToolCallRecord } from "../../graph/tools/tool.factory";
+import { ToolFactory, ToolCallRecord, UserContext } from "../../graph/tools/tool.factory";
 import { ResolveEntityTool } from "../../graph/tools/resolve-entity.tool";
 import { DescribeEntityTool } from "../../graph/tools/describe-entity.tool";
 import { SearchEntitiesTool } from "../../graph/tools/search-entities.tool";
@@ -43,6 +43,44 @@ You must call at least one tool BEFORE producing a final answer. For a question 
     resolve_entity({ text: "<the user's literal phrase>" })
 
 Inspect the returned candidates, pick a type, then call describe_entity and proceed with the typed tools (read_entity, search_entities, traverse) until you have the data the answer needs. Do not respond with prose alone — call the tool now.`;
+
+/**
+ * Up-front variant of {@link RETRY_INSTRUCTION}, used when every type's
+ * description is already in the system prompt: the same instruction without
+ * the describe step.
+ */
+export const UPFRONT_RETRY_INSTRUCTION = `Your previous attempt did not call any tools. You cannot answer a question about this system's data without first looking it up.
+
+You must call at least one tool BEFORE producing a final answer. For a question that names an entity (a person, a place, an organisation, a project — anything that could correspond to a record in the graph), the first tool call is always:
+
+    resolve_entity({ text: "<the user's literal phrase>" })
+
+Inspect the returned candidates, pick a type, then proceed with the typed tools (read_entity, search_entities, traverse) until you have the data the answer needs. Every type is already described in your instructions; use those descriptions directly. Do not respond with prose alone — call the tool now.`;
+
+/**
+ * Up-front variant of the data-loading retry instruction, used when every
+ * type's description is already in the system prompt. Static: unlike the
+ * on-demand text it does not name the tools the previous attempt called.
+ */
+export const UPFRONT_DATA_LOADING_RETRY_INSTRUCTION = `Your previous attempt called tools but never successfully loaded data with read_entity, search_entities, or traverse. The user asked a data question; you must answer it.
+
+Steps to take now:
+  1. Re-read your previous resolve_entity results. Pick the most plausible candidate by name match — an item whose name equals the user's literal phrase is the right pick.
+  2. Look up, in the type descriptions already in your instructions, the type(s) the question is about (both the resolved entity's type AND any target type the user is asking about).
+  3. Call traverse from the resolved entity along the relationship that leads to the records the user wants. If no direct relationship is listed, use search_entities on the target type with appropriate filters.
+  4. Call read_entity on each result to get the full fields.
+  5. Return the records in entities.
+
+Proceed now. Do not refuse, do not ask the user to clarify, do not apologise.`;
+
+/**
+ * Size limit, in approximate tokens (characters / 4), of the compact catalog
+ * the lookup puts in its system prompt. A user whose readable types render
+ * within it gets every description up front and no describe-first gate on
+ * those types; above it the lookup keeps the one-line type index, describes
+ * on demand and keeps the gate. A library constant, not a setting.
+ */
+export const UPFRONT_CATALOG_MAX_TOKENS = 12_000;
 
 /**
  * @deprecated No effect since the traversal guard became a detector: a turn
@@ -186,7 +224,7 @@ export class GraphNodeService implements OnModuleInit {
     const state = params.state;
     // Every graph tool built below reads scopeId/scopeType off this context —
     // it is the only channel confining the whole turn to one scope root.
-    const ctx = {
+    const baseCtx: UserContext = {
       companyId: state.companyId,
       userId: state.userId,
       userModuleIds: state.userModuleIds ?? [],
@@ -194,7 +232,7 @@ export class GraphNodeService implements OnModuleInit {
       scopeType: state.scopeType,
     };
 
-    if (ctx.userModuleIds.length === 0) {
+    if (baseCtx.userModuleIds.length === 0) {
       const out: GraphNodeOutput = {
         answer: "",
         entities: [],
@@ -211,8 +249,21 @@ export class GraphNodeService implements OnModuleInit {
     }
 
     const recorder: ToolCallRecord[] = [];
-    const typeIndex = this.graph.getTypeIndexFor(ctx.userModuleIds);
-    const systemPrompt = renderGraphNodeSystemPrompt(typeIndex, this.domain);
+    const typeIndex = this.graph.getTypeIndexFor(baseCtx.userModuleIds);
+    // Up-front mode: every readable type's description goes into the system
+    // prompt (it depends on the user's modules only, so the provider cache
+    // reuses it across lookups) and those types pass the describe-first gate.
+    // Over the size limit the lookup describes on demand, exactly as before.
+    const catalog = this.describeTool.renderCatalog(baseCtx);
+    const upfront = catalog.types.length > 0 && catalog.approxTokens <= UPFRONT_CATALOG_MAX_TOKENS;
+    this.logger.log(
+      `graph node: catalog mode=${upfront ? "upfront" : "on-demand"} types=${catalog.types.length} approxTokens=${catalog.approxTokens}`,
+    );
+    const ctx: UserContext = upfront ? { ...baseCtx, preDescribedTypes: new Set(catalog.types) } : baseCtx;
+    const systemPrompt = renderGraphNodeSystemPrompt(typeIndex, this.domain, upfront ? catalog.text : undefined);
+    const retryTexts = upfront
+      ? { retry: UPFRONT_RETRY_INSTRUCTION, dataLoading: UPFRONT_DATA_LOADING_RETRY_INSTRUCTION }
+      : { retry: RETRY_INSTRUCTION, dataLoading: undefined };
 
     // read_entity dedup, scoped to one llm.call pass — reset before every
     // retry pass in `call` below (spec § "3b. read_entity dedup").
@@ -316,7 +367,7 @@ export class GraphNodeService implements OnModuleInit {
       // before answering.
       if (recorder.length === 0) {
         this.logger.warn(`graph node: zero tool calls on first attempt — retrying with RETRY_INSTRUCTION`);
-        response = await call(RETRY_INSTRUCTION);
+        response = await call(retryTexts.retry);
       }
 
       // Error-recovery retry: at least one tool call failed AND the model
@@ -350,7 +401,9 @@ If the error lists valid fields or relationships, pick one of those and retry no
       const dataToolCallsBefore = recorder.filter((c) => dataLoadingTools.has(c.tool) && !c.error).length;
       if (recorder.length > 0 && dataToolCallsBefore === 0 && retryBudgetLeft()) {
         const triedTools = Array.from(new Set(recorder.map((c) => c.tool))).join(", ");
-        const dataLoadingRetry = `Your previous attempt called ${triedTools} but never successfully loaded data with read_entity, search_entities, or traverse. The user asked a data question; you must answer it.
+        const dataLoadingRetry =
+          retryTexts.dataLoading ??
+          `Your previous attempt called ${triedTools} but never successfully loaded data with read_entity, search_entities, or traverse. The user asked a data question; you must answer it.
 
 Steps to take now:
   1. Re-read your previous resolve_entity results. Pick the most plausible candidate by name match — an item whose name equals the user's literal phrase is the right pick.

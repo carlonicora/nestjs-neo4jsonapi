@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
+import { renderEntitySchema } from "./describe-entity.tool";
 import { CatalogEntity, CatalogField } from "../interfaces/graph.catalog.interface";
 import { GraphSearchService } from "../services/graph.search.service";
 import { GraphCatalogService } from "../services/graph.catalog.service";
@@ -82,15 +83,15 @@ export class SearchEntitiesTool {
       async () => {
         if ("error" in coerced) return { error: coerced.error };
         if ("error" in coercedSort) return { error: coercedSort.error };
-        const described = recorder.some(
-          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
-        );
         const entity = this.factory.resolveEntity(input.type, ctx);
         if ("error" in entity) return entity;
+        const described =
+          ctx.preDescribedTypes?.has(entity.type) ||
+          recorder.some((c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type);
         if (!described) {
           return {
             error: `You must call describe_entity({ type: "${input.type}" }) before searching ${input.type}. The schema is included below — either call describe_entity({ type: "${input.type}" }) to record the contract and retry this search, or proceed using the listed fields and relationships. Never stop on this error.`,
-            schema: { fields: entity.fields, relationships: entity.relationships },
+            schema: renderEntitySchema(entity, this.factory.resolveService(entity.type)),
           };
         }
 

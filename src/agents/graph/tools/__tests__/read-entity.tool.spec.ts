@@ -8,7 +8,7 @@ describe("ReadEntityTool", () => {
     type: "accounts",
     moduleId: "11111111-1111-1111-1111-111111111111",
     description: "A",
-    fields: [{ name: "name", type: "string" }],
+    fields: [{ name: "name", type: "string", description: "Display name.", filterable: true, sortable: true }],
     nodeName: "account",
     labelName: "Account",
     relationships: [
@@ -58,6 +58,16 @@ describe("ReadEntityTool", () => {
       { tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 },
     ]);
     expect(out).toMatchObject({ id: "a1", type: "accounts", fields: { name: "Acme" } });
+  });
+
+  it("refuses an undescribed type with the type's compact schema", async () => {
+    const tool = new ReadEntityTool(factory, {} as any, {} as any, undefined as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts", id: "a1" }, ctx, []);
+    expect(out.error).toMatch(/describe_entity/);
+    expect(typeof out.schema).toBe("string");
+    expect(out.schema).toContain("## accounts\nA\nFields:\n- name (string) [filter O1]: Display name.");
+    expect(out.schema).toContain("- orders -> orders (many): x");
+    expect(out.schema).toContain("- O1: eq, ne, in, like, isNull, isNotNull");
   });
 
   it("read_entity carries generated", async () => {

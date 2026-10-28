@@ -44,7 +44,7 @@ describe("GraphNodeService — usage attribution", () => {
       { getTypeIndexFor: vi.fn(() => []) } as any,
       {} as any,
       recordingTool("resolve_entity", { error: "boom" }),
-      recordingTool("describe_entity", {}),
+      { ...recordingTool("describe_entity", {}), renderCatalog: () => ({ text: "", types: [], approxTokens: 0 }) },
       recordingTool("search_entities", {}),
       recordingTool("read_entity", {}),
       recordingTool("traverse", {}),

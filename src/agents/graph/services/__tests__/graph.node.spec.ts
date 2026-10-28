@@ -32,7 +32,11 @@ describe("GraphNodeService", () => {
   const toolFactory = {} as ToolFactory;
   const mkBuild = (name: string) => ({ build: vi.fn().mockReturnValue(fakeTool(name)) });
   const resolveTool = mkBuild("resolve_entity") as unknown as ResolveEntityTool;
-  const describeTool = mkBuild("describe_entity") as unknown as DescribeEntityTool;
+  // An empty catalog keeps the lookup in on-demand mode (today's behaviour).
+  const describeTool = {
+    ...mkBuild("describe_entity"),
+    renderCatalog: vi.fn(() => ({ text: "", types: [], approxTokens: 0 })),
+  } as unknown as DescribeEntityTool;
   const searchTool = mkBuild("search_entities") as unknown as SearchEntitiesTool;
   const readTool = mkBuild("read_entity") as unknown as ReadEntityTool;
   const traverseTool = mkBuild("traverse") as unknown as TraverseTool;

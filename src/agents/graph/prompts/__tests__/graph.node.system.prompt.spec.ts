@@ -364,3 +364,47 @@ describe("renderGraphNodeSystemPrompt — polymorphic related traversal", () => 
     expect(traverseBlock).toMatch(/search_entities/);
   });
 });
+
+describe("renderGraphNodeSystemPrompt — up-front catalog", () => {
+  const domain = { role: "You help a reviewer.", depth: "Walk two edges." };
+  const catalog = "T things\n  name string D1\nGuide: abstract fixture without backticks";
+  const linesOf = (text: string) => new Set(text.split("\n"));
+
+  it("without a catalog the prompt is unchanged", () => {
+    expect(renderGraphNodeSystemPrompt("- things — anything", domain, undefined)).toBe(
+      renderGraphNodeSystemPrompt("- things — anything", domain),
+    );
+  });
+
+  it("with a catalog the prompt says descriptions are already given and does not require describe_entity", () => {
+    const out = renderGraphNodeSystemPrompt("- things — anything", domain, catalog);
+    expect(out).toContain(catalog);
+    expect(out).not.toContain("{GRAPH_CATALOG}");
+    expect(out).toMatch(/already described/i);
+    expect(out).not.toMatch(/Call this for every type you intend to touch/);
+    expect(out).not.toMatch(/To learn the fields and relationships of any type, call/);
+    expect(out).not.toMatch(/will refuse to run on a type that has not been described/);
+    // The describe_entity entry is still documented, as a fallback.
+    expect(out).toMatch(/^- describe_entity\(type\) — /m);
+  });
+
+  it("with a catalog the tool chain after resolve_entity skips describe_entity", () => {
+    const out = renderGraphNodeSystemPrompt("- things — anything", domain, catalog);
+    expect(out).toContain("immediately continue: search_entities / traverse / read_entity → answer.");
+    expect(out).not.toContain("immediately continue: `describe_entity`");
+    expect(out).toContain("proceed with the typed tools, using its type's description");
+    expect(out).not.toContain("proceed with `describe_entity` + the typed tools");
+  });
+
+  it("up-front prompt text contains no backticks and no dynamic placeholders", () => {
+    const without = linesOf(renderGraphNodeSystemPrompt("- things — anything", domain));
+    const added = [...linesOf(renderGraphNodeSystemPrompt("- things — anything", domain, catalog))].filter(
+      (line) => !without.has(line),
+    );
+    expect(added.length).toBeGreaterThan(0);
+    for (const line of added) {
+      expect(line.includes("`")).toBe(false);
+      expect(line).not.toMatch(/\$\{/);
+    }
+  });
+});

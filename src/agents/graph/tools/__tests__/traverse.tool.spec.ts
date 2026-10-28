@@ -10,7 +10,7 @@ describe("TraverseTool", () => {
     type: "accounts",
     moduleId: "11111111-1111-1111-1111-111111111111",
     description: "A",
-    fields: [{ name: "name", type: "string", filterable: true, sortable: true }],
+    fields: [{ name: "name", type: "string", description: "Display name.", filterable: true, sortable: true }],
     relationships: [
       {
         name: "orders",
@@ -57,6 +57,17 @@ describe("TraverseTool", () => {
       return v;
     },
   };
+
+  it("refuses an undescribed source type with the type's compact schema", async () => {
+    const tool = new TraverseTool(factory, {} as any, {} as any, {} as any, formatter, {} as any);
+    const out: any = await tool.invoke({ fromType: "accounts", fromId: "a1", relationship: "orders" }, ctx, []);
+    expect(out.error).toMatch(/describe_entity/);
+    expect(typeof out.schema).toBe("string");
+    expect(out.schema).toContain(
+      "## accounts\nA\nFields:\n- name (string) [filter O1]: Display name.\nRelationships:\n- orders -> orders (many): x",
+    );
+    expect(out.schema).toContain("- O1: eq, ne, in, like, isNull, isNotNull");
+  });
 
   it("traverses via catalog edge spec and applies target-field filter + sort", async () => {
     targetSvc.findRelatedRecordsByEdge.mockClear();

@@ -317,7 +317,8 @@ describe("McpGenericToolsService tool-level errors", () => {
   });
 
   it("keeps extras (schema) on the error payload", async () => {
-    const schema = { type: "orders", fields: [{ name: "name" }], relationships: [] };
+    // The refusal carries the compact text schema, the same text describe_entity returns.
+    const schema = "## orders\nFields:\n- name (string) [filter O1]: Display name.";
     searchTool.invoke.mockResolvedValue({ error: "You must call describe_entity first.", schema });
     const out = await build()
       .find((t) => t.name === "search_entities")!

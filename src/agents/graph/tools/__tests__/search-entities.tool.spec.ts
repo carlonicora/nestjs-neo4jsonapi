@@ -14,8 +14,8 @@ describe("SearchEntitiesTool", () => {
             moduleId: "11111111-1111-1111-1111-111111111111",
             description: "A",
             fields: [
-              { name: "name", type: "string", filterable: true, sortable: true },
-              { name: "status", type: "string", filterable: true, sortable: true },
+              { name: "name", type: "string", description: "Display name.", filterable: true, sortable: true },
+              { name: "status", type: "string", description: "Status.", filterable: true, sortable: true },
             ],
             relationships: [],
             nodeName: "account",
@@ -43,6 +43,17 @@ describe("SearchEntitiesTool", () => {
   // Second argument is the search service; this tool no longer calls it,
   // so a bare spy suffices.
   const unusedSearch: any = {};
+
+  it("refuses an undescribed type with the type's compact schema", async () => {
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, []);
+    expect(out.error).toMatch(/describe_entity/);
+    expect(typeof out.schema).toBe("string");
+    expect(out.schema).toContain(
+      "## accounts\nA\nFields:\n- name (string) [filter O1]: Display name.\n- status (string) [filter O1]: Status.",
+    );
+    expect(out.schema).toContain("- O1: eq, ne, in, like, isNull, isNotNull");
+  });
 
   it("rejects filter on undescribed field with explicit error", async () => {
     const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);

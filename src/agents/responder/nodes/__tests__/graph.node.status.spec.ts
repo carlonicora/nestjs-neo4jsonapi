@@ -42,7 +42,10 @@ describe("GraphNodeService — assistant:status", () => {
         matchMode: "exact",
         items: [{ type: "npcs", id: "npc-1", summary: "Fabio", score: 9 }],
       }),
-      buildTool("describe_entity", { fields: [], relationships: [] }),
+      {
+        ...buildTool("describe_entity", { fields: [], relationships: [] }),
+        renderCatalog: () => ({ text: "", types: [], approxTokens: 0 }),
+      },
       buildTool("search_entities", { applied: { filters: [], sort: [], limit: 10 }, items: [] }),
       buildTool("read_entity", { id: "npc-1", type: "npcs", fields: { name: "Fabio" } }),
       buildTool("traverse", { items: [] }),

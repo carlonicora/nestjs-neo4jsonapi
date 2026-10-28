@@ -13,43 +13,17 @@ import type {
   ExternalEntitySource,
   ExternalFilterCapability,
 } from "../../../common/interfaces/external.entity.source.interface";
+import { allowedFilterOperators, serviceFilterCapabilities } from "../services/filter-operators";
+import { renderEntitySchema } from "./describe-entity.tool";
+
+// Moved to services/filter-operators; re-exported so existing imports keep working.
+export { TYPE_TO_OP_ALLOWED, serviceFilterCapabilities, allowedFilterOperators } from "../services/filter-operators";
 
 /** Every filter operator the graph tools accept, in the order they are advertised. */
 export const FILTER_OPERATORS = ["eq", "ne", "in", "like", "gt", "gte", "lt", "lte", "isNull", "isNotNull"] as const;
 export type FilterOperator = (typeof FILTER_OPERATORS)[number];
 
 const FilterOpEnum = z.enum(FILTER_OPERATORS);
-
-/** Operators valid for each catalog field type. A type missing here accepts no operator. */
-export const TYPE_TO_OP_ALLOWED: Record<string, Set<string>> = {
-  string: new Set(["eq", "ne", "in", "like", "isNull", "isNotNull"]),
-  number: new Set(["eq", "ne", "in", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  boolean: new Set(["eq", "ne", "isNull", "isNotNull"]),
-  date: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-  datetime: new Set(["eq", "ne", "gt", "gte", "lt", "lte", "isNull", "isNotNull"]),
-};
-
-/**
- * The filter capabilities a type's service declares, or `undefined` when it
- * declares none (records in the app database: the type table applies).
- */
-export function serviceFilterCapabilities(svc: unknown): ExternalFilterCapability[] | undefined {
-  const hook = (svc as Partial<ExternalEntitySource> | undefined)?.filterCapabilities;
-  return typeof hook === "function" ? hook.call(svc) : undefined;
-}
-
-/**
- * The operators a filter on `field` may use. When the service declares
- * capabilities they win over the type table: exactly the operators listed for
- * the field, none when it is not listed. Otherwise the operators of the field's type.
- */
-export function allowedFilterOperators(
-  field: CatalogField,
-  capabilities: ExternalFilterCapability[] | undefined,
-): string[] {
-  if (capabilities) return [...(capabilities.find((c) => c.field === field.name)?.operators ?? [])];
-  return Array.from(TYPE_TO_OP_ALLOWED[field.type] ?? []);
-}
 
 /**
  * The error for an operator a field does not accept, or `undefined` when it
@@ -379,15 +353,15 @@ export class TraverseTool {
       async () => {
         if ("error" in coerced) return { error: coerced.error };
         if ("error" in coercedSort) return { error: coercedSort.error };
-        const sourceDescribed = recorder.some(
-          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.fromType,
-        );
         const source = this.factory.resolveEntity(input.fromType, ctx);
         if ("error" in source) return source;
+        const sourceDescribed =
+          ctx.preDescribedTypes?.has(source.type) ||
+          recorder.some((c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.fromType);
         if (!sourceDescribed) {
           return {
             error: `You must call describe_entity({ type: "${input.fromType}" }) before traversing from ${input.fromType}. The schema is included below — either call describe_entity({ type: "${input.fromType}" }) to record the contract and retry this traverse, or proceed using the listed relationships. Never stop on this error.`,
-            schema: { fields: source.fields, relationships: source.relationships },
+            schema: renderEntitySchema(source, this.factory.resolveService(source.type)),
           };
         }
 

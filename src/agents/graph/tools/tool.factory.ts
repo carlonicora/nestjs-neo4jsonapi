@@ -21,6 +21,15 @@ export interface UserContext {
    * does not have to re-derive it through the model registry.
    */
   scopeLabel?: string;
+  /**
+   * Types whose full description the model was already given outside the tool
+   * loop (the responder lookup's up-front catalog in its system prompt).
+   * read_entity, search_entities and traverse treat them as described, beside
+   * the describe_entity calls in the recorder. The recorder is never seeded
+   * for them: its length drives the caller's retry budget and trace. Absent =
+   * only recorded describe_entity calls count.
+   */
+  preDescribedTypes?: ReadonlySet<string>;
 }
 
 /**
@@ -152,6 +161,11 @@ export class ToolFactory {
         ? `Entity type "${type}" is not available. The available types are: ${accessible.join(", ")}.`
         : `Entity type "${type}" is not available.`,
     };
+  }
+
+  /** Every catalog type this user can read, in catalog order. */
+  accessibleTypes(ctx: UserContext): string[] {
+    return this.catalog.getAccessibleTypes(ctx.userModuleIds);
   }
 
   private findClosest(input: string, candidates: string[]): string | null {

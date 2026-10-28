@@ -71,6 +71,52 @@ Return these fields:
 - \`stop\` — set to \`true\` once \`answer\` is complete and \`entities\` is the matching set.
 `;
 
+/**
+ * Up-front replacement of the "Your data" paragraph that follows the type
+ * index: the full catalog is given here, so the model is not told to describe
+ * each type before touching it.
+ */
+const UPFRONT_DATA_PARAGRAPH = `The list above is the complete inventory of entity types available to you — anything not listed does not exist. The full description of every one of these types follows: its fields and relationships, which fields can be filtered and sorted, and with which operators.
+
+{GRAPH_CATALOG}
+
+These descriptions are the only authoritative source for each type's schema, and every type in the list above counts as already described: search, read and traverse it directly, without a describe_entity call first. Do not assume a field or relationship exists unless its type's description above lists it.`;
+
+/** Up-front replacement of the describe_entity entry under "Tools". */
+const UPFRONT_DESCRIBE_TOOL_ENTRY = `- describe_entity(type) — returns the description of one entity type. Every type in the inventory is already described in full under "Your data", so it is not needed for those types; use it only for a type whose description you cannot find there.`;
+
+/** Up-front replacement of the "Never ask the user a clarifying question" paragraph: the tool chain skips describe_entity. */
+const UPFRONT_NO_CLARIFYING_PARAGRAPH = `**Never ask the user a clarifying question.** The user expects an answer, not a follow-up. After resolve_entity returns at least one usable candidate, immediately continue: search_entities / traverse / read_entity → answer. Do not stop the tool chain to confirm what to do next. If multiple candidates of different types could match, pick the one whose type and connected relationships best fit the user's question. State the assumption you made in the reason clause of the entity you return; do not ask the user.`;
+
+/** Up-front replacement of the resolve_entity paragraph: the candidate's type is already described. */
+const UPFRONT_RESOLVE_PARAGRAPH = `Otherwise, if the user names an entity — a person, a place, an organisation, a project, anything that could correspond to a record in the graph — your first tool call is resolve_entity with the user's literal phrase. Do not guess a type. resolve_entity returns candidates across every entity type in one shot; you then pick a candidate and proceed with the typed tools, using its type's description under "Your data".`;
+
+const TODAY_DATA_PARAGRAPH = /^The list above is the complete inventory of entity types available to you.*$/m;
+// \x60 is a backtick, kept out of this file's new text.
+const TODAY_DESCRIBE_TOOL_ENTRY = /^- \x60describe_entity\(type\)\x60 .*$/m;
+const TODAY_NO_CLARIFYING_PARAGRAPH = /^\*\*Never ask the user a clarifying question\.\*\*.*$/m;
+const TODAY_RESOLVE_PARAGRAPH = /^Otherwise, if the user names an entity .*$/m;
+
+function replaceLineOnce(text: string, line: RegExp, replacement: string): string {
+  if (!line.test(text)) throw new Error(`graph node system prompt: line ${line} not found`);
+  return text.replace(line, () => replacement);
+}
+
+/**
+ * The base text for up-front mode: today's base with the "Your data" paragraph,
+ * the describe_entity Tools entry and the two paragraphs that chain
+ * describe_entity after resolve_entity swapped for their up-front wording. Every
+ * other line is the same as {@link GRAPH_NODE_SYSTEM_PROMPT_BASE}.
+ */
+export const GRAPH_NODE_SYSTEM_PROMPT_UPFRONT_BASE = (
+  [
+    [TODAY_DATA_PARAGRAPH, UPFRONT_DATA_PARAGRAPH],
+    [TODAY_DESCRIBE_TOOL_ENTRY, UPFRONT_DESCRIBE_TOOL_ENTRY],
+    [TODAY_NO_CLARIFYING_PARAGRAPH, UPFRONT_NO_CLARIFYING_PARAGRAPH],
+    [TODAY_RESOLVE_PARAGRAPH, UPFRONT_RESOLVE_PARAGRAPH],
+  ] as const
+).reduce((text, [line, replacement]) => replaceLineOnce(text, line, replacement), GRAPH_NODE_SYSTEM_PROMPT_BASE);
+
 const DEFAULT_ROLE = "You help a user explore their organisation's data.";
 
 const DOMAIN_SLOTS = ["role", "depth", "disambiguation", "dataConventions", "outputRules"] as const;
@@ -80,19 +126,38 @@ export function describeDomainLayer(domain?: GraphNodeDomainPrompts): string {
   return `graph node domain layer: ${parts.join(" ")}`;
 }
 
-export function renderGraphNodeSystemPrompt(graphMap: string, domain?: GraphNodeDomainPrompts): string {
+/**
+ * Renders the graph node's system prompt.
+ *
+ * @param graphMap the one-line type index of the user's readable types.
+ * @param domain the app's domain text for the DOMAIN slots.
+ * @param catalog the compact descriptions of every type in `graphMap`
+ *   (`DescribeEntityTool.renderCatalog`). Given, the prompt says the types are
+ *   already described and describe_entity is not needed for them; absent, the
+ *   prompt is today's, byte for byte (describe every type first).
+ */
+export function renderGraphNodeSystemPrompt(
+  graphMap: string,
+  domain?: GraphNodeDomainPrompts,
+  catalog?: string,
+): string {
   // Function replacements throughout: a string replacement would interpret
   // $&, $`, $' and $n inside app-supplied text and silently mangle the prompt.
-  return GRAPH_NODE_SYSTEM_PROMPT_BASE.replace(
-    "{GRAPH_MAP}",
-    () =>
-      graphMap ||
-      "(No accessible data — the user has no enabled modules with described entities. Do not attempt any tool calls. Respond politely explaining that you have no data to query.)",
-  )
+  const base = catalog === undefined ? GRAPH_NODE_SYSTEM_PROMPT_BASE : GRAPH_NODE_SYSTEM_PROMPT_UPFRONT_BASE;
+  const rendered = base
+    .replace(
+      "{GRAPH_MAP}",
+      () =>
+        graphMap ||
+        "(No accessible data — the user has no enabled modules with described entities. Do not attempt any tool calls. Respond politely explaining that you have no data to query.)",
+    )
     .replace("{DOMAIN_ROLE}", () => domain?.role?.trim() || DEFAULT_ROLE)
     .replace("{DOMAIN_DATA_CONVENTIONS}", () => domain?.dataConventions?.trim() ?? "")
     .replace("{DOMAIN_DISAMBIGUATION}", () => domain?.disambiguation?.trim() ?? "")
     .replace("{DOMAIN_DEPTH}", () => domain?.depth?.trim() ?? "")
     .replace("{DOMAIN_OUTPUT_RULES}", () => domain?.outputRules?.trim() ?? "")
     .replace(/\n{3,}/g, "\n\n");
+  // Filled last, after the blank-line collapse, so the catalog text reaches
+  // the model exactly as rendered.
+  return catalog === undefined ? rendered : rendered.replace("{GRAPH_CATALOG}", () => catalog.trim());
 }

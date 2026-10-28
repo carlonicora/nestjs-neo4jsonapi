@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
+import { renderEntitySchema } from "./describe-entity.tool";
 import { generatedFieldsIn, ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { GraphCatalogService } from "../services/graph.catalog.service";
@@ -57,15 +58,15 @@ export class ReadEntityTool {
     const result = await this.factory.capture(
       { tool: "read_entity", input },
       async () => {
-        const described = recorder.some(
-          (c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type,
-        );
         const entity = this.factory.resolveEntity(input.type, ctx);
         if ("error" in entity) return entity;
+        const described =
+          ctx.preDescribedTypes?.has(entity.type) ||
+          recorder.some((c) => c.tool === "describe_entity" && (c.input as { type?: string }).type === input.type);
         if (!described) {
           return {
             error: `You must call describe_entity({ type: "${input.type}" }) before reading a ${input.type} record. The schema is included below — either call describe_entity({ type: "${input.type}" }) to record the contract and retry this read, or proceed using the listed fields and relationships. Never stop on this error.`,
-            schema: { fields: entity.fields, relationships: entity.relationships },
+            schema: renderEntitySchema(entity, this.factory.resolveService(entity.type)),
           };
         }
 
