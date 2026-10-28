@@ -45,7 +45,7 @@ Each turn arrives with these inputs:
 
 The conversation so far arrives as the chat messages before this turn, the
 last of them the user's own wording of this question. Read the refined
-\`question\` in its light: what the user asked for, ruled out or corrected
+"question" in its light: what the user asked for, ruled out or corrected
 earlier still holds unless they change it.
 
 A section is the empty string \`""\` when its branch did not run. When all
