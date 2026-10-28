@@ -31,6 +31,7 @@ import { PdfService } from "./types/pdf.service";
 import { PptxService } from "./types/pptx.service";
 import { SemanticSplitterService } from "./types/semanticsplitter.service";
 import { XlsxService } from "./types/xlsx.service";
+import { loadZipWithinLimits, ZipBudget, ZipLimits } from "../utils/zip-limits";
 
 /**
  * Opt-in cost attribution for the LLM calls the chunker makes while reading a
@@ -59,6 +60,20 @@ export interface ChunkerSourceFetcher {
 
 export const CHUNKER_SOURCE_FETCHER = Symbol("CHUNKER_SOURCE_FETCHER");
 
+/**
+ * One source note read whole by `extractNotes`. `path` names the note (the title, or
+ * `<zip name>/<entry path>` inside an archive). A note that could not be read carries
+ * `skipped` and an empty `text`.
+ */
+export type ExtractedNote = {
+  path: string;
+  text: string;
+  skipped?: "unsupported_type" | "image" | "empty" | "too_deep";
+};
+
+/** Zips nested deeper than this (the uploaded zip counts as the first) are skipped as `too_deep`. */
+const MAX_NOTES_ZIP_DEPTH = 3;
+
 /** Words per page used to estimate page counts for formats that have no real pagination. */
 const WORDS_PER_ESTIMATED_PAGE = 500;
 
@@ -77,6 +92,9 @@ const MAX_CHUNK_CHARS = 24_000;
  * (a one-page letter whose estimate rounds to 2) on their real count.
  */
 const IMPLAUSIBLE_SINGLE_PAGE_ESTIMATE = 3;
+
+/** File types `extractNotes` reads as notes. Anything else (images aside) is skipped as unsupported. */
+const NOTE_FILE_TYPES = ["md", "txt", "csv", "json", "jsonl", "html", "htm", "docx", "pdf", "pptx", "xlsx", "zip"];
 
 @Injectable()
 export class ChunkerService {
@@ -358,6 +376,159 @@ export class ChunkerService {
     } finally {
       await fs.unlink(localFilePath).catch(() => {});
     }
+  }
+
+  /**
+   * Reads a file as whole notes, with no splitting: one note per document, one per readable
+   * entry of a zip (nested zips opened up to `MAX_NOTES_ZIP_DEPTH`, within the zip-bomb limits:
+   * one total-bytes budget shared by the archive and every zip nested in it).
+   * Images and unknown types come back as skipped notes; `__MACOSX/` and dotfiles are ignored.
+   *
+   * `zipLimits` is an internal seam (tests lower the zip-bomb ceilings through it).
+   */
+  async extractNotes(params: {
+    filePath: string;
+    fileType: string;
+    title?: string;
+    attribution?: ChunkerAttribution;
+    zipLimits?: Partial<ZipLimits>;
+  }): Promise<ExtractedNote[]> {
+    const notePath = params.title?.trim() || fileNameOf(params.filePath);
+
+    if (this.config.get<ConfigAiInterface>("ai").mock) {
+      return [{ path: notePath, text: "mock note content for smoke testing" }];
+    }
+
+    const fileType = params.fileType.toLowerCase();
+    if (isImageFile(fileType)) return [{ path: notePath, text: "", skipped: "image" }];
+    if (!NOTE_FILE_TYPES.includes(fileType)) return [{ path: notePath, text: "", skipped: "unsupported_type" }];
+
+    const localFilePath = await this._downloadFile({ filePath: params.filePath, extension: fileType });
+    try {
+      return await this._extractLocal({
+        localFilePath,
+        fileType,
+        path: notePath,
+        depth: 0,
+        label: params.filePath,
+        zipLimits: params.zipLimits,
+        zipBudget: { usedBytes: 0 },
+        attribution: params.attribution,
+      });
+    } finally {
+      await fs.unlink(localFilePath).catch(() => {});
+    }
+  }
+
+  /**
+   * One local working copy to notes. `depth` counts the zips already opened around it.
+   * `attribution` is threaded for parity with the other readers; no reader used here calls an LLM.
+   */
+  private async _extractLocal(params: {
+    localFilePath: string;
+    fileType: string;
+    path: string;
+    depth: number;
+    label: string;
+    zipLimits?: Partial<ZipLimits>;
+    zipBudget: ZipBudget;
+    attribution?: ChunkerAttribution;
+  }): Promise<ExtractedNote[]> {
+    const fileType = params.fileType.toLowerCase();
+
+    if (fileType === "zip") return this._extractZip(params);
+
+    let text: string;
+    switch (fileType) {
+      case "md":
+      case "txt":
+      case "csv":
+      case "json":
+      case "jsonl":
+      case "html":
+      case "htm":
+        text = await fs.readFile(params.localFilePath, "utf-8");
+        break;
+      case "docx":
+        text = this.docxService.convertToMarkdown(await this.docxService.getRawElements(params.localFilePath));
+        break;
+      case "pdf":
+      case "pptx":
+      case "xlsx": {
+        const source = { filePath: params.path, localFilePath: params.localFilePath };
+        const docs =
+          fileType === "pdf"
+            ? await this._createFromPdf(source)
+            : fileType === "pptx"
+              ? await this._createFromPptx(source)
+              : await this._createFromXlsx(source);
+        text = docs.map((doc) => doc.pageContent).join("\n\n");
+        break;
+      }
+      default:
+        return [{ path: params.path, text: "", skipped: isImageFile(fileType) ? "image" : "unsupported_type" }];
+    }
+
+    if (!text?.trim()) return [{ path: params.path, text: "", skipped: "empty" }];
+    return [{ path: params.path, text }];
+  }
+
+  private async _extractZip(params: {
+    localFilePath: string;
+    path: string;
+    depth: number;
+    label: string;
+    zipLimits?: Partial<ZipLimits>;
+    zipBudget: ZipBudget;
+    attribution?: ChunkerAttribution;
+  }): Promise<ExtractedNote[]> {
+    if (params.depth >= MAX_NOTES_ZIP_DEPTH) return [{ path: params.path, text: "", skipped: "too_deep" }];
+
+    const zip = await loadZipWithinLimits({
+      buffer: await fs.readFile(params.localFilePath),
+      label: params.label,
+      limits: params.zipLimits,
+      budget: params.zipBudget,
+    });
+    if (!zip) return [{ path: params.path, text: "", skipped: "unsupported_type" }];
+
+    const notes: ExtractedNote[] = [];
+    for (const entry of Object.values(zip.files)) {
+      if (entry.dir) continue;
+      const segments = entry.name.split("/").filter(Boolean);
+      if (segments.some((segment) => segment === "__MACOSX" || segment.startsWith("."))) continue;
+
+      const entryPath = `${params.path}/${entry.name}`;
+      const extension = path.extname(entry.name).slice(1).toLowerCase();
+      if (isImageFile(extension)) {
+        notes.push({ path: entryPath, text: "", skipped: "image" });
+        continue;
+      }
+      if (!NOTE_FILE_TYPES.includes(extension)) {
+        notes.push({ path: entryPath, text: "", skipped: "unsupported_type" });
+        continue;
+      }
+
+      const tempPath = this._tempPath("temp-note", extension);
+      await fs.writeFile(tempPath, await entry.async("nodebuffer"));
+      try {
+        notes.push(
+          ...(await this._extractLocal({
+            localFilePath: tempPath,
+            fileType: extension,
+            path: entryPath,
+            depth: params.depth + 1,
+            label: entryPath,
+            zipLimits: params.zipLimits,
+            zipBudget: params.zipBudget,
+            attribution: params.attribution,
+          })),
+        );
+      } finally {
+        await fs.unlink(tempPath).catch(() => {});
+      }
+    }
+    return notes;
   }
 
   private async _processLocalFile(params: {

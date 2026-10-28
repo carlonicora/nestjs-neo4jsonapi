@@ -31,6 +31,14 @@ const DEFAULT_LIMITS: ZipLimits = {
   maxTotalBytes: ZIP_MAX_TOTAL_UNCOMPRESSED_BYTES,
 };
 
+/**
+ * A running tally shared by several archives (a zip and the zips nested in it), so that together
+ * they stay within one `maxTotalBytes`. `loadZipWithinLimits` adds what each archive inflates to.
+ */
+export interface ZipBudget {
+  usedBytes: number;
+}
+
 /** The size the central directory declares for an entry. JSZip keeps it on the private `_data`. */
 function declaredSize(entry: JSZip.JSZipObject): number {
   const size = (entry as unknown as { _data?: { uncompressedSize?: unknown } })._data?.uncompressedSize;
@@ -101,7 +109,10 @@ export async function loadZipWithinLimits(params: {
   buffer: Buffer;
   label: string;
   limits?: Partial<ZipLimits>;
+  /** Bytes already spent by enclosing archives; this archive's inflated size is added on success. */
+  budget?: ZipBudget;
 }): Promise<JSZip | undefined> {
+  const alreadyUsed = params.budget?.usedBytes ?? 0;
   const limits: ZipLimits = { ...DEFAULT_LIMITS, ...params.limits };
 
   let zip: JSZip;
@@ -113,7 +124,7 @@ export async function loadZipWithinLimits(params: {
 
   const entries = Object.values(zip.files).filter((entry) => !entry.dir);
 
-  let declaredTotal = 0;
+  let declaredTotal = alreadyUsed;
   for (const entry of entries) {
     const size = declaredSize(entry);
     if (size > limits.maxEntryBytes) throw tooLarge(params.label, entry.name, limits.maxEntryBytes);
@@ -121,10 +132,11 @@ export async function loadZipWithinLimits(params: {
     if (declaredTotal > limits.maxTotalBytes) throw tooLarge(params.label, undefined, limits.maxTotalBytes);
   }
 
-  let actualTotal = 0;
+  let actualTotal = alreadyUsed;
   for (const entry of entries) {
     actualTotal += await countEntry({ entry, label: params.label, limits, totalSoFar: actualTotal });
   }
+  if (params.budget) params.budget.usedBytes = actualTotal;
 
   return zip;
 }
