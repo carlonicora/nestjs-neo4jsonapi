@@ -35,6 +35,8 @@ export interface StripeWebhookJobData {
   stripeEventId: string;
   eventType: string;
   payload: Record<string, any>;
+  // The event's data.previous_attributes: the fields an *.updated event changed, with their old values
+  previousAttributes?: Record<string, any>;
 }
 
 @Processor(QueueId.BILLING_WEBHOOK, { concurrency: 5, lockDuration: 1000 * 60 })
@@ -88,7 +90,7 @@ export class StripeWebhookProcessor extends WorkerHost {
   }
 
   async process(job: Job<StripeWebhookJobData>): Promise<void> {
-    const { webhookEventId, eventType, payload } = job.data;
+    const { webhookEventId, eventType, payload, previousAttributes } = job.data;
 
     // Wrap in CLS context for repository operations that require it
     await this.cls.run(async () => {
@@ -98,7 +100,7 @@ export class StripeWebhookProcessor extends WorkerHost {
           status: "processing",
         });
 
-        await this.handleEvent(eventType, payload);
+        await this.handleEvent(eventType, payload, previousAttributes);
 
         await this.stripeWebhookEventRepository.updateStatus({
           id: webhookEventId,
@@ -121,12 +123,19 @@ export class StripeWebhookProcessor extends WorkerHost {
     });
   }
 
-  private async handleEvent(eventType: string, payload: Record<string, any>): Promise<void> {
+  private async handleEvent(
+    eventType: string,
+    payload: Record<string, any>,
+    previousAttributes?: Record<string, any>,
+  ): Promise<void> {
     switch (eventType) {
       case "customer.subscription.created":
-      case "customer.subscription.updated":
       case "customer.subscription.deleted":
         await this.handleSubscriptionEvent(payload as Stripe.Subscription);
+        break;
+
+      case "customer.subscription.updated":
+        await this.handleSubscriptionEvent(payload as Stripe.Subscription, previousAttributes);
         break;
 
       case "customer.subscription.trial_will_end":
@@ -157,8 +166,11 @@ export class StripeWebhookProcessor extends WorkerHost {
     }
   }
 
-  private async handleSubscriptionEvent(subscription: Stripe.Subscription): Promise<void> {
-    // Get previous subscription state to detect price changes
+  private async handleSubscriptionEvent(
+    subscription: Stripe.Subscription,
+    previousAttributes?: Record<string, any>,
+  ): Promise<void> {
+    // Get previous subscription state (trial status, and the price fallback below)
     const previousSubscription = await this.subscriptionRepository.findByStripeSubscriptionId({
       stripeSubscriptionId: subscription.id,
     });
@@ -374,9 +386,13 @@ export class StripeWebhookProcessor extends WorkerHost {
       // Don't throw - status update failure should not fail webhook processing
     }
 
-    // Detect price change and allocate prorated tokens
-    if (previousSubscription && currentStripePriceId) {
-      const previousStripePriceId = previousSubscription.stripePrice?.stripePriceId;
+    // Detect price change and allocate prorated tokens.
+    // The previous price comes from the event: changePlan writes the new price to the database during
+    // the API request, before this job runs, so the stored price is already the new one on an upgrade.
+    // The database value is only the fallback for an event that carries no previous items.
+    if (currentStripePriceId) {
+      const previousStripePriceId: string | undefined =
+        previousAttributes?.items?.data?.[0]?.price?.id ?? previousSubscription?.stripePrice?.stripePriceId;
 
       if (previousStripePriceId && previousStripePriceId !== currentStripePriceId) {
         this.logger.log(

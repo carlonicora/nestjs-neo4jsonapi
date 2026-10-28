@@ -66,6 +66,8 @@ export class StripeWebhookController {
           stripeEventId: event.id,
           eventType: event.type,
           payload: event.data.object as Record<string, any>,
+          // An upgrade's old price is only known from here: the database already holds the new one
+          previousAttributes: (event.data as { previous_attributes?: Record<string, any> }).previous_attributes,
         },
         {
           attempts: 3,

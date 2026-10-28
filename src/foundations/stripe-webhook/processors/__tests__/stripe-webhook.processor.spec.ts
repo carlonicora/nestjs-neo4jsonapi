@@ -72,6 +72,7 @@ describe("StripeWebhookProcessor", () => {
   let stripeInvoiceApiService: Mocked<StripeInvoiceApiService>;
   let featureSyncService: Mocked<FeatureSyncService>;
   let stripePriceRepository: Mocked<StripePriceRepository>;
+  let tokenAllocationService: Mocked<TokenAllocationService>;
   let logger: Mocked<AppLoggingService>;
 
   const TEST_DATA = {
@@ -79,7 +80,11 @@ describe("StripeWebhookProcessor", () => {
     stripeEventId: "evt_test_12345678",
   };
 
-  const createMockJob = (eventType: string, payload: Record<string, any>): Job<StripeWebhookJobData> => {
+  const createMockJob = (
+    eventType: string,
+    payload: Record<string, any>,
+    previousAttributes?: Record<string, any>,
+  ): Job<StripeWebhookJobData> => {
     return {
       id: "job_123",
       data: {
@@ -87,6 +92,7 @@ describe("StripeWebhookProcessor", () => {
         stripeEventId: TEST_DATA.stripeEventId,
         eventType,
         payload,
+        previousAttributes,
       },
       failedReason: undefined,
     } as unknown as Job<StripeWebhookJobData>;
@@ -267,6 +273,7 @@ describe("StripeWebhookProcessor", () => {
     stripeInvoiceApiService = module.get(StripeInvoiceApiService);
     featureSyncService = module.get(FeatureSyncService);
     stripePriceRepository = module.get(StripePriceRepository);
+    tokenAllocationService = module.get(TokenAllocationService);
     logger = module.get(AppLoggingService);
   };
 
@@ -403,6 +410,85 @@ describe("StripeWebhookProcessor", () => {
       expect(featureSyncService.replaceFeaturesOnPlanChange).toHaveBeenCalledWith({
         stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
         previousStripePriceId: "price_previous",
+      });
+    });
+
+    describe("plan change: previous price from the event", () => {
+      const currentStripePriceId = MOCK_SUBSCRIPTION.items.data[0].price.id;
+
+      // changePlan writes the new price before the webhook runs, so the database already holds it
+      const storedWithNewPrice = () =>
+        subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+          id: "sub-internal",
+          stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+          status: "active",
+          stripePrice: { id: "price-internal-new", stripePriceId: currentStripePriceId },
+        } as any);
+
+      it("an updated event whose previous_attributes carry the old price replaces features from that price", async () => {
+        const job = createMockJob(
+          "customer.subscription.updated",
+          MOCK_SUBSCRIPTION as unknown as Record<string, any>,
+          {
+            items: { object: "list", data: [{ id: "si_old", price: { id: "price_old" } }] },
+          },
+        );
+        storedWithNewPrice();
+        stripePriceRepository.findByStripePriceId.mockResolvedValue({ id: "price-internal-new" } as any);
+        subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
+
+        await processor.process(job);
+
+        expect(featureSyncService.replaceFeaturesOnPlanChange).toHaveBeenCalledWith({
+          stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+          previousStripePriceId: "price_old",
+        });
+        expect(tokenAllocationService.allocateProratedTokensOnPlanChange).toHaveBeenCalledWith({
+          stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+          newPriceId: "price-internal-new",
+        });
+      });
+
+      it("an updated event without previous items falls back to the stored price", async () => {
+        const job = createMockJob(
+          "customer.subscription.updated",
+          MOCK_SUBSCRIPTION as unknown as Record<string, any>,
+          {
+            status: "trialing",
+          },
+        );
+        subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+          id: "sub-internal",
+          stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+          status: "active",
+          stripePrice: { id: "price-internal-old", stripePriceId: "price_stored_old" },
+        } as any);
+        stripePriceRepository.findByStripePriceId.mockResolvedValue({ id: "price-internal-new" } as any);
+        subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
+
+        await processor.process(job);
+
+        expect(featureSyncService.replaceFeaturesOnPlanChange).toHaveBeenCalledWith({
+          stripeSubscriptionId: MOCK_SUBSCRIPTION.id,
+          previousStripePriceId: "price_stored_old",
+        });
+      });
+
+      it("an updated event with no price change replaces no features", async () => {
+        const job = createMockJob(
+          "customer.subscription.updated",
+          MOCK_SUBSCRIPTION as unknown as Record<string, any>,
+          {
+            cancel_at_period_end: true,
+          },
+        );
+        storedWithNewPrice();
+        subscriptionService.syncSubscriptionFromStripe.mockResolvedValue({} as any);
+
+        await processor.process(job);
+
+        expect(featureSyncService.replaceFeaturesOnPlanChange).not.toHaveBeenCalled();
+        expect(tokenAllocationService.allocateProratedTokensOnPlanChange).not.toHaveBeenCalled();
       });
     });
 
