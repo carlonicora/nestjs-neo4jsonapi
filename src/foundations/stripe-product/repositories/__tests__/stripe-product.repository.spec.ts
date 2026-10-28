@@ -51,6 +51,37 @@ describe("StripeProductRepository", () => {
     vi.clearAllMocks();
   });
 
+  describe("findAll - active filter", () => {
+    const priceActive = `${stripeProductMeta.nodeName}_stripePrice.active = true`;
+
+    it("keeps only the active prices of active products", async () => {
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAll({ active: true });
+
+      const query = neo4jService.readMany.mock.calls[0][0];
+      expect(query.query).toContain(`${stripeProductMeta.nodeName}.active = $active`);
+      expect(query.query).toContain(priceActive);
+      expect(query.queryParams.active).toBe(true);
+    });
+
+    it("returns every price when no active filter is given (admin list)", async () => {
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAll();
+
+      expect(neo4jService.readMany.mock.calls[0][0].query).not.toContain(priceActive);
+    });
+
+    it("returns every price of archived products", async () => {
+      neo4jService.readMany.mockResolvedValue([]);
+
+      await repository.findAll({ active: false });
+
+      expect(neo4jService.readMany.mock.calls[0][0].query).not.toContain(priceActive);
+    });
+  });
+
   describe("update - active status changes", () => {
     it("should update product to active=false (archive)", async () => {
       const archivedProduct = { ...mockProduct, active: false };

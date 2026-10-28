@@ -54,7 +54,8 @@ export class StripeProductRepository implements OnModuleInit {
    * Find all products
    *
    * @param params - Optional query parameters
-   * @param params.active - Optional filter by active status
+   * @param params.active - Optional filter by active status. `true` also keeps only
+   *   the active prices of each product: an archived price is not on sale.
    * @returns Array of products ordered by name
    */
   async findAll(params?: { active?: boolean }): Promise<StripeProduct[]> {
@@ -67,11 +68,14 @@ export class StripeProductRepository implements OnModuleInit {
     }
 
     const where = whereParams.length > 0 ? `WHERE ${whereParams.join(" AND ")}` : "";
+    const priceWhere =
+      params?.active === true ? `WHERE ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}.active = true` : "";
 
     query.query = `
       MATCH (${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
       ${where}
       OPTIONAL MATCH (${stripeProductMeta.nodeName})<-[:BELONGS_TO]-(${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})
+      ${priceWhere}
       RETURN ${stripeProductMeta.nodeName}, ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}
       ORDER BY ${stripeProductMeta.nodeName}.name
     `;
