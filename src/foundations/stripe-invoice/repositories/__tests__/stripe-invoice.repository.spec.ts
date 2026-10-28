@@ -440,17 +440,39 @@ describe("StripeInvoiceRepository", () => {
       expect(mockQuery.query).not.toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
-      expect(mockQuery.query).toContain(`CREATE (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}`);
-      expect(mockQuery.query).toContain("createdAt: datetime()");
-      expect(mockQuery.query).toContain("updatedAt: datetime()");
       expect(mockQuery.query).toContain(
-        `CREATE (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})`,
+        `MERGE (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})`,
+      );
+      expect(mockQuery.query).not.toContain(`CREATE (${stripeInvoiceMeta.nodeName}:`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.createdAt = datetime()`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`);
+      expect(mockQuery.query).toContain(
+        `MERGE (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})`,
       );
       expect(mockQuery.query).not.toContain(
-        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
       expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
+    });
+
+    it("sets only the fixed fields on create and refreshes the changing ones on every write", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_INVOICE);
+
+      await repository.create(validCreateParams);
+
+      const invoice = stripeInvoiceMeta.nodeName;
+      const [onCreate, onEveryWrite] = mockQuery.query.split(/\n\s*SET\n/);
+      expect(onCreate).toContain("ON CREATE SET");
+      expect(onCreate).toContain(`${invoice}.id = $id`);
+      expect(onCreate).toContain(`${invoice}.periodStart = datetime($periodStart)`);
+      expect(onEveryWrite).toContain(`${invoice}.status = $status`);
+      expect(onEveryWrite).toContain(`${invoice}.amountPaid = $amountPaid`);
+      expect(onEveryWrite).toContain(
+        `${invoice}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+      );
     });
 
     it("should create invoice with subscription relationship", async () => {
@@ -470,7 +492,7 @@ describe("StripeInvoiceRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 
@@ -548,7 +570,7 @@ describe("StripeInvoiceRepository", () => {
 
       expect(mockQuery.queryParams.dueDate).toBeNull();
       expect(mockQuery.query).toContain(
-        "dueDate: CASE WHEN $dueDate IS NOT NULL THEN datetime($dueDate) ELSE null END",
+        `${stripeInvoiceMeta.nodeName}.dueDate = CASE WHEN $dueDate IS NOT NULL THEN datetime($dueDate) ELSE null END`,
       );
     });
 
@@ -560,7 +582,9 @@ describe("StripeInvoiceRepository", () => {
       await repository.create(validCreateParams);
 
       expect(mockQuery.queryParams.paidAt).toBeNull();
-      expect(mockQuery.query).toContain("paidAt: CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END");
+      expect(mockQuery.query).toContain(
+        `${stripeInvoiceMeta.nodeName}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END`,
+      );
     });
 
     it("should convert Date objects to ISO strings for Neo4j datetime", async () => {
@@ -572,8 +596,8 @@ describe("StripeInvoiceRepository", () => {
 
       expect(mockQuery.queryParams.periodStart).toBe(MOCK_DATES.periodStart.toISOString());
       expect(mockQuery.queryParams.periodEnd).toBe(MOCK_DATES.periodEnd.toISOString());
-      expect(mockQuery.query).toContain("periodStart: datetime($periodStart)");
-      expect(mockQuery.query).toContain("periodEnd: datetime($periodEnd)");
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.periodStart = datetime($periodStart)`);
+      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.periodEnd = datetime($periodEnd)`);
     });
 
     it("should generate unique UUID for each invoice", async () => {
@@ -1271,7 +1295,7 @@ describe("StripeInvoiceRepository", () => {
       expect(mockQuery.query).not.toContain(
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName}`,
       );
-      expect(mockQuery.query).not.toContain(`CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
+      expect(mockQuery.query).not.toContain(`MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->`);
     });
 
     it("should build query with subscription MATCH when subscriptionId provided", async () => {
@@ -1306,7 +1330,7 @@ describe("StripeInvoiceRepository", () => {
         `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`,
       );
       expect(mockQuery.query).toContain(
-        `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
+        `MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`,
       );
     });
 

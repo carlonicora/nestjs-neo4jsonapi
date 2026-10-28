@@ -152,10 +152,15 @@ export class StripeInvoiceRepository implements OnModuleInit {
   }
 
   /**
-   * Create a new invoice
+   * Create a new invoice, or update it when it already exists
    *
-   * Creates an Invoice node with BELONGS_TO relationship to BillingCustomer
-   * and optional FOR_SUBSCRIPTION relationship to Subscription.
+   * MERGEs the Invoice node on stripeInvoiceId with BELONGS_TO relationship to
+   * BillingCustomer and optional FOR_SUBSCRIPTION relationship to Subscription.
+   * Stripe sends invoice.created, invoice.finalized and invoice.paid for one
+   * invoice within milliseconds and the worker processes them in parallel: a
+   * find-then-CREATE lets two of them both create it, and the uniqueness
+   * constraint fails the second. On a match the changing fields are updated, as
+   * updateByStripeInvoiceId does.
    *
    * @param params - Creation parameters
    * @param params.stripeCustomerId - Stripe customer ID to link to
@@ -234,38 +239,39 @@ export class StripeInvoiceRepository implements OnModuleInit {
       ? `MATCH (${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName} {id: $subscriptionId})`
       : "";
     const subscriptionRelation = params.subscriptionId
-      ? `CREATE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`
+      ? `MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName})`
       : "";
 
+    const invoice = stripeInvoiceMeta.nodeName;
     query.query = `
       MATCH (${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
       ${subscriptionMatch}
-      CREATE (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {
-        id: $id,
-        stripeInvoiceId: $stripeInvoiceId,
-        stripeInvoiceNumber: $stripeInvoiceNumber,
-        stripeHostedInvoiceUrl: $stripeHostedInvoiceUrl,
-        stripePdfUrl: $stripePdfUrl,
-        status: $status,
-        currency: $currency,
-        amountDue: $amountDue,
-        amountPaid: $amountPaid,
-        amountRemaining: $amountRemaining,
-        subtotal: $subtotal,
-        total: $total,
-        tax: $tax,
-        periodStart: datetime($periodStart),
-        periodEnd: datetime($periodEnd),
-        dueDate: CASE WHEN $dueDate IS NOT NULL THEN datetime($dueDate) ELSE null END,
-        paidAt: CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END,
-        attemptCount: $attemptCount,
-        attempted: $attempted,
-        createdAt: datetime(),
-        updatedAt: datetime()
-      })
-      CREATE (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})
+      MERGE (${invoice}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      ON CREATE SET
+        ${invoice}.id = $id,
+        ${invoice}.currency = $currency,
+        ${invoice}.subtotal = $subtotal,
+        ${invoice}.total = $total,
+        ${invoice}.tax = $tax,
+        ${invoice}.periodStart = datetime($periodStart),
+        ${invoice}.periodEnd = datetime($periodEnd),
+        ${invoice}.dueDate = CASE WHEN $dueDate IS NOT NULL THEN datetime($dueDate) ELSE null END,
+        ${invoice}.createdAt = datetime()
+      SET
+        ${invoice}.stripeInvoiceNumber = $stripeInvoiceNumber,
+        ${invoice}.stripeHostedInvoiceUrl = $stripeHostedInvoiceUrl,
+        ${invoice}.stripePdfUrl = $stripePdfUrl,
+        ${invoice}.status = $status,
+        ${invoice}.amountDue = $amountDue,
+        ${invoice}.amountPaid = $amountPaid,
+        ${invoice}.amountRemaining = $amountRemaining,
+        ${invoice}.paidAt = CASE WHEN $paidAt IS NOT NULL THEN datetime($paidAt) ELSE null END,
+        ${invoice}.attemptCount = $attemptCount,
+        ${invoice}.attempted = $attempted,
+        ${invoice}.updatedAt = datetime()
+      MERGE (${invoice})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName})
       ${subscriptionRelation}
-      RETURN ${stripeInvoiceMeta.nodeName}
+      RETURN ${invoice}
     `;
 
     return this.neo4j.writeOne(query);
