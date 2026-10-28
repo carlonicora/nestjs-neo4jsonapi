@@ -31,7 +31,7 @@ import {
 } from "../cipher/s3-cipher.core";
 import { S3CipherService } from "./s3-cipher.service";
 import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
-import { S3_REQUEST_HANDLER } from "../s3-request-handler";
+import { S3_BODY_IDLE_TIMEOUT_MS, S3_REQUEST_HANDLER } from "../s3-request-handler";
 
 @Injectable()
 export class S3Service {
@@ -164,6 +164,61 @@ export class S3Service {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
+  }
+
+  /**
+   * Reads a GetObject body into memory, aborting the request when no chunk arrives for S3_BODY_IDLE_TIMEOUT_MS:
+   * the request handler stops guarding once the headers arrive, so a stalled body would otherwise wait forever.
+   */
+  private _readS3Body(key: string, body: Readable, controller: AbortController): Promise<Buffer> {
+    return new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let timer: NodeJS.Timeout;
+      const cleanup = () => {
+        clearTimeout(timer);
+        body.off("data", onData);
+        body.off("end", onEnd);
+        body.off("error", onError);
+        body.off("close", onClose);
+      };
+      const onIdle = () => {
+        cleanup();
+        const error = Object.assign(
+          new Error(`S3 object ${key}: no body data for ${S3_BODY_IDLE_TIMEOUT_MS} ms, download aborted`),
+          { name: "TimeoutError" },
+        );
+        // A late "aborted" error from the torn-down socket must not surface as an unhandled stream error.
+        body.on("error", () => undefined);
+        body.destroy();
+        controller.abort(error);
+        reject(error);
+      };
+      const armTimer = () => {
+        clearTimeout(timer);
+        timer = setTimeout(onIdle, S3_BODY_IDLE_TIMEOUT_MS);
+      };
+      const onData = (chunk: Buffer | Uint8Array | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        armTimer();
+      };
+      const onEnd = () => {
+        cleanup();
+        resolve(Buffer.concat(chunks));
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onClose = () => {
+        cleanup();
+        reject(new Error(`S3 object ${key}: body closed before it ended`));
+      };
+      body.on("data", onData);
+      body.on("end", onEnd);
+      body.on("error", onError);
+      body.on("close", onClose);
+      armTimer();
+    });
   }
 
   private async _loadConfiguration(): Promise<void> {
@@ -715,8 +770,9 @@ export class S3Service {
     });
 
     try {
-      const response = await this.s3Client.send(command);
-      const bytes = await this._streamToBuffer(response.Body as AsyncIterable<Uint8Array>);
+      const controller = new AbortController();
+      const response = await this.s3Client.send(command, { abortSignal: controller.signal });
+      const bytes = await this._readS3Body(params.key, response.Body as Readable, controller);
       return (await this._readBody(params.key, response.Metadata, bytes)).toString("utf-8");
     } catch (error) {
       console.error(`Failed to get object content for key ${params.key}:`, error);
@@ -798,11 +854,12 @@ export class S3Service {
       Bucket: this._bucket,
       Key: params.key,
     });
-    const response = await this.s3Client.send(command);
+    const controller = new AbortController();
+    const response = await this.s3Client.send(command, { abortSignal: controller.signal });
     if (!response.Body) {
       throw new Error(`S3 object not found: ${params.key}`);
     }
-    const bytes = await this._streamToBuffer(response.Body as AsyncIterable<Uint8Array>);
+    const bytes = await this._readS3Body(params.key, response.Body as Readable, controller);
     return {
       buffer: await this._readBody(params.key, response.Metadata, bytes),
       contentType: response.ContentType,
@@ -942,16 +999,18 @@ export class S3Service {
     }
 
     let response: GetObjectCommandOutput;
+    let bytes: Buffer;
     try {
-      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+      const controller = new AbortController();
+      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }), {
+        abortSignal: controller.signal,
+      });
+      if (!response.Body) return null;
+      bytes = await this._readS3Body(params.key, response.Body as Readable, controller);
     } catch (error) {
       this.logger.error(`Failed to download file ${params.key}`, error);
       return null;
     }
-    if (!response.Body) return null;
-    if (!isEncryptedObjectMetadata(response.Metadata)) return await response.Body.transformToString();
-
-    const bytes = Buffer.from(await response.Body.transformToByteArray());
     return (await this._readBody(params.key, response.Metadata, bytes)).toString("utf-8");
   }
 
@@ -985,9 +1044,12 @@ export class S3Service {
     let response: GetObjectCommandOutput;
     let bytes: Buffer;
     try {
-      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }));
+      const controller = new AbortController();
+      response = await this.s3Client.send(new GetObjectCommand({ Bucket: this._bucket, Key: params.key }), {
+        abortSignal: controller.signal,
+      });
       if (!response.Body) return null;
-      bytes = Buffer.from(await response.Body.transformToByteArray());
+      bytes = await this._readS3Body(params.key, response.Body as Readable, controller);
     } catch (error) {
       this.logger.error(`Failed to download file as buffer ${params.key}`, error);
       return null;
@@ -1037,6 +1099,7 @@ export class S3Service {
     if (!response.Body) return null;
 
     // AWS SDK v3 Body is SdkStream which extends Readable
+    // The caller owns this stream's read, so no body idle guard applies here.
     return this._readStream(params.key, response.Metadata, response.Body as Readable);
   }
 
@@ -1078,6 +1141,7 @@ export class S3Service {
     }
     if (!response.Body) return null;
 
+    // The caller owns this stream's read, so no body idle guard applies here.
     return {
       stream: await this._readStreamReady(params.key, response.Metadata, response.Body as Readable),
       contentType: response.ContentType,
