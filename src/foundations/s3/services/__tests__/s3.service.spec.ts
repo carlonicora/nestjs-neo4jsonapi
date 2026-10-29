@@ -97,6 +97,7 @@ describe("S3Service", () => {
   let clsService: MockedObject<ClsService>;
   let configService: MockedObject<ConfigService>;
   let cipher: ReturnType<typeof createMockCipherService>;
+  let logger: ReturnType<typeof createMockAppLoggingService>;
 
   const MOCK_S3_CONFIG = {
     type: "s3",
@@ -210,6 +211,7 @@ describe("S3Service", () => {
     clsService = module.get(ClsService) as MockedObject<ClsService>;
     configService = module.get(ConfigService) as MockedObject<ConfigService>;
     cipher = module.get(S3CipherService);
+    logger = module.get(AppLoggingService);
   });
 
   afterEach(() => {
@@ -247,7 +249,7 @@ describe("S3Service", () => {
       expect(mockS3ClientArgs).toHaveLength(1);
       expect(mockS3ClientArgs[0].requestHandler).toEqual({
         connectionTimeout: 10_000,
-        socketTimeout: 5_000,
+        socketTimeout: 30_000,
         requestTimeout: 300_000,
         throwOnRequestTimeout: true,
       });
@@ -260,6 +262,97 @@ describe("S3Service", () => {
 
       expect(result).toBeNull();
     });
+  });
+
+  describe("S3 body idle guard", () => {
+    const BODY_METHODS = ["downloadFileAsBuffer", "downloadFileAsString", "downloadFileBuffer", "getObjectContent"];
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const bodyText = (result: unknown) =>
+      typeof result === "string"
+        ? result
+        : Buffer.isBuffer(result)
+          ? result.toString("utf-8")
+          : (result as { buffer: Buffer }).buffer.toString("utf-8");
+
+    const sentSignal = () => mockS3Send.mock.calls[0][1].abortSignal as AbortSignal;
+
+    it.each(BODY_METHODS)("%s passes an abortSignal to send and returns every chunk", async (method) => {
+      mockS3Send.mockResolvedValue({ Body: Readable.from([Buffer.from("hello "), Buffer.from("world")]) });
+
+      const result = await (service as any)[method]({ key: "judgements/a.txt" });
+
+      expect(mockS3Send).toHaveBeenCalledWith(expect.anything(), { abortSignal: expect.any(AbortSignal) });
+      expect(bodyText(result)).toBe("hello world");
+      expect(sentSignal().aborted).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each(BODY_METHODS)("%s completes a slow but steady body with a chunk every 20 s", async (method) => {
+      const body = new PassThrough();
+      mockS3Send.mockResolvedValue({ Body: body });
+
+      const pending = (service as any)[method]({ key: "judgements/a.txt" });
+      await vi.advanceTimersByTimeAsync(0);
+      for (const part of ["one ", "two ", "three"]) {
+        body.write(Buffer.from(part));
+        await vi.advanceTimersByTimeAsync(20_000);
+      }
+      body.end();
+
+      expect(bodyText(await pending)).toBe("one two three");
+      expect(sentSignal().aborted).toBe(false);
+    });
+
+    const stall = async (method: string) => {
+      const body = new PassThrough();
+      mockS3Send.mockResolvedValue({ Body: body });
+      const pending = (service as any)[method]({ key: "judgements/a.txt" }).catch((error: Error) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      body.write(Buffer.from("partial"));
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(sentSignal().aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      return { result: await pending, body };
+    };
+
+    it.each(["downloadFileAsBuffer", "downloadFileAsString"])(
+      "%s aborts a body that stalls for 30 s and returns null",
+      async (method) => {
+        const { result, body } = await stall(method);
+
+        expect(result).toBeNull();
+        expect(sentSignal().aborted).toBe(true);
+        expect(body.destroyed).toBe(true);
+        expect(logger.error).toHaveBeenCalledWith(
+          expect.stringContaining("judgements/a.txt"),
+          expect.objectContaining({ name: "TimeoutError" }),
+        );
+      },
+    );
+
+    it.each(["downloadFileBuffer", "getObjectContent"])(
+      "%s aborts a body that stalls for 30 s and throws a TimeoutError",
+      async (method) => {
+        const { result, body } = await stall(method);
+
+        expect(result).toBeInstanceOf(Error);
+        expect((result as Error).name).toBe("TimeoutError");
+        expect((result as Error).message).toBe(
+          "S3 object judgements/a.txt: no body data for 30000 ms, download aborted",
+        );
+        expect(sentSignal().aborted).toBe(true);
+        expect(sentSignal().reason).toBe(result);
+        expect(body.destroyed).toBe(true);
+      },
+    );
   });
 
   describe("generatePresignedUrl", () => {
@@ -534,12 +627,8 @@ describe("S3Service", () => {
       return calls[calls.length - 1][0] as Record<string, any>;
     };
 
-    const s3Body = (bytes: Buffer) => {
-      const body: any = Readable.from([bytes]);
-      body.transformToByteArray = vi.fn().mockResolvedValue(new Uint8Array(bytes));
-      body.transformToString = vi.fn().mockResolvedValue(bytes.toString("utf-8"));
-      return body;
-    };
+    // At runtime the SDK Body is the response IncomingMessage (a Readable) with the sdk-stream mixin.
+    const s3Body = (bytes: Buffer) => Readable.from([bytes]);
 
     const buildService = async (s3Config: Record<string, unknown>, policy?: S3KeyAccessPolicy) => {
       const module: TestingModule = await Test.createTestingModule({

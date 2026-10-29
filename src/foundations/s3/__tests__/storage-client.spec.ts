@@ -33,7 +33,7 @@ describe("createS3Client", () => {
       expect(mockS3ClientArgs).toHaveLength(1);
       expect(mockS3ClientArgs[0].requestHandler).toEqual({
         connectionTimeout: 10_000,
-        socketTimeout: 5_000,
+        socketTimeout: 30_000,
         requestTimeout: 300_000,
         throwOnRequestTimeout: true,
       });
