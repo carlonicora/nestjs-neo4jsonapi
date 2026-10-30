@@ -1,3 +1,9 @@
+## [8.14.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.13.0...v8.14.0) (2026-10-30)
+
+### 🚀 Features
+
+* **referral:** record how each referral happened, every invite email and link visit, and serve an administrator referral report ([624889f](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/624889f5cb8d8134f7ff6170dd16e99ef5b235ae))
+
 ## [8.13.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.12.1...v8.13.0) (2026-10-29)
 
 ### 🚀 Features
