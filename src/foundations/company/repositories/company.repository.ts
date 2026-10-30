@@ -10,6 +10,8 @@ import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning
 import { Company, CompanyDescriptor } from "../../company/entities/company";
 import { featureMeta } from "../../feature/entities/feature.meta";
 import { moduleMeta } from "../../module/entities/module.meta";
+import { referralInviteMeta } from "../../referral/entities/referral-invite.meta";
+import { referralVisitMeta } from "../../referral/entities/referral-visit.meta";
 import { companyMeta } from "../entities/company.meta";
 
 /**
@@ -566,8 +568,8 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
-   * Delete a company and cascade its Memberships and the Referrals naming it on
-   * either side.
+   * Delete a company and cascade its Memberships, the Referrals naming it on
+   * either side, and the referral invites and link visits recorded for it.
    *
    * KEPT under the name `delete` (overriding `AbstractRepository.delete()`) — the
    * Membership cascade below MUST run for every caller, including an application
@@ -594,6 +596,12 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       WITH DISTINCT company
       OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)
       DETACH DELETE referral
+
+      // Referral invites sent and link visits received by the company go with it.
+      WITH DISTINCT company
+      OPTIONAL MATCH (company)<-[:SENT_BY|VISITED]-(referral_activity)
+      WHERE referral_activity:${referralInviteMeta.labelName} OR referral_activity:${referralVisitMeta.labelName}
+      DETACH DELETE referral_activity
 
       WITH DISTINCT company
       DETACH DELETE company

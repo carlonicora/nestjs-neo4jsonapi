@@ -78,6 +78,8 @@ describe("ReferralService", () => {
       findPendingByReferredCompanyId: vi.fn(),
       completeReferral: vi.fn(),
       countCompletedByReferrerCompanyId: vi.fn(),
+      createInvite: vi.fn(),
+      createVisit: vi.fn(),
     } as any;
 
     mockCompanyRepository = {
@@ -213,7 +215,23 @@ describe("ReferralService", () => {
         id: expect.any(String),
         referrerCompanyId: "gm",
         referredCompanyId: "player",
+        source: "direct",
       });
+    });
+
+    it("recordReferral writes a direct referral", async () => {
+      await service.recordReferral({ referrerCompanyId: "gm", referredCompanyId: "player" });
+
+      expect(mockReferralRepository.createReferralIfAbsent).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "direct" }),
+      );
+    });
+
+    it("recordVisit does nothing when the feature is disabled", async () => {
+      await service.recordVisit({ referralCode: "company-a-code" });
+
+      expect(mockCompanyRepository.findByReferralCode).not.toHaveBeenCalled();
+      expect(mockReferralRepository.createVisit).not.toHaveBeenCalled();
     });
 
     it("recordReferral ignores a self-referral", async () => {
@@ -248,6 +266,17 @@ describe("ReferralService", () => {
         );
       });
 
+      it("trackReferral writes a link referral", async () => {
+        mockCompanyRepository.findByReferralCode.mockResolvedValue({
+          id: MOCK_REFERRER_COMPANY_ID,
+        } as any);
+        mockReferralRepository.createReferral.mockResolvedValue(true);
+
+        await service.trackReferral({ referralCode: MOCK_REFERRAL_CODE });
+
+        expect(mockReferralRepository.createReferral).toHaveBeenCalledWith(expect.objectContaining({ source: "link" }));
+      });
+
       it("should silently ignore invalid referral codes", async () => {
         mockCompanyRepository.findByReferralCode.mockResolvedValue(null);
 
@@ -280,6 +309,36 @@ describe("ReferralService", () => {
             id: expect.any(String),
           }),
         );
+      });
+    });
+
+    describe("recordVisit", () => {
+      it("recordVisit records a visit for a known code", async () => {
+        mockCompanyRepository.findByReferralCode.mockResolvedValue({ id: "company-a" } as any);
+
+        await service.recordVisit({ referralCode: "company-a-code" });
+
+        expect(mockCompanyRepository.findByReferralCode).toHaveBeenCalledWith({ referralCode: "company-a-code" });
+        expect(mockReferralRepository.createVisit).toHaveBeenCalledTimes(1);
+        expect(mockReferralRepository.createVisit).toHaveBeenCalledWith({
+          id: expect.any(String),
+          referrerCompanyId: "company-a",
+        });
+      });
+
+      it("recordVisit ignores an unknown code", async () => {
+        mockCompanyRepository.findByReferralCode.mockResolvedValue(null);
+
+        await service.recordVisit({ referralCode: "abc" });
+
+        expect(mockReferralRepository.createVisit).not.toHaveBeenCalled();
+      });
+
+      it("recordVisit writes nothing for an empty code", async () => {
+        await service.recordVisit({ referralCode: "" });
+
+        expect(mockCompanyRepository.findByReferralCode).not.toHaveBeenCalled();
+        expect(mockReferralRepository.createVisit).not.toHaveBeenCalled();
       });
     });
 
@@ -450,10 +509,42 @@ describe("ReferralService", () => {
         expect(payload.locale).toBeUndefined();
       });
 
+      it("sendReferralInvite records the invite without the invitee address", async () => {
+        await service.sendReferralInvite({ email: testEmail });
+
+        expect(mockReferralRepository.createInvite).toHaveBeenCalledTimes(1);
+        expect(mockReferralRepository.createInvite).toHaveBeenCalledWith({
+          id: expect.any(String),
+          companyId: MOCK_COMPANY_ID,
+          userId: MOCK_USER_ID,
+        });
+        const args = mockReferralRepository.createInvite.mock.calls[0][0] as Record<string, unknown>;
+        expect(args).not.toHaveProperty("email");
+        expect(JSON.stringify(args)).not.toContain(testEmail);
+      });
+
+      it("sendReferralInvite records nothing when refused", async () => {
+        mockRedisClient.get.mockResolvedValue("1");
+        await expect(service.sendReferralInvite({ email: testEmail })).rejects.toMatchObject({
+          response: expect.objectContaining({ code: "REFERRAL_ALREADY_INVITED" }),
+        });
+        expect(mockReferralRepository.createInvite).not.toHaveBeenCalled();
+
+        mockRedisClient.get.mockResolvedValue(null);
+        mockUserRepository.findByEmail.mockResolvedValue({ id: "existing-user" } as any);
+        await expect(service.sendReferralInvite({ email: testEmail })).rejects.toMatchObject({
+          response: expect.objectContaining({ code: "REFERRAL_ALREADY_REGISTERED" }),
+        });
+        expect(mockReferralRepository.createInvite).not.toHaveBeenCalled();
+      });
+
       it("should throw BadRequestException when email already invited recently", async () => {
         mockRedisClient.get.mockResolvedValue("1");
 
         await expect(service.sendReferralInvite({ email: testEmail })).rejects.toThrow(BadRequestException);
+        await expect(service.sendReferralInvite({ email: testEmail })).rejects.toMatchObject({
+          response: expect.objectContaining({ code: "REFERRAL_ALREADY_INVITED" }),
+        });
         expect(mockEmailQueue.add).not.toHaveBeenCalled();
       });
 
@@ -461,6 +552,9 @@ describe("ReferralService", () => {
         mockUserRepository.findByEmail.mockResolvedValue({ id: "existing-user" } as any);
 
         await expect(service.sendReferralInvite({ email: testEmail })).rejects.toThrow(BadRequestException);
+        await expect(service.sendReferralInvite({ email: testEmail })).rejects.toMatchObject({
+          response: expect.objectContaining({ code: "REFERRAL_ALREADY_REGISTERED" }),
+        });
         expect(mockEmailQueue.add).not.toHaveBeenCalled();
       });
 

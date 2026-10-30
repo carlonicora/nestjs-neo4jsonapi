@@ -553,6 +553,21 @@ describe("CompanyRepository", () => {
       expect(companyDelete).toBeGreaterThan(referralDelete);
       expect(query.query).toContain("DETACH DELETE orphan_ms");
     });
+
+    it("delete removes the company's referral invites and visits", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.delete({ id: MOCK_COMPANY_ID });
+
+      const query = (mockNeo4jService.writeOne.mock.calls[0][0] as { query: string }).query;
+      const activityMatch = query.indexOf("(company)<-[:SENT_BY|VISITED]-(referral_activity)");
+      const activityDelete = query.indexOf("DETACH DELETE referral_activity");
+      const companyDelete = query.indexOf("DETACH DELETE company");
+      expect(activityMatch).toBeGreaterThan(-1);
+      expect(query).toContain("referral_activity:ReferralInvite OR referral_activity:ReferralVisit");
+      expect(activityDelete).toBeGreaterThan(activityMatch);
+      expect(companyDelete).toBeGreaterThan(activityDelete);
+    });
   });
 
   describe("markTrialEnd", () => {

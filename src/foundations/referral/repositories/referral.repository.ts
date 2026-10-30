@@ -5,7 +5,13 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import type { Company } from "../../company/entities/company";
 import { companyMeta } from "../../company/entities/company.meta";
+import { userMeta } from "../../user/entities/user.meta";
 import { Referral, ReferralDescriptor } from "../entities/referral";
+import { ReferralInviteDescriptor } from "../entities/referral-invite";
+import { referralInviteMeta } from "../entities/referral-invite.meta";
+import type { ReferralSource } from "../entities/referral-source";
+import { ReferralVisitDescriptor } from "../entities/referral-visit";
+import { referralVisitMeta } from "../entities/referral-visit.meta";
 import { referralMeta } from "../entities/referral.meta";
 
 @Injectable()
@@ -31,12 +37,28 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
 
   /**
    * Create a new referral with REFERRED_BY and REFERS_TO relationships.
+   *
+   * Company check: the referred company (the caller's own) goes through
+   * validateRelatedNodes. The REFERRED_BY link to the referrer company skips that
+   * check, because a link to another company is the point of the record.
+   * Owner-approved exception (Carlo, 2026-10-30, D18), the same scope as the
+   * 2026-10-26 exception on createReferralIfAbsent.
    * @param params.id - The referral ID
    * @param params.referrerCompanyId - The company that made the referral
    * @param params.referredCompanyId - The company that was referred
+   * @param params.source - How the referral came about (link or direct)
    * @returns true if the referral was created, false if one or both companies don't exist
    */
-  async createReferral(params: { id: string; referrerCompanyId: string; referredCompanyId: string }): Promise<boolean> {
+  async createReferral(params: {
+    id: string;
+    referrerCompanyId: string;
+    referredCompanyId: string;
+    source: ReferralSource;
+  }): Promise<boolean> {
+    await this.neo4j.validateRelatedNodes({
+      nodes: [{ id: params.referredCompanyId, label: companyMeta.labelName }],
+    });
+
     const results = await this.neo4j.executeInTransaction([
       {
         query: `
@@ -45,6 +67,7 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
           CREATE (${referralMeta.nodeName}:${referralMeta.labelName} {
             id: $id,
             status: $status,
+            source: $source,
             createdAt: datetime(),
             updatedAt: datetime()
           })
@@ -57,6 +80,7 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
           referrerCompanyId: params.referrerCompanyId,
           referredCompanyId: params.referredCompanyId,
           status: "pending",
+          source: params.source,
         },
       },
     ]);
@@ -79,11 +103,13 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
    * @param params.id - The referral ID
    * @param params.referrerCompanyId - The company that made the referral
    * @param params.referredCompanyId - The company that was referred
+   * @param params.source - How the referral came about (link or direct)
    */
   async createReferralIfAbsent(params: {
     id: string;
     referrerCompanyId: string;
     referredCompanyId: string;
+    source: ReferralSource;
   }): Promise<void> {
     await this.neo4j.validateRelatedNodes({
       nodes: [{ id: params.referredCompanyId, label: companyMeta.labelName }],
@@ -97,6 +123,7 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
       referrerCompanyId: params.referrerCompanyId,
       referredCompanyId: params.referredCompanyId,
       status: "pending",
+      source: params.source,
     };
 
     query.query += `
@@ -106,11 +133,84 @@ export class ReferralRepository extends AbstractRepository<Referral, typeof Refe
       CREATE (${referralMeta.nodeName}:${referralMeta.labelName} {
         id: $id,
         status: $status,
+        source: $source,
         createdAt: datetime(),
         updatedAt: datetime()
       })
       CREATE (${referralMeta.nodeName})-[:REFERRED_BY]->(referrer)
       CREATE (${referralMeta.nodeName})-[:REFERS_TO]->(referred)
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Record one referral invite email sent by a user of a company. The invitee
+   * address is never stored. Both ids must be server-derived (CLS).
+   * @param params.id - The invite ID
+   * @param params.companyId - The sender's company
+   * @param params.userId - The sender
+   */
+  async createInvite(params: { id: string; companyId: string; userId: string }): Promise<void> {
+    await this.neo4j.validateRelatedNodes({
+      nodes: [
+        { id: params.companyId, label: companyMeta.labelName },
+        { id: params.userId, label: userMeta.labelName },
+      ],
+    });
+
+    const query = this.neo4j.initQuery({ serialiser: ReferralInviteDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      id: params.id,
+      companyId: params.companyId,
+      userId: params.userId,
+    };
+
+    query.query += `
+      MATCH (company:${companyMeta.labelName} {id: $companyId})
+      MATCH (sender:${userMeta.labelName} {id: $userId})
+      CREATE (${referralInviteMeta.nodeName}:${referralInviteMeta.labelName} {
+        id: $id,
+        createdAt: datetime(),
+        updatedAt: datetime()
+      })
+      CREATE (${referralInviteMeta.nodeName})-[:SENT_BY]->(company)
+      CREATE (${referralInviteMeta.nodeName})-[:SENT_BY_USER]->(sender)
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Record one visit to a company's referral link. Runs on a public route with no
+   * company in CLS, so the company check is existence only. The company id comes
+   * from the referral code lookup, never from the request.
+   * @param params.id - The visit ID
+   * @param params.referrerCompanyId - The company owning the referral code
+   */
+  async createVisit(params: { id: string; referrerCompanyId: string }): Promise<void> {
+    await this.neo4j.validateRelatedNodes({
+      nodes: [{ id: params.referrerCompanyId, label: companyMeta.labelName }],
+    });
+
+    const query = this.neo4j.initQuery({ serialiser: ReferralVisitDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      id: params.id,
+      referrerCompanyId: params.referrerCompanyId,
+    };
+
+    query.query += `
+      MATCH (referrer:${companyMeta.labelName} {id: $referrerCompanyId})
+      CREATE (${referralVisitMeta.nodeName}:${referralVisitMeta.labelName} {
+        id: $id,
+        createdAt: datetime(),
+        updatedAt: datetime()
+      })
+      CREATE (${referralVisitMeta.nodeName})-[:VISITED]->(referrer)
     `;
 
     await this.neo4j.writeOne(query);

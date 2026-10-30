@@ -13,6 +13,7 @@ import { CompanyRepository } from "../../company/repositories/company.repository
 import { UserRepository } from "../../user/repositories/user.repository";
 import { ReferralRepository } from "../repositories/referral.repository";
 import { ReferralCodeDescriptor } from "../entities/referral-code";
+import { REFERRAL_SOURCE } from "../entities/referral-source";
 import { ReferralStatsDescriptor } from "../entities/referral-stats";
 import { REFERRAL_CONFIG, ReferralModuleConfig } from "../interfaces/referral.config.interface";
 import { ReferralCompletionHandler } from "../../stripe-webhook/interfaces/referral-completion-handler.interface";
@@ -127,6 +128,7 @@ export class ReferralService implements ReferralCompletionHandler {
       id: referralId,
       referrerCompanyId: referrerCompany.id,
       referredCompanyId,
+      source: REFERRAL_SOURCE.link,
     });
 
     if (created) {
@@ -155,6 +157,27 @@ export class ReferralService implements ReferralCompletionHandler {
       id: randomUUID(),
       referrerCompanyId: params.referrerCompanyId,
       referredCompanyId: params.referredCompanyId,
+      source: REFERRAL_SOURCE.direct,
+    });
+  }
+
+  /**
+   * Record one visit to a referral link. Never throws for a bad code: an empty or
+   * unknown code, or a disabled feature, writes nothing. Never feeds a reward.
+   * @param params.referralCode - The referral code from the visited link
+   */
+  async recordVisit(params: { referralCode: string }): Promise<void> {
+    if (!this.isEnabled) return;
+    if (!params.referralCode) return;
+
+    const referrerCompany = await this.companyRepository.findByReferralCode({
+      referralCode: params.referralCode,
+    });
+    if (!referrerCompany) return;
+
+    await this.referralRepository.createVisit({
+      id: randomUUID(),
+      referrerCompanyId: referrerCompany.id,
     });
   }
 
@@ -162,8 +185,8 @@ export class ReferralService implements ReferralCompletionHandler {
    * Queue a referral invite email to be sent.
    * Enforces a configurable cooldown per company+email to prevent spam.
    * @param params.email - The email address to send the invite to
-   * @throws BadRequestException if the email was already invited within the cooldown period
-   * @throws BadRequestException if the email is already registered in the system
+   * @throws BadRequestException (code REFERRAL_ALREADY_INVITED) if the email was already invited within the cooldown period
+   * @throws BadRequestException (code REFERRAL_ALREADY_REGISTERED) if the email is already registered in the system
    */
   async sendReferralInvite(params: { email: string }): Promise<void> {
     const companyId = this.clsService.get("companyId") as string;
@@ -175,13 +198,19 @@ export class ReferralService implements ReferralCompletionHandler {
     const existingInvite = await redis.get(inviteKey);
 
     if (existingInvite) {
-      throw new BadRequestException("You already sent an invitation to this email recently");
+      throw new BadRequestException({
+        code: "REFERRAL_ALREADY_INVITED",
+        message: "You already sent an invitation to this email recently",
+      });
     }
 
     // Check if the email is already registered in the system
     const existingUser = await this.userRepository.findByEmail({ email: params.email });
     if (existingUser) {
-      throw new BadRequestException("This email is already registered in the system");
+      throw new BadRequestException({
+        code: "REFERRAL_ALREADY_REGISTERED",
+        message: "This email is already registered in the system",
+      });
     }
 
     const company = await this.companyRepository.findByCompanyId({ companyId });
@@ -192,6 +221,7 @@ export class ReferralService implements ReferralCompletionHandler {
 
     // Mark this email as invited (with configured TTL)
     await redis.setex(inviteKey, this.config.inviteCooldownSeconds, "1");
+    await this.referralRepository.createInvite({ id: randomUUID(), companyId, userId });
 
     await this.emailQueue.add("referral-invite", {
       jobType: "referral-invite",

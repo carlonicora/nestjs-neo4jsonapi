@@ -17,6 +17,8 @@ import { ClsService } from "nestjs-cls";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import { referralInviteMeta } from "../../referral/entities/referral-invite.meta";
+import { referralVisitMeta } from "../../referral/entities/referral-visit.meta";
 import { User, UserDescriptor } from "../../user/entities/user";
 
 type WipeQuery = { query: string; queryParams: Record<string, unknown> };
@@ -182,7 +184,8 @@ export class AccountDeletionWipeRepository extends AbstractRepository<User, type
   /**
    * Deletes the Company node and its Memberships in one transaction (a company has a handful
    * of memberships; an orphaned Membership would read as a platform membership). Referrals
-   * naming the company on either side are deleted with it. Remaining edges go with the Company.
+   * naming the company on either side are deleted with it, and so are the referral invites it sent
+   * and the link visits it received. Remaining edges go with the Company.
    */
   async deleteCompanyShell(params: { companyId: string }): Promise<void> {
     const { query, queryParams } = this._wipeQuery(
@@ -194,6 +197,10 @@ export class AccountDeletionWipeRepository extends AbstractRepository<User, type
       WITH DISTINCT company
       OPTIONAL MATCH (company)<-[:REFERRED_BY|REFERS_TO]-(referral:Referral)
       DETACH DELETE referral
+      WITH DISTINCT company
+      OPTIONAL MATCH (company)<-[:SENT_BY|VISITED]-(referral_activity)
+      WHERE referral_activity:${referralInviteMeta.labelName} OR referral_activity:${referralVisitMeta.labelName}
+      DETACH DELETE referral_activity
       WITH DISTINCT company
       DETACH DELETE company
     `,

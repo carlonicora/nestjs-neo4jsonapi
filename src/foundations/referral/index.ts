@@ -6,6 +6,7 @@ export * from "./interfaces";
 
 // Entities
 export * from "./entities";
+export * from "./entities/referral-source";
 
 // Repositories
 export * from "./repositories";

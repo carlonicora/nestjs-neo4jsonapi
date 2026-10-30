@@ -1,6 +1,7 @@
 import { defineEntity, Entity } from "../../../common";
 import type { Company } from "../../company/entities/company";
 import { companyMeta } from "../../company/entities/company.meta";
+import type { ReferralSource } from "./referral-source";
 import { referralMeta } from "./referral.meta";
 
 /**
@@ -10,6 +11,8 @@ export type Referral = Entity & {
   status: string;
   completedAt?: Date;
   tokensAwarded?: number;
+  /** Absent on referrals written before the source was recorded. */
+  source?: ReferralSource;
 
   referrer?: Company;
   referred?: Company;
@@ -29,6 +32,7 @@ export const ReferralDescriptor = defineEntity<Referral>()({
     status: { type: "string", required: true },
     completedAt: { type: "datetime" },
     tokensAwarded: { type: "number" },
+    source: { type: "string" },
   },
 
   // Relationship definitions

@@ -147,6 +147,20 @@ describe("AccountDeletionWipeRepository", () => {
     expect(companyDelete).toBeGreaterThan(referralDelete);
   });
 
+  it("deleteCompanyShell deletes the company's referral invites and visits in the same transaction", async () => {
+    await repository.deleteCompanyShell({ companyId: COMPANY_ID });
+
+    expect(neo4j.executeInTransaction).toHaveBeenCalledTimes(1);
+    const query = calls[0].query as string;
+    const activityMatch = query.indexOf("(company)<-[:SENT_BY|VISITED]-(referral_activity)");
+    const activityDelete = query.indexOf("DETACH DELETE referral_activity");
+    const companyDelete = query.indexOf("DETACH DELETE company");
+    expect(activityMatch).toBeGreaterThan(-1);
+    expect(query).toContain("referral_activity:ReferralInvite OR referral_activity:ReferralVisit");
+    expect(activityDelete).toBeGreaterThan(activityMatch);
+    expect(companyDelete).toBeGreaterThan(activityDelete);
+  });
+
   it("deleteUserNode deletes one user by parameter", async () => {
     await repository.deleteUserNode({ userId: USER_ID });
 

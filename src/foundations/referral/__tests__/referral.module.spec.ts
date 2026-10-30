@@ -18,6 +18,17 @@ import {
 import { ReferralService } from "../services/referral.service";
 import { ReferralRepository } from "../repositories/referral.repository";
 import { QueueId } from "../../../config/enums/queue.id";
+import { modelRegistry } from "../../../common/registries/registry";
+import { ReferralController } from "../controllers/referral.controller";
+import { ReferralPublicController } from "../controllers/referral.public.controller";
+import { ReferralAdminController } from "../controllers/referral.admin.controller";
+import { ReferralAdminRepository } from "../repositories/referral.admin.repository";
+import { ReferralAdminService } from "../services/referral.admin.service";
+import { ReferralAdminSummaryDescriptor } from "../entities/referral-admin-summary";
+import { ReferralAdminReferrerDescriptor } from "../entities/referral-admin-referrer";
+import { ReferralAdminReferralDescriptor } from "../entities/referral-admin-referral";
+import { ReferralInviteDescriptor } from "../entities/referral-invite";
+import { ReferralVisitDescriptor } from "../entities/referral-visit";
 
 // Mock dependencies
 vi.mock("../../../core/jsonapi/services/jsonapi.service", () => ({
@@ -277,6 +288,46 @@ describe("ReferralModule", () => {
       const dynamicModule = ReferralModule.forRoot();
 
       expect(dynamicModule.providers).toContain(ReferralRepository);
+    });
+  });
+
+  describe("Scenario: Referral admin report and visit endpoint", () => {
+    it("lists the user, public and admin controllers, user controller first", () => {
+      const dynamicModule = ReferralModule.forRoot();
+
+      expect(dynamicModule.controllers).toEqual([
+        ReferralController,
+        ReferralPublicController,
+        ReferralAdminController,
+      ]);
+    });
+
+    it("provides the admin repository and service", () => {
+      const dynamicModule = ReferralModule.forRoot();
+
+      expect(dynamicModule.providers).toContain(ReferralAdminRepository);
+      expect(dynamicModule.providers).toContain(ReferralAdminService);
+    });
+
+    it("provides the admin descriptors' serialisers that buildList resolves", () => {
+      const dynamicModule = ReferralModule.forRoot();
+
+      expect(dynamicModule.providers).toContain(ReferralAdminSummaryDescriptor.model.serialiser);
+      expect(dynamicModule.providers).toContain(ReferralAdminReferrerDescriptor.model.serialiser);
+      expect(dynamicModule.providers).toContain(ReferralAdminReferralDescriptor.model.serialiser);
+    });
+
+    it("registers the admin, invite and visit descriptors' models on init", () => {
+      const register = vi.spyOn(modelRegistry, "register");
+
+      new ReferralModule().onModuleInit();
+
+      expect(register).toHaveBeenCalledWith(ReferralAdminSummaryDescriptor.model);
+      expect(register).toHaveBeenCalledWith(ReferralAdminReferrerDescriptor.model);
+      expect(register).toHaveBeenCalledWith(ReferralAdminReferralDescriptor.model);
+      expect(register).toHaveBeenCalledWith(ReferralInviteDescriptor.model);
+      expect(register).toHaveBeenCalledWith(ReferralVisitDescriptor.model);
+      register.mockRestore();
     });
   });
 });

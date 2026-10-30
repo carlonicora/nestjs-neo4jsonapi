@@ -8,11 +8,20 @@ import { UserModule } from "../user/user.module";
 import { REGISTRATION_HOOK } from "../auth/interfaces/registration-hook.interface";
 import { REFERRAL_COMPLETION_HANDLER } from "../stripe-webhook/interfaces/referral-completion-handler.interface";
 
+import { ReferralAdminController } from "./controllers/referral.admin.controller";
 import { ReferralController } from "./controllers/referral.controller";
+import { ReferralPublicController } from "./controllers/referral.public.controller";
+import { ReferralAdminReferralDescriptor } from "./entities/referral-admin-referral";
+import { ReferralAdminReferrerDescriptor } from "./entities/referral-admin-referrer";
+import { ReferralAdminSummaryDescriptor } from "./entities/referral-admin-summary";
 import { ReferralCodeDescriptor } from "./entities/referral-code";
 import { ReferralStatsDescriptor } from "./entities/referral-stats";
 import { ReferralDescriptor } from "./entities/referral";
+import { ReferralInviteDescriptor } from "./entities/referral-invite";
+import { ReferralVisitDescriptor } from "./entities/referral-visit";
+import { ReferralAdminRepository } from "./repositories/referral.admin.repository";
 import { ReferralRepository } from "./repositories/referral.repository";
+import { ReferralAdminService } from "./services/referral.admin.service";
 import { ReferralService } from "./services/referral.service";
 import { RegistrationReferralHook } from "./services/registration-referral.hook";
 import {
@@ -63,6 +72,11 @@ export class ReferralModule implements OnModuleInit {
     modelRegistry.register(ReferralDescriptor.model);
     modelRegistry.register(ReferralCodeDescriptor.model);
     modelRegistry.register(ReferralStatsDescriptor.model);
+    modelRegistry.register(ReferralInviteDescriptor.model);
+    modelRegistry.register(ReferralVisitDescriptor.model);
+    modelRegistry.register(ReferralAdminSummaryDescriptor.model);
+    modelRegistry.register(ReferralAdminReferrerDescriptor.model);
+    modelRegistry.register(ReferralAdminReferralDescriptor.model);
   }
 
   /**
@@ -117,14 +131,19 @@ export class ReferralModule implements OnModuleInit {
     return {
       module: ReferralModule,
       imports: [CompanyModule, UserModule, BullModule.registerQueue({ name: QueueId.EMAIL }), ...(imports as any[])],
-      controllers: [ReferralController],
+      controllers: [ReferralController, ReferralPublicController, ReferralAdminController],
       providers: [
         ...providers,
         ReferralCodeDescriptor.model.serialiser,
         ReferralStatsDescriptor.model.serialiser,
         ReferralDescriptor.model.serialiser,
+        ReferralAdminSummaryDescriptor.model.serialiser,
+        ReferralAdminReferrerDescriptor.model.serialiser,
+        ReferralAdminReferralDescriptor.model.serialiser,
         ReferralRepository,
         ReferralService,
+        ReferralAdminRepository,
+        ReferralAdminService,
         RegistrationReferralHook,
         registrationHookProvider,
         referralCompletionProvider,
