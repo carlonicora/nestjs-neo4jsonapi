@@ -1,3 +1,13 @@
+## [8.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.14.0...v8.15.0) (2026-10-31)
+
+### 🚀 Features
+
+* **cache:** key cached responses by the request language, so a reply in one language is never served to a request in another ([615b08b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/615b08be944fee65bfad377954d6cc70c93a8f6b))
+
+### 🐛 Bug Fixes
+
+* **neo4j:** rebuild a full-text index at boot when its labels or fields have changed ([b95fd61](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b95fd61cfc0e1ce73a52135d0baa998fb94ab38e))
+
 ## [8.14.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.13.0...v8.14.0) (2026-10-30)
 
 ### 🚀 Features
