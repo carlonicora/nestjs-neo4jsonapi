@@ -80,10 +80,9 @@ export interface FieldDef {
    * the index. Excluding every string field leaves `fulltextIndexName` empty,
    * which the search guards already treat as "no index".
    *
-   * NOTE: changing this on an existing entity does not rebuild the live index.
-   * `AbstractRepository` issues `CREATE ... IF NOT EXISTS`, which no-ops when an
-   * index of that name already exists, so the old properties persist until that
-   * index is dropped manually.
+   * NOTE: changing this on an existing entity changes the index's fields. At
+   * boot, `AbstractRepository.onModuleInit` drops the mismatched index and
+   * creates it again with the new fields.
    */
   excludeFromSearch?: boolean;
   /**

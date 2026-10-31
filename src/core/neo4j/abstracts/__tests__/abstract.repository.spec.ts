@@ -251,6 +251,42 @@ describe("AbstractRepository", () => {
 
       // Should only be called once for constraint, not for FULLTEXT index
       expect(neo4jService.writeOne).toHaveBeenCalledTimes(1);
+      const queries = neo4jService.writeOne.mock.calls.map((call: any[]) => call[0].query as string);
+      expect(queries.some((q) => q.includes("DROP INDEX"))).toBe(false);
+      expect(queries.some((q) => q.includes("CREATE FULLTEXT INDEX"))).toBe(false);
+    });
+
+    it("should drop and recreate a FULLTEXT index whose properties differ, as two separate writes", async () => {
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      const mockRecord = {
+        get: vi.fn((field: string) => {
+          if (field === "labels") return ["TestEntity"];
+          if (field === "properties") return ["name"];
+          return null;
+        }),
+      };
+      neo4jService.read.mockResolvedValue({ records: [mockRecord] });
+
+      await repository.onModuleInit();
+
+      const queries = neo4jService.writeOne.mock.calls.map((call: any[]) => call[0].query as string);
+      const dropIndex = queries.findIndex((q) => q.includes("DROP INDEX `testEntity_search_index` IF EXISTS"));
+      const createIndex = queries.findIndex((q) => q.includes("CREATE FULLTEXT INDEX"));
+      expect(dropIndex).toBeGreaterThanOrEqual(0);
+      expect(createIndex).toBeGreaterThan(dropIndex);
+      expect(queries[dropIndex]).not.toContain("CREATE");
+      expect(queries[createIndex]).not.toContain("DROP");
+    });
+
+    it("should only create, never drop, a FULLTEXT index that is missing", async () => {
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      neo4jService.read.mockResolvedValue({ records: [] });
+
+      await repository.onModuleInit();
+
+      const queries = neo4jService.writeOne.mock.calls.map((call: any[]) => call[0].query as string);
+      expect(queries.some((q) => q.includes("DROP INDEX"))).toBe(false);
+      expect(queries.filter((q) => q.includes("CREATE FULLTEXT INDEX"))).toHaveLength(1);
     });
 
     it("should handle constraint creation errors", async () => {

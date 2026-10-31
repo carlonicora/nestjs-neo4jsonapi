@@ -83,6 +83,14 @@ export abstract class AbstractRepository<
           const arraysEqual = (a: string[], b: string[]) => a.length === b.length && a.every((val) => b.includes(val));
 
           if (!match || !arraysEqual(labels, [labelName]) || !arraysEqual(properties, index.properties)) {
+            if (match) {
+              // CREATE ... IF NOT EXISTS is a no-op on an existing index of the same name, so drop the mismatched one first.
+              await this.neo4j.writeOne({
+                query: `DROP INDEX \`${index.name}\` IF EXISTS`,
+                queryParams: {},
+              });
+            }
+
             await this.neo4j.writeOne({
               query: `
                 CREATE FULLTEXT INDEX \`${index.name}\` IF NOT EXISTS
