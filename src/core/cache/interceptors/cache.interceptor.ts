@@ -5,6 +5,7 @@ import { Observable, of } from "rxjs";
 import { tap } from "rxjs/operators";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { CacheService } from "../services/cache.service";
+import { normaliseRequestLanguage } from "../utils/request-language";
 
 // Decorator to disable caching for specific endpoints
 export const NoCache = () => SetMetadata("no-cache", true);
@@ -42,7 +43,14 @@ export class CacheInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const cacheKey = this.cacheService.generateCacheKey(userId, method, url, query, body);
+    const cacheKey = this.cacheService.generateCacheKey(
+      userId,
+      method,
+      url,
+      query,
+      body,
+      normaliseRequestLanguage(request.headers["x-language"]),
+    );
 
     try {
       const cachedResponse = await this.cacheService.get(cacheKey);

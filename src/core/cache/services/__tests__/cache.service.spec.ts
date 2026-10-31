@@ -186,6 +186,28 @@ describe("CacheService", () => {
 
       expect(key1).toEqual(key2);
     });
+
+    it("gives different keys for different languages", () => {
+      const en = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "en");
+      const it_ = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "it");
+
+      expect(en).not.toEqual(it_);
+    });
+
+    it("gives the same key for the same language", () => {
+      const key1 = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "it");
+      const key2 = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "it");
+
+      expect(key1).toEqual(key2);
+    });
+
+    it("keeps the user prefix so invalidateByUser still matches language-keyed entries", () => {
+      const en = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "en");
+      const it_ = service.generateCacheKey("user123", "GET", "/api/users", { page: 1 }, undefined, "it");
+
+      expect(en.startsWith("testapp:api_cache:user123:GET:/api/users:")).toBe(true);
+      expect(it_.startsWith("testapp:api_cache:user123:GET:/api/users:")).toBe(true);
+    });
   });
 
   describe("get", () => {

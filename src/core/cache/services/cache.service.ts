@@ -49,10 +49,17 @@ export class CacheService implements OnModuleDestroy {
     return this.configService.get<ConfigCacheInterface>("cache");
   }
 
-  generateCacheKey(userId: string, method: string, url: string, query?: any, body?: any): string {
+  /**
+   * Builds `<prefix><userId>:<method>:<url>:<hash>`. The language is part of
+   * the hashed part because a response depends on it (localised fields): the
+   * same user's English and Italian reads of one URL must not share an entry.
+   * It sits in the hash, not the prefix, so `deleteUserCache`'s
+   * `<prefix><userId>:*` pattern and the element tracking keep matching.
+   */
+  generateCacheKey(userId: string, method: string, url: string, query?: any, body?: any, language?: string): string {
     const baseKey = `${this.CACHE_KEY_PREFIX}${userId}:${method}:${url}`;
 
-    const paramsHash = this.hashObject({ query, body });
+    const paramsHash = this.hashObject({ query, body, language });
     return `${baseKey}:${paramsHash}`;
   }
 
