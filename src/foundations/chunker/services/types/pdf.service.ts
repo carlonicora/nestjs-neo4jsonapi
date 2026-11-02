@@ -1259,10 +1259,17 @@ export class PdfService {
     const punctuationRatio = punctuation / totalChars;
     const wordChars = (trimmedText.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
     const digits = (trimmedText.match(/\d/g) || []).length;
+    const whitespace = (trimmedText.match(/\s/g) || []).length;
+    // Check 2 base: digits and whitespace are neither letters nor noise, so they are left out.
+    // Symbol noise (§ | { } < > ...) stays in the base, so OCR garbage still fails.
+    const letterBase = totalChars - whitespace - digits;
+    const letterRatio = letterBase > 0 ? wordChars / letterBase : 0;
 
     this.logger.log("--- Character Analysis ---");
     this.logger.log(`Total characters: ${totalChars}`);
-    this.logger.log(`Letters: ${wordChars} (${((wordChars / totalChars) * 100).toFixed(1)}%) [threshold: >= 60%]`);
+    this.logger.log(
+      `Letters: ${wordChars} (${(letterRatio * 100).toFixed(1)}% of non-space, non-digit characters) [threshold: >= 60%]`,
+    );
     this.logger.log(
       `Special chars: ${specialChars} (${((specialChars / totalChars) * 100).toFixed(1)}%) [threshold: < 15%]`,
     );
@@ -1280,14 +1287,17 @@ export class PdfService {
     }
     this.logger.log(`✓ Check 1 PASSED - Special char ratio ${(specialCharsRatio * 100).toFixed(1)}% is acceptable`);
 
-    // Check 2: Very low ratio of actual letters (< 60%)
-    const letterRatio = wordChars / totalChars;
+    // Check 2: Very low ratio of actual letters among non-space, non-digit characters (< 60%)
     if (letterRatio < 0.6) {
-      this.logger.warn(`❌ REJECTED: Check 2 FAILED - Low letter ratio ${(letterRatio * 100).toFixed(1)}%`);
+      this.logger.warn(
+        `❌ REJECTED: Check 2 FAILED - Low letter ratio ${(letterRatio * 100).toFixed(1)}% of non-space, non-digit characters`,
+      );
       this.logger.log("==================== GARBAGE DETECTION END ====================");
       return true;
     }
-    this.logger.log(`✓ Check 2 PASSED - Letter ratio ${(letterRatio * 100).toFixed(1)}% is acceptable`);
+    this.logger.log(
+      `✓ Check 2 PASSED - Letter ratio ${(letterRatio * 100).toFixed(1)}% of non-space, non-digit characters is acceptable`,
+    );
 
     // Check 3: Excessive punctuation (> 20%)
     if (punctuationRatio > 0.2) {
