@@ -1,3 +1,9 @@
+## [8.16.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.15.1...v8.16.0) (2026-11-02)
+
+### 🚀 Features
+
+* **offline:** opt-in offline support: bootstrap({ offline }) receives change sets made offline, replays them through the app's own routes, merges them with what changed meanwhile, and lists read updatedSince for incremental downloads ([c7d3cd5](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c7d3cd511e57d94f2f19910bcc2f6525eac4401a))
+
 ## [8.15.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.15.0...v8.15.1) (2026-11-02)
 
 ### 🐛 Bug Fixes
