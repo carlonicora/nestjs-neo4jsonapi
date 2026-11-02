@@ -1,3 +1,10 @@
+## [8.16.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.16.0...v8.16.1) (2026-11-02)
+
+### 🐛 Bug Fixes
+
+* **chunker:** import only natural's tokenizers, so loading the package no longer replaces the global Math.sign with one that returns 1 for 0 ([a44de5b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a44de5b57ebac617fa217c3779d3b755e2800080))
+* **drift:** DriftModule no longer provides its own CompanyRepository, so an app with an extended company descriptor stops rebuilding company_search_index on every boot ([f621a7b](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f621a7b42d3a23223d1b5e38a91668dccf02156b))
+
 ## [8.16.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.15.1...v8.16.0) (2026-11-02)
 
 ### 🚀 Features
