@@ -36,3 +36,7 @@ export { RedisLockService } from "./core/redis/services/redis.lock.service";
 // Trusted-origins hook (CORS + S3 frame-ancestors); the app binds TRUSTED_ORIGINS_RESOLVER.
 export { TRUSTED_ORIGINS_RESOLVER } from "./core/cors/interfaces/trusted-origins.resolver.interface";
 export type { TrustedOriginsResolver } from "./core/cors/interfaces/trusted-origins.resolver.interface";
+
+// Offline support (opt-in through bootstrap({ offline })).
+export * from "./core/offline";
+export * from "./foundations/offline-change-set";

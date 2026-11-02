@@ -19,6 +19,8 @@ import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
 import { FoundationsModule } from "../foundations/foundations.modules";
 import { McpModule } from "../mcp/mcp.module";
+import { OfflineModule } from "../core/offline/offline.module";
+import { isOfflineInternalRequest } from "../foundations/offline-change-set/services/offline-route-runner.service";
 import { RbacPermissionModule } from "../foundations/rbac/rbac-permission.module";
 import { PERMISSIONS_ENFORCE } from "../foundations/rbac/rbac.tokens";
 import { OpenApiModule } from "../openapi/module/openapi.module";
@@ -91,6 +93,12 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
                   { name: "default", ttl: rateLimit.ttl, limit: rateLimit.limit },
                   { name: "ip", ttl: rateLimit.ttl, limit: rateLimit.ipLimit },
                 ],
+                // The steps an offline change set runs through the app's routes are not
+                // requests: they carry this process's x-offline-internal token and are not
+                // counted (the package itself is counted once).
+                skipIf: (context) =>
+                  context.getType() === "http" &&
+                  isOfflineInternalRequest(context.switchToHttp().getRequest()?.headers),
               };
             },
           }),
@@ -157,6 +165,9 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
 
           // MCP (Model Context Protocol) server (opt-in, default off)
           ...(options.mcp === true ? [McpModule] : []),
+
+          // Offline support (opt-in, default off)
+          ...(options.offline ? [OfflineModule.forRoot(options.offline)] : []),
 
           // OpenAPI module for Swagger/Redoc documentation
           OpenApiModule,

@@ -277,6 +277,15 @@ export interface BootstrapOptions {
   permissions?: { enforce: boolean };
 
   /**
+   * Offline support. Default undefined = off: no interceptor, no extra CORS header.
+   *
+   * When set, `OfflineModule` is loaded (global): `OfflineRequestContext` reports
+   * whether a request is an offline replay (`x-offline-replay: 1`), and CORS allows
+   * the `x-offline-replay` header. `changeSets` enables the offline change-set service.
+   */
+  offline?: { changeSets: boolean };
+
+  /**
    * Optional custom SecurityService subclass to inject into the package engine.
    * The subclass must extend the package SecurityService.
    * Default undefined uses the base SecurityService (neural-erp behavior unchanged).

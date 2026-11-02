@@ -575,9 +575,25 @@ export abstract class AbstractService<
       orderBy: params.orderBy,
       filters: params.filters,
       cursor: paginator.generateCursor(),
+      // Offline sync: `?updatedSince=<ISO>` returns only records changed after it.
+      updatedSince: this.readUpdatedSince(params.query),
     });
 
     return this.jsonApiService.buildList(this.model, data, paginator);
+  }
+
+  /**
+   * `query.updatedSince` as an ISO datetime string; 400 when it is present but not a datetime.
+   * Protected so a service's own list (one that does not go through findByRelated) reads it the
+   * same way and hands it to its repository as an `updatedAt` "gt" filter.
+   */
+  protected readUpdatedSince(query: any): string | undefined {
+    const value = query?.updatedSince;
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+      throw new BadRequestException("updatedSince must be an ISO datetime");
+    }
+    return value;
   }
 
   /**

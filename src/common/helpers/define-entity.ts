@@ -5,6 +5,7 @@ import { BaseConfigInterface } from "../../config/interfaces";
 import { JsonApiSerialiserFactory } from "../../core/jsonapi/factories/jsonapi.serialiser.factory";
 import { DescriptorBasedSerialiser } from "../../core/jsonapi/serialisers/descriptor.based.serialiser";
 import { mapEntity } from "../abstracts/entity";
+import { entityDescriptorRegistry } from "../registries/entity-descriptor.registry";
 import { entityTenancyRegistry, RelatedNodeHop } from "../registries/entity-tenancy.registry";
 import { DataModelInterface, RelationshipInfo } from "../interfaces/datamodel.interface";
 import {
@@ -483,6 +484,8 @@ export function defineEntity<T>() {
     // A projection is another view of a label owned by a different descriptor: it never sets the rule.
     if (!isProjection) {
       entityTenancyRegistry.register({ labelName, type, isCompanyScoped, tenancy, linkScope, via: viaHop });
+      // JSON:API type → descriptor (see entity-descriptor.registry.ts).
+      entityDescriptorRegistry.register(descriptor);
     }
 
     return descriptor;

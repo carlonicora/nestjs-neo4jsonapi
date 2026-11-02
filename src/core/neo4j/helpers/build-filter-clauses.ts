@@ -11,6 +11,13 @@ const COMPARISON_OP: Partial<Record<FilterOperator, string>> = {
   lte: "<=",
 };
 
+/**
+ * Base fields every node carries as a native Neo4j datetime. A comparison against one of
+ * them casts the bound ISO string with `datetime($param)`; comparing a datetime property
+ * with a plain string never matches.
+ */
+const DATETIME_BASE_FIELDS = new Set<string>(["updatedAt"]);
+
 export interface BuildFilterClausesResult {
   clause: string;
   params: Record<string, unknown>;
@@ -45,7 +52,8 @@ export function buildFilterClauses(input: {
       case "gte":
       case "lt":
       case "lte": {
-        fragments.push(`${lhs} ${COMPARISON_OP[criterion.op]} $${paramKey}`);
+        const rhs = DATETIME_BASE_FIELDS.has(criterion.field) ? `datetime($${paramKey})` : `$${paramKey}`;
+        fragments.push(`${lhs} ${COMPARISON_OP[criterion.op]} ${rhs}`);
         params[paramKey] = criterion.value;
         break;
       }

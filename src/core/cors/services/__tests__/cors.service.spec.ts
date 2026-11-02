@@ -4,6 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { CorsService } from "../cors.service";
 import { ConfigCorsInterface } from "../../../../config/interfaces";
 import { TRUSTED_ORIGINS_RESOLVER, TrustedOriginsResolver } from "../../interfaces/trusted-origins.resolver.interface";
+import { OFFLINE_OPTIONS } from "../../../offline/offline.constants";
 
 describe("CorsService", () => {
   let service: CorsService;
@@ -475,6 +476,24 @@ describe("CorsService", () => {
 
       expect(await decide(validator, undefined)).toEqual({ allow: true, calls: 1 });
       expect(resolver.isTrusted).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("with offline configured", () => {
+    it("appends x-offline-replay when offline is configured; unchanged otherwise", async () => {
+      expect(service.getCorsConfiguration().allowedHeaders).toBe("Content-Type,Authorization");
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          CorsService,
+          { provide: ConfigService, useValue: mockConfigService },
+          { provide: OFFLINE_OPTIONS, useValue: { changeSets: true } },
+        ],
+      }).compile();
+
+      expect(module.get<CorsService>(CorsService).getCorsConfiguration().allowedHeaders).toBe(
+        "Content-Type,Authorization,x-offline-replay",
+      );
     });
   });
 });

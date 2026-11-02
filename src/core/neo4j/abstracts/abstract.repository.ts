@@ -637,6 +637,8 @@ export abstract class AbstractRepository<
     cursor?: JsonApiCursorInterface;
     filters?: FilterCriterion[];
     orderByFields?: SortCriterion[];
+    /** ISO datetime: only nodes with `updatedAt` after it (offline sync). */
+    updatedSince?: string;
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
     const rel = this.descriptor.relationships[params.relationship];
@@ -670,7 +672,10 @@ export abstract class AbstractRepository<
 
     const filterResult = buildFilterClauses({
       nodeAlias: nodeName,
-      filters: params.filters ?? [],
+      filters: [
+        ...(params.filters ?? []),
+        ...(params.updatedSince ? [{ field: "updatedAt", op: "gt" as const, value: params.updatedSince }] : []),
+      ],
       paramPrefix: "filter",
     });
     query.queryParams = { ...query.queryParams, ...filterResult.params };

@@ -3,6 +3,7 @@ import { CorsOptions } from "@nestjs/common/interfaces/external/cors-options.int
 import { ConfigService } from "@nestjs/config";
 import { BaseConfigInterface, ConfigCorsInterface } from "../../../config/interfaces";
 import { TRUSTED_ORIGINS_RESOLVER, TrustedOriginsResolver } from "../interfaces/trusted-origins.resolver.interface";
+import { OFFLINE_OPTIONS, OFFLINE_REPLAY_HEADER, OfflineOptions } from "../../offline/offline.constants";
 
 @Injectable()
 export class CorsService {
@@ -11,6 +12,8 @@ export class CorsService {
     // Optional application-provided source of extra trusted origins (e.g. per-tenant custom
     // domains). Asked only for an origin the static lists reject; absent = behaviour unchanged.
     @Optional() @Inject(TRUSTED_ORIGINS_RESOLVER) private readonly resolver?: TrustedOriginsResolver,
+    // Bound by OfflineModule only when `bootstrap({ offline })` is set; absent = headers unchanged.
+    @Optional() @Inject(OFFLINE_OPTIONS) private readonly offlineOptions?: OfflineOptions,
   ) {}
 
   private get corsConfig(): ConfigCorsInterface {
@@ -22,11 +25,24 @@ export class CorsService {
       origin: this.getOriginValidator(),
       credentials: this.corsConfig.credentials,
       methods: this.corsConfig.methods,
-      allowedHeaders: this.corsConfig.allowedHeaders,
+      allowedHeaders: this.getAllowedHeaders(),
       maxAge: this.corsConfig.maxAge,
       preflightContinue: this.corsConfig.preflightContinue,
       optionsSuccessStatus: this.corsConfig.optionsSuccessStatus,
     };
+  }
+
+  private getAllowedHeaders(): string {
+    const allowedHeaders = this.corsConfig.allowedHeaders;
+    if (!this.offlineOptions) return allowedHeaders;
+
+    const present = allowedHeaders
+      .split(",")
+      .map((header) => header.trim().toLowerCase())
+      .includes(OFFLINE_REPLAY_HEADER);
+    if (present) return allowedHeaders;
+
+    return allowedHeaders ? `${allowedHeaders},${OFFLINE_REPLAY_HEADER}` : OFFLINE_REPLAY_HEADER;
   }
 
   private getOriginValidator():
