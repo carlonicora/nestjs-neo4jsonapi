@@ -13,6 +13,7 @@ import { emailAutomationEnrollmentMeta } from "../entities/email-automation-enro
 import { emailAutomationStepMeta } from "../entities/email-automation-step.meta";
 import { emailAutomationMeta } from "../entities/email-automation.meta";
 import { EmailAutomationRecipient } from "../interfaces/email-automation.config.interface";
+import { recipientMarketingConsentCall } from "../utils/recipient-marketing-consent.cypher";
 
 @Injectable()
 export class EmailAutomationEnrollmentRepository extends AbstractRepository<
@@ -27,8 +28,13 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
 
   /**
    * Enrolment + automation + current step, with the current step's subject
-   * (`currentStepSubject`) and the number of steps sent (`sentCount`). The SENT
+   * (`currentStepSubject`), the number of steps sent (`sentCount`) and the
+   * recipient's current marketing consent (`recipientMarketingConsent`). The SENT
    * steps themselves are not returned: the count is what every reader needs.
+   *
+   * Consent is read from the recipient record now, not from the enrolment, through the
+   * shared rule (`recipientMarketingConsentCall`). It is an internal column: the
+   * descriptor keeps it out of every JSON:API answer.
    */
   protected buildReturnStatement(): string {
     const { nodeName } = emailAutomationEnrollmentMeta;
@@ -43,16 +49,24 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
         OPTIONAL MATCH (${nodeName})-[sentEdge:SENT]->(:${emailAutomationStepMeta.labelName})
         RETURN count(sentEdge) AS sentCount
       }
+      ${recipientMarketingConsentCall({
+        carry: nodeName,
+        recipientType: `${nodeName}.recipientType`,
+        recipientId: `${nodeName}.recipientId`,
+        prefix: nodeName,
+      })}
       RETURN ${nodeName},
         ${automationAlias},
         ${currentStepAlias},
         ${currentStepAlias}.subject AS currentStepSubject,
-        sentCount
+        sentCount,
+        recipientMarketingConsent
     `;
   }
 
   /**
    * Creates an active enrolment of `recipient` in an automation, waiting on `stepId`.
+   * The automation id can come from a URL (manual add), so both ids are checked first.
    */
   async createEnrollment(params: {
     id: string;
@@ -63,6 +77,13 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
     nextSendAt: Date;
     unsubscribeToken: string;
   }): Promise<void> {
+    await this.neo4j.validateRelatedNodes({
+      nodes: [
+        { id: params.automationId, label: emailAutomationMeta.labelName },
+        { id: params.stepId, label: emailAutomationStepMeta.labelName },
+      ],
+    });
+
     const { nodeName, labelName } = emailAutomationEnrollmentMeta;
     const query = this.neo4j.initQuery();
 
@@ -137,9 +158,10 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
   }
 
   /**
-   * Every active enrolment of an email, in any automation.
+   * Every active enrolment of an email in a Marketing automation (an automation with no
+   * purpose counts as Marketing). "Unsubscribe from everything" finishes these only.
    */
-  async findActiveByEmail(params: { email: string }): Promise<EmailAutomationEnrollment[]> {
+  async findActiveMarketingByEmail(params: { email: string }): Promise<EmailAutomationEnrollment[]> {
     const { nodeName } = emailAutomationEnrollmentMeta;
     const query = this.neo4j.initQuery({ serialiser: EmailAutomationEnrollmentDescriptor.model });
 
@@ -152,6 +174,10 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
     query.query += `
       ${this.buildDefaultMatch()}
       WHERE toLower(${nodeName}.email) = $email AND ${nodeName}.status = $status
+      AND EXISTS {
+        MATCH (${nodeName})<-[:HAS_ENROLLMENT]-(${emailAutomationMeta.nodeName}:${emailAutomationMeta.labelName})
+        WHERE coalesce(${emailAutomationMeta.nodeName}.purpose, "marketing") = "marketing"
+      }
       WITH ${nodeName}
       ${this.buildReturnStatement()}
     `;

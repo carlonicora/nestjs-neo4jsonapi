@@ -42,6 +42,8 @@ describe("EmailAutomationSenderService", () => {
     replyTo: "hello@example.com",
     unsubscribeUrl: "https://app.example.com/en/unsubscribe/token-1",
     unsubscribeAllUrl: "https://app.example.com/en/unsubscribe/token-1?scope=all",
+    isService: false,
+    isWaitlistRecipient: false,
   };
 
   const buildEnrollment = (overrides: Partial<EmailAutomationEnrollment> = {}): EmailAutomationEnrollment =>
@@ -51,6 +53,8 @@ describe("EmailAutomationSenderService", () => {
       status: "active",
       attempts: 0,
       unsubscribeToken: "token-1",
+      recipientType: "user",
+      recipientMarketingConsent: true,
       automation,
       currentStep: { id: "s1" },
       ...overrides,
@@ -123,6 +127,8 @@ describe("EmailAutomationSenderService", () => {
         headers: rendered.headers,
         unsubscribeUrl: rendered.unsubscribeUrl,
         unsubscribeAllUrl: rendered.unsubscribeAllUrl,
+        isService: false,
+        isWaitlistRecipient: false,
       },
       "en",
     );
@@ -202,6 +208,83 @@ describe("EmailAutomationSenderService", () => {
     });
     expect(enrollmentRepository.advance).not.toHaveBeenCalled();
     expect(result).toEqual({ sent: 0, skipped: 1, failed: 0 });
+  });
+
+  it("sender: marketing step with withdrawn consent finishes unsubscribed", async () => {
+    enrollmentRepository.findDue.mockResolvedValue([buildEnrollment({ recipientMarketingConsent: false })]);
+
+    const result = await service.processDue({ now: new Date(), limit: 200 });
+
+    expect(emailService.sendEmail).not.toHaveBeenCalled();
+    expect(enrollmentRepository.finish).toHaveBeenCalledWith({
+      enrollmentId: "enrollment-1",
+      status: "unsubscribed",
+      finishedAt: NOW,
+    });
+    expect(result).toEqual({ sent: 0, skipped: 1, failed: 0 });
+  });
+
+  it("sender: marketing step with a missing recipient record finishes unsubscribed", async () => {
+    enrollmentRepository.findDue.mockResolvedValue([buildEnrollment({ recipientMarketingConsent: undefined })]);
+
+    await service.processDue({ now: new Date(), limit: 200 });
+
+    expect(emailService.sendEmail).not.toHaveBeenCalled();
+    expect(enrollmentRepository.finish).toHaveBeenCalledWith(expect.objectContaining({ status: "unsubscribed" }));
+  });
+
+  it("sender: marketing step with opt-out finishes unsubscribed", async () => {
+    enrollmentRepository.findDue.mockResolvedValue([
+      buildEnrollment({ automation: { ...automation, purpose: "marketing" } as EmailAutomation }),
+    ]);
+    optOutRepository.findByEmail.mockResolvedValue({ id: "opt-1", email: "player@example.com" } as EmailOptOut);
+
+    await service.processDue({ now: new Date(), limit: 200 });
+
+    expect(emailService.sendEmail).not.toHaveBeenCalled();
+    expect(enrollmentRepository.finish).toHaveBeenCalledWith({
+      enrollmentId: "enrollment-1",
+      status: "unsubscribed",
+      finishedAt: NOW,
+    });
+  });
+
+  it("sender: service step sends despite opt-out and no consent", async () => {
+    enrollmentRepository.findDue.mockResolvedValue([
+      buildEnrollment({
+        recipientMarketingConsent: false,
+        automation: { ...automation, purpose: "service" } as EmailAutomation,
+      }),
+    ]);
+    optOutRepository.findByEmail.mockResolvedValue({ id: "opt-1", email: "player@example.com" } as EmailOptOut);
+
+    const result = await service.processDue({ now: new Date(), limit: 200 });
+
+    expect(emailService.sendEmail).toHaveBeenCalledTimes(1);
+    expect(enrollmentRepository.finish).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unsubscribed" }));
+    expect(result).toEqual({ sent: 1, skipped: 0, failed: 0 });
+  });
+
+  it("sender: passes isService and isWaitlistRecipient to sendEmail", async () => {
+    enrollmentRepository.findDue.mockResolvedValue([
+      buildEnrollment({
+        recipientType: "waitlist",
+        automation: { ...automation, purpose: "service" } as EmailAutomation,
+      }),
+    ]);
+    renderer.render.mockResolvedValue({
+      ...rendered,
+      unsubscribeAllUrl: undefined,
+      isService: true,
+      isWaitlistRecipient: true,
+    } as any);
+
+    await service.processDue({ now: new Date(), limit: 200 });
+
+    const data = emailService.sendEmail.mock.calls[0][1] as Record<string, unknown>;
+    expect(data.isService).toBe(true);
+    expect(data.isWaitlistRecipient).toBe(true);
+    expect(data.unsubscribeAllUrl).toBeUndefined();
   });
 
   it("records a failed send and retries in an hour", async () => {

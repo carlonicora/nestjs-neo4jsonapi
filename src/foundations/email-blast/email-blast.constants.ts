@@ -42,14 +42,17 @@ export const EMAIL_BLAST_TEST_SUBJECT_PREFIX = "[TEST] ";
 /**
  * The one eligibility block both the admin recipient count and the snapshot use. Binds
  * `email` (lower-cased) and `recipient` (one User per email).
+ *
+ * Callers bind `purpose` (a string, "service" or "marketing") in scope before the block. Every
+ * purpose needs an active, not deleted user with an email; marketing consent and the global
+ * opt-out list are checked only when the purpose is not "service".
  */
 export const ELIGIBLE_RECIPIENTS_CYPHER = `
     MATCH (candidate:User)
-    WHERE candidate.marketingConsent = true
-      AND candidate.isActive = true
+    WHERE candidate.isActive = true
       AND coalesce(candidate.isDeleted, false) = false
       AND candidate.deletionScheduledAt IS NULL
       AND candidate.email IS NOT NULL AND trim(candidate.email) <> ""
-      AND NOT EXISTS { MATCH (optOut:EmailOptOut) WHERE toLower(optOut.email) = toLower(candidate.email) }
+      AND (purpose = "service" OR (candidate.marketingConsent = true AND NOT EXISTS { MATCH (optOut:EmailOptOut) WHERE toLower(optOut.email) = toLower(candidate.email) }))
     WITH toLower(candidate.email) AS email, collect(candidate)[0] AS recipient
 `;

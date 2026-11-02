@@ -7,6 +7,7 @@ import { EmailAutomationEnrollmentDescriptor } from "../entities/email-automatio
 import { EmailAutomationEnrollmentRepository } from "../repositories/email-automation-enrollment.repository";
 import { EmailAutomationStepRepository } from "../repositories/email-automation-step.repository";
 import { EmailOptOutRepository } from "../repositories/email-opt-out.repository";
+import { recipientMarketingConsentCall } from "../utils/recipient-marketing-consent.cypher";
 
 type IssuedQuery = { query: string; queryParams: Record<string, unknown> };
 
@@ -40,6 +41,7 @@ describe("email-automation repositories", () => {
       writeOne: vi.fn(async () => null),
       read: vi.fn(async () => ({ records: [] })),
       executeInTransaction: vi.fn(async () => []),
+      validateRelatedNodes: vi.fn(async () => undefined),
     } as unknown as MockedObject<Neo4jService>;
     securityService = {
       userHasAccess: vi.fn((params: { validator: () => string }) => params.validator()),
@@ -111,6 +113,109 @@ describe("email-automation repositories", () => {
         nextSendAt: nextSendAt.toISOString(),
         unsubscribeToken: "token-1",
       });
+    });
+  });
+
+  describe("EmailAutomationEnrollmentRepository.createEnrollment checks", () => {
+    it("createEnrollment validates the automation and step ids", async () => {
+      await enrollmentRepository.createEnrollment({
+        id: "enrollment-1",
+        automationId: "automation-1",
+        stepId: "step-1",
+        recipient: {
+          email: "ada@example.com",
+          recipientType: "user",
+          recipientId: "user-9",
+          marketingConsent: false,
+        },
+        enrolledAt: new Date("2026-10-21T10:00:00.000Z"),
+        nextSendAt: new Date("2026-10-21T10:00:00.000Z"),
+        unsubscribeToken: "token-1",
+      });
+
+      expect(neo4j.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [
+          { id: "automation-1", label: "EmailAutomation" },
+          { id: "step-1", label: "EmailAutomationStep" },
+        ],
+      });
+      expect(neo4j.validateRelatedNodes.mock.invocationCallOrder[0]).toBeLessThan(
+        neo4j.writeOne.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("does not write when the ids do not validate", async () => {
+      neo4j.validateRelatedNodes.mockRejectedValue(new Error("Related node not found"));
+
+      await expect(
+        enrollmentRepository.createEnrollment({
+          id: "enrollment-1",
+          automationId: "missing",
+          stepId: "step-1",
+          recipient: { email: "ada@example.com", recipientType: "user", recipientId: "u", marketingConsent: true },
+          enrolledAt: new Date(),
+          nextSendAt: new Date(),
+          unsubscribeToken: "token-1",
+        }),
+      ).rejects.toThrow();
+      expect(neo4j.writeOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("EmailAutomationEnrollmentRepository.findActiveMarketingByEmail", () => {
+    it("reads active enrolments of the email in marketing automations only", async () => {
+      await enrollmentRepository.findActiveMarketingByEmail({ email: "Ada@Example.com" });
+
+      const issued = lastReadMany();
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      expect(issued.query).toMatch(/coalesce\([^)]*purpose, "marketing"\) = "marketing"/);
+      expect(issued.query).toContain("emailAutomationEnrollment.status = $status");
+      expect(issued.queryParams).toMatchObject({ email: "ada@example.com", status: "active" });
+      expect(neo4j.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: EmailAutomationEnrollmentDescriptor.model }),
+      );
+    });
+  });
+
+  describe("EmailAutomationEnrollmentRepository.buildReturnStatement", () => {
+    it("returns recipientMarketingConsent from the recipient record", () => {
+      const statement = (enrollmentRepository as any).buildReturnStatement() as string;
+
+      expect(statement).toContain("recipientMarketingConsent");
+      expect(statement).toContain(":User");
+      expect(statement).toContain(":Waitlist");
+      expect(statement).toContain("userId");
+      expect(statement).toMatch(/RETURN[\s\S]*recipientMarketingConsent\s*$/);
+    });
+
+    it("uses the shared consent rule on the enrolment's recipient", () => {
+      const statement = (enrollmentRepository as any).buildReturnStatement() as string;
+
+      expect(statement).toContain(
+        recipientMarketingConsentCall({
+          carry: "emailAutomationEnrollment",
+          recipientType: "emailAutomationEnrollment.recipientType",
+          recipientId: "emailAutomationEnrollment.recipientId",
+          prefix: "emailAutomationEnrollment",
+        }),
+      );
+    });
+  });
+
+  describe("EmailAutomationEnrollmentDescriptor.computed.recipientMarketingConsent", () => {
+    const compute = (EmailAutomationEnrollmentDescriptor.computed as any).recipientMarketingConsent.compute;
+    const record = (values: Record<string, unknown>) => ({
+      has: (key: string) => key in values,
+      get: (key: string) => values[key],
+    });
+
+    it("maps the recipientMarketingConsent column", () => {
+      expect(compute({ record: record({ recipientMarketingConsent: true }), data: {} })).toBe(true);
+      expect(compute({ record: record({ recipientMarketingConsent: false }), data: {} })).toBe(false);
+    });
+
+    it("keeps the stored value when the column is absent", () => {
+      expect(compute({ record: record({}), data: {} })).toBeUndefined();
     });
   });
 

@@ -271,7 +271,7 @@ describe("email-blast repositories", () => {
       records: [{ get: (key: string) => (key === "recipientCount" ? int(3) : null) }],
     });
 
-    const result = await adminRepository.countEligibleRecipients({ blastId: "blast-1" });
+    const result = await adminRepository.countEligibleRecipients({ blastId: "blast-1", purpose: "marketing" });
 
     expect(result).toEqual({ id: "blast-1", recipientCount: 3 });
     expect(neo4j.initQuery).not.toHaveBeenCalled();
@@ -279,5 +279,39 @@ describe("email-blast repositories", () => {
     expect(query).toContain(ELIGIBLE_RECIPIENTS_CYPHER);
     expect(query).toContain("RETURN count(email) AS recipientCount");
     expect(params).not.toHaveProperty("companyId");
+  });
+
+  it("ELIGIBLE_RECIPIENTS_CYPHER filters consent and opt-out only for marketing", () => {
+    const block = ELIGIBLE_RECIPIENTS_CYPHER.replace(/\s+/g, " ");
+    expect(block).toMatch(
+      /\(purpose = "service" OR \(candidate\.marketingConsent = true AND NOT EXISTS \{ MATCH \(optOut:EmailOptOut\)[^}]*\}\)\)/,
+    );
+    // The account conditions apply to every purpose.
+    expect(block).toContain("candidate.isActive = true");
+    expect(block).toContain("coalesce(candidate.isDeleted, false) = false");
+    expect(block).toContain("candidate.deletionScheduledAt IS NULL");
+    expect(block).toContain('candidate.email IS NOT NULL AND trim(candidate.email) <> ""');
+    expect(block).not.toMatch(/WHERE candidate\.marketingConsent = true/);
+  });
+
+  it("countEligibleRecipients binds purpose", async () => {
+    await adminRepository.countEligibleRecipients({ blastId: "blast-1", purpose: "service" });
+
+    const [query, params] = neo4j.read.mock.calls[0] as [string, Record<string, unknown>];
+    expect(params).toEqual({ purpose: "service" });
+    expect(query.trim().startsWith("WITH $purpose AS purpose")).toBe(true);
+    expect(query.indexOf("WITH $purpose AS purpose")).toBeLessThan(query.indexOf(ELIGIBLE_RECIPIENTS_CYPHER));
+  });
+
+  it("createSnapshot derives purpose from the blast", async () => {
+    await deliveryRepository.createSnapshot({ blastId: "blast-1" });
+
+    const [[entry]] = neo4j.executeInTransaction.mock.calls[0] as unknown as [[{ query: string; params: any }]];
+    const query = entry.query.replace(/\s+/g, " ");
+    expect(query).toContain('WITH emailBlast, coalesce(emailBlast.purpose, "marketing") AS purpose');
+    expect(query).toContain("CALL { WITH purpose");
+    expect(query.indexOf("._lock = true")).toBeLessThan(query.indexOf("AS purpose"));
+    expect(query.indexOf("AS purpose")).toBeLessThan(query.indexOf("CALL { WITH purpose"));
+    expect(entry.params).toEqual({ blastId: "blast-1" });
   });
 });

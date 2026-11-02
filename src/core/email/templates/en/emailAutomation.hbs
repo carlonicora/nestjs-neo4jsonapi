@@ -15,7 +15,11 @@
       </tr>
       <tr>
         <td style="padding: 0 32px 24px 32px;">
+          {{#if isService}}
+          <p style="color: #999999; font-size: 12px; line-height: 1.5; margin: 0;">{{#if isWaitlistRecipient}}You're receiving this because you joined our waitlist.{{else}}You're receiving this because you have an account with us.{{/if}} &middot; <a href="{{{unsubscribeUrl}}}" style="color: #999999;">Stop these emails</a></p>
+          {{else}}
           <p style="color: #999999; font-size: 12px; line-height: 1.5; margin: 0;"><a href="{{{unsubscribeUrl}}}" style="color: #999999;">Stop these emails</a> &middot; <a href="{{{unsubscribeAllUrl}}}" style="color: #999999;">Stop all marketing emails</a></p>
+          {{/if}}
         </td>
       </tr>
       <tr><td>{{> footer}}</td></tr>

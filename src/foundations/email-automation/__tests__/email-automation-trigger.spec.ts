@@ -7,6 +7,7 @@ import { EmailAutomationEnrollment } from "../entities/email-automation-enrollme
 import { EmailAutomationStep } from "../entities/email-automation-step";
 import { EmailOptOut } from "../entities/email-opt-out";
 import { EmailAutomationRecipient } from "../interfaces/email-automation.config.interface";
+import { EmailAutomationCandidateRepository } from "../repositories/email-automation-candidate.repository";
 import { EmailAutomationEnrollmentRepository } from "../repositories/email-automation-enrollment.repository";
 import { EmailAutomationStepRepository } from "../repositories/email-automation-step.repository";
 import { EmailAutomationRepository } from "../repositories/email-automation.repository";
@@ -28,6 +29,13 @@ describe("EmailAutomationTriggerService", () => {
   const automationA = { id: "automation-a", name: "A", isActive: true, exitTrigger: "reg" } as EmailAutomation;
   const automationB = { id: "automation-b", name: "B", isActive: true, trigger: "reg" } as EmailAutomation;
   const head = { id: "step-1", subject: "Hi", body: "Body", delayHours: 24 } as EmailAutomationStep;
+  const userRecipient: EmailAutomationRecipient = {
+    email: "gm@example.com",
+    name: "GM",
+    recipientType: "user",
+    recipientId: "user-1",
+    marketingConsent: true,
+  };
 
   let eventEmitter: MockedObject<Pick<EventEmitter2, "on">>;
   let automationRepository: MockedObject<
@@ -41,6 +49,7 @@ describe("EmailAutomationTriggerService", () => {
     >
   >;
   let optOutRepository: MockedObject<Pick<EmailOptOutRepository, "findByEmail">>;
+  let candidateRepository: MockedObject<Pick<EmailAutomationCandidateRepository, "findRecipientMarketingConsent">>;
   let logger: MockedObject<Pick<AppLoggingService, "error">>;
   let service: EmailAutomationTriggerService;
 
@@ -61,6 +70,8 @@ describe("EmailAutomationTriggerService", () => {
       createEnrollment: vi.fn().mockResolvedValue(undefined),
     };
     optOutRepository = { findByEmail: vi.fn().mockResolvedValue(null) };
+    // The consent stored on the recipient record (the payload's is not trusted for Marketing).
+    candidateRepository = { findRecipientMarketingConsent: vi.fn().mockResolvedValue(true) };
     logger = { error: vi.fn() };
 
     service = new EmailAutomationTriggerService(
@@ -70,6 +81,7 @@ describe("EmailAutomationTriggerService", () => {
       stepRepository as unknown as EmailAutomationStepRepository,
       enrollmentRepository as unknown as EmailAutomationEnrollmentRepository,
       optOutRepository as unknown as EmailOptOutRepository,
+      candidateRepository as unknown as EmailAutomationCandidateRepository,
       logger as unknown as AppLoggingService,
     );
   });
@@ -87,6 +99,7 @@ describe("EmailAutomationTriggerService", () => {
         stepRepository as unknown as EmailAutomationStepRepository,
         enrollmentRepository as unknown as EmailAutomationEnrollmentRepository,
         optOutRepository as unknown as EmailOptOutRepository,
+        candidateRepository as unknown as EmailAutomationCandidateRepository,
         logger as unknown as AppLoggingService,
       );
 
@@ -111,6 +124,8 @@ describe("EmailAutomationTriggerService", () => {
 
   describe("handle", () => {
     it("does not enrol without marketing consent", async () => {
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
       await service.handle(reg, userPayload(false));
 
       expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
@@ -204,6 +219,7 @@ describe("EmailAutomationTriggerService", () => {
       enrollmentRepository.findActiveByEmailAndAutomation.mockResolvedValue([
         { id: "enrollment-a", status: "active" } as EmailAutomationEnrollment,
       ]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
 
       await service.handle(reg, userPayload(false));
 
@@ -218,6 +234,210 @@ describe("EmailAutomationTriggerService", () => {
       await expect(service.handle(reg, userPayload(true))).resolves.toBeUndefined();
 
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("reg"), failure, expect.any(String));
+    });
+  });
+
+  describe("enter (purpose)", () => {
+    const service_ = {
+      id: "automation-s",
+      name: "S",
+      isActive: true,
+      trigger: "reg",
+      purpose: "service",
+    } as EmailAutomation;
+    const marketing = {
+      id: "automation-m",
+      name: "M",
+      isActive: true,
+      trigger: "reg",
+      purpose: "marketing",
+    } as EmailAutomation;
+    const recipient = (marketingConsent: boolean): EmailAutomationRecipient => ({
+      email: "gm@example.com",
+      name: "GM",
+      recipientType: "user",
+      recipientId: "user-1",
+      marketingConsent,
+    });
+
+    it("enter: service automation enrols a recipient without consent", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([service_]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("reg", recipient(false));
+
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({ automationId: service_.id }),
+      );
+      expect(optOutRepository.findByEmail).not.toHaveBeenCalled();
+      expect(candidateRepository.findRecipientMarketingConsent).not.toHaveBeenCalled();
+    });
+
+    it("enter: marketing automation skips a recipient without consent", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("reg", recipient(false));
+
+      expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it("enter: an automation without purpose counts as marketing", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([automationB]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("reg", recipient(false));
+
+      expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it("enter: service automation enrols an opted-out recipient", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([service_, marketing]);
+      optOutRepository.findByEmail.mockResolvedValue({ id: "opt-1", email: "gm@example.com" } as EmailOptOut);
+
+      await service.enter("reg", recipient(true));
+
+      expect(optOutRepository.findByEmail).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({ automationId: service_.id }),
+      );
+    });
+
+    it("enter: one trigger enrols into service and skips marketing for the same no-consent recipient", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing, service_]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("reg", recipient(false));
+
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({ automationId: service_.id }),
+      );
+    });
+  });
+
+  describe("enter (consent from the recipient record)", () => {
+    const marketing = {
+      id: "automation-m",
+      name: "M",
+      isActive: true,
+      trigger: "wl",
+      purpose: "marketing",
+    } as EmailAutomation;
+    const service_ = {
+      id: "automation-s",
+      name: "S",
+      isActive: true,
+      trigger: "wl",
+      purpose: "service",
+    } as EmailAutomation;
+    // A registered waitlist entry: its payload still says consent true, the linked user said no.
+    const registeredWaitlist: EmailAutomationRecipient = {
+      email: "player@example.com",
+      recipientType: "waitlist",
+      recipientId: "wl-1",
+      marketingConsent: true,
+    };
+
+    it("enter: a waitlist recipient whose linked user has no consent is not enrolled in marketing", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("wl", registeredWaitlist);
+
+      expect(candidateRepository.findRecipientMarketingConsent).toHaveBeenCalledWith({
+        recipientType: "waitlist",
+        recipientId: "wl-1",
+      });
+      expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it("enter: the same recipient is still enrolled in a service automation", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing, service_]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(false);
+
+      await service.enter("wl", registeredWaitlist);
+
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({ automationId: service_.id }),
+      );
+    });
+
+    it("enter: the record's consent enrols in marketing even when the payload says no", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing]);
+      candidateRepository.findRecipientMarketingConsent.mockResolvedValue(true);
+
+      await service.enter("wl", { ...registeredWaitlist, marketingConsent: false });
+
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({ automationId: marketing.id }),
+      );
+    });
+
+    it("enter: reads the consent once for several marketing automations", async () => {
+      automationRepository.findActiveByTrigger.mockResolvedValue([marketing, { ...marketing, id: "automation-m2" }]);
+
+      await service.enter("wl", registeredWaitlist);
+
+      expect(candidateRepository.findRecipientMarketingConsent).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("enrol", () => {
+    it("enrol: answers no_steps when the automation has no head step", async () => {
+      stepRepository.findHead.mockResolvedValue(null);
+
+      await expect(service.enrol({ automation: automationB, recipient: userRecipient })).resolves.toEqual({
+        status: "no_steps",
+      });
+      expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it("enrol: answers already_enrolled when an enrolment exists", async () => {
+      enrollmentRepository.findByAutomationAndEmail.mockResolvedValue({
+        id: "enrollment-1",
+        status: "exited",
+      } as EmailAutomationEnrollment);
+
+      await expect(service.enrol({ automation: automationB, recipient: userRecipient })).resolves.toEqual({
+        status: "already_enrolled",
+      });
+      expect(enrollmentRepository.createEnrollment).not.toHaveBeenCalled();
+    });
+
+    it("enrol: uses the given enrollmentId", async () => {
+      const result = await service.enrol({
+        automation: automationB,
+        recipient: userRecipient,
+        enrollmentId: "given-id",
+      });
+
+      expect(result).toEqual({ status: "enrolled", enrollmentId: "given-id" });
+      expect(enrollmentRepository.createEnrollment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "given-id",
+          automationId: automationB.id,
+          stepId: head.id,
+          recipient: userRecipient,
+          enrolledAt: now,
+          nextSendAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        }),
+      );
+    });
+
+    it("enrol: generates an id when none is given and does not check consent", async () => {
+      const result = await service.enrol({
+        automation: automationB,
+        recipient: { ...userRecipient, marketingConsent: false },
+      });
+
+      expect(result.status).toBe("enrolled");
+      const id = result.status === "enrolled" ? result.enrollmentId : "";
+      expect(id).toMatch(UUID);
+      expect(enrollmentRepository.createEnrollment.mock.calls[0][0].id).toBe(id);
     });
   });
 });

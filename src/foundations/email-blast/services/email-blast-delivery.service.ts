@@ -13,6 +13,7 @@ import { AppLoggingService } from "../../../core/logging/services/logging.servic
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { EmailAutomationEnrollmentRepository } from "../../email-automation/repositories/email-automation-enrollment.repository";
 import { EmailOptOutRepository } from "../../email-automation/repositories/email-opt-out.repository";
+import { resolveEmailPurpose } from "../../email-automation/utils/email-purpose";
 import { ResponseLanguageService } from "../../user/services/response-language.service";
 import {
   EMAIL_BLAST_BATCH_SIZE,
@@ -146,8 +147,8 @@ export class EmailBlastDeliveryService extends AbstractService<
 
   /**
    * Stops every marketing email to the delivery's address: counts the unsubscribe on the
-   * blast once, finishes the address's active automation enrolments and writes the shared
-   * opt-out. Idempotent. Answers nothing, so a token holder never learns the email or user.
+   * blast once, finishes the address's active enrolments in Marketing automations (Service
+   * enrolments continue) and writes the shared opt-out. Idempotent. Answers nothing, so a token holder never learns the email or user.
    */
   async unsubscribe(params: { token: string; source: "link" | "header" }): Promise<void> {
     const delivery = await this.deliveryRepository.findByUnsubscribeToken({ token: params.token });
@@ -157,7 +158,7 @@ export class EmailBlastDeliveryService extends AbstractService<
 
     await this.deliveryRepository.markUnsubscribed({ id: delivery.id, unsubscribedAt: now });
 
-    const activeEnrollments = await this.enrollmentRepository.findActiveByEmail({ email: delivery.email });
+    const activeEnrollments = await this.enrollmentRepository.findActiveMarketingByEmail({ email: delivery.email });
     for (const enrollment of activeEnrollments) {
       await this.enrollmentRepository.finish({ enrollmentId: enrollment.id, status: "unsubscribed", finishedAt: now });
     }
@@ -177,12 +178,15 @@ export class EmailBlastDeliveryService extends AbstractService<
     apiUrl: string;
   }): Promise<DeliveryOutcome> {
     const { blast, delivery, appUrl, apiUrl } = params;
+    const isService = resolveEmailPurpose(blast.purpose) === "service";
 
-    // The address may have opted out after the snapshot.
-    const optOut = await this.optOutRepository.findByEmail({ email: delivery.email });
-    if (optOut) {
-      await this.deliveryRepository.markSkipped({ id: delivery.id });
-      return "skipped";
+    // A Marketing address may have opted out after the snapshot; a Service blast ignores the opt-out.
+    if (!isService) {
+      const optOut = await this.optOutRepository.findByEmail({ email: delivery.email });
+      if (optOut) {
+        await this.deliveryRepository.markSkipped({ id: delivery.id });
+        return "skipped";
+      }
     }
 
     try {
@@ -204,6 +208,7 @@ export class EmailBlastDeliveryService extends AbstractService<
           replyTo: rendered.replyTo,
           headers: rendered.headers,
           unsubscribeAllUrl: rendered.unsubscribeAllUrl,
+          isService,
         },
         locale,
       );

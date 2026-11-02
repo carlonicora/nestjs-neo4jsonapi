@@ -7,6 +7,7 @@ import { EmailAutomationEnrollment } from "../entities/email-automation-enrollme
 import { EmailAutomationStep } from "../entities/email-automation-step";
 import { EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT, emailAutomationMeta } from "../entities/email-automation.meta";
 import { renderMarkdownEmail } from "../utils/email-markdown.renderer";
+import { resolveEmailPurpose } from "../utils/email-purpose";
 
 export type EmailAutomationRendered = {
   subject: string;
@@ -14,7 +15,10 @@ export type EmailAutomationRendered = {
   headers: Record<string, string>;
   replyTo?: string;
   unsubscribeUrl: string;
-  unsubscribeAllUrl: string;
+  /** Undefined for a Service automation: the global opt-out does not stop Service emails. */
+  unsubscribeAllUrl?: string;
+  isService: boolean;
+  isWaitlistRecipient: boolean;
 };
 
 /**
@@ -27,6 +31,11 @@ export type EmailAutomationRendered = {
  * The three URLs are built here from config and a UUID token, so they are passed
  * unescaped: escaping would turn `?scope=all` into `?scope&#x3D;all`, which breaks
  * Markdown autolinks. Raw HTML written in the body is escaped too: the body is Markdown.
+ *
+ * A Service automation (purpose "service") has no `unsubscribeAllUrl`: the variable is
+ * omitted, so a body that uses it renders an empty string, and the List-Unsubscribe
+ * header points at the enrolment's own unsubscribe (no `?scope=all`). A missing purpose
+ * counts as Marketing.
  */
 @Injectable()
 export class EmailAutomationRenderer {
@@ -43,15 +52,19 @@ export class EmailAutomationRenderer {
     const apiUrl = this.configService.get<ConfigApiInterface>("api").url;
     const token = enrollment.unsubscribeToken;
 
+    const isService = resolveEmailPurpose(automation.purpose) === "service";
+    const isWaitlistRecipient = enrollment.recipientType === "waitlist";
+
     const unsubscribeUrl = `${appUrl}${locale}/unsubscribe/${token}`;
-    const unsubscribeAllUrl = `${unsubscribeUrl}?scope=all`;
+    const unsubscribeAllUrl = isService ? undefined : `${unsubscribeUrl}?scope=all`;
+    const oneClickUrl = `${apiUrl}${emailAutomationMeta.endpoint}/${EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT}/${token}`;
 
     const vars = {
       name: enrollment.name ?? enrollment.email.split("@")[0],
       email: enrollment.email,
       url: new Handlebars.SafeString(appUrl),
       unsubscribeUrl: new Handlebars.SafeString(unsubscribeUrl),
-      unsubscribeAllUrl: new Handlebars.SafeString(unsubscribeAllUrl),
+      ...(unsubscribeAllUrl ? { unsubscribeAllUrl: new Handlebars.SafeString(unsubscribeAllUrl) } : {}),
     };
 
     const { subject, content } = await renderMarkdownEmail({ subject: step.subject, body: step.body, vars });
@@ -60,12 +73,15 @@ export class EmailAutomationRenderer {
       subject,
       content,
       headers: {
-        "List-Unsubscribe": `<${apiUrl}${emailAutomationMeta.endpoint}/${EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT}/${token}?scope=all>`,
+        // The scope is always explicit: the one-click endpoint falls back to "all" when none is given.
+        "List-Unsubscribe": isService ? `<${oneClickUrl}?scope=automation>` : `<${oneClickUrl}?scope=all>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       },
       ...(automation.replyTo ? { replyTo: automation.replyTo } : {}),
       unsubscribeUrl,
-      unsubscribeAllUrl,
+      ...(unsubscribeAllUrl ? { unsubscribeAllUrl } : {}),
+      isService,
+      isWaitlistRecipient,
     };
   }
 }

@@ -31,7 +31,8 @@ export class EmailBlastDeliveryRepository extends AbstractRepository<
 
   /**
    * Builds the recipient list of a blast once: one pending delivery per eligible, distinct
-   * lower-cased email, and the blast's recipientCount (0 when nobody is eligible).
+   * lower-cased email, and the blast's recipientCount (0 when nobody is eligible). The blast's
+   * purpose (missing counts as "marketing") decides whether consent and opt-out are checked.
    *
    * Owner-approved exception (Carlo, 2026-10-27, decision D-1 of the email-blasts plan):
    * - Only caller: EmailBlastDeliveryService.processBlast in the worker job, never an HTTP request.
@@ -59,7 +60,9 @@ export class EmailBlastDeliveryRepository extends AbstractRepository<
       WHERE NOT EXISTS {
         MATCH (${blast})-[:HAS_DELIVERY]->(:${emailBlastDeliveryMeta.labelName})
       }
+      WITH ${blast}, coalesce(${blast}.purpose, "marketing") AS purpose
       CALL {
+        WITH purpose
         ${ELIGIBLE_RECIPIENTS_CYPHER}
         RETURN collect({ email: email, recipient: recipient }) AS rows
       }

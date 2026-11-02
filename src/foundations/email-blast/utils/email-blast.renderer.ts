@@ -1,5 +1,6 @@
 import * as Handlebars from "handlebars";
 import { renderMarkdownEmail } from "../../email-automation/utils/email-markdown.renderer";
+import { resolveEmailPurpose } from "../../email-automation/utils/email-purpose";
 import { EmailBlast } from "../entities/email-blast";
 import { EMAIL_BLAST_UNSUBSCRIBE_SEGMENT, emailBlastMeta } from "../entities/email-blast.meta";
 
@@ -8,7 +9,9 @@ export type EmailBlastRendered = {
   content: string;
   headers: Record<string, string>;
   replyTo?: string;
-  unsubscribeAllUrl: string;
+  /** Undefined for a Service blast: it carries no unsubscribe link. */
+  unsubscribeAllUrl?: string;
+  isService: boolean;
 };
 
 /**
@@ -19,6 +22,10 @@ export type EmailBlastRendered = {
  * Variables: `{{name}}`, `{{email}}`, `{{url}}`, `{{unsubscribeAllUrl}}`.
  * `name` and `email` are HTML-escaped; the two URLs are built from config and a UUID
  * token, so they are passed unescaped. The caller reads `appUrl` / `apiUrl` from config.
+ *
+ * A Service blast (purpose "service") has no `unsubscribeAllUrl` (a body that uses it
+ * renders an empty string) and no List-Unsubscribe headers. A missing purpose counts
+ * as Marketing.
  */
 export async function renderEmailBlast(params: {
   blast: EmailBlast;
@@ -30,13 +37,14 @@ export async function renderEmailBlast(params: {
 }): Promise<EmailBlastRendered> {
   const { blast, recipient, unsubscribeToken, locale, appUrl, apiUrl } = params;
 
-  const unsubscribeAllUrl = `${appUrl}${locale}/unsubscribe/blast/${unsubscribeToken}`;
+  const isService = resolveEmailPurpose(blast.purpose) === "service";
+  const unsubscribeAllUrl = isService ? undefined : `${appUrl}${locale}/unsubscribe/blast/${unsubscribeToken}`;
 
   const vars = {
     name: recipient.name ?? recipient.email.split("@")[0],
     email: recipient.email,
     url: new Handlebars.SafeString(appUrl),
-    unsubscribeAllUrl: new Handlebars.SafeString(unsubscribeAllUrl),
+    ...(unsubscribeAllUrl ? { unsubscribeAllUrl: new Handlebars.SafeString(unsubscribeAllUrl) } : {}),
   };
 
   const { subject, content } = await renderMarkdownEmail({ subject: blast.subject, body: blast.body, vars });
@@ -44,11 +52,14 @@ export async function renderEmailBlast(params: {
   return {
     subject,
     content,
-    headers: {
-      "List-Unsubscribe": `<${apiUrl}${emailBlastMeta.endpoint}/${EMAIL_BLAST_UNSUBSCRIBE_SEGMENT}/${unsubscribeToken}>`,
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-    },
+    headers: isService
+      ? {}
+      : {
+          "List-Unsubscribe": `<${apiUrl}${emailBlastMeta.endpoint}/${EMAIL_BLAST_UNSUBSCRIBE_SEGMENT}/${unsubscribeToken}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
     ...(blast.replyTo ? { replyTo: blast.replyTo } : {}),
-    unsubscribeAllUrl,
+    ...(unsubscribeAllUrl ? { unsubscribeAllUrl } : {}),
+    isService,
   };
 }

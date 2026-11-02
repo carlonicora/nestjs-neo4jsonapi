@@ -1,4 +1,5 @@
 import { Entity, defineEntity } from "../../../common";
+import { EmailPurpose } from "../../email-automation/utils/email-purpose";
 import { emailBlastMeta } from "./email-blast.meta";
 
 export type EmailBlastStatus = "draft" | "sending" | "sent";
@@ -7,6 +8,8 @@ export type EmailBlast = Entity & {
   subject: string;
   body: string;
   replyTo?: string;
+  /** Missing counts as "marketing" (see resolveEmailPurpose). */
+  purpose?: EmailPurpose;
   status: EmailBlastStatus;
   sentAt?: Date;
   recipientCount?: number;
@@ -26,6 +29,7 @@ export const EmailBlastDescriptor = defineEntity<EmailBlast>()({
     subject: { type: "string", required: true },
     body: { type: "string", required: true },
     replyTo: { type: "string" },
+    purpose: { type: "string" },
     // Not required: the POST DTO never carries it, the default sets it
     status: { type: "string", default: "draft" },
     sentAt: { type: "datetime" },

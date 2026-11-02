@@ -133,4 +133,65 @@ describe("EmailAutomationRenderer", () => {
 
     expect(result.subject).toBe("Hi Tom & Jerry");
   });
+
+  it("marketing automation keeps both unsubscribe urls and the scope=all header", async () => {
+    const result = await renderer.render({
+      step,
+      enrollment,
+      automation: { ...automation, purpose: "marketing" } as EmailAutomation,
+      locale: "en",
+    });
+
+    expect(result.isService).toBe(false);
+    expect(result.unsubscribeUrl).toBe("https://app.test/en/unsubscribe/tok");
+    expect(result.unsubscribeAllUrl).toBe("https://app.test/en/unsubscribe/tok?scope=all");
+    expect(result.headers).toEqual({
+      "List-Unsubscribe": `<https://api.test/${emailAutomationMeta.endpoint}/${EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT}/tok?scope=all>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+  });
+
+  it("service automation has no unsubscribeAllUrl and its List-Unsubscribe header ends only this automation (scope=automation)", async () => {
+    const result = await renderer.render({
+      step: { ...step, body: "Stop: {{unsubscribeAllUrl}}" } as EmailAutomationStep,
+      enrollment,
+      automation: { ...automation, purpose: "service" } as EmailAutomation,
+      locale: "en",
+    });
+
+    expect(result.isService).toBe(true);
+    expect(result.unsubscribeUrl).toBe("https://app.test/en/unsubscribe/tok");
+    expect(result.unsubscribeAllUrl).toBeUndefined();
+    expect(result.content).not.toContain("scope=all");
+    expect(result.headers).toEqual({
+      "List-Unsubscribe": `<https://api.test/${emailAutomationMeta.endpoint}/${EMAIL_AUTOMATION_UNSUBSCRIBE_SEGMENT}/tok?scope=automation>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+  });
+
+  it("isWaitlistRecipient follows recipientType", async () => {
+    const waitlist = await renderer.render({
+      step,
+      enrollment: { ...enrollment, recipientType: "waitlist" } as EmailAutomationEnrollment,
+      automation,
+      locale: "en",
+    });
+    const user = await renderer.render({
+      step,
+      enrollment: { ...enrollment, recipientType: "user" } as EmailAutomationEnrollment,
+      automation,
+      locale: "en",
+    });
+
+    expect(waitlist.isWaitlistRecipient).toBe(true);
+    expect(user.isWaitlistRecipient).toBe(false);
+  });
+
+  it("automation without purpose renders as marketing", async () => {
+    const result = await renderer.render({ step, enrollment, automation, locale: "en" });
+
+    expect(result.isService).toBe(false);
+    expect(result.unsubscribeAllUrl).toBe("https://app.test/en/unsubscribe/tok?scope=all");
+    expect(result.headers["List-Unsubscribe"]).toContain("?scope=all");
+  });
 });

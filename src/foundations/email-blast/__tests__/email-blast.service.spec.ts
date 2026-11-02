@@ -1,4 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
+import { plainToInstance } from "class-transformer";
+import { validate } from "class-validator";
 import { ConfigService } from "@nestjs/config";
 import { Queue } from "bullmq";
 import { ClsService } from "nestjs-cls";
@@ -11,6 +13,8 @@ import { JsonApiDTOData } from "../../../core/neo4j/abstracts/abstract.service";
 import { User } from "../../user/entities/user";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { ResponseLanguageService } from "../../user/services/response-language.service";
+import { EmailBlastPatchDTO } from "../dtos/email-blast.patch.dto";
+import { EmailBlastPostDTO } from "../dtos/email-blast.post.dto";
 import { EMAIL_BLAST_JOB_NAMES } from "../email-blast.constants";
 import { EmailBlast } from "../entities/email-blast";
 import { EmailBlastAudience } from "../entities/email-blast-audience";
@@ -154,5 +158,66 @@ describe("EmailBlastService", () => {
 
     await expect(service.sendTest({ id: "blast-1" })).rejects.toBeInstanceOf(BadRequestException);
     expect(emailService.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("findAudience and send pass the blast purpose to countEligibleRecipients", async () => {
+    blastRepository.findById.mockResolvedValue(buildBlast({ purpose: "service" }));
+
+    await service.findAudience({ id: "blast-1" });
+    expect(blastRepository.findById).toHaveBeenCalledWith({ id: "blast-1" });
+    expect(adminRepository.countEligibleRecipients).toHaveBeenLastCalledWith({
+      blastId: "blast-1",
+      purpose: "service",
+    });
+
+    await service.send({ id: "blast-1" });
+    expect(adminRepository.countEligibleRecipients).toHaveBeenLastCalledWith({
+      blastId: "blast-1",
+      purpose: "service",
+    });
+
+    // A blast with no stored purpose counts as Marketing.
+    blastRepository.findById.mockResolvedValue(buildBlast());
+    await service.findAudience({ id: "blast-1" });
+    expect(adminRepository.countEligibleRecipients).toHaveBeenLastCalledWith({
+      blastId: "blast-1",
+      purpose: "marketing",
+    });
+  });
+
+  it("sendTest passes isService to sendEmail", async () => {
+    blastRepository.findById.mockResolvedValue(buildBlast({ purpose: "service" }));
+    await service.sendTest({ id: "blast-1" });
+    expect(emailService.sendEmail.mock.calls[0][1]).toMatchObject({ isService: true });
+
+    blastRepository.findById.mockResolvedValue(buildBlast({ purpose: "marketing" }));
+    await service.sendTest({ id: "blast-1" });
+    expect(emailService.sendEmail.mock.calls[1][1]).toMatchObject({ isService: false });
+  });
+
+  describe("DTO purpose", () => {
+    const body = (DTO: typeof EmailBlastPostDTO | typeof EmailBlastPatchDTO, attributes: Record<string, unknown>) =>
+      plainToInstance(DTO, {
+        data: {
+          type: "email-blasts",
+          id: "6f1c1f0e-3b1a-4c2d-9e8f-0a1b2c3d4e5f",
+          attributes: { subject: "Big news", body: "Hello", ...attributes },
+        },
+      });
+
+    for (const DTO of [EmailBlastPostDTO, EmailBlastPatchDTO]) {
+      it(`${DTO.name} accepts purpose`, async () => {
+        expect(await validate(body(DTO, { purpose: "service" }))).toHaveLength(0);
+        expect(await validate(body(DTO, { purpose: "marketing" }))).toHaveLength(0);
+      });
+
+      it(`${DTO.name} accepts its absence`, async () => {
+        expect(await validate(body(DTO, {}))).toHaveLength(0);
+      });
+
+      it(`${DTO.name} rejects "other"`, async () => {
+        expect(await validate(body(DTO, { purpose: "other" }))).not.toHaveLength(0);
+      });
+    }
   });
 });

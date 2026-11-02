@@ -6,6 +6,7 @@ import { EmailAutomationEnrollment } from "../entities/email-automation-enrollme
 import { EmailAutomationEnrollmentRepository } from "../repositories/email-automation-enrollment.repository";
 import { EmailAutomationStepRepository } from "../repositories/email-automation-step.repository";
 import { EmailOptOutRepository } from "../repositories/email-opt-out.repository";
+import { resolveEmailPurpose } from "../utils/email-purpose";
 import { EmailAutomationRenderer } from "./email-automation-renderer.service";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -52,10 +53,19 @@ export class EmailAutomationSenderService {
   private async processOne(params: { enrollment: EmailAutomationEnrollment; now: Date }): Promise<ProcessOutcome> {
     const { enrollment, now } = params;
 
-    const optOut = await this.optOutRepository.findByEmail({ email: enrollment.email });
-    if (optOut) {
-      await this.enrollmentRepository.finish({ enrollmentId: enrollment.id, status: "unsubscribed", finishedAt: now });
-      return "skipped";
+    // Marketing is re-checked before every send: the global opt-out AND the recipient record's
+    // current consent (withdrawn midway, record gone, or the automation switched to Marketing).
+    // Service emails skip both checks.
+    if (resolveEmailPurpose(enrollment.automation?.purpose) === "marketing") {
+      const optOut = await this.optOutRepository.findByEmail({ email: enrollment.email });
+      if (optOut || enrollment.recipientMarketingConsent !== true) {
+        await this.enrollmentRepository.finish({
+          enrollmentId: enrollment.id,
+          status: "unsubscribed",
+          finishedAt: now,
+        });
+        return "skipped";
+      }
     }
 
     if (!enrollment.currentStep?.id || !enrollment.automation) {
@@ -98,6 +108,8 @@ export class EmailAutomationSenderService {
             headers: rendered.headers,
             unsubscribeUrl: rendered.unsubscribeUrl,
             unsubscribeAllUrl: rendered.unsubscribeAllUrl,
+            isService: rendered.isService,
+            isWaitlistRecipient: rendered.isWaitlistRecipient,
           },
           locale,
         );

@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDefined,
   IsEmail,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -11,6 +12,7 @@ import {
   ValidateNested,
 } from "class-validator";
 import { emailAutomationMeta } from "../entities/email-automation.meta";
+import { EMAIL_PURPOSES, EmailPurpose } from "../utils/email-purpose";
 
 export class EmailAutomationPostAttributesDTO {
   @IsDefined()
@@ -30,6 +32,10 @@ export class EmailAutomationPostAttributesDTO {
   @IsString()
   @IsEmail()
   replyTo?: string;
+
+  @IsOptional()
+  @IsIn(EMAIL_PURPOSES)
+  purpose?: EmailPurpose;
 
   @IsOptional()
   @IsBoolean()

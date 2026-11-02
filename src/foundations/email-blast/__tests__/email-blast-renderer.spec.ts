@@ -71,4 +71,25 @@ describe("renderEmailBlast", () => {
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     });
   });
+
+  it("service blast has no unsubscribeAllUrl and no headers", async () => {
+    const result = await renderEmailBlast({ ...base, blast: { ...blast, purpose: "service" } as EmailBlast });
+
+    expect(result.isService).toBe(true);
+    expect(result.unsubscribeAllUrl).toBeUndefined();
+    expect(result.headers).toEqual({});
+    expect(result.content).not.toContain("unsubscribe");
+  });
+
+  it("marketing blast unchanged", async () => {
+    const result = await renderEmailBlast({ ...base, blast: { ...blast, purpose: "marketing" } as EmailBlast });
+
+    expect(result.isService).toBe(false);
+    expect(result.unsubscribeAllUrl).toBe("https://app.test/en/unsubscribe/blast/tok-1");
+    expect(result.content).toContain("https://app.test/en/unsubscribe/blast/tok-1");
+    expect(result.headers).toEqual({
+      "List-Unsubscribe": `<https://api.test/${emailBlastMeta.endpoint}/${EMAIL_BLAST_UNSUBSCRIBE_SEGMENT}/tok-1>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+  });
 });

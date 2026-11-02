@@ -18,6 +18,8 @@ export * from "./entities/email-opt-out";
 export * from "./entities/email-opt-out.meta";
 export * from "./entities/email-automation-trigger";
 export * from "./entities/email-automation-trigger.meta";
+export * from "./entities/email-automation-candidate";
+export * from "./entities/email-automation-candidate.meta";
 
 // DTOs
 export * from "./dtos/email-automation.dto";
@@ -27,12 +29,14 @@ export * from "./dtos/email-automation-step.dto";
 export * from "./dtos/email-automation-step.post.dto";
 export * from "./dtos/email-automation-step.patch.dto";
 export * from "./dtos/email-automation-unsubscribe.dto";
+export * from "./dtos/email-automation-enrollment.post.dto";
 
 // Repositories
 export * from "./repositories/email-automation.repository";
 export * from "./repositories/email-automation-step.repository";
 export * from "./repositories/email-automation-enrollment.repository";
 export * from "./repositories/email-opt-out.repository";
+export * from "./repositories/email-automation-candidate.repository";
 
 // Services
 export * from "./services/email-automation.service";
@@ -44,6 +48,7 @@ export * from "./services/email-automation-unsubscribe.service";
 
 // Utils
 export * from "./utils/email-markdown.renderer";
+export * from "./utils/email-purpose";
 
 // Cron
 export * from "./cron/email-automation-sender.cron";

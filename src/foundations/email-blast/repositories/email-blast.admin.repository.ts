@@ -6,13 +6,16 @@
 // readOne()/readMany() cannot map. Only EmailBlastController.findAudience and .send reach it,
 // gated by JwtAuthGuard and Roles(SystemRoles.Administrator).
 //
-// Queries seed themselves from _adminQuery(); no query here binds a parameter named companyId.
+// Queries seed themselves from _adminQuery(); the only parameter bound is the blast's purpose
+// ("service" or "marketing", resolved by the service), which the eligibility block reads. No
+// query here binds a parameter named companyId.
 import { Injectable } from "@nestjs/common";
 import { isInt } from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import { EmailPurpose } from "../../email-automation/utils/email-purpose";
 import { ELIGIBLE_RECIPIENTS_CYPHER } from "../email-blast.constants";
 import { EmailBlastAudience, EmailBlastAudienceDescriptor } from "../entities/email-blast-audience";
 
@@ -32,12 +35,13 @@ export class EmailBlastAdminRepository extends AbstractRepository<
 
   /**
    * How many distinct addresses a blast would reach right now (the same eligibility block the
-   * snapshot uses). `id` is the blast id.
+   * snapshot uses), for the blast's purpose. `id` is the blast id.
    */
-  async countEligibleRecipients(params: { blastId: string }): Promise<EmailBlastAudience> {
-    const seed = this._adminQuery();
+  async countEligibleRecipients(params: { blastId: string; purpose: EmailPurpose }): Promise<EmailBlastAudience> {
+    const seed = this._adminQuery({ purpose: params.purpose });
 
     seed.query = `
+      WITH $purpose AS purpose
       ${ELIGIBLE_RECIPIENTS_CYPHER}
       RETURN count(email) AS recipientCount
     `;
@@ -51,8 +55,8 @@ export class EmailBlastAdminRepository extends AbstractRepository<
     } as EmailBlastAudience;
   }
 
-  /** Seeds a query with only the parameters it needs: none (never the caller's companyId). */
-  private _adminQuery(): AdminQuery {
-    return { query: "", queryParams: {} };
+  /** Seeds a query with only the parameters it needs: the purpose (never the caller's companyId). */
+  private _adminQuery(params: { purpose: EmailPurpose }): AdminQuery {
+    return { query: "", queryParams: { purpose: params.purpose } };
   }
 }

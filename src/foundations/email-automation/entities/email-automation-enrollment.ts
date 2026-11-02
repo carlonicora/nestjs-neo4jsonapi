@@ -21,6 +21,7 @@ export type EmailAutomationEnrollment = Entity & {
   unsubscribeToken?: string;
   currentStepSubject?: string; // computed
   sentCount?: number; // computed
+  recipientMarketingConsent?: boolean; // computed: the recipient record's current consent
   automation?: EmailAutomation;
   currentStep?: EmailAutomationStep;
   sentSteps?: EmailAutomationStep[];
@@ -46,6 +47,8 @@ export const EmailAutomationEnrollmentDescriptor = defineEntity<EmailAutomationE
     unsubscribeToken: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },
     currentStepSubject: { type: "string" },
     sentCount: { type: "number" },
+    // Internal: the sender reads it from the entity; never serialised (the public unsubscribe answer included).
+    recipientMarketingConsent: { type: "boolean", excludeFromJsonApi: true },
   },
 
   computed: {
@@ -61,6 +64,14 @@ export const EmailAutomationEnrollmentDescriptor = defineEntity<EmailAutomationE
         const count = params.record.get("sentCount");
         if (count?.toNumber) return count.toNumber();
         return Number(count) || 0;
+      },
+    },
+    // Column produced by EmailAutomationEnrollmentRepository.buildReturnStatement(): the consent
+    // on the recipient's record right now (false when the record no longer exists).
+    recipientMarketingConsent: {
+      compute: (params) => {
+        if (!params.record?.has?.("recipientMarketingConsent")) return params.data?.recipientMarketingConsent;
+        return params.record.get("recipientMarketingConsent") === true;
       },
     },
   },

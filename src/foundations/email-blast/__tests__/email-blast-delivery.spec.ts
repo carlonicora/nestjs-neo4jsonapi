@@ -88,7 +88,7 @@ describe("EmailBlastDeliveryService", () => {
       createOptOut: vi.fn().mockResolvedValue(undefined),
     } as unknown as MockedObject<EmailOptOutRepository>;
     enrollmentRepository = {
-      findActiveByEmail: vi.fn().mockResolvedValue([]),
+      findActiveMarketingByEmail: vi.fn().mockResolvedValue([]),
       finish: vi.fn().mockResolvedValue(undefined),
     } as unknown as MockedObject<EmailAutomationEnrollmentRepository>;
     emailService = { sendEmail: vi.fn().mockResolvedValue(undefined) } as unknown as MockedObject<EmailService>;
@@ -186,6 +186,7 @@ describe("EmailBlastDeliveryService", () => {
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
           },
           unsubscribeAllUrl: "https://app.test/en/unsubscribe/blast/token-d1",
+          isService: false,
         },
         "en",
       );
@@ -349,14 +350,14 @@ describe("EmailBlastDeliveryService", () => {
 
     it("unsubscribe finishes active automation enrolments of the email", async () => {
       deliveryRepository.findByUnsubscribeToken.mockResolvedValue(delivery);
-      enrollmentRepository.findActiveByEmail.mockResolvedValue([
+      enrollmentRepository.findActiveMarketingByEmail.mockResolvedValue([
         { id: "enr-1" } as EmailAutomationEnrollment,
         { id: "enr-2" } as EmailAutomationEnrollment,
       ]);
 
       await service.unsubscribe({ token: "token-d1", source: "link" });
 
-      expect(enrollmentRepository.findActiveByEmail).toHaveBeenCalledWith({ email: "d1@wyrd.li" });
+      expect(enrollmentRepository.findActiveMarketingByEmail).toHaveBeenCalledWith({ email: "d1@wyrd.li" });
       expect(enrollmentRepository.finish).toHaveBeenCalledWith({
         enrollmentId: "enr-1",
         status: "unsubscribed",
@@ -367,6 +368,57 @@ describe("EmailBlastDeliveryService", () => {
         status: "unsubscribed",
         finishedAt: NOW,
       });
+    });
+
+    it("blast unsubscribe leaves service enrolments active", async () => {
+      deliveryRepository.findByUnsubscribeToken.mockResolvedValue(delivery);
+      enrollmentRepository.findActiveMarketingByEmail.mockResolvedValue([
+        { id: "enr-marketing" } as EmailAutomationEnrollment,
+      ]);
+
+      await service.unsubscribe({ token: "token-d1", source: "link" });
+
+      expect(enrollmentRepository.findActiveMarketingByEmail).toHaveBeenCalledWith({ email: "d1@wyrd.li" });
+      expect(enrollmentRepository.finish).toHaveBeenCalledTimes(1);
+      expect(enrollmentRepository.finish).toHaveBeenCalledWith(
+        expect.objectContaining({ enrollmentId: "enr-marketing", status: "unsubscribed" }),
+      );
+    });
+  });
+
+  describe("purpose", () => {
+    it("deliverOne skips an opted-out address only for marketing", async () => {
+      blastRepository.findById.mockResolvedValue({ ...blast, purpose: "marketing" } as EmailBlast);
+      deliveryRepository.claimBatch.mockResolvedValueOnce([buildDelivery("d1")]);
+      optOutRepository.findByEmail.mockResolvedValue({ id: "o1", email: "d1@wyrd.li" } as EmailOptOut);
+
+      const counts = await service.processBlast({ blastId: "blast-1" });
+
+      expect(deliveryRepository.markSkipped).toHaveBeenCalledWith({ id: "d1" });
+      expect(emailService.sendEmail).not.toHaveBeenCalled();
+      expect(counts).toEqual({ sent: 0, skipped: 1, failed: 0 });
+    });
+
+    it("service blast delivers to an opted-out address", async () => {
+      blastRepository.findById.mockResolvedValue({ ...blast, purpose: "service" } as EmailBlast);
+      deliveryRepository.claimBatch.mockResolvedValueOnce([buildDelivery("d1")]);
+      optOutRepository.findByEmail.mockResolvedValue({ id: "o1", email: "d1@wyrd.li" } as EmailOptOut);
+
+      const counts = await service.processBlast({ blastId: "blast-1" });
+
+      expect(optOutRepository.findByEmail).not.toHaveBeenCalled();
+      expect(deliveryRepository.markSkipped).not.toHaveBeenCalled();
+      expect(emailService.sendEmail).toHaveBeenCalledTimes(1);
+      expect(emailService.sendEmail.mock.calls[0][1]).toMatchObject({ to: "d1@wyrd.li", isService: true });
+      expect(counts).toEqual({ sent: 1, skipped: 0, failed: 0 });
+    });
+
+    it("a marketing blast passes isService false", async () => {
+      deliveryRepository.claimBatch.mockResolvedValueOnce([buildDelivery("d1")]);
+
+      await service.processBlast({ blastId: "blast-1" });
+
+      expect(emailService.sendEmail.mock.calls[0][1]).toMatchObject({ isService: false });
     });
   });
 });

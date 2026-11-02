@@ -1,4 +1,5 @@
 import { Entity, defineEntity } from "../../../common";
+import type { EmailPurpose } from "../utils/email-purpose";
 import type { EmailAutomationStep } from "./email-automation-step";
 import { emailAutomationStepMeta } from "./email-automation-step.meta";
 import { emailAutomationMeta } from "./email-automation.meta";
@@ -8,6 +9,7 @@ export type EmailAutomation = Entity & {
   trigger?: string;
   exitTrigger?: string;
   replyTo?: string;
+  purpose?: EmailPurpose; // missing counts as "marketing" (resolveEmailPurpose)
   isActive: boolean;
   stepCount?: number; // computed
   activeCount?: number; // computed
@@ -41,6 +43,7 @@ export const EmailAutomationDescriptor = defineEntity<EmailAutomation>()({
     trigger: { type: "string" },
     exitTrigger: { type: "string" },
     replyTo: { type: "string" },
+    purpose: { type: "string" },
     isActive: { type: "boolean", required: true, default: false },
     stepCount: { type: "number" },
     activeCount: { type: "number" },

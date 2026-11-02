@@ -9,6 +9,7 @@ import { EmailService } from "../../../core/email/services/email.service";
 import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService, JsonApiDTOData } from "../../../core/neo4j/abstracts/abstract.service";
+import { resolveEmailPurpose } from "../../email-automation/utils/email-purpose";
 import { UserRepository } from "../../user/repositories/user.repository";
 import { ResponseLanguageService } from "../../user/services/response-language.service";
 import {
@@ -20,7 +21,7 @@ import {
   emailBlastJobId,
 } from "../email-blast.constants";
 import { EmailBlast, EmailBlastDescriptor } from "../entities/email-blast";
-import { EmailBlastAudienceDescriptor } from "../entities/email-blast-audience";
+import { EmailBlastAudience, EmailBlastAudienceDescriptor } from "../entities/email-blast-audience";
 import { EmailBlastAdminRepository } from "../repositories/email-blast.admin.repository";
 import { EmailBlastRepository } from "../repositories/email-blast.repository";
 import { renderEmailBlast } from "../utils/email-blast.renderer";
@@ -58,12 +59,13 @@ export class EmailBlastService extends AbstractService<EmailBlast, typeof EmailB
   }
 
   /**
-   * How many people the blast would reach now, as a synthetic `email-blast-audiences` resource.
+   * How many people the blast would reach now (for its purpose), as a synthetic
+   * `email-blast-audiences` resource.
    */
   async findAudience(params: { id: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       EmailBlastAudienceDescriptor.model,
-      await this.adminRepository.countEligibleRecipients({ blastId: params.id }),
+      await this.countAudience({ id: params.id }),
     );
   }
 
@@ -98,6 +100,7 @@ export class EmailBlastService extends AbstractService<EmailBlast, typeof EmailB
         replyTo: rendered.replyTo,
         headers: rendered.headers,
         unsubscribeAllUrl: rendered.unsubscribeAllUrl,
+        isService: resolveEmailPurpose(blast.purpose) === "service",
       },
       locale,
     );
@@ -109,7 +112,7 @@ export class EmailBlastService extends AbstractService<EmailBlast, typeof EmailB
    * administrator) gets a 400 and never queues a second run.
    */
   async send(params: { id: string }): Promise<JsonApiSingleDocument> {
-    const audience = await this.adminRepository.countEligibleRecipients({ blastId: params.id });
+    const audience = await this.countAudience({ id: params.id });
     if (audience.recipientCount === 0) throw new BadRequestException("Nobody can receive this blast");
 
     const blast = await this.emailBlastRepository.markSending({ id: params.id, sentAt: new Date() });
@@ -122,6 +125,15 @@ export class EmailBlastService extends AbstractService<EmailBlast, typeof EmailB
     });
 
     return this.jsonApiService.buildSingle(EmailBlastDescriptor.model, blast);
+  }
+
+  /** Counts the eligible recipients for the blast's purpose (a missing blast counts as Marketing). */
+  private async countAudience(params: { id: string }): Promise<EmailBlastAudience> {
+    const blast = await this.emailBlastRepository.findById({ id: params.id });
+    return this.adminRepository.countEligibleRecipients({
+      blastId: params.id,
+      purpose: resolveEmailPurpose(blast?.purpose),
+    });
   }
 
   private async loadDraft(params: { id: string }): Promise<EmailBlast> {

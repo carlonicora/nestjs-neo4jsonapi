@@ -7,11 +7,13 @@ import { JsonApiModule } from "../../core/jsonapi/jsonapi.module";
 import { SecurityModule } from "../../core/security/security.module";
 import { AuditModule } from "../audit/audit.module";
 import { UserModule } from "../user/user.module";
+import { EmailAutomationAdminController } from "./controllers/email-automation.admin.controller";
 import { EmailAutomationStepController } from "./controllers/email-automation-step.controller";
 import { EmailAutomationController } from "./controllers/email-automation.controller";
 import { EmailAutomationPublicController } from "./controllers/email-automation.public.controller";
 import { EmailAutomationSenderCron } from "./cron/email-automation-sender.cron";
 import { EmailAutomationDescriptor } from "./entities/email-automation";
+import { EmailAutomationCandidateDescriptor } from "./entities/email-automation-candidate";
 import { EmailAutomationEnrollmentDescriptor } from "./entities/email-automation-enrollment";
 import { EmailAutomationStepDescriptor } from "./entities/email-automation-step";
 import { EmailAutomationTriggerDescriptor } from "./entities/email-automation-trigger";
@@ -23,6 +25,7 @@ import {
 } from "./interfaces/email-automation.config.interface";
 import { EmailAutomationEnrollmentRepository } from "./repositories/email-automation-enrollment.repository";
 import { EmailAutomationStepRepository } from "./repositories/email-automation-step.repository";
+import { EmailAutomationCandidateRepository } from "./repositories/email-automation-candidate.repository";
 import { EmailAutomationRepository } from "./repositories/email-automation.repository";
 import { EmailOptOutRepository } from "./repositories/email-opt-out.repository";
 import { EmailAutomationRenderer } from "./services/email-automation-renderer.service";
@@ -37,6 +40,8 @@ import { EmailAutomationService } from "./services/email-automation.service";
  *
  * - Admin CRUD over automations and steps (`EmailAutomationController`,
  *   `EmailAutomationStepController`, administrators only)
+ * - Manual add of a user or waitlist entry to an automation (`EmailAutomationAdminController`,
+ *   administrators only)
  * - A public one-click unsubscribe route (`EmailAutomationPublicController`)
  * - A listener that enrols people on the triggers the app declares
  *   (`EmailAutomationTriggerService`)
@@ -64,6 +69,7 @@ export class EmailAutomationModule implements OnModuleInit {
     modelRegistry.register(EmailOptOutDescriptor.model);
     // Synthetic resource (never a node): buildList needs it in the registry
     modelRegistry.register(EmailAutomationTriggerDescriptor.model);
+    modelRegistry.register(EmailAutomationCandidateDescriptor.model);
   }
 
   /**
@@ -82,7 +88,12 @@ export class EmailAutomationModule implements OnModuleInit {
     return {
       module: EmailAutomationModule,
       imports: [SecurityModule, JsonApiModule, EmailModule, UserModule, CacheModule, AuditModule],
-      controllers: [EmailAutomationController, EmailAutomationStepController, EmailAutomationPublicController],
+      controllers: [
+        EmailAutomationController,
+        EmailAutomationStepController,
+        EmailAutomationPublicController,
+        EmailAutomationAdminController,
+      ],
       providers: [
         configProvider,
         EmailAutomationDescriptor.model.serialiser,
@@ -90,10 +101,12 @@ export class EmailAutomationModule implements OnModuleInit {
         EmailAutomationEnrollmentDescriptor.model.serialiser,
         EmailOptOutDescriptor.model.serialiser,
         EmailAutomationTriggerDescriptor.model.serialiser,
+        EmailAutomationCandidateDescriptor.model.serialiser,
         EmailAutomationRepository,
         EmailAutomationStepRepository,
         EmailAutomationEnrollmentRepository,
         EmailOptOutRepository,
+        EmailAutomationCandidateRepository,
         EmailAutomationService,
         EmailAutomationStepService,
         EmailAutomationTriggerService,

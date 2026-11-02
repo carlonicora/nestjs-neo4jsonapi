@@ -29,11 +29,13 @@ import { EmailBlastDeliveryService } from "./services/email-blast-delivery.servi
 import { EmailBlastService } from "./services/email-blast.service";
 
 /**
- * EmailBlastModule — one-off marketing emails an administrator sends to every registered
- * user who gave marketing consent.
+ * EmailBlastModule — one-off emails an administrator sends to registered users. Each blast
+ * has a purpose: a Marketing blast reaches only users who gave marketing consent and are not
+ * in the global opt-out list; a Service blast reaches every active user with an email.
  *
  * - Admin CRUD, recipient count, test send and Send (`EmailBlastController`, administrators only)
  * - A public unsubscribe route (`EmailBlastPublicController`) that stops all marketing email
+ *   (Service automation enrolments continue)
  * - A worker job that snapshots the recipients and sends (`EmailBlastProcessor`)
  * - A recovery cron that fails stuck deliveries and re-queues interrupted sends
  *   (`EmailBlastRecoveryCron`)

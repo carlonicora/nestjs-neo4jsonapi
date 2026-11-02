@@ -1,6 +1,17 @@
 import { Type } from "class-transformer";
-import { Equals, IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
+import {
+  Equals,
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from "class-validator";
 import { emailAutomationMeta } from "../entities/email-automation.meta";
+import { EMAIL_PURPOSES, EmailPurpose } from "../utils/email-purpose";
 
 export class EmailAutomationPatchAttributesDTO {
   @IsOptional()
@@ -20,6 +31,10 @@ export class EmailAutomationPatchAttributesDTO {
   @IsString()
   @IsEmail()
   replyTo?: string;
+
+  @IsOptional()
+  @IsIn(EMAIL_PURPOSES)
+  purpose?: EmailPurpose;
 
   @IsOptional()
   @IsBoolean()

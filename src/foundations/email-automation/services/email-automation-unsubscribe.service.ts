@@ -28,7 +28,9 @@ export class EmailAutomationUnsubscribeService extends AbstractService<
   }
 
   /**
-   * Stops the emails of one enrolment (`automation`) or every marketing email to its address (`all`).
+   * `automation` ("Stop these emails") ends the token's enrolment, whatever the automation's purpose.
+   * `all` ("Stop all marketing emails") also ends the address's other active enrolments in Marketing
+   * automations only and records the global opt-out; Service enrolments continue.
    * Idempotent: a repeat call changes nothing and still answers with the enrolment.
    */
   async unsubscribe(params: {
@@ -46,7 +48,7 @@ export class EmailAutomationUnsubscribeService extends AbstractService<
     }
 
     if (params.scope === "all") {
-      const activeEnrollments = await this.enrollmentRepository.findActiveByEmail({ email: enrollment.email });
+      const activeEnrollments = await this.enrollmentRepository.findActiveMarketingByEmail({ email: enrollment.email });
       for (const active of activeEnrollments) {
         if (active.id === enrollment.id) continue;
         await this.enrollmentRepository.finish({ enrollmentId: active.id, status: "unsubscribed", finishedAt: now });

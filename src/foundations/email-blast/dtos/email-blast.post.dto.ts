@@ -1,5 +1,16 @@
 import { Type } from "class-transformer";
-import { Equals, IsDefined, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, ValidateNested } from "class-validator";
+import {
+  Equals,
+  IsIn,
+  IsDefined,
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  ValidateNested,
+} from "class-validator";
+import { EMAIL_PURPOSES, EmailPurpose } from "../../email-automation/utils/email-purpose";
 import { emailBlastMeta } from "../entities/email-blast.meta";
 
 // No status, counters or dates are accepted: the global whitelist strips them.
@@ -17,6 +28,11 @@ export class EmailBlastPostAttributesDTO {
   @IsOptional()
   @IsEmail()
   replyTo?: string;
+
+  // Optional at the API: a missing value counts as Marketing.
+  @IsOptional()
+  @IsIn(EMAIL_PURPOSES)
+  purpose?: EmailPurpose;
 }
 
 export class EmailBlastPostDataDTO {
