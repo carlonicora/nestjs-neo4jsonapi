@@ -1,3 +1,9 @@
+## [8.17.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.16.1...v8.17.0) (2026-11-02)
+
+### 🚀 Features
+
+* **email:** automations and blasts declare a purpose, Service or Marketing; Marketing reaches only people with marketing consent who have not opted out, checked on entry and before every send, Service reaches everyone and its footer says why with a stop link for that automation only, unsubscribing from everything now stops Marketing only, and administrators can search and add users or waitlist entries to an automation (WYR-45) ([f9dd8db](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f9dd8db5453ed7b33ef25645cc7987a2cfd40ea2))
+
 ## [8.16.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.16.0...v8.16.1) (2026-11-02)
 
 ### 🐛 Bug Fixes
