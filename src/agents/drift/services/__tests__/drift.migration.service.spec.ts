@@ -1,7 +1,10 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
+import { Module } from "@nestjs/common";
+import { MODULE_METADATA } from "@nestjs/common/constants";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ClsService } from "nestjs-cls";
 import { DriftMigrationService } from "../drift.migration.service";
+import { DriftModule } from "../../drift.module";
 import { AppLoggingService } from "../../../../core/logging/services/logging.service";
 import type { Company } from "../../../../foundations/company/entities/company";
 import { CompanyRepository } from "../../../../foundations/company/repositories/company.repository";
@@ -120,6 +123,44 @@ describe("DriftMigrationService", () => {
   describe("constructor", () => {
     it("should create the service", () => {
       expect(service).toBeDefined();
+    });
+  });
+
+  describe("company repository resolution", () => {
+    it("DriftModule does not provide its own CompanyRepository", () => {
+      const providers: unknown[] = Reflect.getMetadata(MODULE_METADATA.PROVIDERS, DriftModule) ?? [];
+      expect(providers).not.toContain(CompanyRepository);
+    });
+
+    it("uses the CompanyRepository registered by another module", async () => {
+      const appRepository = createMockCompanyRepository();
+      appRepository.fetchAll.mockResolvedValue([MOCK_COMPANIES[0]]);
+
+      @Module({
+        providers: [{ provide: CompanyRepository, useValue: appRepository }],
+        exports: [CompanyRepository],
+      })
+      class AppCompanyModule {}
+
+      @Module({
+        providers: [
+          DriftMigrationService,
+          { provide: AppLoggingService, useValue: createMockLogger() },
+          { provide: ClsService, useValue: createMockClsService() },
+          { provide: CommunityRepository, useValue: createMockCommunityRepository() },
+          { provide: CommunityDetectorService, useValue: createMockCommunityDetectorService() },
+        ],
+      })
+      class IsolatedDriftModule {}
+
+      const module = await Test.createTestingModule({
+        imports: [AppCompanyModule, IsolatedDriftModule],
+      }).compile();
+
+      const result = await module.get(DriftMigrationService).migrateAll();
+
+      expect(appRepository.fetchAll).toHaveBeenCalledTimes(1);
+      expect(result.totalCompanies).toBe(1);
     });
   });
 

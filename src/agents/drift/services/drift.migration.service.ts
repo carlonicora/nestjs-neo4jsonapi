@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { CommunityRepository } from "../../../foundations/community/repositories/community.repository";
@@ -17,10 +18,25 @@ export class DriftMigrationService {
   constructor(
     private readonly logger: AppLoggingService,
     private readonly clsService: ClsService,
-    private readonly companyRepository: CompanyRepository,
+    private readonly moduleRef: ModuleRef,
     private readonly communityRepository: CommunityRepository,
     private readonly communityDetectorService: CommunityDetectorService,
   ) {}
+
+  /**
+   * The app's own CompanyRepository, resolved at call time.
+   *
+   * DriftModule must not provide a CompanyRepository of its own: every
+   * repository instance runs `onModuleInit` and (re)creates
+   * `company_search_index` from its descriptor. An app that replaces the
+   * company foundation (e.g. with an extended descriptor) would then get two
+   * repositories with different field sets rebuilding the same index on every
+   * boot. Resolving the token globally reuses whichever repository the app
+   * registered under `CompanyRepository`.
+   */
+  private get companyRepository(): CompanyRepository {
+    return this.moduleRef.get(CompanyRepository, { strict: false });
+  }
 
   /**
    * Run DRIFT migration for all companies
