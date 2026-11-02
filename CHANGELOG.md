@@ -1,3 +1,9 @@
+## [8.15.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.15.0...v8.15.1) (2026-11-02)
+
+### 🐛 Bug Fixes
+
+* **chunker:** the PDF garbage check measures letters against non-space, non-digit characters, so legal text full of dates and amounts is no longer sent to OCR ([7c9302c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/7c9302cde09f1deda8c1439c987384b9d85dff1d))
+
 ## [8.15.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.14.0...v8.15.0) (2026-10-31)
 
 ### 🚀 Features
