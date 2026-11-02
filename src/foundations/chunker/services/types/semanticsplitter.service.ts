@@ -3,7 +3,10 @@ import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import { Injectable } from "@nestjs/common";
 import * as math from "mathjs";
-import * as natural from "natural";
+// Import only natural's tokenizers. The package root also loads its classifiers,
+// which pull in `sylvester`, and that library overwrites the global `Math.sign`
+// on import with a version that returns 1 for 0 — for the whole process.
+import { SentenceTokenizer } from "natural/lib/natural/tokenizers";
 import { ModelService } from "../../../../core/llm/services/model.service";
 import TurndownService from "turndown";
 import { TextLoader } from "../../loaders/text.loader";
@@ -76,7 +79,7 @@ export class SemanticSplitterService {
   }
 
   private splitToSentencesUsingNLP(textCorpus: string): string[] {
-    const tokenizer = new natural.SentenceTokenizer([]);
+    const tokenizer = new SentenceTokenizer([]);
     const sentences = tokenizer.tokenize(textCorpus);
     return sentences;
   }
