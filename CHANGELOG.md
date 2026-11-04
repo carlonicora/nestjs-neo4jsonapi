@@ -1,3 +1,9 @@
+## [8.18.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.17.0...v8.18.0) (2026-11-04)
+
+### 🚀 Features
+
+* **analytics:** the nightly retention job now stores each day's unique visitors and unique users, counted once across website and app, before it deletes that day's raw sessions, and a new administrator endpoint, analytics/administration/daily-uniques, returns one row per day of a date range with those two counts, taken from the stored day, else from the raw sessions, else empty for a day summarised before this change, else 0 (WYR-53) ([9aef3e9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9aef3e90f27bdd16e080388cf11dea8bb0b45680))
+
 ## [8.17.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.16.1...v8.17.0) (2026-11-02)
 
 ### 🚀 Features
