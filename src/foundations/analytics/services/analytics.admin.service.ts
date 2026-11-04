@@ -4,6 +4,10 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
 import { AnalyticsBreakdownDescriptor } from "../entities/analytics-breakdown";
+import {
+  AnalyticsDailyUniqueTimelineDescriptor,
+  AnalyticsDailyUniqueTimelineEntity,
+} from "../entities/analytics-daily-unique-timeline";
 import { AnalyticsPageViewDescriptor } from "../entities/analytics-page-view";
 import { AnalyticsSession, AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { AnalyticsSummaryDescriptor } from "../entities/analytics-summary";
@@ -89,6 +93,41 @@ export class AnalyticsAdminService extends AbstractService<
     });
 
     return this.jsonApiService.buildList(AnalyticsBreakdownDescriptor.model, rows);
+  }
+
+  /**
+   * One row per UTC calendar day from `fromDate` to `min(toDate, today UTC)`,
+   * ascending, across every section. For each day, in this order:
+   * 1. a stored AnalyticsDailyUnique node -> its counts;
+   * 2. otherwise raw sessions -> counts from the sessions;
+   * 3. otherwise an old AnalyticsDailySummary total row -> null / null
+   *    (unknown, drawn as a gap);
+   * 4. otherwise -> 0 / 0.
+   * No paginator: the range is bounded by the controller's window limit and
+   * the chart needs every day in one response (approved exception, 2026-11-04).
+   */
+  async getDailyUniques(params: { fromDate: string; toDate: string }): Promise<JsonApiListDocument> {
+    const sources = await this.analyticsAdminRepository.findDailyUniques({
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+    });
+    const byDay = new Map(sources.map((source) => [source.day, source]));
+
+    const today = new Date().toISOString().slice(0, 10);
+    const end = params.toDate < today ? params.toDate : today;
+
+    const rows: AnalyticsDailyUniqueTimelineEntity[] = [];
+    const cursor = new Date(`${params.fromDate}T00:00:00.000Z`);
+    for (let day = params.fromDate; day <= end; day = cursor.toISOString().slice(0, 10)) {
+      const source = byDay.get(day);
+      const unknownOrZero = source?.hasOldSummary ? { visitors: null, users: null } : { visitors: 0, users: 0 };
+      const counts = source?.stored ?? source?.raw ?? unknownOrZero;
+
+      rows.push({ id: day, day, visitors: counts.visitors, users: counts.users } as AnalyticsDailyUniqueTimelineEntity);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return this.jsonApiService.buildList(AnalyticsDailyUniqueTimelineDescriptor.model, rows);
   }
 
   async getSessions(params: {

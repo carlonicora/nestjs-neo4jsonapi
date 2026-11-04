@@ -9,6 +9,8 @@ import { AnalyticsController } from "./controllers/analytics.controller";
 import { AnalyticsRetentionCron } from "./cron/analytics-retention.cron";
 import { AnalyticsBreakdownDescriptor } from "./entities/analytics-breakdown";
 import { AnalyticsDailySummaryDescriptor } from "./entities/analytics-daily-summary";
+import { AnalyticsDailyUniqueDescriptor } from "./entities/analytics-daily-unique";
+import { AnalyticsDailyUniqueTimelineDescriptor } from "./entities/analytics-daily-unique-timeline";
 import { AnalyticsPageViewDescriptor } from "./entities/analytics-page-view";
 import { AnalyticsSessionDescriptor } from "./entities/analytics-session";
 import { AnalyticsSummaryDescriptor } from "./entities/analytics-summary";
@@ -21,6 +23,7 @@ import {
 } from "./interfaces/analytics.config.interface";
 import { AnalyticsProcessor } from "./processors/analytics.processor";
 import { AnalyticsDailySummaryRepository } from "./repositories/analytics-daily-summary.repository";
+import { AnalyticsDailyUniqueRepository } from "./repositories/analytics-daily-unique.repository";
 import { AnalyticsPageViewRepository } from "./repositories/analytics-page-view.repository";
 import { AnalyticsSessionRepository } from "./repositories/analytics-session.repository";
 import { AnalyticsAdminRepository } from "./repositories/analytics.admin.repository";
@@ -82,9 +85,12 @@ export class AnalyticsModule implements OnModuleInit {
       AnalyticsSummaryDescriptor.model.serialiser,
       AnalyticsTimelineDescriptor.model.serialiser,
       AnalyticsBreakdownDescriptor.model.serialiser,
+      AnalyticsDailyUniqueDescriptor.model.serialiser,
+      AnalyticsDailyUniqueTimelineDescriptor.model.serialiser,
       AnalyticsSessionRepository,
       AnalyticsPageViewRepository,
       AnalyticsDailySummaryRepository,
+      AnalyticsDailyUniqueRepository,
       AnalyticsAdminRepository,
       AnalyticsVisitorIdService,
       AnalyticsService,
@@ -113,5 +119,7 @@ export class AnalyticsModule implements OnModuleInit {
     modelRegistry.register(AnalyticsSummaryDescriptor.model);
     modelRegistry.register(AnalyticsTimelineDescriptor.model);
     modelRegistry.register(AnalyticsBreakdownDescriptor.model);
+    modelRegistry.register(AnalyticsDailyUniqueDescriptor.model);
+    modelRegistry.register(AnalyticsDailyUniqueTimelineDescriptor.model);
   }
 }

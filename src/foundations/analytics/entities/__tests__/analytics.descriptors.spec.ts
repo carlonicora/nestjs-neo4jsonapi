@@ -3,6 +3,8 @@ import { AnalyticsSessionDescriptor } from "../analytics-session";
 import { AnalyticsPageViewDescriptor } from "../analytics-page-view";
 import { AnalyticsDailySummaryDescriptor } from "../analytics-daily-summary";
 import { AnalyticsTimelineDescriptor } from "../analytics-timeline";
+import { AnalyticsDailyUniqueDescriptor } from "../analytics-daily-unique";
+import { AnalyticsDailyUniqueTimelineDescriptor } from "../analytics-daily-unique-timeline";
 
 describe("analytics descriptors", () => {
   it("are platform-level, never company scoped", () => {
@@ -37,5 +39,23 @@ describe("analytics descriptors", () => {
   it("uses the agreed JSON:API types", () => {
     expect(AnalyticsSessionDescriptor.model.type).toBe("analytics-sessions");
     expect(AnalyticsTimelineDescriptor.model.endpoint).toBe("analytics/administration/timeline");
+  });
+
+  it("stores one platform-level daily uniques node per day with date, visitors and users", () => {
+    expect(AnalyticsDailyUniqueDescriptor.isCompanyScoped).toBe(false);
+    expect(AnalyticsDailyUniqueDescriptor.fields.date.type).toBe("date");
+    expect(AnalyticsDailyUniqueDescriptor.fields.visitors.type).toBe("number");
+    expect(AnalyticsDailyUniqueDescriptor.fields.users.type).toBe("number");
+    expect(AnalyticsDailyUniqueDescriptor.relationships).toEqual({});
+    expect(AnalyticsDailyUniqueDescriptor.model.type).toBe("analytics-daily-uniques");
+  });
+  it("serialises the daily uniques timeline with a date day and nullable visitors and users", () => {
+    expect(AnalyticsDailyUniqueTimelineDescriptor.isCompanyScoped).toBe(false);
+    expect(AnalyticsDailyUniqueTimelineDescriptor.fields.day.type).toBe("date");
+    expect(AnalyticsDailyUniqueTimelineDescriptor.fields.visitors.type).toBe("number");
+    expect(AnalyticsDailyUniqueTimelineDescriptor.fields.users.type).toBe("number");
+    expect(AnalyticsDailyUniqueTimelineDescriptor.relationships).toEqual({});
+    expect(AnalyticsDailyUniqueTimelineDescriptor.model.type).toBe("analytics-daily-unique-timelines");
+    expect(AnalyticsDailyUniqueTimelineDescriptor.model.endpoint).toBe("analytics/administration/daily-uniques");
   });
 });

@@ -406,3 +406,99 @@ describe("AnalyticsAdminRepository", () => {
     }
   });
 });
+
+describe("AnalyticsAdminRepository.findDailyUniques", () => {
+  const RANGE = { fromDate: "2026-10-01", toDate: "2026-10-05" };
+  const nd = (day: number) => ({ year: { low: 2026 }, month: { low: 10 }, day: { low: day } });
+  const isStored = (q: string) => q.includes(":AnalyticsDailyUnique");
+  const isOldSummary = (q: string) => q.includes(":AnalyticsDailySummary");
+  const isRaw = (q: string) => q.includes(":AnalyticsSession");
+
+  let repo: AnalyticsAdminRepository;
+  let neo4j: any;
+
+  beforeEach(() => {
+    ({ repo, neo4j } = makeRepo());
+  });
+
+  it("runs three reads bound to fromDate/toDate, never through initQuery or a companyId", async () => {
+    const seen = capture(neo4j);
+
+    await repo.findDailyUniques(RANGE);
+
+    expect(seen).toHaveLength(3);
+    expect(neo4j.initQuery).not.toHaveBeenCalled();
+    for (const { q, p } of seen) {
+      expect(p.fromDate).toBe("2026-10-01");
+      expect(p.toDate).toBe("2026-10-05");
+      expect(Object.keys(p)).not.toContain("companyId");
+      expect(p.currentUserId).toBeUndefined();
+      expect(q).not.toContain("$companyId");
+      expect(q).not.toContain("currentUser");
+    }
+  });
+
+  it("counts raw sessions per day by distinct visitor and distinct BY_USER user, with no section or retention predicate", async () => {
+    const seen = capture(neo4j);
+
+    await repo.findDailyUniques(RANGE);
+
+    const raw = seen.find((s) => isRaw(s.q))!;
+    expect(raw).toBeDefined();
+    expect(raw.q).toContain("date(analyticsSession.startedAt) >= date($fromDate)");
+    expect(raw.q).toContain("date(analyticsSession.startedAt) <= date($toDate)");
+    expect(raw.q).toContain("count(DISTINCT analyticsSession.visitorId)");
+    expect(raw.q).toMatch(/OPTIONAL MATCH \(analyticsSession\)-\[:BY_USER\]->\(user:User\)/);
+    expect(raw.q).toContain("count(DISTINCT user)");
+    expect(raw.q).toContain("date(analyticsSession.startedAt) AS day");
+    expect(raw.q).not.toContain("section");
+    expect(raw.q).not.toContain("retentionCutoff");
+    expect(raw.p.section).toBeUndefined();
+    expect(raw.p.retentionCutoff).toBeUndefined();
+  });
+
+  it("reads stored AnalyticsDailyUnique nodes in the same date window", async () => {
+    const seen = capture(neo4j);
+
+    await repo.findDailyUniques(RANGE);
+
+    const stored = seen.find((s) => isStored(s.q))!;
+    expect(stored).toBeDefined();
+    expect(stored.q).toContain("analyticsDailyUnique.date >= date($fromDate)");
+    expect(stored.q).toContain("analyticsDailyUnique.date <= date($toDate)");
+  });
+
+  it("reads the distinct days of old total summaries in the window", async () => {
+    const seen = capture(neo4j);
+
+    await repo.findDailyUniques(RANGE);
+
+    const old = seen.find((s) => isOldSummary(s.q))!;
+    expect(old).toBeDefined();
+    expect(old.q).toContain("dimension: 'total'");
+    expect(old.q).toContain("RETURN DISTINCT analyticsDailySummary.date AS day");
+    expect(old.q).toContain("analyticsDailySummary.date >= date($fromDate)");
+    expect(old.q).toContain("analyticsDailySummary.date <= date($toDate)");
+  });
+
+  it("merges the three sources by day, converting integers and dates", async () => {
+    capture(neo4j, (q) => {
+      if (isStored(q)) return [makeRecord({ day: nd(1), visitors: int(9), users: int(4) })];
+      if (isOldSummary(q)) return [makeRecord({ day: nd(1) }), makeRecord({ day: nd(3) })];
+      if (isRaw(q))
+        return [
+          makeRecord({ day: nd(1), visitors: int(2), users: int(1) }),
+          makeRecord({ day: nd(2), visitors: int(5), users: int(0) }),
+        ];
+      return [];
+    });
+
+    const rows = await repo.findDailyUniques(RANGE);
+
+    expect(rows).toEqual([
+      { day: "2026-10-01", stored: { visitors: 9, users: 4 }, raw: { visitors: 2, users: 1 }, hasOldSummary: true },
+      { day: "2026-10-02", stored: null, raw: { visitors: 5, users: 0 }, hasOldSummary: false },
+      { day: "2026-10-03", stored: null, raw: null, hasOldSummary: true },
+    ]);
+  });
+});

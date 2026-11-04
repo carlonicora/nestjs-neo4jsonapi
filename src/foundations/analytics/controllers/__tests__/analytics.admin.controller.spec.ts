@@ -1,5 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Sibling-task modules (metas, admin service) are mocked so this spec exercises
 // the controller alone.
@@ -17,6 +17,14 @@ vi.mock("../../entities/analytics-session.meta", () => ({
 }));
 vi.mock("../../entities/analytics-page-view.meta", () => ({
   analyticsPageViewMeta: { endpoint: "pageviews" },
+}));
+vi.mock("../../entities/analytics-daily-unique-timeline.meta", () => ({
+  analyticsDailyUniqueTimelineMeta: {
+    type: "analytics-daily-unique-timelines",
+    endpoint: "analytics/administration/daily-uniques",
+    nodeName: "analyticsDailyUniqueTimeline",
+    labelName: "AnalyticsDailyUniqueTimeline",
+  },
 }));
 vi.mock("../../services/analytics.admin.service", () => ({
   AnalyticsAdminService: class AnalyticsAdminService {},
@@ -36,6 +44,7 @@ function makeController() {
     getBreakdown: vi.fn(async () => ({ data: [] })),
     getSessions: vi.fn(async () => ({ data: [] })),
     getSessionPageViews: vi.fn(async () => ({ data: [] })),
+    getDailyUniques: vi.fn(async () => ({ data: [] })),
     findById: vi.fn(async ({ id }: { id: string }) => ({ data: { id } })),
   } as any;
   const auditService = { logRead: vi.fn() } as any;
@@ -186,5 +195,84 @@ describe("AnalyticsAdminController", () => {
 
     expect(service.getSessionPageViews).toHaveBeenCalledWith({ sessionId: "session-1" });
     expect(r.send).toHaveBeenCalledWith({ data: [] });
+  });
+
+  describe("getDailyUniques", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("passes fromDate and toDate through and sends the service's list", async () => {
+      const { controller, service } = makeController();
+      const r = reply();
+
+      await controller.getDailyUniques(r, "2026-10-05", "2026-11-04");
+
+      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
+      expect(r.send).toHaveBeenCalledWith({ data: [] });
+    });
+
+    it("accepts a single-day range", async () => {
+      const { controller, service } = makeController();
+
+      await controller.getDailyUniques(reply(), "2026-11-04", "2026-11-04");
+
+      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-11-04", toDate: "2026-11-04" });
+    });
+
+    it.each([
+      ["an impossible month", "2026-13-01", "2026-11-04"],
+      ["an impossible day", "2026-02-30", "2026-11-04"],
+      ["a word", "yesterday", "2026-11-04"],
+      ["an ISO instant", "2026-11-04T10:00:00Z", "2026-11-04"],
+      ["an impossible toDate", "2026-10-01", "2026-13-01"],
+    ])("rejects %s with 400", async (_label, fromDate, toDate) => {
+      const { controller, service } = makeController();
+
+      await expect(controller.getDailyUniques(reply(), fromDate, toDate)).rejects.toBeInstanceOf(BadRequestException);
+      expect(service.getDailyUniques).not.toHaveBeenCalled();
+    });
+
+    it("rejects fromDate later than toDate", async () => {
+      const { controller, service } = makeController();
+
+      await expect(controller.getDailyUniques(reply(), "2026-11-05", "2026-11-04")).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(service.getDailyUniques).not.toHaveBeenCalled();
+    });
+
+    it("accepts a 400-day window and rejects a 401-day one", async () => {
+      const { controller, service } = makeController();
+
+      await controller.getDailyUniques(reply(), "2025-09-30", "2026-11-04");
+      expect(service.getDailyUniques).toHaveBeenCalledTimes(1);
+
+      await expect(controller.getDailyUniques(reply(), "2025-09-29", "2026-11-04")).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(service.getDailyUniques).toHaveBeenCalledTimes(1);
+    });
+
+    it("defaults to the last 30 days ending today UTC when both dates are absent", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-11-04T23:30:00Z"));
+      const { controller, service } = makeController();
+
+      await controller.getDailyUniques(reply());
+
+      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
+    });
+
+    it("takes no section or granularity", async () => {
+      const { controller, service } = makeController();
+
+      expect(controller.getDailyUniques.length).toBe(3);
+      await controller.getDailyUniques(reply(), "2026-10-05", "2026-11-04");
+
+      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
+      expect(service.getDailyUniques.mock.calls[0][0]).not.toHaveProperty("section");
+      expect(service.getDailyUniques.mock.calls[0][0]).not.toHaveProperty("granularity");
+    });
   });
 });

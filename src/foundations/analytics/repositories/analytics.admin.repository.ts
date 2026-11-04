@@ -27,11 +27,15 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { AnalyticsBreakdownEntity } from "../entities/analytics-breakdown";
 import { analyticsDailySummaryMeta } from "../entities/analytics-daily-summary.meta";
+import { AnalyticsDailyUniqueSourceEntity } from "../entities/analytics-daily-unique-source";
+import { AnalyticsDailyUniqueTimelineDescriptor } from "../entities/analytics-daily-unique-timeline";
+import { analyticsDailyUniqueMeta } from "../entities/analytics-daily-unique.meta";
 import { analyticsPageViewMeta } from "../entities/analytics-page-view.meta";
 import { AnalyticsSession, AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { analyticsSessionMeta } from "../entities/analytics-session.meta";
 import { AnalyticsSummaryEntity } from "../entities/analytics-summary";
 import { AnalyticsTimelineDescriptor, AnalyticsTimelineEntity } from "../entities/analytics-timeline";
+import { userMeta } from "../../user/entities/user.meta";
 
 /**
  * The closed sets of values the admin endpoints accept. The controller
@@ -49,6 +53,8 @@ export type Dimension = (typeof DIMENSIONS)[number];
 const SESSION = analyticsSessionMeta.nodeName; // "analyticsSession"
 const PAGE_VIEW = analyticsPageViewMeta.nodeName; // "analyticsPageView"
 const SUMMARY = analyticsDailySummaryMeta.nodeName; // "analyticsDailySummary"
+const DAILY_UNIQUE = analyticsDailyUniqueMeta.nodeName; // "analyticsDailyUnique"
+const USER = userMeta.nodeName; // "user"
 
 /**
  * The `date.truncate` units this repository is allowed to emit, keyed by the
@@ -341,6 +347,78 @@ export class AnalyticsAdminRepository extends AbstractRepository<
   }
 
   /**
+   * The three sources of each day's unique visitors and unique users between
+   * `fromDate` and `toDate` (inclusive, YYYY-MM-DD, UTC days), merged by day.
+   * Only days with at least one source are returned; the service fills the
+   * rest and picks the counts by the four rules.
+   *
+   * - stored: the AnalyticsDailyUnique node the retention job wrote for the day;
+   * - raw: distinct visitors and distinct BY_USER users of the sessions still
+   *   stored for the day, across every section, with no retention cutoff (a day
+   *   past the cutoff whose rollup has not run is still in raw storage);
+   * - hasOldSummary: an AnalyticsDailySummary total row exists for the day.
+   */
+  async findDailyUniques(params: { fromDate: string; toDate: string }): Promise<AnalyticsDailyUniqueSourceEntity[]> {
+    const seed = { fromDate: params.fromDate, toDate: params.toDate };
+
+    const raw = this._adminQuery(seed);
+    raw.query = `
+      MATCH (${SESSION}:${analyticsSessionMeta.labelName})
+      WHERE date(${SESSION}.startedAt) >= date($fromDate) AND date(${SESSION}.startedAt) <= date($toDate)
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      WITH date(${SESSION}.startedAt) AS day, ${SESSION}, ${USER}
+      RETURN day                                     AS day,
+             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
+             count(DISTINCT ${USER})                 AS users
+    `;
+
+    const stored = this._adminQuery(seed);
+    stored.query = `
+      MATCH (${DAILY_UNIQUE}:${analyticsDailyUniqueMeta.labelName})
+      WHERE ${DAILY_UNIQUE}.date >= date($fromDate) AND ${DAILY_UNIQUE}.date <= date($toDate)
+      RETURN ${DAILY_UNIQUE}.date                    AS day,
+             ${DAILY_UNIQUE}.visitors                AS visitors,
+             ${DAILY_UNIQUE}.users                   AS users
+    `;
+
+    const oldSummary = this._adminQuery(seed);
+    oldSummary.query = `
+      MATCH (${SUMMARY}:${analyticsDailySummaryMeta.labelName} {dimension: 'total'})
+      WHERE ${SUMMARY}.date >= date($fromDate) AND ${SUMMARY}.date <= date($toDate)
+      RETURN DISTINCT ${SUMMARY}.date AS day
+    `;
+
+    const [rawResult, storedResult, oldSummaryResult] = await Promise.all([
+      this.neo4j.read(raw.query, raw.queryParams),
+      this.neo4j.read(stored.query, stored.queryParams),
+      this.neo4j.read(oldSummary.query, oldSummary.queryParams),
+    ]);
+
+    // Native Neo4j Date -> YYYY-MM-DD through the framework's read-path
+    // conversion; the field type is read off the descriptor so they never drift.
+    const dayType = AnalyticsDailyUniqueTimelineDescriptor.fields.day?.type ?? "date";
+    const merged = new Map<string, AnalyticsDailyUniqueSourceEntity>();
+    const entry = (record: any): AnalyticsDailyUniqueSourceEntity => {
+      const day = convertFieldValue(record.get("day"), dayType) as string;
+      const existing = merged.get(day);
+      if (existing) return existing;
+      const created: AnalyticsDailyUniqueSourceEntity = { day, stored: null, raw: null, hasOldSummary: false };
+      merged.set(day, created);
+      return created;
+    };
+    const counts = (record: any) => ({
+      visitors: toNumber(record.get("visitors")),
+      users: toNumber(record.get("users")),
+    });
+
+    for (const r of storedResult.records as any[]) entry(r).stored = counts(r);
+    for (const r of rawResult.records as any[]) entry(r).raw = counts(r);
+    for (const r of oldSummaryResult.records as any[]) entry(r).hasOldSummary = true;
+
+    return [...merged.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  }
+
+  /**
    * Raw + summarised totals split by section for one window, plus the window's
    * total visitor count.
    *
@@ -504,14 +582,18 @@ export class AnalyticsAdminRepository extends AbstractRepository<
    * zero-fill rendered a successful, empty page (ADM-53..57).
    *
    * Analytics nodes have no company at all, so this seed binds no `companyId`
-   * parameter of any kind. `section`, `granularity` and `dimension` are bound
-   * only when the caller supplies them, and only with values echoed from this
-   * file's lookup tables.
+   * parameter of any kind. Every parameter is bound only when the caller
+   * supplies it; `section`, `granularity` and `dimension` only with values
+   * echoed from this file's lookup tables. The instant-range reports pass
+   * `from` / `to` / `retentionCutoff`; the daily uniques pass the calendar days
+   * `fromDate` / `toDate`.
    */
   private _adminQuery(params: {
-    from: string;
-    to: string;
-    retentionCutoff: string;
+    from?: string;
+    to?: string;
+    retentionCutoff?: string;
+    fromDate?: string;
+    toDate?: string;
     section?: string | null;
     granularity?: string | null;
     dimension?: string;
@@ -522,9 +604,11 @@ export class AnalyticsAdminRepository extends AbstractRepository<
     return {
       query: "",
       queryParams: {
-        from: params.from,
-        to: params.to,
-        retentionCutoff: params.retentionCutoff,
+        ...(params.from === undefined ? {} : { from: params.from }),
+        ...(params.to === undefined ? {} : { to: params.to }),
+        ...(params.retentionCutoff === undefined ? {} : { retentionCutoff: params.retentionCutoff }),
+        ...(params.fromDate === undefined ? {} : { fromDate: params.fromDate }),
+        ...(params.toDate === undefined ? {} : { toDate: params.toDate }),
         ...(params.section === undefined || params.section === null ? {} : { section: params.section }),
         ...(params.granularity === undefined ? {} : { granularity: params.granularity }),
         ...(params.dimension === undefined ? {} : { dimension: params.dimension }),

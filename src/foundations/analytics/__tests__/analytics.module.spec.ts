@@ -35,6 +35,16 @@ vi.mock("../entities/analytics-breakdown", () => ({
     model: { type: "analytics-breakdowns", serialiser: class AnalyticsBreakdownSerialiser {} },
   },
 }));
+vi.mock("../entities/analytics-daily-unique", () => ({
+  AnalyticsDailyUniqueDescriptor: {
+    model: { type: "analytics-daily-uniques", serialiser: class AnalyticsDailyUniqueSerialiser {} },
+  },
+}));
+vi.mock("../entities/analytics-daily-unique-timeline", () => ({
+  AnalyticsDailyUniqueTimelineDescriptor: {
+    model: { type: "analytics-daily-unique-timelines", serialiser: class AnalyticsDailyUniqueTimelineSerialiser {} },
+  },
+}));
 vi.mock("../interfaces/analytics.config.interface", () => ({
   ANALYTICS_CONFIG: Symbol("ANALYTICS_CONFIG"),
   ANALYTICS_QUEUE: Symbol("ANALYTICS_QUEUE"),
@@ -52,6 +62,7 @@ vi.mock("../repositories/analytics-session.repository", () => ({ AnalyticsSessio
 vi.mock("../repositories/analytics-page-view.repository", () => ({ AnalyticsPageViewRepository: class {} }));
 vi.mock("../repositories/analytics-daily-summary.repository", () => ({ AnalyticsDailySummaryRepository: class {} }));
 vi.mock("../repositories/analytics.admin.repository", () => ({ AnalyticsAdminRepository: class {} }));
+vi.mock("../repositories/analytics-daily-unique.repository", () => ({ AnalyticsDailyUniqueRepository: class {} }));
 vi.mock("../services/analytics.visitor-id.service", () => ({ AnalyticsVisitorIdService: class {} }));
 vi.mock("../services/analytics.service", () => ({ AnalyticsService: class {} }));
 vi.mock("../services/analytics.admin.service", () => ({ AnalyticsAdminService: class {} }));
@@ -79,6 +90,8 @@ import { AnalyticsController } from "../controllers/analytics.controller";
 import { AnalyticsRetentionCron } from "../cron/analytics-retention.cron";
 import { AnalyticsBreakdownDescriptor } from "../entities/analytics-breakdown";
 import { AnalyticsDailySummaryDescriptor } from "../entities/analytics-daily-summary";
+import { AnalyticsDailyUniqueDescriptor } from "../entities/analytics-daily-unique";
+import { AnalyticsDailyUniqueTimelineDescriptor } from "../entities/analytics-daily-unique-timeline";
 import { AnalyticsPageViewDescriptor } from "../entities/analytics-page-view";
 import { AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { AnalyticsSummaryDescriptor } from "../entities/analytics-summary";
@@ -86,6 +99,7 @@ import { AnalyticsTimelineDescriptor } from "../entities/analytics-timeline";
 import { ANALYTICS_CONFIG, ANALYTICS_QUEUE } from "../interfaces/analytics.config.interface";
 import { AnalyticsProcessor } from "../processors/analytics.processor";
 import { AnalyticsDailySummaryRepository } from "../repositories/analytics-daily-summary.repository";
+import { AnalyticsDailyUniqueRepository } from "../repositories/analytics-daily-unique.repository";
 import { AnalyticsPageViewRepository } from "../repositories/analytics-page-view.repository";
 import { AnalyticsSessionRepository } from "../repositories/analytics-session.repository";
 import { AnalyticsAdminRepository } from "../repositories/analytics.admin.repository";
@@ -102,6 +116,8 @@ const descriptors: any[] = [
   AnalyticsSummaryDescriptor,
   AnalyticsTimelineDescriptor,
   AnalyticsBreakdownDescriptor,
+  AnalyticsDailyUniqueDescriptor,
+  AnalyticsDailyUniqueTimelineDescriptor,
 ];
 
 describe("AnalyticsModule.forRoot", () => {
@@ -167,6 +183,7 @@ describe("AnalyticsModule.forRoot", () => {
       AnalyticsSessionRepository,
       AnalyticsPageViewRepository,
       AnalyticsDailySummaryRepository,
+      AnalyticsDailyUniqueRepository,
       AnalyticsAdminRepository,
     ])
       expect(tokens).toContain(repository);
@@ -253,7 +270,7 @@ describe("AnalyticsModule.forRoot", () => {
 
     new AnalyticsModule().onModuleInit();
 
-    expect(register).toHaveBeenCalledTimes(6);
+    expect(register).toHaveBeenCalledTimes(8);
     for (const descriptor of descriptors) expect(register).toHaveBeenCalledWith(descriptor.model);
   });
 });

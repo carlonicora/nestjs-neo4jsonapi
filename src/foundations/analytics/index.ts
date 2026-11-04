@@ -35,10 +35,24 @@ export {
   AnalyticsBreakdownDescriptorType,
 } from "./entities/analytics-breakdown";
 export { analyticsBreakdownMeta } from "./entities/analytics-breakdown.meta";
+export {
+  AnalyticsDailyUnique,
+  AnalyticsDailyUniqueDescriptor,
+  AnalyticsDailyUniqueDescriptorType,
+} from "./entities/analytics-daily-unique";
+export { analyticsDailyUniqueMeta } from "./entities/analytics-daily-unique.meta";
+export {
+  AnalyticsDailyUniqueTimelineEntity,
+  AnalyticsDailyUniqueTimelineDescriptor,
+  AnalyticsDailyUniqueTimelineDescriptorType,
+} from "./entities/analytics-daily-unique-timeline";
+export { analyticsDailyUniqueTimelineMeta } from "./entities/analytics-daily-unique-timeline.meta";
+export { AnalyticsDailyUniqueSourceEntity } from "./entities/analytics-daily-unique-source";
 export { analyticsEventMeta } from "./entities/analytics-event.meta";
 export { AnalyticsSessionRepository } from "./repositories/analytics-session.repository";
 export { AnalyticsPageViewRepository } from "./repositories/analytics-page-view.repository";
 export { AnalyticsDailySummaryRepository } from "./repositories/analytics-daily-summary.repository";
+export { AnalyticsDailyUniqueRepository } from "./repositories/analytics-daily-unique.repository";
 export { AnalyticsAdminRepository } from "./repositories/analytics.admin.repository";
 export { AnalyticsVisitorIdService } from "./services/analytics.visitor-id.service";
 export { AnalyticsService } from "./services/analytics.service";
