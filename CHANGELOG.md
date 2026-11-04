@@ -1,3 +1,13 @@
+## [8.19.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.18.0...v8.19.0) (2026-11-04)
+
+### 🚀 Features
+
+* **neo4j:** findByRelated takes an optional extraWhere, a parameterised WHERE condition on the entity node written by the calling service and AND-ed with the request filters in both the normal and the full-text query, so a list can be narrowed by a rule the generic filters cannot express; its values always go in params, and leaving it out builds the same query as before (WYR-52) ([980b1f9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/980b1f9e8a97322d943beb305d987e4ab1791e28))
+
+### 🐛 Bug Fixes
+
+* **bootstrap:** behind a reverse proxy request.ip is now the client's address from X-Forwarded-For instead of the proxy's, so the rate limiter gives every user their own budget instead of one shared by everyone; only a proxy on a private network (loopback, link-local, private ranges) is trusted, so a client connecting directly from the internet cannot fake its address, and TRUST_PROXY sets another list or false to trust nothing ([2c810d1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/2c810d169417680a189856516e931fb9741a2f06))
+
 ## [8.18.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.17.0...v8.18.0) (2026-11-04)
 
 ### 🚀 Features
