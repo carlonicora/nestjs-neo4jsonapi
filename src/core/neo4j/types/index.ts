@@ -1,1 +1,1 @@
-export type { FilterCriterion, FilterOperator, SortCriterion } from "./filter.criterion";
+export type { ExtraWhereCondition, FilterCriterion, FilterOperator, SortCriterion } from "./filter.criterion";

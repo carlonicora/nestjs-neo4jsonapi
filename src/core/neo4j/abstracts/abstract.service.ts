@@ -5,7 +5,7 @@ import { EntityDescriptor, FieldDef, RelationshipDef } from "../../../common/int
 import { AuditService } from "../../../foundations/audit/services/audit.service";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
-import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
+import { ExtraWhereCondition, FilterCriterion, SortCriterion } from "../types/filter.criterion";
 import { AbstractRepository } from "./abstract.repository";
 import { JsonApiListDocument, JsonApiSingleDocument } from "../../jsonapi/interfaces/jsonapi.document.interface";
 
@@ -564,6 +564,8 @@ export abstract class AbstractService<
     fetchAll?: boolean;
     orderBy?: string;
     filters?: FilterCriterion[];
+    /** Caller-written, parameterised WHERE condition, passed unchanged to the repository; `clause` must never contain request input. */
+    extraWhere?: ExtraWhereCondition;
   }): Promise<JsonApiListDocument> {
     const paginator = new JsonApiPaginator(params.query);
 
@@ -574,6 +576,7 @@ export abstract class AbstractService<
       term: params.term,
       orderBy: params.orderBy,
       filters: params.filters,
+      extraWhere: params.extraWhere,
       cursor: paginator.generateCursor(),
       // Offline sync: `?updatedSince=<ISO>` returns only records changed after it.
       updatedSince: this.readUpdatedSince(params.query),

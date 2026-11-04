@@ -10,7 +10,7 @@ import { buildFulltextTerm } from "../helpers/build-fulltext-term";
 import { buildLegacyOrderByClause, buildOrderByClause } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
-import { FilterCriterion, SortCriterion } from "../types/filter.criterion";
+import { ExtraWhereCondition, FilterCriterion, SortCriterion } from "../types/filter.criterion";
 
 /**
  * Abstract base repository for Neo4j entities
@@ -627,6 +627,11 @@ export abstract class AbstractRepository<
    * // Find all glossaries related to specific topics
    * await repository.findByRelated({ relationship: 'topic', id: ['topic-1', 'topic-2'] });
    * ```
+   *
+   * @param extraWhere - Optional caller-built WHERE condition on the entity node, AND-ed with `filters`
+   *   in both the default and the full-text branch. `extraWhere.clause` is caller-written code that
+   *   must never contain request input: every value goes in `extraWhere.params`, which are merged into
+   *   the query parameters. Omitting it builds the identical query as before.
    */
   async findByRelated(params: {
     relationship: keyof R & string;
@@ -639,6 +644,8 @@ export abstract class AbstractRepository<
     orderByFields?: SortCriterion[];
     /** ISO datetime: only nodes with `updatedAt` after it (offline sync). */
     updatedSince?: string;
+    /** Caller-written, parameterised condition AND-ed with `filters`; never request input in `clause`. */
+    extraWhere?: ExtraWhereCondition;
   }): Promise<T[]> {
     const { nodeName } = this.descriptor.model;
     const rel = this.descriptor.relationships[params.relationship];
@@ -678,7 +685,11 @@ export abstract class AbstractRepository<
       ],
       paramPrefix: "filter",
     });
-    query.queryParams = { ...query.queryParams, ...filterResult.params };
+    query.queryParams = { ...query.queryParams, ...filterResult.params, ...(params.extraWhere?.params ?? {}) };
+
+    const whereClause = [filterResult.clause, params.extraWhere ? `(${params.extraWhere.clause})` : ""]
+      .filter(Boolean)
+      .join(" AND ");
 
     const orderByClause =
       params.orderByFields && params.orderByFields.length
@@ -700,7 +711,7 @@ export abstract class AbstractRepository<
 
       query.query += this.buildFulltextAccessCheckedMatch({
         hitFilter: relatedFilter,
-        filterClause: filterResult.clause,
+        filterClause: whereClause,
       });
     } else {
       // Use default query with relationship match
@@ -719,7 +730,7 @@ export abstract class AbstractRepository<
 
       query.query += `
       ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
-      ${filterResult.clause ? `WHERE ${filterResult.clause}` : ""}
+      ${whereClause ? `WHERE ${whereClause}` : ""}
 
       ${orderByClause}
     `;

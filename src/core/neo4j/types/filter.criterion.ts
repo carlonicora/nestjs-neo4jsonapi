@@ -15,6 +15,18 @@ export interface FilterCriterion {
   value?: string | number | boolean | string[] | number[];
 }
 
+/**
+ * A caller-built, parameterised WHERE condition on the entity node, AND-ed with `filters`.
+ *
+ * `clause` is caller-written code and must never contain request input: every value goes in `params`.
+ */
+export interface ExtraWhereCondition {
+  /** Caller-written Cypher boolean expression, never request input; may reference only the entity node alias and the `$params` below. */
+  clause: string;
+  /** Merged into the query parameters. */
+  params: Record<string, unknown>;
+}
+
 export interface SortCriterion {
   field: string;
   direction: "asc" | "desc";

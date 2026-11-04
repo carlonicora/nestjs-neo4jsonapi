@@ -526,3 +526,17 @@ describe("AbstractService - delete company-scope gate", () => {
     });
   });
 });
+
+describe("AbstractService - findByRelated", () => {
+  it("findByRelated passes extraWhere to the repository", async () => {
+    const repository: any = { findByRelated: vi.fn().mockResolvedValue([]) };
+    const jsonApiService: any = { buildSingle: vi.fn(), buildList: vi.fn().mockReturnValue({ data: [] }) };
+    const clsService: any = { get: vi.fn() };
+    const service = new TestService(jsonApiService, repository, clsService, testModel);
+    const extraWhere = { clause: "test.flag = $extraFlag", params: { extraFlag: true } };
+
+    await service.findByRelated({ relationship: "campaign", id: "c-1", query: {}, extraWhere });
+
+    expect(repository.findByRelated.mock.calls[0][0].extraWhere).toBe(extraWhere);
+  });
+});
