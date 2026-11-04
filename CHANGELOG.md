@@ -1,3 +1,9 @@
+## [8.19.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.0...v8.19.1) (2026-11-04)
+
+### ♻️ Chores
+
+* re-release the 8.19.0 changes, which never reached npm because GitHub returned an error while the release was being pushed ([f95f462](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f95f4625470b4cdbac265a93c101d2acf9d81b2d))
+
 ## [8.19.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.18.0...v8.19.0) (2026-11-04)
 
 ### 🚀 Features
