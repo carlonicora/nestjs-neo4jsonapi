@@ -20,7 +20,13 @@ import { tracingSetup } from "../core/tracing/tracing.setup";
 
 import { createAppModule } from "./app.module.factory";
 import { BootstrapOptions } from "./bootstrap.options";
-import { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeConfig } from "./defaults";
+import {
+  defaultFastifyOptions,
+  defaultMultipartOptions,
+  getAppMode,
+  getAppModeConfig,
+  resolveTrustProxy,
+} from "./defaults";
 import { setupGracefulShutdown } from "./graceful-shutdown";
 import { setupRawBodyCapture, setupS3ObjectUploadStreaming } from "./raw-body.config";
 
@@ -81,7 +87,8 @@ export async function bootstrap(options: BootstrapOptions): Promise<void> {
 async function bootstrapAPI(AppModule: any, modeConfig: AppModeConfig, options: BootstrapOptions): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.forRoot(modeConfig),
-    new FastifyAdapter(defaultFastifyOptions),
+    // trustProxy is re-read here so a TRUST_PROXY loaded after this module was imported still applies.
+    new FastifyAdapter({ ...defaultFastifyOptions, trustProxy: resolveTrustProxy() }),
     { logger: ["error", "warn"] },
   );
 

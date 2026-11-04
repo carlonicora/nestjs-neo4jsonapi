@@ -354,6 +354,8 @@ RATE_LIMIT_ENABLED=true
 RATE_LIMIT_TTL=60000
 RATE_LIMIT_REQUESTS=100
 IP_RATE_LIMIT_REQUESTS=20
+# Proxies whose X-Forwarded-For is trusted for the client IP (comma-separated IPs/CIDRs/named ranges, or false)
+# TRUST_PROXY=loopback,linklocal,uniquelocal
 
 # Encryption
 ENCRYPTION_KEY=your-32-char-encryption-key

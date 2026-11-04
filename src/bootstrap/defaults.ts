@@ -44,9 +44,36 @@ export function getAppModeConfig(mode: AppMode): AppModeConfig {
 }
 
 /**
+ * Default `trustProxy` value: proxy-addr named ranges for private networks.
+ */
+export const DEFAULT_TRUST_PROXY = "loopback,linklocal,uniquelocal";
+
+/**
+ * Resolve Fastify's `trustProxy` from `TRUST_PROXY`.
+ *
+ * Fastify takes `X-Forwarded-For` as `request.ip` only when the direct peer is trusted.
+ * Trusting private ranges only is safe: a client connecting straight from the internet
+ * has a public address, is never trusted, and so cannot spoof `X-Forwarded-For`; a
+ * reverse proxy on the private/Docker network is trusted. Without this every request
+ * behind the proxy shares the proxy's IP, and so one rate-limit bucket.
+ *
+ * - unset or empty: `DEFAULT_TRUST_PROXY`
+ * - `false`: trust nothing
+ * - anything else: comma-separated IPs/CIDRs/named ranges, passed through as-is.
+ *   `true` (trust every hop) is deliberately not supported: it would let any client spoof its IP.
+ */
+export function resolveTrustProxy(value: string | undefined = process.env.TRUST_PROXY): string | false {
+  const trimmed = value?.trim();
+  if (!trimmed) return DEFAULT_TRUST_PROXY;
+  if (trimmed.toLowerCase() === "false") return false;
+  return trimmed;
+}
+
+/**
  * Standard FastifyAdapter options for API applications
  */
 export const defaultFastifyOptions = {
+  trustProxy: resolveTrustProxy(),
   routerOptions: {
     ignoreTrailingSlash: true,
     // Signed object tokens (`/s3/objects/:token`) carry key, content type and filename;
