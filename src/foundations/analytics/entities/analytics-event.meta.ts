@@ -7,7 +7,10 @@ import { DataMeta } from "../../../common/interfaces/datamodel.interface";
  */
 export const analyticsEventMeta: DataMeta = {
   type: "analytics-events",
-  endpoint: "analytics/events",
+  // Never put words ad/tracking blocklists match in this path (analytics, event,
+  // track, collect, beacon, pageview, stats, metrics, telemetry): EasyPrivacy's
+  // "/analytics/event" rule silently dropped every page view from uBlock Origin users.
+  endpoint: "wayfinding",
   nodeName: "analyticsEvent",
   labelName: "AnalyticsEvent",
 };

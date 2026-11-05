@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../entities/analytics-event.meta", () => ({
   analyticsEventMeta: {
     type: "analytics-events",
-    endpoint: "analytics/events",
+    endpoint: "wayfinding",
     nodeName: "analyticsEvent",
     labelName: "AnalyticsEvent",
   },

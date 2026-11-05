@@ -30,7 +30,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * Administrator role, so a non-administrator receives 401.
  *
  * Mounted at /analytics/administration/* — the only other analytics route is
- * the public POST /analytics/events beacon, so there is no Fastify overlap.
+ * the public POST /wayfinding beacon, so there is no Fastify overlap.
  *
  * Enum-valued query params are validated against a closed allowlist here rather
  * than in a DTO: DTOs are body validation for POST/PUT/PATCH, and GET filters
