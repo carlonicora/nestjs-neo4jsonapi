@@ -1,3 +1,9 @@
+## [8.19.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.2...v8.19.3) (2026-11-05)
+
+### 🐛 Bug Fixes
+
+* **analytics:** the page-view beacon now listens on POST /wayfinding instead of /analytics/events, because the EasyPrivacy rule /analytics/event (on by default in uBlock Origin) blocked every page view from visitors with a blocker; update nextjs-jsonapi to the matching release ([b5768e2](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b5768e291d388ad4891ef96d617fd48a7dc35e4b))
+
 ## [8.19.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.1...v8.19.2) (2026-11-05)
 
 ### 🐛 Bug Fixes
