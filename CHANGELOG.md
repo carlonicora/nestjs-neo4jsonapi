@@ -1,3 +1,9 @@
+## [8.19.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.1...v8.19.2) (2026-11-05)
+
+### 🐛 Bug Fixes
+
+* **offline-change-set:** a DELETE queued after an edit of the same record in one change set is checked against the record as that edit left it, so the device's own edit no longer refuses the delete as changed on the server; a change by someone else still does ([d02aad4](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/d02aad492d6566eab766dd3c4cc4e8de5a993adc))
+
 ## [8.19.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.0...v8.19.1) (2026-11-04)
 
 ### ♻️ Chores
