@@ -261,6 +261,42 @@ describe("OfflineChangeSetService", () => {
     expect(results[1]).toEqual({ seq: 2, status: "applied" });
   });
 
+  it("a DELETE after an applied edit of the same record in the package is checked against the record as that edit left it", async () => {
+    const base = resource({ name: "A", description: JSON.stringify([block("b1", "one")]) });
+    const edited = resource({ name: "A", description: JSON.stringify([block("b1", "one (mine)")]) });
+    // GET before the edit (theirs = base), then GET before the delete (the record after the edit).
+    answer("GET", "npcs/n1", { ran: true, status: 200, body: doc(base) });
+    answer("GET", "npcs/n1", { ran: true, status: 200, body: doc(edited) });
+    answer("PATCH", "npcs/n1", { ran: true, status: 200, body: doc(edited) });
+    answer("DELETE", "npcs/n1", { ran: true, status: 204, body: undefined });
+
+    const results = await apply([
+      { seq: 1, method: "PATCH", path: "npcs/n1", body: doc(edited), recordType: TYPE, recordId: "n1", base },
+      { seq: 2, method: "DELETE", path: "npcs/n1", recordType: TYPE, recordId: "n1", base },
+    ]);
+
+    expect(results[0].status).toBe("applied");
+    expect(results[1]).toEqual({ seq: 2, status: "applied" });
+    expect(run.mock.calls.filter((c) => c[0].method === "DELETE").map((c) => c[0].path)).toEqual(["npcs/n1"]);
+  });
+
+  it("a DELETE after an applied edit still conflicts when someone else changed the record too", async () => {
+    const base = resource({ name: "A", description: JSON.stringify([block("b1", "one")]) });
+    const edited = resource({ name: "A", description: JSON.stringify([block("b1", "one (mine)")]) });
+    const changedByOthers = resource({ name: "Renamed", description: JSON.stringify([block("b1", "one (mine)")]) });
+    answer("GET", "npcs/n1", { ran: true, status: 200, body: doc(base) });
+    answer("GET", "npcs/n1", { ran: true, status: 200, body: doc(changedByOthers) });
+    answer("PATCH", "npcs/n1", { ran: true, status: 200, body: doc(edited) });
+
+    const results = await apply([
+      { seq: 1, method: "PATCH", path: "npcs/n1", body: doc(edited), recordType: TYPE, recordId: "n1", base },
+      { seq: 2, method: "DELETE", path: "npcs/n1", recordType: TYPE, recordId: "n1", base },
+    ]);
+
+    expect(results[1]).toEqual({ seq: 2, status: "conflict", conflict: "changed-on-server", current: changedByOthers });
+    expect(run.mock.calls.filter((c) => c[0].method === "DELETE")).toEqual([]);
+  });
+
   it("a 'mine' resolution keeps the original base: a field only the server changed is not reverted", async () => {
     answer("GET", "npcs/n1", { ran: true, status: 200, body: doc(resource({ name: "C", level: 2 })) });
 

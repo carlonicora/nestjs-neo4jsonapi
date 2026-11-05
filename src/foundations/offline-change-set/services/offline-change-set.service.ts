@@ -110,6 +110,11 @@ export class OfflineChangeSetService extends AbstractService<
     );
 
     const blocked = new Set<string>();
+    // The record as the last applied change of this package left it. Every change the device
+    // queued for a record carries the same base (the copy before any offline change), so a DELETE
+    // after an edit of the same record is checked against this state, not that base: the GM's own
+    // edit is not a change "on the server".
+    const appliedState = new Map<string, Resource>();
     const results: OfflineChangeResult[] = [];
 
     for (const change of changes) {
@@ -121,12 +126,17 @@ export class OfflineChangeSetService extends AbstractService<
 
       let result: OfflineChangeResult;
       try {
-        result = await this.applyChange(change, params.request);
+        result = await this.applyChange(change, params.request, key ? appliedState.get(key) : undefined);
       } catch (error) {
         result = { seq: change.seq, status: "could-not-apply", detail: (error as Error)?.message ?? String(error) };
       }
 
       if (key && (result.status === "conflict" || result.status === "could-not-apply")) blocked.add(key);
+      if (key && result.status === "applied") {
+        const state = (result.response as any)?.data;
+        if (state && typeof state === "object" && !Array.isArray(state)) appliedState.set(key, state as Resource);
+        else appliedState.delete(key);
+      }
       results.push(result);
     }
 
@@ -177,10 +187,14 @@ export class OfflineChangeSetService extends AbstractService<
     return undefined;
   }
 
-  private async applyChange(change: OfflineChange, request: FastifyRequest): Promise<OfflineChangeResult> {
+  private async applyChange(
+    change: OfflineChange,
+    request: FastifyRequest,
+    appliedState: Resource | undefined,
+  ): Promise<OfflineChangeResult> {
     const namesRecord = !!change.recordType && !!change.recordId;
     if (!namesRecord || change.method === "POST") return this.runAsSent(change, request);
-    if (change.method === "DELETE") return this.applyDelete(change, request);
+    if (change.method === "DELETE") return this.applyDelete(change, request, appliedState);
     return this.applyEdit(change, request);
   }
 
@@ -281,13 +295,22 @@ export class OfflineChangeSetService extends AbstractService<
     return this.toResult(change.seq, answer);
   }
 
-  private async applyDelete(change: OfflineChange, request: FastifyRequest): Promise<OfflineChangeResult> {
+  /**
+   * `appliedState`: the record as an earlier applied change of this package left it. It replaces
+   * `base` for the check, so the GM's own edit in the same package does not refuse the delete.
+   */
+  private async applyDelete(
+    change: OfflineChange,
+    request: FastifyRequest,
+    appliedState: Resource | undefined,
+  ): Promise<OfflineChangeResult> {
     if (!change.resolution) {
       const current = await this.readCurrent(change, request);
       if (current.kind === "deleted") return { seq: change.seq, status: "applied" };
       if (current.kind === "failed") return { seq: change.seq, status: "could-not-apply", detail: current.detail };
 
-      if (change.base && this.changedSince(change.recordType as string, change.base as Resource, current.resource))
+      const base = appliedState ?? (change.base as Resource | null | undefined);
+      if (base && this.changedSince(change.recordType as string, base, current.resource))
         return { seq: change.seq, status: "conflict", conflict: "changed-on-server", current: current.resource };
     }
 
