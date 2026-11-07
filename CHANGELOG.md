@@ -1,3 +1,9 @@
+## [8.21.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.21.0...v8.21.1) (2026-11-07)
+
+### 🐛 Bug Fixes
+
+* **images:** an external image link is now any value starting with http:// or https://, stored as is; Google and Discord sign-in no longer add a "~" in front of the picture link, and the user avatar, blog cover and blog category image fields, the client key check and account deletion recognise the plain link, so saving a profile whose avatar came from Google or Discord no longer fails with 403 "You cannot reference this file."; apps must strip the leading "~" from stored User.avatar, BlogPost.coverImage and BlogCategory.image values before taking this version ([9741495](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/9741495dc5958be9adc3cf5dc64666ef8a42e8c4))
+
 ## [8.21.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.20.0...v8.21.0) (2026-11-07)
 
 ### 🚀 Features
