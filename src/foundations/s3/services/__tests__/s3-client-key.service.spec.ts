@@ -113,6 +113,24 @@ describe("S3ClientKeyService.assertClientKey", () => {
     expect(policy.canAccess).not.toHaveBeenCalled();
   });
 
+  it("lets a plain Discord avatar URL through on the avatar field (sent back unchanged)", async () => {
+    const policy = companyPrefixPolicy();
+    const service = await build({ policy });
+
+    await expect(
+      service.assertClientKey({ key: "https://cdn.discordapp.com/avatars/1/abc.png", folder: "users" }),
+    ).resolves.toBeUndefined();
+    expect(policy.canAccess).not.toHaveBeenCalled();
+  });
+
+  it("refuses a ~https value on the avatar field (no longer a recognised link form)", async () => {
+    const service = await build({ policy: companyPrefixPolicy() });
+
+    await expect(
+      service.assertClientKey({ key: "~https://cdn.discordapp.com/avatars/1/abc.png", folder: "users" }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
   describe("folder", () => {
     it("allows a key in the field's own folder", async () => {
       const service = await build({ policy: companyPrefixPolicy() });

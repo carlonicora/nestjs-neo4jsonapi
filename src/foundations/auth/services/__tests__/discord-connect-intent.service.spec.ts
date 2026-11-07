@@ -48,7 +48,7 @@ describe("DiscordConnectIntentService", () => {
     createdAt: "2026-11-07T10:00:00.000Z",
     browserKeyHash: "hash",
     launched: true,
-    discord: { id: "d-1", username: "player", avatar: "~https://cdn.discordapp.com/avatars/d-1/a.png" },
+    discord: { id: "d-1", username: "player", avatar: "https://cdn.discordapp.com/avatars/d-1/a.png" },
     ...overrides,
   });
 

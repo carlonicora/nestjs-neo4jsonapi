@@ -284,7 +284,7 @@ describe("DiscordUserService", () => {
     });
   });
   describe("link", () => {
-    const details = { ...MOCK_DISCORD_USER, avatar: "~https://cdn.discordapp.com/avatars/1/a.png" };
+    const details = { ...MOCK_DISCORD_USER, avatar: "https://cdn.discordapp.com/avatars/1/a.png" };
 
     const userWithAvatar = (avatar: string | null): User => ({ id: TEST_IDS.userId, avatar }) as unknown as User;
 
@@ -321,13 +321,13 @@ describe("DiscordUserService", () => {
       await service.link({ userId: TEST_IDS.userId, userDetails: details });
       expect(userRepository.updateAvatar).not.toHaveBeenCalled();
 
-      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://lh3.googleusercontent.com/x"));
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("https://lh3.googleusercontent.com/x"));
       await service.link({ userId: TEST_IDS.userId, userDetails: details });
       expect(userRepository.updateAvatar).not.toHaveBeenCalled();
     });
 
     it("link replaces a Discord picture with the new Discord picture", async () => {
-      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://cdn.discordapp.com/avatars/1/old.png"));
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("https://cdn.discordapp.com/avatars/1/old.png"));
 
       await service.link({ userId: TEST_IDS.userId, userDetails: details });
 
@@ -338,7 +338,7 @@ describe("DiscordUserService", () => {
     });
 
     it("link clears a Discord picture when the Discord account has none", async () => {
-      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://cdn.discordapp.com/avatars/1/old.png"));
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("https://cdn.discordapp.com/avatars/1/old.png"));
 
       await service.link({ userId: TEST_IDS.userId, userDetails: { ...details, avatar: null } });
 

@@ -348,7 +348,7 @@ describe("AuthDiscordService", () => {
       it("should update avatar if the user's Discord avatar has changed", async () => {
         const userWithDifferentAvatar = {
           ...mockExistingDiscordUser,
-          user: { ...mockExistingDiscordUser.user, avatar: "~https://cdn.discordapp.com/avatars/old.png" },
+          user: { ...mockExistingDiscordUser.user, avatar: "https://cdn.discordapp.com/avatars/old.png" },
         };
         discordUserRepository.findByDiscordId.mockResolvedValue(userWithDifferentAvatar as any);
         authService.createToken.mockResolvedValue({
@@ -380,7 +380,7 @@ describe("AuthDiscordService", () => {
       it("should keep another external avatar", async () => {
         discordUserRepository.findByDiscordId.mockResolvedValue({
           ...mockExistingDiscordUser,
-          user: { ...mockExistingDiscordUser.user, avatar: "~https://lh3.googleusercontent.com/x" },
+          user: { ...mockExistingDiscordUser.user, avatar: "https://lh3.googleusercontent.com/x" },
         } as any);
         authService.createToken.mockResolvedValue({
           data: { attributes: { refreshToken: "refresh-token-123" } },
@@ -844,7 +844,7 @@ describe("AuthDiscordService", () => {
         id: TEST_IDS.discordId,
         email: "test@example.com",
         username: "testuser",
-        avatar: `~https://cdn.discordapp.com/avatars/${TEST_IDS.discordId}/avatar-hash.png`,
+        avatar: `https://cdn.discordapp.com/avatars/${TEST_IDS.discordId}/avatar-hash.png`,
       });
     });
 
@@ -895,7 +895,7 @@ describe("AuthDiscordService", () => {
 
       const result = await service.fetchUserDetails(mockAccessToken);
 
-      expect(result.avatar).toBe(`~https://cdn.discordapp.com/avatars/${TEST_IDS.discordId}/${avatarHash}.png`);
+      expect(result.avatar).toBe(`https://cdn.discordapp.com/avatars/${TEST_IDS.discordId}/${avatarHash}.png`);
     });
 
     it("should throw error when API request fails", async () => {

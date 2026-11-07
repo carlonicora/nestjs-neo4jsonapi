@@ -647,7 +647,7 @@ describe("AuthGoogleService", () => {
         id: TEST_IDS.googleId,
         email: "test@example.com",
         name: "Test User",
-        picture: "~https://example.com/avatar.png",
+        picture: "https://example.com/avatar.png",
       });
     });
 
@@ -685,7 +685,7 @@ describe("AuthGoogleService", () => {
       expect(result.picture).toBeNull();
     });
 
-    it("should return the picture URL marked as an external URL when user has picture", async () => {
+    it("should return the plain picture URL when user has picture", async () => {
       const pictureUrl = "https://example.com/custom-avatar.png";
       mockedAxios.get.mockResolvedValue({
         data: {
@@ -698,7 +698,7 @@ describe("AuthGoogleService", () => {
 
       const result = await service.fetchUserDetails(mockAccessToken);
 
-      expect(result.picture).toBe(`~${pictureUrl}`);
+      expect(result.picture).toBe(pictureUrl);
     });
 
     it("should throw error when API request fails", async () => {

@@ -167,7 +167,7 @@ export class FullCompanyDeletionService
 
     const avatar = user.avatar;
     const insideWipedFolder = wipedCompanyId ? avatar?.startsWith(companyFolder(wipedCompanyId)) : false;
-    if (avatar && !avatar.startsWith("~") && !insideWipedFolder) {
+    if (avatar && !/^https?:\/\//i.test(avatar) && !insideWipedFolder) {
       await this.s3Service.deleteFileFromS3({ key: avatar });
     }
 

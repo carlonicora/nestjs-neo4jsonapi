@@ -67,7 +67,7 @@ export const UserDescriptor = defineEntity<User>()({
       type: "string",
       transform: async (data, services) => {
         if (!data.avatar) return undefined;
-        if (data.avatar.startsWith("~")) return data.avatar.substring(1);
+        if (/^https?:\/\//i.test(data.avatar)) return data.avatar;
         return await services.S3Service.generateSignedUrl({ key: data.avatar, isPublic: true });
       },
     },

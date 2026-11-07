@@ -336,7 +336,7 @@ export class AuthDiscordService {
     });
 
     const avatarUrl = response.data.avatar
-      ? `~https://cdn.discordapp.com/avatars/${response.data.id}/${response.data.avatar}.png`
+      ? `https://cdn.discordapp.com/avatars/${response.data.id}/${response.data.avatar}.png`
       : null;
 
     return {

@@ -61,7 +61,7 @@ export const BlogCategoryDescriptor = defineEntity<BlogCategory>()({
       description: "S3 key of the optional category image, serialised as a signed public URL.",
       transform: async (data, services) => {
         if (!data.image) return undefined;
-        if (data.image.startsWith("~")) return data.image.substring(1);
+        if (/^https?:\/\//i.test(data.image)) return data.image;
         return await services.S3Service.generateSignedUrl({ key: data.image, isPublic: true });
       },
     },

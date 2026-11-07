@@ -230,7 +230,7 @@ describe("AccountWipeService", () => {
       );
     });
 
-    it("deletes an avatar outside the wiped company folder, never a ~ avatar", async () => {
+    it("deletes an avatar outside the wiped company folder, never an http(s) avatar", async () => {
       await service.deleteAccount({ userId: "u1" });
       expect(s3Service.deleteFileFromS3).toHaveBeenCalledWith({ key: "avatars/u1.png" });
 
@@ -239,9 +239,7 @@ describe("AccountWipeService", () => {
       await service.deleteAccount({ userId: "u1" });
       expect(s3Service.deleteFileFromS3).not.toHaveBeenCalled();
 
-      accountDeletionRepository.findTargetUser.mockResolvedValue(
-        makeUser({ avatar: "~https://cdn.example.com/a.png" }),
-      );
+      accountDeletionRepository.findTargetUser.mockResolvedValue(makeUser({ avatar: "https://cdn.example.com/a.png" }));
       await service.deleteAccount({ userId: "u1" });
       expect(s3Service.deleteFileFromS3).not.toHaveBeenCalled();
     });

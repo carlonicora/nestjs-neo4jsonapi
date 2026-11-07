@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { UserDescriptor } from "../user";
 import type { RelationshipDef } from "../../../../common/interfaces/entity.schema.interface";
 
@@ -26,5 +26,29 @@ describe("UserDescriptor security surface", () => {
     const module: RelationshipDef = UserDescriptor.relationships.module;
     expect(company.readOnly).toBeUndefined();
     expect(module.readOnly).toBeUndefined();
+  });
+});
+
+describe("UserDescriptor avatar transform", () => {
+  const transform = UserDescriptor.fields.avatar!.transform!;
+
+  it("returns an http(s) avatar as-is, never signing it", async () => {
+    const generateSignedUrl = vi.fn();
+    const services = { S3Service: { generateSignedUrl } };
+
+    await expect(transform({ avatar: "https://cdn.discordapp.com/avatars/1/abc.png" }, services)).resolves.toBe(
+      "https://cdn.discordapp.com/avatars/1/abc.png",
+    );
+    await expect(transform({ avatar: "HTTP://example.com/a.png" }, services)).resolves.toBe("HTTP://example.com/a.png");
+    expect(generateSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("signs an S3 key", async () => {
+    const generateSignedUrl = vi.fn().mockResolvedValue("https://signed.example/a.png");
+
+    await expect(
+      transform({ avatar: "companies/c1/users/u1/u1.png" }, { S3Service: { generateSignedUrl } }),
+    ).resolves.toBe("https://signed.example/a.png");
+    expect(generateSignedUrl).toHaveBeenCalledWith({ key: "companies/c1/users/u1/u1.png", isPublic: true });
   });
 });

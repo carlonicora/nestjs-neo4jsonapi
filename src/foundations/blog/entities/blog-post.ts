@@ -94,7 +94,7 @@ export const BlogPostDescriptor = defineEntity<BlogPost>()({
         "S3 key of the optional cover image, serialised as a signed public URL. Shown at the top of the post page and on the post's card in the public list.",
       transform: async (data, services) => {
         if (!data.coverImage) return undefined;
-        if (data.coverImage.startsWith("~")) return data.coverImage.substring(1);
+        if (/^https?:\/\//i.test(data.coverImage)) return data.coverImage;
         return await services.S3Service.generateSignedUrl({ key: data.coverImage, isPublic: true });
       },
     },

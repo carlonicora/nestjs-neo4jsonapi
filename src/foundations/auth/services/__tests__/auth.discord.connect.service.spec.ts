@@ -101,7 +101,7 @@ describe("AuthDiscordService — connect", () => {
       id: "d-1",
       username: "player",
       email: "p@example.com",
-      avatar: "~https://cdn.discordapp.com/avatars/d-1/a.png",
+      avatar: "https://cdn.discordapp.com/avatars/d-1/a.png",
     });
   });
 
@@ -292,7 +292,7 @@ describe("AuthDiscordService — connect", () => {
       expect(call.discord).toEqual({
         id: "d-1",
         username: "player",
-        avatar: "~https://cdn.discordapp.com/avatars/d-1/a.png",
+        avatar: "https://cdn.discordapp.com/avatars/d-1/a.png",
       });
       expect(call.confirmToken).toMatch(UUID);
       expect(url).toBe(
@@ -345,25 +345,25 @@ describe("AuthDiscordService — connect", () => {
     };
 
     it("handleDiscordLogin keeps an uploaded avatar", async () => {
-      await loginWith("users/u-1/a.png", "~https://cdn.discordapp.com/avatars/d-1/new.png");
+      await loginWith("users/u-1/a.png", "https://cdn.discordapp.com/avatars/d-1/new.png");
 
       expect(userRepository.updateAvatar).not.toHaveBeenCalled();
     });
 
     it("handleDiscordLogin replaces a Discord avatar", async () => {
       await loginWith(
-        "~https://cdn.discordapp.com/avatars/d-1/old.png",
-        "~https://cdn.discordapp.com/avatars/d-1/new.png",
+        "https://cdn.discordapp.com/avatars/d-1/old.png",
+        "https://cdn.discordapp.com/avatars/d-1/new.png",
       );
 
       expect(userRepository.updateAvatar).toHaveBeenCalledWith({
         userId: "u-1",
-        avatar: "~https://cdn.discordapp.com/avatars/d-1/new.png",
+        avatar: "https://cdn.discordapp.com/avatars/d-1/new.png",
       });
     });
 
     it("handleDiscordLogin clears a Discord avatar when the Discord account has none", async () => {
-      await loginWith("~https://cdn.discordapp.com/avatars/d-1/old.png", null);
+      await loginWith("https://cdn.discordapp.com/avatars/d-1/old.png", null);
 
       expect(userRepository.updateAvatar).toHaveBeenCalledWith({ userId: "u-1", avatar: null });
     });

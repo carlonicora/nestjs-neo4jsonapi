@@ -1,8 +1,8 @@
 /**
  * The prefix of a Discord profile picture stored on `User.avatar`
- * (`~` marks an external URL; see `fetchUserDetails`).
+ * (an external http(s) URL; see `fetchUserDetails`).
  */
-export const DISCORD_AVATAR_PREFIX = "~https://cdn.discordapp.com/";
+export const DISCORD_AVATAR_PREFIX = "https://cdn.discordapp.com/";
 
 /**
  * The picture rule for Discord connect and every Discord login: the Discord picture is written only
