@@ -1,3 +1,9 @@
+## [8.20.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.3...v8.20.0) (2026-11-07)
+
+### 🚀 Features
+
+* **auth:** a signed-in user can now connect a Discord account to the user they already have; POST discord-connect-intents sets an HttpOnly discord_connect cookie and answers with the launch route, the Discord callback attaches the account to that intent only when the browser carries the cookie and returns a one-time confirmation token, and POST discord-connect-confirmations links it in the user's own company only when the same user confirms; GET discord-connections/:id tells the caller whether they are connected and as whom; an app can refuse users through the optional DISCORD_CONNECT_POLICY hook; Discord login no longer replaces a picture the user uploaded or took from another provider ([09e33c1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/09e33c123ead56a09e6c7526fde60c4b0b2b0af6))
+
 ## [8.19.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.2...v8.19.3) (2026-11-05)
 
 ### 🐛 Bug Fixes
