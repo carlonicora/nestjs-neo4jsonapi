@@ -6,6 +6,8 @@ import { DiscordUserRepository } from "../../repositories/discord-user.repositor
 import { UserRepository } from "../../../user/repositories/user.repository";
 import { CompanyRepository } from "../../../company/repositories/company.repository";
 import { RoleId } from "../../../../common";
+import { User } from "../../../user/entities/user";
+import { DiscordUser } from "../../entities/discord-user";
 
 // Mock crypto
 vi.mock("crypto", async () => {
@@ -40,11 +42,14 @@ describe("DiscordUserService", () => {
     create: vi.fn(),
     findByDiscordId: vi.fn(),
     findByUserId: vi.fn(),
+    linkToUser: vi.fn(),
     delete: vi.fn(),
   });
 
   const createMockUserRepository = () => ({
     createUser: vi.fn(),
+    findByUserId: vi.fn(),
+    updateAvatar: vi.fn(),
     findById: vi.fn(),
     findByEmail: vi.fn(),
     update: vi.fn(),
@@ -276,6 +281,86 @@ describe("DiscordUserService", () => {
           userDetails: MOCK_DISCORD_USER,
         }),
       ).rejects.toThrow("Discord user creation failed");
+    });
+  });
+  describe("link", () => {
+    const details = { ...MOCK_DISCORD_USER, avatar: "~https://cdn.discordapp.com/avatars/1/a.png" };
+
+    const userWithAvatar = (avatar: string | null): User => ({ id: TEST_IDS.userId, avatar }) as unknown as User;
+
+    beforeEach(() => {
+      discordUserRepository.linkToUser.mockResolvedValue({ id: "du-1" } as DiscordUser);
+    });
+
+    it("link does not create a user or company", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar(null));
+
+      await expect(service.link({ userId: TEST_IDS.userId, userDetails: details })).resolves.toBe("linked");
+
+      expect(userRepository.createUser).not.toHaveBeenCalled();
+      expect(companyRepository.createCompanyNode).not.toHaveBeenCalled();
+      expect(discordUserRepository.create).not.toHaveBeenCalled();
+      expect(discordUserRepository.linkToUser).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        discordId: details.id,
+        name: details.username,
+      });
+    });
+
+    it("link reads the user and sets the avatar only when shouldUseDiscordAvatar", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar(""));
+      await service.link({ userId: TEST_IDS.userId, userDetails: details });
+      expect(userRepository.findByUserId).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(userRepository.updateAvatar).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        avatar: details.avatar,
+      });
+
+      userRepository.updateAvatar.mockClear();
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("users/u/a.png"));
+      await service.link({ userId: TEST_IDS.userId, userDetails: details });
+      expect(userRepository.updateAvatar).not.toHaveBeenCalled();
+
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://lh3.googleusercontent.com/x"));
+      await service.link({ userId: TEST_IDS.userId, userDetails: details });
+      expect(userRepository.updateAvatar).not.toHaveBeenCalled();
+    });
+
+    it("link replaces a Discord picture with the new Discord picture", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://cdn.discordapp.com/avatars/1/old.png"));
+
+      await service.link({ userId: TEST_IDS.userId, userDetails: details });
+
+      expect(userRepository.updateAvatar).toHaveBeenCalledWith({
+        userId: TEST_IDS.userId,
+        avatar: details.avatar,
+      });
+    });
+
+    it("link clears a Discord picture when the Discord account has none", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar("~https://cdn.discordapp.com/avatars/1/old.png"));
+
+      await service.link({ userId: TEST_IDS.userId, userDetails: { ...details, avatar: null } });
+
+      expect(userRepository.updateAvatar).toHaveBeenCalledWith({ userId: TEST_IDS.userId, avatar: null });
+    });
+
+    it("link leaves the company to the user's own BELONGS_TO: no session company is passed or set", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar(null));
+
+      await service.link({ userId: TEST_IDS.userId, userDetails: details });
+
+      const args = discordUserRepository.linkToUser.mock.calls[0][0];
+      expect(Object.keys(args).sort()).toEqual(["discordId", "name", "userId"]);
+      expect(clsService.set).not.toHaveBeenCalled();
+    });
+
+    it("link returns blocked when linkToUser returns null", async () => {
+      userRepository.findByUserId.mockResolvedValue(userWithAvatar(null));
+      discordUserRepository.linkToUser.mockResolvedValue(null);
+
+      await expect(service.link({ userId: TEST_IDS.userId, userDetails: details })).resolves.toBe("blocked");
+      expect(userRepository.updateAvatar).not.toHaveBeenCalled();
     });
   });
 });

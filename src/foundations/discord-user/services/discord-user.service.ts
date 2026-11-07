@@ -6,6 +6,7 @@ import { CompanyRepository } from "../../company";
 import { UserRepository } from "../../user";
 import { DiscordUserRepository } from "../repositories/discord-user.repository";
 import { discordUser } from "../types/discord.user.type";
+import { shouldUseDiscordAvatar } from "../utils/discord-avatar";
 
 @Injectable()
 export class DiscordUserService {
@@ -52,5 +53,29 @@ export class DiscordUserService {
       name: params.userDetails.username,
       user: params.userId,
     });
+  }
+
+  /**
+   * Links a Discord account to an existing user (Discord connect). Creates no User and no Company:
+   * the DiscordUser goes in the user's own company. The user's name is never changed; the Discord
+   * picture is written only when {@link shouldUseDiscordAvatar} allows it.
+   *
+   * @returns "blocked" when the Discord id is already linked or the user already has Discord.
+   */
+  async link(params: { userId: string; userDetails: discordUser }): Promise<"linked" | "blocked"> {
+    const user = await this.userRepository.findByUserId({ userId: params.userId });
+
+    const linked = await this.discordUserRepository.linkToUser({
+      userId: params.userId,
+      discordId: params.userDetails.id,
+      name: params.userDetails.username,
+    });
+    if (!linked) return "blocked";
+
+    if (shouldUseDiscordAvatar(user?.avatar)) {
+      await this.userRepository.updateAvatar({ userId: params.userId, avatar: params.userDetails.avatar });
+    }
+
+    return "linked";
   }
 }

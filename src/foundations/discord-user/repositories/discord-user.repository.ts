@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { ClsService } from "nestjs-cls";
 import { AbstractRepository, Neo4jService, SecurityService } from "../../../core";
 import { roleMeta } from "../../role";
@@ -69,5 +70,52 @@ export class DiscordUserRepository extends AbstractRepository<DiscordUser, typeo
     `;
 
     return this.neo4j.readOne(query);
+  }
+
+  /**
+   * Links a new DiscordUser to an existing user, in the user's own company (the one Company the
+   * User BELONGS_TO), never the session's company. Creates no User and no Company.
+   *
+   * One write query. `SET` then `REMOVE` of `discordLinkLock` takes the User node's write lock for the
+   * rest of the transaction before the existence checks, so two links for the same user serialise and
+   * the second sees the first; no property is left behind.
+   *
+   * @returns The new DiscordUser, or null when the Discord id is already linked or the user already
+   * has a Discord account (the caller re-checks to tell which).
+   */
+  async linkToUser(params: { userId: string; discordId: string; name: string }): Promise<DiscordUser | null> {
+    await this.neo4j.validateRelatedNodes({ nodes: [{ id: params.userId, label: userMeta.labelName }] });
+
+    const { nodeName, labelName } = DiscordUserDescriptor.model;
+    const query = this.neo4j.initQuery({ serialiser: DiscordUserDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+      discordId: params.discordId,
+      name: params.name,
+      discordUserId: randomUUID(),
+    };
+
+    // own_company, never company: initQuery already binds `company` to the session's company.
+    query.query += `
+      MATCH (user:${userMeta.labelName} {id: $userId})-[:BELONGS_TO]->(own_company:Company)
+      SET user.discordLinkLock = true
+      REMOVE user.discordLinkLock
+      WITH user, own_company
+      WHERE NOT EXISTS { (:${labelName} {discordId: $discordId}) }
+        AND NOT EXISTS { (user)-[:HAS_DISCORD]->(:${labelName}) }
+      CREATE (user)-[:HAS_DISCORD]->(${nodeName}:${labelName} {
+        id: $discordUserId,
+        discordId: $discordId,
+        name: $name,
+        createdAt: datetime(),
+        updatedAt: datetime()
+      })-[:BELONGS_TO]->(own_company)
+      WITH ${nodeName}
+      ${this.buildReturnStatement()}
+    `;
+
+    return (await this.neo4j.writeOne(query)) ?? null;
   }
 }

@@ -287,4 +287,91 @@ describe("DiscordUserRepository", () => {
       expect(mockQuery.queryParams.name).toBe(specialName);
     });
   });
+  describe("linkToUser", () => {
+    const linkParams = { userId: TEST_IDS.userId, discordId: TEST_IDS.discordId, name: "player" };
+    const initQueryResult = () => ({
+      query: "",
+      queryParams: { companyId: TEST_IDS.companyId, currentUserId: TEST_IDS.userId } as Record<string, unknown>,
+    });
+
+    it("linkToUser locks the user before the existence checks", async () => {
+      const mockQuery = initQueryResult();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_DISCORD_USER);
+
+      await repository.linkToUser(linkParams);
+
+      const text = mockQuery.query;
+      const lock = text.indexOf("SET user.discordLinkLock = true");
+      const unlock = text.indexOf("REMOVE user.discordLinkLock");
+      const guard = text.indexOf("NOT EXISTS");
+      const create = text.indexOf("CREATE");
+      expect(lock).toBeGreaterThan(-1);
+      expect(unlock).toBeGreaterThan(lock);
+      expect(guard).toBeGreaterThan(unlock);
+      expect(create).toBeGreaterThan(guard);
+      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
+    });
+
+    it("linkToUser creates the node under the descriptor nodeName", async () => {
+      const mockQuery = initQueryResult();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_DISCORD_USER);
+
+      await expect(repository.linkToUser(linkParams)).resolves.toEqual(MOCK_DISCORD_USER);
+
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: DiscordUserDescriptor.model });
+      expect(mockQuery.query).toContain("CREATE (user)-[:HAS_DISCORD]->(discorduser:DiscordUser");
+      expect(mockQuery.query).toContain("WITH discorduser");
+      expect(typeof mockQuery.queryParams.discordUserId).toBe("string");
+      expect(mockQuery.queryParams.discordUserId).not.toBe(TEST_IDS.userId);
+    });
+
+    it("linkToUser links to the user's own company", async () => {
+      const mockQuery = initQueryResult();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_DISCORD_USER);
+
+      await repository.linkToUser(linkParams);
+
+      expect(mockQuery.query).toContain("-[:BELONGS_TO]->(own_company:Company)");
+      expect(mockQuery.query).toContain("-[:BELONGS_TO]->(own_company)");
+      expect(mockQuery.query).not.toContain("-[:BELONGS_TO]->(company)");
+    });
+
+    it("linkToUser keeps the initQuery params", async () => {
+      const mockQuery = initQueryResult();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_DISCORD_USER);
+
+      await repository.linkToUser(linkParams);
+
+      expect(mockQuery.queryParams).toMatchObject({
+        companyId: TEST_IDS.companyId,
+        currentUserId: TEST_IDS.userId,
+        userId: TEST_IDS.userId,
+        discordId: TEST_IDS.discordId,
+        name: "player",
+      });
+    });
+
+    it("linkToUser checks the user against the company before writing", async () => {
+      const mockQuery = initQueryResult();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(MOCK_DISCORD_USER);
+
+      await repository.linkToUser(linkParams);
+
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [{ id: TEST_IDS.userId, label: "User" }],
+      });
+    });
+
+    it("linkToUser returns null when the guard blocks", async () => {
+      neo4jService.initQuery.mockReturnValue(initQueryResult());
+      neo4jService.writeOne.mockResolvedValue(null);
+
+      await expect(repository.linkToUser(linkParams)).resolves.toBeNull();
+    });
+  });
 });

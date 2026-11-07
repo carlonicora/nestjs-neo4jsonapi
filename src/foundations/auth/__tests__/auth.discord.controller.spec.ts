@@ -8,6 +8,9 @@ vi.mock("../services/auth.discord.service", () => ({
     exchangeCodeForToken: vi.fn(),
     fetchUserDetails: vi.fn(),
     handleDiscordLogin: vi.fn(),
+    launchConnect: vi.fn(),
+    handleDiscordConnectCallback: vi.fn(),
+    connectCookie: vi.fn(),
   })),
 }));
 
@@ -27,6 +30,7 @@ describe("AuthDiscordController", () => {
   const createMockReply = (): Mocked<FastifyReply> => {
     return {
       redirect: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       code: vi.fn().mockReturnThis(),
@@ -46,6 +50,9 @@ describe("AuthDiscordController", () => {
       exchangeCodeForToken: vi.fn(),
       fetchUserDetails: vi.fn(),
       handleDiscordLogin: vi.fn(),
+      launchConnect: vi.fn(),
+      handleDiscordConnectCallback: vi.fn(),
+      connectCookie: vi.fn(),
     };
 
     const mockConfigService = {
@@ -287,6 +294,62 @@ describe("AuthDiscordController", () => {
       await controller.callbackDiscord(mockReply, "auth-code", "encoded-state");
 
       expect(authDiscordService.handleDiscordLogin).toHaveBeenCalledWith(expect.objectContaining({ pass: "code-1" }));
+    });
+  });
+
+  describe("connect", () => {
+    const INTENT = "0b6f8a52-3c0e-4d8e-9a77-6f0c2b1d4e11";
+    const requestWithCookie = (cookie?: string) => ({ headers: cookie ? { cookie } : {} }) as any;
+
+    it("launch route passes the discord_connect cookie to launchConnect and answers 302 to its URL", async () => {
+      authDiscordService.launchConnect.mockResolvedValue("https://discord.com/api/oauth2/authorize?x=1");
+
+      await controller.launchConnect(mockReply, INTENT, requestWithCookie("other=1; discord_connect=key-1; more=2"));
+
+      expect(authDiscordService.launchConnect).toHaveBeenCalledWith({ code: INTENT, browserKey: "key-1" });
+      expect(mockReply.redirect).toHaveBeenCalledWith("https://discord.com/api/oauth2/authorize?x=1", 302);
+    });
+
+    it("launch route without a cookie passes no browser key", async () => {
+      authDiscordService.launchConnect.mockResolvedValue("http://app.test/?discordConnect=failed");
+
+      await controller.launchConnect(mockReply, INTENT, requestWithCookie());
+
+      expect(authDiscordService.launchConnect).toHaveBeenCalledWith({ code: INTENT, browserKey: undefined });
+      expect(mockReply.redirect).toHaveBeenCalledWith("http://app.test/?discordConnect=failed", 302);
+    });
+
+    it("callback with a connect state calls handleDiscordConnectCallback, clears the cookie and redirects to its URL", async () => {
+      authDiscordService.parseStateData.mockReturnValue({ connect: INTENT });
+      authDiscordService.handleDiscordConnectCallback.mockResolvedValue("http://app.test/?discordConnect=pending");
+      authDiscordService.connectCookie.mockReturnValue("discord_connect=; Max-Age=0");
+
+      await controller.callbackDiscord(mockReply, "discord-code", "state", requestWithCookie("discord_connect=key-1"));
+
+      expect(authDiscordService.handleDiscordConnectCallback).toHaveBeenCalledWith({
+        code: INTENT,
+        discordCode: "discord-code",
+        browserKey: "key-1",
+      });
+      expect(authDiscordService.connectCookie).toHaveBeenCalledWith({ value: "", maxAge: 0 });
+      expect(mockReply.header).toHaveBeenCalledWith("Set-Cookie", "discord_connect=; Max-Age=0");
+      expect(mockReply.redirect).toHaveBeenCalledWith("http://app.test/?discordConnect=pending", 302);
+      expect(authDiscordService.exchangeCodeForToken).not.toHaveBeenCalled();
+      expect(authDiscordService.handleDiscordLogin).not.toHaveBeenCalled();
+    });
+
+    it("callback without connect keeps the login path", async () => {
+      authDiscordService.parseStateData.mockReturnValue({ invite: "inv" });
+      authDiscordService.exchangeCodeForToken.mockResolvedValue("token");
+      authDiscordService.fetchUserDetails.mockResolvedValue({ id: "d", username: "u", avatar: null });
+      authDiscordService.handleDiscordLogin.mockResolvedValue("http://app.test/auth?code=1");
+
+      await controller.callbackDiscord(mockReply, "discord-code", "state", requestWithCookie("discord_connect=key-1"));
+
+      expect(authDiscordService.handleDiscordConnectCallback).not.toHaveBeenCalled();
+      expect(mockReply.header).not.toHaveBeenCalled();
+      expect(authDiscordService.handleDiscordLogin).toHaveBeenCalled();
+      expect(mockReply.redirect).toHaveBeenCalledWith("http://app.test/auth?code=1", 302);
     });
   });
 

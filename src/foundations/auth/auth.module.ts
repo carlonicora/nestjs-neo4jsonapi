@@ -13,21 +13,35 @@ import { GoogleUserModule } from "../google-user/google-user.module";
 import { TwoFactorModule } from "../two-factor/two-factor.module";
 import { UserModule } from "../user/user.module";
 import { WaitlistModule } from "../waitlist/waitlist.module";
+import { AuthDiscordConnectionController } from "./controllers/auth.discord-connection.controller";
 import { AuthDiscordController } from "./controllers/auth.discord.controller";
 import { AuthGoogleController } from "./controllers/auth.google.controller";
 import { AuthDescriptor } from "./entities/auth";
 import { AuthCodeDescriptor } from "./entities/auth.code";
+import { DiscordConnectConfirmationDescriptor } from "./entities/discord-connect-confirmation";
+import { DiscordConnectIntentDescriptor } from "./entities/discord-connect-intent";
+import { DiscordConnectionDescriptor } from "./entities/discord-connection";
 import { PendingAuthDescriptor } from "./entities/pending-auth";
 import { PendingRegistrationDescriptor } from "./entities/pending-registration.resource";
 import { AuthRepository } from "./repositories/auth.repository";
+import { DiscordConnectionRepository } from "./repositories/discord-connection.repository";
 import { AuthDiscordService } from "./services/auth.discord.service";
 import { AuthGoogleService } from "./services/auth.google.service";
 import { AuthService } from "./services/auth.service";
+import { DiscordConnectIntentService } from "./services/discord-connect-intent.service";
+import { DiscordConnectIntentStore } from "./services/discord-connect-intent.store";
+import { DiscordConnectionService } from "./services/discord-connection.service";
 import { PendingRegistrationService } from "./services/pending-registration.service";
 import { TrialQueueService } from "./services/trial-queue.service";
 
 @Module({
-  controllers: [AuthCompanyController, AuthController, AuthDiscordController, AuthGoogleController],
+  controllers: [
+    AuthCompanyController,
+    AuthController,
+    AuthDiscordController,
+    AuthDiscordConnectionController,
+    AuthGoogleController,
+  ],
   providers: [
     AuthService,
     AuthRepository,
@@ -35,7 +49,14 @@ import { TrialQueueService } from "./services/trial-queue.service";
     AuthCodeDescriptor.model.serialiser,
     PendingAuthDescriptor.model.serialiser,
     PendingRegistrationDescriptor.model.serialiser,
+    DiscordConnectionDescriptor.model.serialiser,
+    DiscordConnectIntentDescriptor.model.serialiser,
+    DiscordConnectConfirmationDescriptor.model.serialiser,
     AuthDiscordService,
+    DiscordConnectIntentStore,
+    DiscordConnectIntentService,
+    DiscordConnectionRepository,
+    DiscordConnectionService,
     AuthGoogleService,
     PendingRegistrationService,
     TrialQueueService,
@@ -59,5 +80,8 @@ export class AuthModule implements OnModuleInit {
     modelRegistry.register(AuthCodeDescriptor.model);
     modelRegistry.register(PendingAuthDescriptor.model);
     modelRegistry.register(PendingRegistrationDescriptor.model);
+    modelRegistry.register(DiscordConnectionDescriptor.model);
+    modelRegistry.register(DiscordConnectIntentDescriptor.model);
+    modelRegistry.register(DiscordConnectConfirmationDescriptor.model);
   }
 }

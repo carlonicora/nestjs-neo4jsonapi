@@ -22,9 +22,10 @@ vi.mock("../../waitlist/services/waitlist.service", () => ({
 vi.mock("axios");
 
 // Mock crypto.randomUUID
-vi.mock("crypto", () => ({
-  randomUUID: vi.fn(() => "mock-uuid-12345"),
-}));
+vi.mock("crypto", async () => {
+  const actual = await vi.importActual<typeof import("crypto")>("crypto");
+  return { ...actual, randomUUID: vi.fn(() => "mock-uuid-12345") };
+});
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
@@ -39,6 +40,7 @@ import { DiscordUserRepository } from "../../discord-user/repositories/discord-u
 import { DiscordUserService } from "../../discord-user";
 import { PendingRegistrationService } from "../services/pending-registration.service";
 import { WaitlistService } from "../../waitlist/services/waitlist.service";
+import { DiscordConnectIntentStore } from "../services/discord-connect-intent.store";
 
 const mockedAxios = vi.mocked(axios);
 
@@ -154,6 +156,7 @@ describe("AuthDiscordService", () => {
         { provide: ClsService, useValue: mockClsService },
         { provide: PendingRegistrationService, useValue: mockPendingRegistrationService },
         { provide: WaitlistService, useValue: mockWaitlistService },
+        { provide: DiscordConnectIntentStore, useValue: {} },
       ],
     }).compile();
 
@@ -342,12 +345,57 @@ describe("AuthDiscordService", () => {
         });
       });
 
-      it("should update avatar if user avatar has changed", async () => {
+      it("should update avatar if the user's Discord avatar has changed", async () => {
         const userWithDifferentAvatar = {
           ...mockExistingDiscordUser,
-          user: { ...mockExistingDiscordUser.user, avatar: "different-avatar" },
+          user: { ...mockExistingDiscordUser.user, avatar: "~https://cdn.discordapp.com/avatars/old.png" },
         };
         discordUserRepository.findByDiscordId.mockResolvedValue(userWithDifferentAvatar as any);
+        authService.createToken.mockResolvedValue({
+          data: { attributes: { refreshToken: "refresh-token-123" } },
+        } as any);
+
+        await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails });
+
+        expect(userRepository.updateAvatar).toHaveBeenCalledWith({
+          userId: TEST_IDS.userId,
+          avatar: mockDiscordUserDetails.avatar,
+        });
+      });
+
+      it("should keep an uploaded avatar", async () => {
+        discordUserRepository.findByDiscordId.mockResolvedValue({
+          ...mockExistingDiscordUser,
+          user: { ...mockExistingDiscordUser.user, avatar: "users/user-123/avatar.png" },
+        } as any);
+        authService.createToken.mockResolvedValue({
+          data: { attributes: { refreshToken: "refresh-token-123" } },
+        } as any);
+
+        await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails });
+
+        expect(userRepository.updateAvatar).not.toHaveBeenCalled();
+      });
+
+      it("should keep another external avatar", async () => {
+        discordUserRepository.findByDiscordId.mockResolvedValue({
+          ...mockExistingDiscordUser,
+          user: { ...mockExistingDiscordUser.user, avatar: "~https://lh3.googleusercontent.com/x" },
+        } as any);
+        authService.createToken.mockResolvedValue({
+          data: { attributes: { refreshToken: "refresh-token-123" } },
+        } as any);
+
+        await service.handleDiscordLogin({ userDetails: mockDiscordUserDetails });
+
+        expect(userRepository.updateAvatar).not.toHaveBeenCalled();
+      });
+
+      it("should set the Discord avatar when the user has none", async () => {
+        discordUserRepository.findByDiscordId.mockResolvedValue({
+          ...mockExistingDiscordUser,
+          user: { ...mockExistingDiscordUser.user, avatar: null },
+        } as any);
         authService.createToken.mockResolvedValue({
           data: { attributes: { refreshToken: "refresh-token-123" } },
         } as any);
