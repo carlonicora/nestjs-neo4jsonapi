@@ -23,6 +23,8 @@ import { subscriptionPaymentConfirmation } from "./subscription-payment-confirma
 
 export interface CreateSubscriptionResult {
   data: JsonApiSingleDocument;
+  /** The local subscription node the call created (the entity behind `data`). */
+  subscription: StripeSubscription;
   clientSecret: string | null;
   paymentIntentId: string | null;
   requiresAction: boolean;
@@ -154,6 +156,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
    * @param params.trialPeriodDays - Optional trial period in days (ignored if trialEnd is set)
    * @param params.trialEnd - Optional Unix timestamp for trial end (takes precedence over trialPeriodDays)
    * @param params.quantity - Optional quantity (default: 1)
+   * @param params.idempotencyKey - Optional Stripe idempotency key for the subscription create
    * @returns JSON:API formatted subscription data
    * @throws {HttpException} NOT_FOUND if customer or price not found
    * @throws {HttpException} PAYMENT_REQUIRED (402) if no payment methods exist
@@ -176,6 +179,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
     trialEnd?: number; // Unix timestamp - takes precedence over trialPeriodDays
     quantity?: number;
     promotionCode?: string;
+    idempotencyKey?: string;
   }): Promise<CreateSubscriptionResult> {
     const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
     if (!customer) {
@@ -263,6 +267,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
             priceId: params.priceId,
           },
           promotionCode,
+          ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
         }),
     );
 
@@ -291,6 +296,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
 
     return {
       data,
+      subscription,
       clientSecret,
       paymentIntentId,
       requiresAction,
@@ -728,6 +734,7 @@ export class StripeSubscriptionAdminService extends AbstractService<
 
     return {
       data,
+      subscription,
       clientSecret,
       paymentIntentId: confirmedPaymentIntent.id,
       requiresAction,

@@ -488,6 +488,34 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
   }
 
   /**
+   * Overwrite the end of the company's free trial with the value Stripe returned.
+   *
+   * Unlike `markTrialEnd`, an existing `trialEndsAt` is replaced: the in-request trial
+   * start stores the real Stripe trial end, which supersedes a value written earlier
+   * (for example a legacy backfill). The company id must be server-derived.
+   *
+   * @param params.companyId - Company identifier
+   * @param params.trialEndsAt - ISO 8601 instant at which the trial ends
+   */
+  async replaceTrialEnd(params: { companyId: string; trialEndsAt: string }): Promise<void> {
+    const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      searchValue: params.companyId,
+      trialEndsAt: params.trialEndsAt,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      SET company.trialEndsAt = datetime($trialEndsAt),
+          company.updatedAt = datetime()
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
    * Update company credit allocation fields
    *
    * Used by TokenAllocationService to reset credits on subscription payment

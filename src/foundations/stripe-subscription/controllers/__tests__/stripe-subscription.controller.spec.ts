@@ -39,7 +39,10 @@ import { StripeSubscriptionAdminService } from "../../services/stripe-subscripti
 import { CacheService } from "../../../../core/cache/services/cache.service";
 import { RoleId } from "../../../../common/constants/system.roles";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
-import type { StripeSubscriptionStatus } from "../../entities/stripe-subscription";
+import type { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription";
+import type { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
+import type { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
+import type { Company } from "../../../company/entities/company";
 import type {
   JsonApiListDocument,
   JsonApiSingleDocument,
@@ -56,6 +59,23 @@ describe("StripeSubscriptionController", () => {
     companyId: "660e8400-e29b-41d4-a716-446655440001",
     subscriptionId: "sub_test123",
     priceId: "price_test123",
+  };
+
+  const MOCK_DB_SUBSCRIPTION: StripeSubscription = {
+    id: "subscription_db_123",
+    type: "stripe-subscriptions",
+    stripeSubscriptionId: TEST_IDS.subscriptionId,
+    stripeSubscriptionItemId: "si_test_123",
+    status: "active",
+    currentPeriodStart: new Date("2025-01-01T00:00:00Z"),
+    currentPeriodEnd: new Date("2025-02-01T00:00:00Z"),
+    cancelAtPeriodEnd: false,
+    quantity: 1,
+    createdAt: new Date("2025-01-01T00:00:00Z"),
+    updatedAt: new Date("2025-01-01T00:00:00Z"),
+    stripeCustomer: {} as StripeCustomer,
+    stripePrice: {} as StripePrice,
+    company: {} as Company,
   };
 
   const MOCK_SUBSCRIPTION_RESPONSE: JsonApiSingleDocument = {
@@ -238,6 +258,7 @@ describe("StripeSubscriptionController", () => {
       };
       const mockServiceResponse = {
         data: MOCK_SUBSCRIPTION_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: "pi_secret",
         paymentIntentId: "pi_123",
         requiresAction: false,
@@ -279,6 +300,7 @@ describe("StripeSubscriptionController", () => {
       };
       const mockServiceResponse = {
         data: MOCK_SUBSCRIPTION_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: "pi_secret",
         paymentIntentId: "pi_123",
         requiresAction: false,
@@ -375,6 +397,7 @@ describe("StripeSubscriptionController", () => {
       subscriptionService.changePlan.mockResolvedValue(MOCK_SUBSCRIPTION_RESPONSE);
       subscriptionService.createSubscription.mockResolvedValue({
         data: MOCK_SUBSCRIPTION_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: null,
         paymentIntentId: null,
         requiresAction: false,

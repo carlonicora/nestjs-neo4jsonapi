@@ -75,6 +75,28 @@ describe("StripeSubscriptionApiService", () => {
       expect(result).toEqual(MOCK_SUBSCRIPTION);
     });
 
+    it("createSubscription sends the idempotency key as a request option", async () => {
+      mockStripe.subscriptions.create.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.createSubscription({ ...validParams, idempotencyKey: "k" });
+
+      const call = mockStripe.subscriptions.create.mock.calls[0];
+      expect(call).toHaveLength(2);
+      expect(call[0]).toEqual(
+        expect.objectContaining({ customer: validParams.stripeCustomerId, items: [{ price: validParams.priceId }] }),
+      );
+      expect(call[0]).not.toHaveProperty("idempotencyKey");
+      expect(call[1]).toEqual({ idempotencyKey: "k" });
+    });
+
+    it("createSubscription sends no request options without a key", async () => {
+      mockStripe.subscriptions.create.mockResolvedValue(MOCK_SUBSCRIPTION);
+
+      await service.createSubscription(validParams);
+
+      expect(mockStripe.subscriptions.create.mock.calls[0]).toHaveLength(1);
+    });
+
     it("should create subscription with payment method", async () => {
       const paramsWithPaymentMethod = {
         ...validParams,

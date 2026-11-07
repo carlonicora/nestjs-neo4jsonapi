@@ -35,6 +35,9 @@ export class StripeSubscriptionApiService {
    * @param params.trialPeriodDays - Number of trial days (optional, ignored if trialEnd is set)
    * @param params.trialEnd - Unix timestamp for trial end (optional, takes precedence over trialPeriodDays)
    * @param params.metadata - Additional metadata (optional)
+   * @param params.idempotencyKey - Stripe idempotency key (optional). When set it is sent as the
+   *   request option, so a retry of the same request returns the same subscription. Without it
+   *   the call carries no request options.
    * @returns Promise resolving to the created subscription with expanded invoice and payment intent
    * @throws {StripeError} If subscription creation fails
    *
@@ -56,6 +59,7 @@ export class StripeSubscriptionApiService {
     trialEnd?: number; // Unix timestamp - takes precedence over trialPeriodDays
     metadata?: Record<string, string>;
     promotionCode?: string;
+    idempotencyKey?: string;
   }): Promise<Stripe.Subscription> {
     const stripe = this.stripeService.getClient();
 
@@ -80,6 +84,10 @@ export class StripeSubscriptionApiService {
 
     if (params.promotionCode) {
       subscriptionParams.discounts = [{ promotion_code: params.promotionCode }];
+    }
+
+    if (params.idempotencyKey) {
+      return stripe.subscriptions.create(subscriptionParams, { idempotencyKey: params.idempotencyKey });
     }
 
     return stripe.subscriptions.create(subscriptionParams);

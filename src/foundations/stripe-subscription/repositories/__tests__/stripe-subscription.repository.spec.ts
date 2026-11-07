@@ -141,6 +141,23 @@ describe("StripeSubscriptionRepository", () => {
     });
   });
 
+  describe("deleteByStripeSubscriptionId", () => {
+    it("deleteByStripeSubscriptionId matches through buildDefaultMatch and detaches the node", async () => {
+      await repository.deleteByStripeSubscriptionId({ stripeSubscriptionId: "sub_1" });
+
+      const issued = lastCall(neo4j.writeOne.mock.calls);
+      const defaultMatch = (repository as any).buildDefaultMatch({ searchField: "stripeSubscriptionId" });
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      expect(flat(issued.query)).toContain(flat(defaultMatch));
+      expect(issued.query).toContain("DETACH DELETE stripeSubscription");
+      expect(issued.queryParams).toMatchObject({ searchValue: "sub_1" });
+      expect(issued.query).not.toContain("{stripeSubscriptionId: $stripeSubscriptionId}");
+      expect(neo4j.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: StripeSubscriptionDescriptor.model }),
+      );
+    });
+  });
+
   describe("findActiveByStripeCustomerId", () => {
     it("filters on the Stripe customer id and active or trialing status", async () => {
       await repository.findActiveByStripeCustomerId({ stripeCustomerId: "cus_1" });

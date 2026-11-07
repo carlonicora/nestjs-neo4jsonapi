@@ -469,6 +469,7 @@ describe("StripeSubscriptionAdminService", () => {
       });
       expect(result).toEqual({
         data: MOCK_JSON_API_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: null,
         paymentIntentId: null,
         requiresAction: false,
@@ -495,6 +496,7 @@ describe("StripeSubscriptionAdminService", () => {
 
       expect(result).toEqual({
         data: MOCK_JSON_API_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: "pi_1_secret",
         paymentIntentId: "pi_1",
         requiresAction: true,
@@ -712,6 +714,7 @@ describe("StripeSubscriptionAdminService", () => {
 
       expect(result).toEqual({
         data: MOCK_JSON_API_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: null,
         paymentIntentId: null,
         requiresAction: false,
@@ -972,6 +975,7 @@ describe("StripeSubscriptionAdminService", () => {
       );
       expect(result).toEqual({
         data: MOCK_JSON_API_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: null,
         paymentIntentId: "pi_1",
         requiresAction: false,
@@ -991,6 +995,7 @@ describe("StripeSubscriptionAdminService", () => {
       );
       expect(result).toEqual({
         data: MOCK_JSON_API_RESPONSE,
+        subscription: MOCK_DB_SUBSCRIPTION,
         clientSecret: "pi_1_secret",
         paymentIntentId: "pi_1",
         requiresAction: true,

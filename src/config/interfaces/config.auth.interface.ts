@@ -11,4 +11,10 @@ export interface ConfigAuthInterface {
    * flows were previously hardcoded to.
    */
   emailLocale?: string;
+
+  /**
+   * false: activation and OAuth sign-up start no trial; the app starts it itself.
+   * Default true.
+   */
+  trialOnActivation?: boolean;
 }

@@ -586,6 +586,27 @@ describe("CompanyRepository", () => {
     });
   });
 
+  describe("replaceTrialEnd", () => {
+    it("replaceTrialEnd overwrites trialEndsAt through buildDefaultMatch", async () => {
+      mockNeo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.replaceTrialEnd({ companyId: MOCK_COMPANY_ID, trialEndsAt: "2026-11-21T10:00:00.000Z" });
+
+      expect(mockNeo4jService.initQuery).toHaveBeenCalledWith({ serialiser: CompanyDescriptor.model });
+      const query = mockNeo4jService.writeOne.mock.calls[0][0] as { query: string; queryParams: any };
+      const flat = (s: string) => s.replace(/\s+/g, " ").trim();
+      const defaultMatch = (repository as any).buildDefaultMatch({ searchField: "id" });
+      expect(flat(query.query)).toContain(flat(defaultMatch));
+      expect(query.query).toContain("SET company.trialEndsAt = datetime($trialEndsAt)");
+      expect(query.query).not.toContain("IS NULL AND");
+      expect(query.query).not.toContain("trialEndsAt IS NULL");
+      expect(query.query).not.toContain("coalesce(company.trialEndsAt");
+      expect(query.queryParams).toEqual(
+        expect.objectContaining({ searchValue: MOCK_COMPANY_ID, trialEndsAt: "2026-11-21T10:00:00.000Z" }),
+      );
+    });
+  });
+
   describe("findByStripeCustomerId", () => {
     it("should find company by Stripe customer ID", async () => {
       mockNeo4jService.readOne.mockResolvedValue(MOCK_COMPANY);

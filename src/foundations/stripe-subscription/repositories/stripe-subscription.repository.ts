@@ -155,6 +155,26 @@ export class StripeSubscriptionRepository extends AbstractRepository<
   }
 
   /**
+   * Deletes the local subscription node with this Stripe subscription id, scoped to the
+   * caller's company. Used when a subscription created in a request is cancelled at once
+   * (a trial that Stripe did not start as trialing).
+   *
+   * @param params.stripeSubscriptionId - The Stripe subscription id (sub_...)
+   */
+  async deleteByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<void> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });
+
+    query.queryParams = { ...query.queryParams, searchValue: params.stripeSubscriptionId };
+
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "stripeSubscriptionId" })}
+      DETACH DELETE ${S}
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
    * Creates a subscription linked to its customer, its price, the caller's company and the
    * caller. The customer and price ids are checked against the caller's company first.
    */

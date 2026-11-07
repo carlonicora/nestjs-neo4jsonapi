@@ -909,6 +909,31 @@ describe("AuthService", () => {
       expect(call?.[1]).toMatchObject({ user: expect.objectContaining({ id: MOCK_USER.id }) });
       expect((call?.[1] as { language?: string }).language).toBeUndefined();
     });
+
+    it("activateAccount queues no trial when auth.trialOnActivation is false", async () => {
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") return { ...MOCK_AUTH_CONFIG, trialOnActivation: false };
+        if (key === "app") return MOCK_APP_CONFIG;
+        return undefined;
+      });
+      userRepository.findByCode.mockResolvedValue(MOCK_USER);
+      authRepository.activateAccount.mockResolvedValue(undefined);
+
+      await service.activateAccount("valid-code");
+
+      expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER });
+    });
+
+    it("activateAccount queues the trial when trialOnActivation is undefined", async () => {
+      userRepository.findByCode.mockResolvedValue(MOCK_USER);
+      authRepository.activateAccount.mockResolvedValue(undefined);
+      trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+
+      await service.activateAccount("valid-code");
+
+      expect(trialQueueService.queueTrialCreation).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("completeOAuthRegistration", () => {
@@ -1064,6 +1089,43 @@ describe("AuthService", () => {
       await expect(service.completeOAuthRegistration(oauthParams)).rejects.toThrow(
         new HttpException("Unsupported provider: facebook", HttpStatus.BAD_REQUEST),
       );
+    });
+
+    const arrangeGoogleCompletion = () => {
+      pendingRegistrationService.get.mockResolvedValue(mockPendingGoogle);
+      googleUserService.create.mockResolvedValue(undefined);
+      trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+      pendingRegistrationService.delete.mockResolvedValue(undefined);
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+      authRepository.createSession.mockResolvedValue(MOCK_AUTH);
+      authRepository.setLastLogin.mockResolvedValue(undefined);
+      authRepository.createCode.mockResolvedValue(undefined);
+      authRepository.findByCode.mockResolvedValue(MOCK_AUTH_CODE);
+      jsonApiService.buildSingle.mockResolvedValue({
+        data: { attributes: { refreshToken: TEST_IDS.authId } },
+      });
+    };
+
+    it("completeOAuthRegistration queues no trial when auth.trialOnActivation is false", async () => {
+      arrangeGoogleCompletion();
+      configService.get.mockImplementation((key: string) => {
+        if (key === "auth") return { ...MOCK_AUTH_CONFIG, trialOnActivation: false };
+        if (key === "app") return MOCK_APP_CONFIG;
+        return undefined;
+      });
+
+      await service.completeOAuthRegistration(oauthParams);
+
+      expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER });
+    });
+
+    it("completeOAuthRegistration queues the trial when trialOnActivation is undefined", async () => {
+      arrangeGoogleCompletion();
+
+      await service.completeOAuthRegistration(oauthParams);
+
+      expect(trialQueueService.queueTrialCreation).toHaveBeenCalledTimes(1);
     });
   });
 

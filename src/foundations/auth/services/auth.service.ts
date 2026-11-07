@@ -634,7 +634,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     // Queue trial creation now that account is activated. Without the trial
     // queue there is nothing to queue and activation completes unchanged.
-    if (this.trialQueueService && user.company?.id) {
+    if (this.trialQueueService && user.company?.id && this.authConfig.trialOnActivation !== false) {
       await this.trialQueueService.queueTrialCreation({
         companyId: user.company.id,
         userId: user.id,
@@ -778,7 +778,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     // A pass sign-up gets no trial and no USER_ACTIVATED_EVENT (no GM email automations).
     // Queue trial creation (async, non-blocking) - see activateAccount()
-    if (this.trialQueueService && !pending.pass) {
+    if (this.trialQueueService && !pending.pass && this.authConfig.trialOnActivation !== false) {
       await this.trialQueueService.queueTrialCreation({
         companyId: companyId,
         userId: userId,

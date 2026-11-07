@@ -16,10 +16,16 @@ import { TrialService } from "./services/trial.service";
  * - TrialProcessor handles jobs asynchronously
  * - WebSocket notification sent from Stripe webhook after feature sync
  *
+ * In-request starts:
+ * - Apps that set `auth.trialOnActivation: false` call `TrialService.startTrialInRequest`
+ *   from their own request code; it returns a `TrialStartOutcome` and throws Stripe errors
+ *
  * Dependencies (via ModuleRef):
  * - StripeCustomerAdminService: Create Stripe customer
  * - StripeSubscriptionAdminService: Create subscription with trial period
  * - StripePriceRepository: Find trial price configuration
+ * - StripeCustomerRepository / StripeSubscriptionRepository: Find the customer and its subscriptions
+ * - StripeSubscriptionApiService: Cancel a subscription Stripe did not create as trialing
  *
  * Direct dependencies:
  * - CompanyModule: Update company tokens and subscription status
