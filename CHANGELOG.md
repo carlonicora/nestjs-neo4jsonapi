@@ -1,3 +1,9 @@
+## [8.21.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.20.0...v8.21.0) (2026-11-07)
+
+### 🚀 Features
+
+* **stripe-trial:** an app can set auth.trialOnActivation to false so sign-up and OAuth activation start no trial (the default still starts one); TrialService.startTrialInRequest starts the trial inside a request and reports trialing, already-subscribed, no-trial-price or not-trialing, cancels and deletes a subscription Stripe did not create as trialing, and adds the trial price's features to the company before answering; a company whose earlier trial attempt left a Stripe customer but no subscription now gets its trial on retry instead of being skipped for good; createSubscription takes an optional Stripe idempotency key and returns the local subscription it created ([0a4c5b1](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0a4c5b18fe1df863f6f11ab97a7a5f186e220f52))
+
 ## [8.20.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.19.3...v8.20.0) (2026-11-07)
 
 ### 🚀 Features
