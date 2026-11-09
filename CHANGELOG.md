@@ -1,3 +1,9 @@
+## [8.22.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.21.1...v8.22.0) (2026-11-09)
+
+### 🚀 Features
+
+* **auth:** in waitlist mode, a sign-up from an invite takes the Terms date and marketing choice from the waitlist entry and ignores what the client sends; an email sign-up from an invite now creates the account active, sends no activation email, clears the activation code and runs the activation steps (trial, admin notice, USER_ACTIVATED_EVENT); an invite whose entry has no Terms on record gets 403, and a sign-up without an invite and without termsAcceptedAt gets 400; POST auth/register reads x-language; a pending OAuth sign-up reports hasInvite; POST auth/oauth/complete now takes a JSON:API body (type auth, id = the pending id, optional consent attributes) checked by the new AuthPostOAuthCompleteDTO, so apps must take the matching nextjs-jsonapi release with this one; termsAcceptedAt and marketingConsentAt must be ISO dates; adds WaitlistService.findUsableInvite ([0e3f68c](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/0e3f68c37a84cf301f587cb89193ebdbab8729b8))
+
 ## [8.21.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.21.0...v8.21.1) (2026-11-07)
 
 ### 🐛 Bug Fixes
