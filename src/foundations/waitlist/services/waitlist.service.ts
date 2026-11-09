@@ -233,6 +233,22 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
   }
 
   /**
+   * The entry behind an invite code that can still be used to register: not
+   * expired and not already registered (same rule as validateInviteCode).
+   * Returns null otherwise. Server-side only, never returned by an endpoint.
+   */
+  async findUsableInvite(params: { code: string }): Promise<Waitlist | null> {
+    const entry = await this.waitlistRepository.findByInviteCode({ code: params.code });
+
+    if (!entry) return null;
+
+    const expired = entry.inviteCodeExpiration && entry.inviteCodeExpiration < new Date();
+    const used = entry.status === WaitlistStatus.Registered;
+
+    return expired || used ? null : entry;
+  }
+
+  /**
    * Mark entry as registered after user creates account.
    * Returns the entry it marked, or null when the invite code is unknown.
    */

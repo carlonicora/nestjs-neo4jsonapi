@@ -19,6 +19,11 @@ export {
   AuthPostRegisterDataDTO,
   AuthPostRegisterDTO,
 } from "./dtos/auth.post.register.dto";
+export {
+  AuthPostOAuthCompleteAttributesDTO,
+  AuthPostOAuthCompleteDataDTO,
+  AuthPostOAuthCompleteDTO,
+} from "./dtos/auth.post.oauth-complete.dto";
 export { AuthPostResetPasswordDTO } from "./dtos/auth.post.resetpassword.dto";
 export { Auth, AuthDescriptor } from "./entities/auth";
 export { AuthCode, AuthCodeDescriptor } from "./entities/auth.code";

@@ -27,6 +27,7 @@ import { PendingAuthDescriptor } from "../../entities/pending-auth";
 import { PendingRegistrationDescriptor } from "../../entities/pending-registration.resource";
 import { REGISTRATION_PASS } from "../../interfaces/registration-pass.interface";
 import { User } from "../../../user/entities/user";
+import { Waitlist } from "../../../waitlist/entities/waitlist";
 import { USER_ACTIVATED_EVENT } from "../../events/auth.events";
 
 // Mock crypto
@@ -116,6 +117,16 @@ describe("AuthService", () => {
     expiration: new Date(Date.now() + 300000),
     auth: MOCK_AUTH,
   } as AuthCode;
+
+  // The waitlist entry behind a usable invite: Terms accepted, no marketing.
+  const INVITE_ENTRY = {
+    id: "entry-1",
+    email: "gm@example.com",
+    status: "invited",
+    gdprConsent: true,
+    gdprConsentAt: new Date("2026-10-01T10:00:00.000Z"),
+    marketingConsent: false,
+  } as Waitlist;
 
   const createMockJsonApiService = () => ({
     buildSingle: vi.fn(),
@@ -210,6 +221,7 @@ describe("AuthService", () => {
 
   const createMockWaitlistService = () => ({
     validateInviteCode: vi.fn(),
+    findUsableInvite: vi.fn(),
     markAsRegistered: vi.fn(),
   });
 
@@ -1195,7 +1207,7 @@ describe("AuthService", () => {
         provider: "discord",
         providerUserId: "discord-123",
       });
-      expect(waitlistService.validateInviteCode).not.toHaveBeenCalled();
+      expect(waitlistService.findUsableInvite).not.toHaveBeenCalled();
       expect(discordUserService.create).toHaveBeenCalled();
       expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
       expect(eventEmitter.emit).not.toHaveBeenCalledWith(USER_ACTIVATED_EVENT, expect.anything());
@@ -1258,6 +1270,47 @@ describe("AuthService", () => {
       expect(pendingRegistrationService.delete).not.toHaveBeenCalled();
     });
 
+    const TERMS_REQUIRED = new HttpException("The terms must be accepted", HttpStatus.BAD_REQUEST);
+
+    it("open-mode sign-up with no termsAcceptedAt is refused with 400 and nothing is created", async () => {
+      useRegistrationMode("open");
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord());
+
+      await expect(service.completeOAuthRegistration({ pendingId: "pending-123" })).rejects.toThrow(TERMS_REQUIRED);
+
+      expect(discordUserService.create).not.toHaveBeenCalled();
+      expect(googleUserService.create).not.toHaveBeenCalled();
+    });
+
+    it("pass sign-up keeps the client consent", async () => {
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1", inviteCode: "invite-abc" }));
+
+      await service.completeOAuthRegistration({
+        pendingId: "pending-123",
+        termsAcceptedAt: "2026-11-09T00:00:00Z",
+        marketingConsent: true,
+        marketingConsentAt: "2026-11-09T00:00:00Z",
+      });
+
+      expect(waitlistService.findUsableInvite).not.toHaveBeenCalled();
+      expect(discordUserService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          termsAcceptedAt: "2026-11-09T00:00:00Z",
+          marketingConsent: true,
+          marketingConsentAt: "2026-11-09T00:00:00Z",
+        }),
+      );
+    });
+
+    it("pass sign-up with no termsAcceptedAt is refused with 400", async () => {
+      pendingRegistrationService.get.mockResolvedValue(pendingDiscord({ pass: "code-1" }));
+
+      await expect(service.completeOAuthRegistration({ pendingId: "pending-123" })).rejects.toThrow(TERMS_REQUIRED);
+
+      expect(discordUserService.create).not.toHaveBeenCalled();
+      expect(hook.consume).not.toHaveBeenCalled();
+    });
+
     it("sign-up without a pass still queues the trial, emits user.activated and returns { code }", async () => {
       useRegistrationMode("open");
       pendingRegistrationService.get.mockResolvedValue(pendingDiscord());
@@ -1299,8 +1352,88 @@ describe("AuthService", () => {
         provider: "discord",
         hasPass: true,
         emailInUse: true,
+        hasInvite: false,
       });
       expect(result).toBe(document);
+    });
+
+    describe("hasInvite", () => {
+      const pendingInvite = (overrides: Partial<PendingRegistration> = {}): PendingRegistration => ({
+        id: "pending-123",
+        provider: "google",
+        providerUserId: "google-123",
+        email: "gm@example.com",
+        name: "GM",
+        inviteCode: "invite-abc",
+        createdAt: "2026-11-09T00:00:00Z",
+        ...overrides,
+      });
+
+      const useRegistrationMode = (registrationMode: "open" | "waitlist") =>
+        configService.get.mockImplementation((key: string) => {
+          if (key === "auth") return { allowRegistration: true, registrationMode };
+          if (key === "app") return MOCK_APP_CONFIG;
+          return undefined;
+        });
+
+      const expectHasInvite = (hasInvite: boolean) =>
+        expect(jsonApiService.buildSingle).toHaveBeenCalledWith(
+          PendingRegistrationDescriptor.model,
+          expect.objectContaining({ hasInvite }),
+        );
+
+      beforeEach(() => {
+        userRepository.findByEmail.mockResolvedValue(null);
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+      });
+
+      it("is true in waitlist mode for a usable invite whose entry accepted the terms", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingInvite());
+
+        await service.findPendingRegistration({ pendingId: "pending-123" });
+
+        expect(waitlistService.findUsableInvite).toHaveBeenCalledWith({ code: "invite-abc" });
+        expectHasInvite(true);
+      });
+
+      it("is false for a pending record that carries a pass", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingInvite({ pass: "code-1" }));
+
+        await service.findPendingRegistration({ pendingId: "pending-123" });
+
+        expectHasInvite(false);
+      });
+
+      it("is false in open mode", async () => {
+        useRegistrationMode("open");
+        pendingRegistrationService.get.mockResolvedValue(pendingInvite());
+
+        await service.findPendingRegistration({ pendingId: "pending-123" });
+
+        expectHasInvite(false);
+      });
+
+      it("is false when the invite is not usable", async () => {
+        waitlistService.findUsableInvite.mockResolvedValue(null);
+        pendingRegistrationService.get.mockResolvedValue(pendingInvite());
+
+        await service.findPendingRegistration({ pendingId: "pending-123" });
+
+        expectHasInvite(false);
+      });
+
+      it("is false when the entry has no recorded terms acceptance", async () => {
+        waitlistService.findUsableInvite.mockResolvedValue({
+          ...INVITE_ENTRY,
+          gdprConsentAt: undefined,
+        } as unknown as Waitlist);
+        pendingRegistrationService.get.mockResolvedValue(pendingInvite());
+
+        await service.findPendingRegistration({ pendingId: "pending-123" });
+
+        expectHasInvite(false);
+      });
     });
 
     it("findPendingRegistration reports no pass and a free email", async () => {
@@ -1369,7 +1502,7 @@ describe("AuthService", () => {
     describe("register", () => {
       it("register in waitlist mode rejects an email that differs from the invite", async () => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
 
         await expect(
           service.register({ data: registerData({ email: "other@example.com", inviteCode: "invite-abc" }) }),
@@ -1380,7 +1513,7 @@ describe("AuthService", () => {
 
       it("email match is case-insensitive and trimmed", async () => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
 
         await expect(
           service.register({ data: registerData({ email: " GM@Example.com ", inviteCode: "invite-abc" }) }),
@@ -1402,7 +1535,7 @@ describe("AuthService", () => {
 
       it("invited user takes the waitlist entry source", async () => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
         waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", sourceUtmSource: "reddit" } as any);
 
         await service.register({ data: registerData({ inviteCode: "invite-abc", sourceRef: "x" }) });
@@ -1415,7 +1548,7 @@ describe("AuthService", () => {
 
       it("invited user keeps the browser source when the entry has none", async () => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
         waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", email: "gm@example.com" } as any);
 
         await service.register({ data: registerData({ inviteCode: "invite-abc", sourceRef: "x" }) });
@@ -1428,12 +1561,155 @@ describe("AuthService", () => {
 
       it("no source anywhere → setSignupSource not called", async () => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
         waitlistService.markAsRegistered.mockResolvedValue({ id: "entry-1", email: "gm@example.com" } as any);
 
         await service.register({ data: registerData({ inviteCode: "invite-abc" }) });
 
         expect(userRepository.setSignupSource).not.toHaveBeenCalled();
+      });
+
+      it("invite sign-up creates an active user with the waitlist consent", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+
+        await service.register({
+          data: registerData({
+            inviteCode: "invite-abc",
+            termsAcceptedAt: "2026-11-09T00:00:00Z",
+            marketingConsent: true,
+            marketingConsentAt: "2026-11-09T00:00:00Z",
+          }),
+        });
+
+        expect(waitlistService.findUsableInvite).toHaveBeenCalledWith({ code: "invite-abc" });
+        expect(userRepository.createUser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            isActive: true,
+            termsAcceptedAt: "2026-10-01T10:00:00.000Z",
+            marketingConsent: false,
+            marketingConsentAt: undefined,
+          }),
+        );
+      });
+
+      it("invite sign-up copies marketing consent and date from the waitlist", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue({
+          ...INVITE_ENTRY,
+          marketingConsent: true,
+          marketingConsentAt: new Date("2026-10-02T08:00:00.000Z"),
+        } as Waitlist);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc" }) });
+
+        expect(userRepository.createUser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            marketingConsent: true,
+            marketingConsentAt: "2026-10-02T08:00:00.000Z",
+          }),
+        );
+      });
+
+      it("invite sign-up clears the activation code and sends no activation email", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc" }) });
+
+        expect(authRepository.activateAccount).toHaveBeenCalledWith({ userId: MOCK_USER.id });
+        expect(emailService.sendEmail).not.toHaveBeenCalledWith(
+          "activationEmail",
+          expect.anything(),
+          expect.anything(),
+        );
+      });
+
+      it("invite sign-up runs the activation steps", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+        trialQueueService.queueTrialCreation.mockResolvedValue(undefined);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc" }), language: "it" });
+
+        expect(trialQueueService.queueTrialCreation).toHaveBeenCalledWith({
+          companyId: TEST_IDS.companyId,
+          userId: MOCK_USER.id,
+        });
+        expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER, language: "it" });
+      });
+
+      it("invite sign-up queues no trial when trialOnActivation is false", async () => {
+        configService.get.mockImplementation((key: string) => {
+          if (key === "auth")
+            return { allowRegistration: true, registrationMode: "waitlist", trialOnActivation: false };
+          if (key === "app") return MOCK_APP_CONFIG;
+          return undefined;
+        });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+
+        await service.register({ data: registerData({ inviteCode: "invite-abc" }) });
+
+        expect(trialQueueService.queueTrialCreation).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).toHaveBeenCalledWith(USER_ACTIVATED_EVENT, { user: MOCK_USER, language: undefined });
+      });
+
+      it("activation step failure is logged, register still resolves", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
+        trialQueueService.queueTrialCreation.mockRejectedValue(new Error("redis down"));
+
+        await expect(service.register({ data: registerData({ inviteCode: "invite-abc" }) })).resolves.toBeUndefined();
+
+        expect(userRepository.createUser).toHaveBeenCalled();
+      });
+
+      it("an entry with no recorded terms acceptance is refused", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue({
+          ...INVITE_ENTRY,
+          gdprConsentAt: undefined,
+        } as unknown as Waitlist);
+
+        await expect(service.register({ data: registerData({ inviteCode: "invite-abc" }) })).rejects.toThrow(
+          new HttpException("This invitation has no recorded acceptance of the terms", HttpStatus.FORBIDDEN),
+        );
+
+        expect(userRepository.createUser).not.toHaveBeenCalled();
+      });
+
+      it("an unusable invite is refused", async () => {
+        useRegistrationMode("waitlist");
+        waitlistService.findUsableInvite.mockResolvedValue(null);
+
+        await expect(service.register({ data: registerData({ inviteCode: "invite-abc" }) })).rejects.toThrow(
+          new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN),
+        );
+
+        expect(userRepository.createUser).not.toHaveBeenCalled();
+      });
+
+      it("open mode without termsAcceptedAt is refused", async () => {
+        useRegistrationMode("open");
+
+        await expect(service.register({ data: registerData({ termsAcceptedAt: undefined }) })).rejects.toThrow(
+          new HttpException("The terms must be accepted", HttpStatus.BAD_REQUEST),
+        );
+
+        expect(userRepository.createUser).not.toHaveBeenCalled();
+      });
+
+      it("open mode keeps the client consent, an inactive user and the activation email", async () => {
+        useRegistrationMode("open");
+
+        await service.register({ data: registerData() });
+
+        const createParams = userRepository.createUser.mock.calls[0][0];
+        expect(createParams.isActive).toBeFalsy();
+        expect(createParams.termsAcceptedAt).toBe("2026-10-21T00:00:00Z");
+        expect(emailService.sendEmail).toHaveBeenCalledWith("activationEmail", expect.anything(), expect.anything());
+        expect(authRepository.activateAccount).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
       });
     });
 
@@ -1458,7 +1734,7 @@ describe("AuthService", () => {
 
       beforeEach(() => {
         useRegistrationMode("waitlist");
-        waitlistService.validateInviteCode.mockResolvedValue({ email: "gm@example.com", valid: true });
+        waitlistService.findUsableInvite.mockResolvedValue(INVITE_ENTRY);
         googleUserService.create.mockResolvedValue(undefined);
         userRepository.findByUserId.mockResolvedValue(MOCK_USER);
         authRepository.createSession.mockResolvedValue(MOCK_AUTH);
@@ -1503,6 +1779,72 @@ describe("AuthService", () => {
           userId: "mock-random-uuid",
           source: { sourceUtmSource: "reddit", sourceUtmCampaign: "r_rpg" },
         });
+      });
+
+      const CLIENT_CONSENT = {
+        pendingId: "pending-123",
+        termsAcceptedAt: "2026-11-09T00:00:00Z",
+        marketingConsent: true,
+      };
+
+      const WAITLIST_CONSENT = {
+        termsAcceptedAt: "2026-10-01T10:00:00.000Z",
+        marketingConsent: false,
+        marketingConsentAt: undefined,
+      };
+
+      it("OAuth completion with a usable invite takes consent from the waitlist entry (google)", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle());
+
+        await service.completeOAuthRegistration(CLIENT_CONSENT);
+
+        expect(waitlistService.findUsableInvite).toHaveBeenCalledWith({ code: "invite-abc" });
+        expect(googleUserService.create).toHaveBeenCalledWith(expect.objectContaining(WAITLIST_CONSENT));
+      });
+
+      it("OAuth completion with a usable invite takes consent from the waitlist entry (discord)", async () => {
+        pendingRegistrationService.get.mockResolvedValue(
+          pendingGoogle({ provider: "discord", providerUserId: "discord-123" }),
+        );
+        discordUserService.create.mockResolvedValue(undefined);
+
+        await service.completeOAuthRegistration(CLIENT_CONSENT);
+
+        expect(discordUserService.create).toHaveBeenCalledWith(expect.objectContaining(WAITLIST_CONSENT));
+      });
+
+      it("OAuth completion with an invite completes with no client consent at all", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle());
+
+        await service.completeOAuthRegistration({ pendingId: "pending-123" });
+
+        expect(googleUserService.create).toHaveBeenCalledWith(expect.objectContaining(WAITLIST_CONSENT));
+      });
+
+      it("OAuth completion with an unusable invite is refused with 403", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle());
+        waitlistService.findUsableInvite.mockResolvedValue(null);
+
+        await expect(service.completeOAuthRegistration(CLIENT_CONSENT)).rejects.toThrow(
+          new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN),
+        );
+
+        expect(googleUserService.create).not.toHaveBeenCalled();
+      });
+
+      it("OAuth completion with an entry that has no recorded terms is refused with 403", async () => {
+        pendingRegistrationService.get.mockResolvedValue(pendingGoogle());
+        waitlistService.findUsableInvite.mockResolvedValue({
+          ...INVITE_ENTRY,
+          gdprConsent: false,
+          gdprConsentAt: undefined,
+        } as unknown as Waitlist);
+
+        await expect(service.completeOAuthRegistration(CLIENT_CONSENT)).rejects.toThrow(
+          new HttpException("This invitation has no recorded acceptance of the terms", HttpStatus.FORBIDDEN),
+        );
+
+        expect(googleUserService.create).not.toHaveBeenCalled();
       });
     });
   });
@@ -1665,7 +2007,13 @@ describe("AuthService", () => {
       const scopedUsers = module.get(UserRepository) as any;
       const scopedCompanies = module.get(CompanyRepository) as any;
 
-      scopedWaitlist.validateInviteCode.mockResolvedValue({ email: REGISTER_DATA.attributes.email, valid: true });
+      scopedWaitlist.findUsableInvite.mockResolvedValue({
+        id: "entry-1",
+        email: REGISTER_DATA.attributes.email,
+        status: "invited",
+        gdprConsent: true,
+        gdprConsentAt: new Date("2026-10-01T10:00:00.000Z"),
+      });
       scopedUserService.expectNotExists.mockResolvedValue(undefined);
       scopedCompanies.createByName.mockResolvedValue({ id: TEST_IDS.companyId, name: "New Company" });
       scopedUsers.createUser.mockResolvedValue(MOCK_USER);
@@ -1674,8 +2022,45 @@ describe("AuthService", () => {
       await scopedService.register({ data: REGISTER_DATA as any });
 
       // Assert
-      expect(scopedWaitlist.validateInviteCode).toHaveBeenCalledWith(REGISTER_DATA.attributes.inviteCode);
+      expect(scopedWaitlist.findUsableInvite).toHaveBeenCalledWith({ code: REGISTER_DATA.attributes.inviteCode });
       expect(scopedWaitlist.markAsRegistered).toHaveBeenCalled();
+    });
+
+    it("findPendingRegistration reports hasInvite false, without throwing, when WaitlistService is absent", async () => {
+      const configService = {
+        get: vi.fn((key: string) => {
+          if (key === "auth") return { allowRegistration: true, registrationMode: "waitlist" };
+          if (key === "app") return MOCK_APP_CONFIG;
+          return undefined;
+        }),
+      };
+
+      const module = await buildModule({
+        omit: [WaitlistService],
+        overrides: [{ provide: ConfigService, useValue: configService }],
+      });
+      const scopedService = module.get<AuthService>(AuthService);
+      const scopedPending = module.get(PendingRegistrationService) as MockedObject<PendingRegistrationService>;
+      const scopedUsers = module.get(UserRepository) as MockedObject<UserRepository>;
+      const scopedJsonApi = module.get(JsonApiService) as MockedObject<JsonApiService>;
+
+      scopedPending.get.mockResolvedValue({
+        id: "pending-123",
+        provider: "google",
+        providerUserId: "google-123",
+        email: "gm@example.com",
+        name: "GM",
+        inviteCode: "invite-abc",
+        createdAt: "2026-11-09T00:00:00Z",
+      });
+      scopedUsers.findByEmail.mockResolvedValue(null);
+
+      await scopedService.findPendingRegistration({ pendingId: "pending-123" });
+
+      expect(scopedJsonApi.buildSingle).toHaveBeenCalledWith(
+        PendingRegistrationDescriptor.model,
+        expect.objectContaining({ hasInvite: false }),
+      );
     });
 
     it("activates an account without queueing a trial when TrialQueueService is absent", async () => {
@@ -1746,6 +2131,7 @@ describe("Auth descriptors — serialiser parity", () => {
       "avatar",
       "email",
       "emailInUse",
+      "hasInvite",
       "hasPass",
       "name",
       "provider",

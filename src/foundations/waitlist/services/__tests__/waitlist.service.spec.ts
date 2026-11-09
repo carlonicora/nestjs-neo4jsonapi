@@ -148,6 +148,45 @@ describe("WaitlistService", () => {
     });
   });
 
+  describe("findUsableInvite", () => {
+    const invited = {
+      id: "e1",
+      email: "gm@example.com",
+      status: WaitlistStatus.Invited,
+      inviteCodeExpiration: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    } as Waitlist;
+
+    it("returns the entry for an invited, unexpired code", async () => {
+      repository.findByInviteCode.mockResolvedValue(invited);
+
+      const result = await service.findUsableInvite({ code: "invite-1" });
+
+      expect(result).toEqual(invited);
+      expect(repository.findByInviteCode).toHaveBeenCalledWith({ code: "invite-1" });
+    });
+
+    it("returns null for an unknown code", async () => {
+      repository.findByInviteCode.mockResolvedValue(null);
+
+      expect(await service.findUsableInvite({ code: "unknown" })).toBeNull();
+    });
+
+    it("returns null for an expired code", async () => {
+      repository.findByInviteCode.mockResolvedValue({
+        ...invited,
+        inviteCodeExpiration: new Date(Date.now() - 60 * 1000),
+      } as Waitlist);
+
+      expect(await service.findUsableInvite({ code: "invite-1" })).toBeNull();
+    });
+
+    it("returns null for a registered entry", async () => {
+      repository.findByInviteCode.mockResolvedValue({ ...invited, status: WaitlistStatus.Registered } as Waitlist);
+
+      expect(await service.findUsableInvite({ code: "invite-1" })).toBeNull();
+    });
+  });
+
   describe("markAsRegistered", () => {
     it("returns the marked entry", async () => {
       repository.findByInviteCode.mockResolvedValue(entry);

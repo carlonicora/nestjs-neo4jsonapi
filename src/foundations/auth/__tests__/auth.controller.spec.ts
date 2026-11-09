@@ -11,6 +11,8 @@ import { HttpException } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { AuthController } from "../controllers/auth.controller";
 import { AuthService } from "../services/auth.service";
+import { AuthPostRegisterDTO } from "../dtos/auth.post.register.dto";
+import { AuthPostOAuthCompleteDTO } from "../dtos/auth.post.oauth-complete.dto";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { JsonApiSingleDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
@@ -221,6 +223,17 @@ describe("AuthController", () => {
     });
   });
 
+  describe("POST /auth/register", () => {
+    it("register passes the x-language header", async () => {
+      authService.register.mockResolvedValue(undefined);
+
+      const body = { data: { id: "u" } } as unknown as AuthPostRegisterDTO;
+      await controller.register(body, "it");
+
+      expect(authService.register).toHaveBeenCalledWith({ data: { id: "u" }, language: "it" });
+    });
+  });
+
   describe("POST /auth/activate/:code", () => {
     it("should activate account with valid code", async () => {
       authService.activateAccount.mockResolvedValue(undefined);
@@ -238,34 +251,46 @@ describe("AuthController", () => {
   });
 
   describe("POST /auth/oauth/complete", () => {
-    it("should complete OAuth registration", async () => {
-      const oauthBody = {
-        pendingId: "pending-123",
-        termsAcceptedAt: "2024-01-15T10:00:00Z",
-        marketingConsent: true,
-        marketingConsentAt: "2024-01-15T10:00:00Z",
-      };
+    it("completeOAuthRegistration maps the JSON:API body", async () => {
+      const body = {
+        data: { type: "auth", id: "p1", attributes: { termsAcceptedAt: "2026-11-09T00:00:00Z" } },
+      } as unknown as AuthPostOAuthCompleteDTO;
       authService.completeOAuthRegistration.mockResolvedValue({ code: "oauth-complete-code" });
 
-      const result = await controller.completeOAuthRegistration(oauthBody);
+      const result = await controller.completeOAuthRegistration(body, "it");
 
-      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody, undefined);
+      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(
+        { pendingId: "p1", termsAcceptedAt: "2026-11-09T00:00:00Z" },
+        "it",
+      );
       expect(result).toEqual({ code: "oauth-complete-code" });
     });
 
-    it("should handle OAuth registration without marketing consent", async () => {
-      const oauthBody = {
-        pendingId: "pending-456",
-        termsAcceptedAt: "2024-01-15T10:00:00Z",
-        marketingConsent: false,
-        marketingConsentAt: null,
-      };
-      authService.completeOAuthRegistration.mockResolvedValue({ code: "oauth-code-no-marketing" });
+    it("completeOAuthRegistration passes full client consent and no language", async () => {
+      const body = {
+        data: {
+          type: "auth",
+          id: "p2",
+          attributes: {
+            termsAcceptedAt: "2024-01-15T10:00:00Z",
+            marketingConsent: true,
+            marketingConsentAt: "2024-01-15T10:00:00Z",
+          },
+        },
+      } as unknown as AuthPostOAuthCompleteDTO;
+      authService.completeOAuthRegistration.mockResolvedValue({ code: "oauth-code" });
 
-      const result = await controller.completeOAuthRegistration(oauthBody);
+      await controller.completeOAuthRegistration(body);
 
-      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(oauthBody, undefined);
-      expect(result.code).toBeDefined();
+      expect(authService.completeOAuthRegistration).toHaveBeenCalledWith(
+        {
+          pendingId: "p2",
+          termsAcceptedAt: "2024-01-15T10:00:00Z",
+          marketingConsent: true,
+          marketingConsentAt: "2024-01-15T10:00:00Z",
+        },
+        undefined,
+      );
     });
   });
 

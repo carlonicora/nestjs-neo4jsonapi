@@ -20,6 +20,7 @@ import { FastifyReply } from "fastify";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuthPostForgotDTO } from "../../auth/dtos/auth.post.forgot.dto";
 import { AuthPostLoginDTO } from "../../auth/dtos/auth.post.login.dto";
+import { AuthPostOAuthCompleteDTO } from "../../auth/dtos/auth.post.oauth-complete.dto";
 import { AuthPostRegisterDTO } from "../../auth/dtos/auth.post.register.dto";
 import { AuthPostResetPasswordDTO } from "../../auth/dtos/auth.post.resetpassword.dto";
 import { authMeta } from "../../auth/entities/auth.meta";
@@ -73,13 +74,13 @@ export class AuthController {
   @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
   @Post("register")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async register(@Body() body: AuthPostRegisterDTO) {
+  async register(@Body() body: AuthPostRegisterDTO, @Headers("x-language") language?: string) {
     // MUST be awaited — see acceptInvitation below for the full rationale.
     // Unawaited, the 204 is sent before the promise settles, so the duplicate
     // email 409 that UserService.expectNotExists raises never reaches the
     // response: the caller always sees the confirmation card, registered or
     // not, and the error is lost as an unhandled rejection.
-    await this.service.register({ data: body.data });
+    await this.service.register({ data: body.data, language });
   }
 
   @Throttle({ default: { limit: 3, ttl: 60000 }, ip: { limit: 3, ttl: 60000 } })
@@ -138,15 +139,9 @@ export class AuthController {
 
   @Post("oauth/complete")
   async completeOAuthRegistration(
-    @Body()
-    body: {
-      pendingId: string;
-      termsAcceptedAt: string;
-      marketingConsent: boolean;
-      marketingConsentAt: string | null;
-    },
+    @Body() body: AuthPostOAuthCompleteDTO,
     @Headers("x-language") language?: string,
   ): Promise<{ code: string }> {
-    return this.service.completeOAuthRegistration(body, language);
+    return this.service.completeOAuthRegistration({ pendingId: body.data.id, ...body.data.attributes }, language);
   }
 }

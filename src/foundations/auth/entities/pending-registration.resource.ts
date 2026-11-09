@@ -10,8 +10,8 @@ import { pendingRegistrationMeta } from "./pending-registration.meta";
  * NEVER persisted: no `:PendingRegistration` node exists in Neo4j.
  * `AuthService.findPendingRegistration` hands a plain object straight to
  * `JsonApiService.buildSingle`, so the descriptor only describes the JSON:API
- * shape. `hasPass` and `emailInUse` are derived by the service yet declared as
- * fields, because `computed` needs a Neo4j record (owner decision D-C).
+ * shape. `hasPass`, `emailInUse` and `hasInvite` are derived by the service yet
+ * declared as fields, because `computed` needs a Neo4j record (owner decision D-C).
  */
 export type PendingRegistrationResource = Entity & {
   name: string;
@@ -20,6 +20,7 @@ export type PendingRegistrationResource = Entity & {
   provider: string;
   hasPass: boolean;
   emailInUse: boolean;
+  hasInvite: boolean;
 };
 
 /**
@@ -67,6 +68,12 @@ export const PendingRegistrationDescriptor = defineEntity<PendingRegistrationRes
       type: "boolean",
       required: true,
       description: "True when a user (including a deleted one) already has this email, so the sign-up cannot complete.",
+    },
+    hasInvite: {
+      type: "boolean",
+      required: true,
+      description:
+        "True when the sign-up carries a usable waitlist invite whose entry recorded acceptance of the terms, so the consent step is skipped.",
     },
   },
 

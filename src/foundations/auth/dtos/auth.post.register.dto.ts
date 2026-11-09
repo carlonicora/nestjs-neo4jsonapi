@@ -3,6 +3,7 @@ import {
   Equals,
   IsBoolean,
   IsDefined,
+  IsDateString,
   IsEmail,
   IsNotEmpty,
   IsOptional,
@@ -30,16 +31,16 @@ export class AuthPostRegisterAttributesDTO {
   @IsString()
   password: string;
 
-  @IsDefined()
-  @IsString()
-  termsAcceptedAt: string;
+  @IsOptional()
+  @IsDateString()
+  termsAcceptedAt?: string;
 
   @IsOptional()
   @IsBoolean()
   marketingConsent?: boolean;
 
   @IsOptional()
-  @IsString()
+  @IsDateString()
   marketingConsentAt?: string;
 
   @IsOptional()

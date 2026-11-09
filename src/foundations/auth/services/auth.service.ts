@@ -50,7 +50,7 @@ import {
   ACCOUNT_DELETION_LOGIN_HOOK,
   AccountDeletionLoginHook,
 } from "../../account-deletion/interfaces/account-deletion-login-hook.interface";
-import { PendingRegistrationService } from "./pending-registration.service";
+import { PendingRegistration, PendingRegistrationService } from "./pending-registration.service";
 import { TrialQueueService } from "./trial-queue.service";
 import {
   JsonApiListDocument,
@@ -414,7 +414,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     return await this.createToken({ user: user });
   }
 
-  async register(params: { data: AuthPostRegisterDataDTO }): Promise<void> {
+  async register(params: { data: AuthPostRegisterDataDTO; language?: string }): Promise<void> {
     if (!this.authConfig.allowRegistration) {
       throw new HttpException("Registration is currently disabled", HttpStatus.FORBIDDEN);
     }
@@ -425,6 +425,11 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     if (registrationMode === "closed") {
       throw new HttpException("Registration is currently closed", HttpStatus.FORBIDDEN);
     }
+
+    // The waitlist entry behind a usable invite. Its recorded consent replaces
+    // whatever the client sends, and the email is already proven by the
+    // waitlist confirmation, so the account is created active.
+    let invite: Waitlist | null = null;
 
     if (registrationMode === "waitlist") {
       // Waitlist mode needs WaitlistModule; without it there is no way to
@@ -439,13 +444,20 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       }
 
       // Validate invite code
-      const inviteValidation = await this.waitlistService.validateInviteCode(params.data.attributes.inviteCode);
-      if (!inviteValidation || !inviteValidation.valid) {
+      invite = await this.waitlistService.findUsableInvite({ code: params.data.attributes.inviteCode });
+      if (!invite) {
         throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
       }
 
       // An invite registers only the email it was sent to
-      this.assertInviteEmail({ email: params.data.attributes.email, inviteEmail: inviteValidation.email });
+      this.assertInviteEmail({ email: params.data.attributes.email, inviteEmail: invite.email });
+
+      // Never create an invited account without a recorded Terms acceptance
+      if (!invite.gdprConsent || !invite.gdprConsentAt) {
+        throw new HttpException("This invitation has no recorded acceptance of the terms", HttpStatus.FORBIDDEN);
+      }
+    } else if (!params.data.attributes.termsAcceptedAt) {
+      throw new HttpException("The terms must be accepted", HttpStatus.BAD_REQUEST);
     }
 
     await this.userService.expectNotExists({ email: params.data.attributes.email });
@@ -463,9 +475,13 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       password: password,
       companyId: company.id,
       roleIds: [RoleId.CompanyAdministrator],
-      termsAcceptedAt: params.data.attributes.termsAcceptedAt,
-      marketingConsent: params.data.attributes.marketingConsent,
-      marketingConsentAt: params.data.attributes.marketingConsentAt,
+      ...(invite
+        ? { isActive: true, ...this.consentFromInvite(invite) }
+        : {
+            termsAcceptedAt: params.data.attributes.termsAcceptedAt,
+            marketingConsent: params.data.attributes.marketingConsent,
+            marketingConsentAt: params.data.attributes.marketingConsentAt,
+          }),
     });
 
     // Set CLS context for registration hooks
@@ -502,6 +518,22 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     }
 
     await this.applySignupSource({ userId: user.id, waitlistEntry, browserSource: params.data.attributes });
+
+    if (invite) {
+      // Clear the activation code createUser always sets, so nobody holding it
+      // can run the activation steps a second time.
+      await this.authRepository.activateAccount({ userId: user.id });
+
+      // Same rule as the activation email below: the account exists, and a
+      // retry would hit the duplicate-email 409, so a failure here is logged.
+      try {
+        await this.runActivationSteps({ user, language: params.language });
+      } catch (error) {
+        this.logger.error("Activation steps failed after invite sign-up:", error);
+      }
+
+      return;
+    }
 
     // Delivery failure must not fail registration. By this point the company, the
     // user and its membership are already committed, so throwing here reports a
@@ -632,6 +664,16 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
 
     await this.authRepository.activateAccount({ userId: user.id });
 
+    await this.runActivationSteps({ user, language });
+  }
+
+  /**
+   * What an account gets once it is active: shared by activateAccount and the
+   * invite sign-up in register, so the two paths cannot drift.
+   */
+  private async runActivationSteps(params: { user: User; language?: string }): Promise<void> {
+    const { user, language } = params;
+
     // Queue trial creation now that account is activated. Without the trial
     // queue there is nothing to queue and activation completes unchanged.
     if (this.trialQueueService && user.company?.id && this.authConfig.trialOnActivation !== false) {
@@ -651,9 +693,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
   async completeOAuthRegistration(
     params: {
       pendingId: string;
-      termsAcceptedAt: string;
-      marketingConsent: boolean;
-      marketingConsentAt: string | null;
+      termsAcceptedAt?: string;
+      marketingConsent?: boolean;
+      marketingConsentAt?: string | null;
     },
     language?: string,
   ): Promise<{ code: string }> {
@@ -679,6 +721,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
     // anything but "valid" refuses the sign-up in every mode. A valid pass skips
     // the waitlist/invite checks.
     let passHook: RegistrationPassInterface | undefined;
+    // The waitlist entry behind a usable invite: its recorded consent replaces
+    // whatever the client sends - see register().
+    let invite: Waitlist | null = null;
     if (pending.pass) {
       passHook = resolveRegistrationPass(this.moduleRef);
       const verdict: RegistrationPassVerdict = passHook
@@ -699,14 +744,33 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       }
 
       // Validate invite code
-      const inviteValidation = await this.waitlistService.validateInviteCode(pending.inviteCode);
-      if (!inviteValidation || !inviteValidation.valid) {
+      invite = await this.waitlistService.findUsableInvite({ code: pending.inviteCode });
+      if (!invite) {
         throw new HttpException("Invalid or expired invitation code", HttpStatus.FORBIDDEN);
       }
 
       // Defence in depth: the provider callback already redirected on a mismatch
-      this.assertInviteEmail({ email: pending.email, inviteEmail: inviteValidation.email });
+      this.assertInviteEmail({ email: pending.email, inviteEmail: invite.email });
+
+      // Never create an invited account without a recorded Terms acceptance
+      if (!invite.gdprConsent || !invite.gdprConsentAt) {
+        throw new HttpException("This invitation has no recorded acceptance of the terms", HttpStatus.FORBIDDEN);
+      }
     }
+
+    // Without a usable invite (a pass, open mode) the consent comes from the
+    // client, and no account is created without Terms acceptance.
+    if (!invite && !params.termsAcceptedAt) {
+      throw new HttpException("The terms must be accepted", HttpStatus.BAD_REQUEST);
+    }
+
+    const consent = invite
+      ? this.consentFromInvite(invite)
+      : {
+          termsAcceptedAt: params.termsAcceptedAt,
+          marketingConsent: params.marketingConsent,
+          marketingConsentAt: params.marketingConsentAt,
+        };
 
     // The User.email UNIQUE constraint ignores isDeleted, so a soft-deleted user
     // also blocks the sign-up. Checked before any write.
@@ -733,9 +797,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
           username: pending.name,
           avatar: pending.avatar,
         },
-        termsAcceptedAt: params.termsAcceptedAt,
-        marketingConsent: params.marketingConsent,
-        marketingConsentAt: params.marketingConsentAt,
+        ...consent,
       });
     } else if (pending.provider === "google") {
       await this.googleUserService.create({
@@ -747,9 +809,7 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
           name: pending.name,
           picture: pending.avatar,
         },
-        termsAcceptedAt: params.termsAcceptedAt,
-        marketingConsent: params.marketingConsent,
-        marketingConsentAt: params.marketingConsentAt,
+        ...consent,
       });
     } else {
       throw new HttpException(`Unsupported provider: ${pending.provider}`, HttpStatus.BAD_REQUEST);
@@ -832,7 +892,9 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
   /**
    * Reads a pending OAuth sign-up for the consent page. `hasPass` tells the page
    * the sign-up carries an application registration pass; `emailInUse` tells it
-   * the sign-up cannot complete because the email already has an account.
+   * the sign-up cannot complete because the email already has an account;
+   * `hasInvite` tells it the consent step is skipped, because a usable waitlist
+   * invite already recorded the Terms acceptance.
    */
   async findPendingRegistration(params: { pendingId: string }): Promise<JsonApiSingleDocument> {
     const pending = await this.pendingRegistrationService.get(params.pendingId);
@@ -848,7 +910,43 @@ export class AuthService extends AbstractService<Auth, typeof AuthDescriptor.rel
       provider: pending.provider,
       hasPass: !!pending.pass,
       emailInUse: await this.isEmailInUse(pending.email),
+      hasInvite: await this.hasUsableInvite(pending),
     });
+  }
+
+  /**
+   * True when completeOAuthRegistration would take the consent from a waitlist
+   * entry: waitlist mode, an invite code and no pass, and a usable invite whose
+   * entry recorded the Terms acceptance. False, never a throw, when
+   * WaitlistModule is absent.
+   */
+  private async hasUsableInvite(pending: PendingRegistration): Promise<boolean> {
+    if ((this.authConfig.registrationMode ?? "open") !== "waitlist") return false;
+    if (pending.pass || !pending.inviteCode) return false;
+
+    const invite = await this.waitlistService?.findUsableInvite({ code: pending.inviteCode });
+
+    return !!(invite?.gdprConsent && invite.gdprConsentAt);
+  }
+
+  /**
+   * The consent a usable invite carries: the waitlist Terms acceptance, and
+   * marketing only when the entry opted in. Shared by register() and
+   * completeOAuthRegistration().
+   */
+  private consentFromInvite(invite: Waitlist): {
+    termsAcceptedAt: string;
+    marketingConsent: boolean;
+    marketingConsentAt?: string;
+  } {
+    return {
+      termsAcceptedAt: invite.gdprConsentAt.toISOString(),
+      marketingConsent: invite.marketingConsent === true,
+      marketingConsentAt:
+        invite.marketingConsent === true && invite.marketingConsentAt
+          ? invite.marketingConsentAt.toISOString()
+          : undefined,
+    };
   }
 
   /** True when any User, soft-deleted included, already has this email. */
