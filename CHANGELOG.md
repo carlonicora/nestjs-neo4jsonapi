@@ -1,3 +1,9 @@
+## [8.23.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.22.0...v8.23.0) (2026-11-11)
+
+### 🚀 Features
+
+* **graph:** the reverse side of a relationship can declare its own cardinality (one law, many articles) instead of copying the forward one; read_entity includes and traverse use an external source's own related ids when it supplies them; search_entities returns the warnings a service gives with its records; a filter error lists only the fields that accept a filter, with their operators, and the sortable fields; describe_entity over MCP returns the structured fields next to the text schema; adds Neo4jService.readScalars for rows of scalar columns and AbstractRepository.projectNodeOmitting to read whole nodes without shipping a large property; JSON:API meta leaves out null edge properties ([a1fced9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/a1fced928d8c1dc057a10b2e3f58fc0afc280e73))
+
 ## [8.22.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.21.1...v8.22.0) (2026-11-09)
 
 ### 🚀 Features
