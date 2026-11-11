@@ -1,3 +1,9 @@
+## [8.24.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.23.0...v8.24.0) (2026-11-11)
+
+### 🚀 Features
+
+* **graph,llm:** traverse and read_entity now pass findRelatedIds the relationship they ask for, with its name and direction (out, in, or both for a polymorphic one), so a source can tell a relationship from its reverse when both use one Cypher label; apps that implement findRelatedIds must read relationship.direction instead of both sides of the label; LLMService throws LLMContentFilterError, with the refused stage (prompt or output), when the provider content filter refuses a call, instead of a wrapped "LLM service error: ..."; a tool can throw ToolLoopAbortError to end the tool loop, and the caller gets that error unwrapped with the usage of the rounds already made recorded ([df520a8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/df520a81bb43c889f6d5944bd9bedabbfd6dc70f))
+
 ## [8.23.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.22.0...v8.23.0) (2026-11-11)
 
 ### 🚀 Features
