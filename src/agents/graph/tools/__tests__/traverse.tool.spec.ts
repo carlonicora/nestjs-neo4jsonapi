@@ -789,7 +789,12 @@ describe("TraverseTool — polymorphic related traversal", () => {
       ctx,
       describedRecorder(),
     );
-    expect(services.things.findRelatedIds).toHaveBeenCalledWith({ id: "id1", cypherLabel: "RELATES_TO", limit: 2 });
+    expect(services.things.findRelatedIds).toHaveBeenCalledWith({
+      id: "id1",
+      cypherLabel: "RELATES_TO",
+      limit: 2,
+      relationship: { name: "related", direction: "both" },
+    });
     expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
     expect(out.items).toHaveLength(1);
     expect(out.items[0]).toMatchObject({ id: "a1", type: "alphas" });
@@ -948,6 +953,16 @@ describe("TraverseTool — non-polymorphic relationship on a source with findRel
         sourceType: "massime",
       },
       {
+        name: "cites",
+        targetType: "judgements",
+        cardinality: "one",
+        description: "The judgement.",
+        cypherDirection: "out",
+        cypherLabel: "HAS_MASSIMA",
+        isReverse: false,
+        sourceType: "massime",
+      },
+      {
         name: "related",
         targetType: "*",
         cardinality: "many",
@@ -1009,13 +1024,35 @@ describe("TraverseTool — non-polymorphic relationship on a source with findRel
     const out: any = await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "judgement" }, ctx, [
       ...described,
     ]);
-    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "HAS_MASSIMA", limit: 11 });
+    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({
+      id: "m1",
+      cypherLabel: "HAS_MASSIMA",
+      limit: 11,
+      relationship: { name: "judgement", direction: "in" },
+    });
     expect(services.judgements.findRelatedRecordsByEdge).not.toHaveBeenCalled();
     expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
     expect(services.judgements.findRecordById).toHaveBeenCalledWith({ id: "j2" });
     expect(out).toEqual({
       items: [{ id: "j2", type: "judgements", summary: "judgement:j2", fields: { year: 2023 } }],
     });
+  });
+
+  it("tells apart two relationships that share a Cypher label by name and direction", async () => {
+    const { tool, services } = build({});
+    services.massime = {
+      ...services.massime,
+      relatedIdsForEveryRelationship: true,
+      findRelatedIds: vi.fn(async () => []),
+    };
+
+    await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "judgement" }, ctx, [...described]);
+    await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "cites" }, ctx, [...described]);
+
+    expect(services.massime.findRelatedIds.mock.calls.map(([params]: any) => params.relationship)).toEqual([
+      { name: "judgement", direction: "in" },
+      { name: "cites", direction: "out" },
+    ]);
   });
 
   it("passes the filters, sort and limit+1 to an opted-in source and keeps its page and order", async () => {
@@ -1043,6 +1080,7 @@ describe("TraverseTool — non-polymorphic relationship on a source with findRel
       id: "m1",
       cypherLabel: "HAS_MASSIMA",
       limit: 2,
+      relationship: { name: "judgement", direction: "in" },
       filters: [{ field: "year", op: "gte", value: 2022 }],
       orderByFields: [{ field: "year", direction: "desc" }],
     });
@@ -1143,7 +1181,12 @@ describe("TraverseTool — non-polymorphic relationship on a source with findRel
       ...described,
     ]);
     expect(services.massime.findRelatedIds).toHaveBeenCalledTimes(1);
-    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "RELATES_TO", limit: 11 });
+    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({
+      id: "m1",
+      cypherLabel: "RELATES_TO",
+      limit: 11,
+      relationship: { name: "related", direction: "both" },
+    });
     expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
     expect(polymorphic.items.map((i: any) => i.id)).toEqual(["j2"]);
   });

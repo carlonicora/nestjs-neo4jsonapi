@@ -518,6 +518,7 @@ export class TraverseTool {
             id: input.fromId,
             cypherLabel: rel.cypherLabel,
             limit: limit + 1,
+            relationship: { name: rel.name, direction: rel.polymorphic ? "both" : rel.cypherDirection },
           })
         : (
             await this.relatedEdges.findRelatedIds({
@@ -619,6 +620,7 @@ export class TraverseTool {
       id: input.fromId,
       cypherLabel: rel.cypherLabel,
       limit: limit + 1,
+      relationship: { name: rel.name, direction: rel.polymorphic ? "both" : rel.cypherDirection },
       ...(filters.length ? { filters } : {}),
       ...(sort.length ? { orderByFields: sort } : {}),
     });

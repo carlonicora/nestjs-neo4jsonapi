@@ -3,7 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as z from "zod";
-import { LLMService } from "../llm.service";
+import { LLMContentFilterError, LLMService, ToolLoopAbortError, contentFilterOutcome } from "../llm.service";
 import { ModelService } from "../model.service";
 import { AgentMessageType } from "../../../../common/enums/agentmessage.type";
 import { LLMCallDumper } from "../llm-call-dumper.service";
@@ -11,6 +11,8 @@ import { TokenUsageService } from "../../../../foundations/tokenusage/services/t
 import { TokenUsageType } from "../../../../foundations/tokenusage/enums/tokenusage.type";
 import { TOKEN_USAGE_RECORDER } from "../../../../common/tokens";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { DynamicStructuredTool } from "@langchain/core/tools";
+import { repairTruncatedJson } from "../../utils/repair-truncated-json";
 
 // Mock LangChain modules
 vi.mock("@langchain/core/messages", () => {
@@ -103,6 +105,12 @@ vi.mock("../openrouter-fetch", () => ({
   injectOpenRouterProvider: vi.fn(),
   openRouterEscalatingFetch: vi.fn(),
 }));
+
+// The real repair behind a spy, so a test can prove a filtered answer never reaches it.
+vi.mock("../../utils/repair-truncated-json", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../utils/repair-truncated-json")>();
+  return { ...actual, repairTruncatedJson: vi.fn(actual.repairTruncatedJson) };
+});
 
 describe("LLMService", () => {
   let service: LLMService;
@@ -1416,6 +1424,579 @@ describe("LLMService", () => {
       ).rejects.toThrow(/model exploded/);
 
       expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The four members of a tool the service reads: `name`, `description` and `schema` when it
+   * records and binds the tools, `invoke` when the tool loop runs a call. A double typed with
+   * it must have all four, and its `invoke` is a typed mock.
+   */
+  type ToolDouble = Mocked<Pick<DynamicStructuredTool, "name" | "description" | "schema" | "invoke">>;
+
+  /** Hands tool doubles to `call()` and `callStep()`, whose `tools` parameter takes the whole class. */
+  const asTools = (...doubles: ToolDouble[]): DynamicStructuredTool[] => doubles as unknown as DynamicStructuredTool[];
+
+  /**
+   * A refused answer is not a parse failure. The provider's content filter can refuse the
+   * prompt (a thrown 400) or the output (a thrown error with no status, an incomplete
+   * Responses API message, a refusal part, or the chat completions finish reason). All five
+   * leave `call()` as one typed error, before the salvage ladder can repair a cut-off answer
+   * into a shorter, clean-looking one.
+   */
+  describe("content filter outcomes (LLMContentFilterError)", () => {
+    const outputSchema = z.object({ response: z.string() });
+    const attributed = {
+      inputParams: { message: "Hello" },
+      outputSchema,
+      systemPrompts: ["You are a helpful assistant"],
+      tokenUsageType: "summary",
+      relationshipId: "judgement-1",
+      relationshipType: "Judgement",
+    };
+    const listSchema = z.object({ facts: z.array(z.object({ text: z.string() })) });
+    // A cut-off payload the repair closes into a valid, shorter answer: the control test proves it.
+    const CUT_OFF = '{"facts":[{"text":"one"},{"text":"two"},{"text":"thr';
+
+    /** Resolves with the typed refusal the promise rejected with, and fails the test for anything else. */
+    const refusalOf = async (promise: Promise<unknown>): Promise<LLMContentFilterError> => {
+      const error = await promise.then(
+        () => {
+          throw new Error("expected the call to reject");
+        },
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(LLMContentFilterError);
+      if (!(error instanceof LLMContentFilterError)) throw error;
+      return error;
+    };
+
+    it("re-exports the classifier and the error class from the service file", () => {
+      expect(contentFilterOutcome({ response_metadata: { finish_reason: "content_filter" } })).toBe("output");
+      expect(new LLMContentFilterError({ stage: "output", cause: undefined })).toBeInstanceOf(Error);
+    });
+
+    it.each([
+      [
+        "code content_filter",
+        Object.assign(new Error("400 The response was filtered"), { status: 400, code: "content_filter" }),
+      ],
+      [
+        "inner error ResponsibleAIPolicyViolation",
+        Object.assign(new Error("400 Bad Request"), {
+          status: 400,
+          error: { innererror: { code: "ResponsibleAIPolicyViolation" } },
+        }),
+      ],
+      [
+        "content management policy message",
+        Object.assign(
+          new Error("The response was filtered due to the prompt triggering the content management policy."),
+          { status: 400 },
+        ),
+      ],
+    ])("shape 1 (%s): a thrown 400 leaves as a prompt refusal, not wrapped", async (_label, providerError) => {
+      mockStructuredLLM.invoke.mockRejectedValueOnce(providerError);
+
+      const error = await refusalOf(service.call(attributed));
+
+      expect(error.stage).toBe("prompt");
+      expect(error.cause).toBe(providerError);
+      expect(error.message).not.toMatch(/^LLM service error:/);
+      expect(mockStructuredLLM.invoke).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledWith(expect.objectContaining({ finalStatus: "error" }));
+      // Nothing was generated, so nothing is billed: the zero-token rule holds as before.
+      expect(recordTokenUsageMock).not.toHaveBeenCalled();
+    });
+
+    it("shape 1: the tokens burned before the refusal are recorded as before", async () => {
+      const tool: ToolDouble = {
+        name: "lookup",
+        description: "looks things up",
+        schema: z.object({ id: z.string() }),
+        invoke: vi.fn().mockResolvedValue("{}"),
+      };
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValueOnce({
+          content: "draft",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 2_000, output_tokens: 100 },
+        }),
+      });
+      mockStructuredLLM.invoke.mockRejectedValueOnce(
+        Object.assign(new Error("400 The response was filtered"), { status: 400, code: "content_filter" }),
+      );
+
+      const error = await refusalOf(service.call({ ...attributed, tools: asTools(tool) }));
+
+      expect(error.stage).toBe("prompt");
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          type: "summary",
+          relationshipId: "judgement-1",
+          relationshipType: "Judgement",
+          tokens: { input: 2_000, output: 100, cached: 0 },
+        }),
+      );
+    });
+
+    it("shape 2: a thrown content_filter error with no status leaves as an output refusal", async () => {
+      const providerError = Object.assign(new Error("The response was filtered"), { name: "content_filter" });
+      mockStructuredLLM.invoke.mockRejectedValueOnce(providerError);
+
+      const error = await refusalOf(service.call(attributed));
+
+      expect(error.stage).toBe("output");
+      expect(error.cause).toBe(providerError);
+      expect(error.message).not.toMatch(/^LLM service error:/);
+    });
+
+    it("shape 3: an incomplete filtered answer never reaches the JSON repair, and its tokens are recorded", async () => {
+      const raw = {
+        usage_metadata: { input_tokens: 800, output_tokens: 60 },
+        response_metadata: { status: "incomplete", incomplete_details: { reason: "content_filter" } },
+        content: CUT_OFF,
+      };
+      mockStructuredLLM.invoke.mockResolvedValueOnce({ parsed: null, raw });
+
+      const error = await refusalOf(service.call({ ...attributed, outputSchema: listSchema }));
+
+      expect(error.stage).toBe("output");
+      expect(error.cause).toBe(raw);
+      expect(error.message).not.toMatch(/^LLM service error:/);
+      expect(repairTruncatedJson).not.toHaveBeenCalled();
+      expect(mockStructuredLLM.invoke).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 800, output: 60, cached: 0 });
+      expect(closeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ finalStatus: "error", totalTokens: { input: 800, output: 60, cached: 0 } }),
+      );
+    });
+
+    it("shape 3: a filtered answer is refused even when the wrapper returned a parsed value", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "Una sintesi" },
+        raw: {
+          usage_metadata: { input_tokens: 800, output_tokens: 60 },
+          response_metadata: { status: "incomplete", incomplete_details: { reason: "content_filter" } },
+          content: '{"response":"Una sintesi"}',
+        },
+      });
+
+      const error = await refusalOf(service.call(attributed));
+
+      expect(error.stage).toBe("output");
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 800, output: 60, cached: 0 });
+    });
+
+    it("shape 4: a refusal part with no parsed value leaves as an output refusal", async () => {
+      const raw = {
+        usage_metadata: { input_tokens: 500, output_tokens: 12 },
+        response_metadata: { status: "completed" },
+        additional_kwargs: { refusal: "I cannot help with that." },
+        content: "",
+      };
+      mockStructuredLLM.invoke.mockResolvedValueOnce({ parsed: null, raw });
+
+      const error = await refusalOf(service.call(attributed));
+
+      expect(error.stage).toBe("output");
+      expect(error.cause).toBe(raw);
+      expect(repairTruncatedJson).not.toHaveBeenCalled();
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 500, output: 12, cached: 0 });
+    });
+
+    it("shape 4: a refusal part beside a parsed value is not a refusal", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: {
+          usage_metadata: { input_tokens: 500, output_tokens: 12 },
+          response_metadata: { status: "completed" },
+          additional_kwargs: { refusal: "I cannot help with that." },
+          content: '{"response":"ok"}',
+        },
+      });
+
+      const result = await service.call(attributed);
+
+      expect(result.response).toBe("ok");
+    });
+
+    it("shape 5: finish_reason content_filter leaves as an output refusal before the repair", async () => {
+      const raw = {
+        usage_metadata: { input_tokens: 700, output_tokens: 45 },
+        response_metadata: { finish_reason: "content_filter" },
+        content: CUT_OFF,
+      };
+      mockStructuredLLM.invoke.mockResolvedValueOnce({ parsed: null, raw });
+
+      const error = await refusalOf(service.call({ ...attributed, outputSchema: listSchema }));
+
+      expect(error.stage).toBe("output");
+      expect(error.cause).toBe(raw);
+      expect(repairTruncatedJson).not.toHaveBeenCalled();
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 700, output: 45, cached: 0 });
+    });
+
+    it("control: a length truncation still reaches the JSON repair", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          usage_metadata: { input_tokens: 700, output_tokens: 45 },
+          response_metadata: { finish_reason: "length" },
+          content: CUT_OFF,
+        },
+      });
+
+      const result = await service.call({ ...attributed, outputSchema: listSchema });
+
+      expect(result.facts).toEqual([{ text: "one" }, { text: "two" }]);
+      expect(repairTruncatedJson).toHaveBeenCalledTimes(1);
+    });
+
+    it("streamCall() rejects with the typed error when the stream ends on the content filter", async () => {
+      streamObjectMock.mockReturnValue({
+        object: Promise.resolve({ response: "Una sintesi" }),
+        usage: Promise.resolve({ inputTokens: 900, outputTokens: 40 }),
+        // The Vercel AI SDK spelling of the provider's content_filter.
+        finishReason: Promise.resolve("content-filter"),
+        partialObjectStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamCall({
+        inputParams: { message: "Hello" },
+        outputSchema,
+        systemPrompts: ["sys"],
+        tokenUsageType: "custom_stream",
+        relationshipId: "r7",
+        relationshipType: "Round",
+      });
+      const error = await refusalOf(result);
+
+      expect(error.stage).toBe("output");
+      expect(error.message).not.toMatch(/^LLM streamCall error:/);
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 900, output: 40, cached: 0 });
+      expect(closeMock).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ finalStatus: "error", totalTokens: { input: 900, output: 40, cached: 0 } }),
+      );
+    });
+
+    it("streamText() rejects with the typed error when the stream ends on the content filter", async () => {
+      streamTextMock.mockReturnValue({
+        text: Promise.resolve("Una sintesi"),
+        reasoningText: Promise.resolve(""),
+        usage: Promise.resolve({ inputTokens: 300, outputTokens: 20 }),
+        finishReason: Promise.resolve("content-filter"),
+        fullStream: (async function* () {})(),
+      });
+
+      const { result } = await service.streamText({
+        systemPrompts: ["sys"],
+        prompt: "go",
+        tokenUsageType: "custom_narrate",
+        relationshipId: "r7",
+        relationshipType: "Round",
+      });
+      const error = await refusalOf(result);
+
+      expect(error.stage).toBe("output");
+      expect(error.message).not.toMatch(/^LLM streamText error:/);
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0].tokens).toEqual({ input: 300, output: 20, cached: 0 });
+      expect(closeMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * The Responses API carries no `finish_reason`: the reason a response ended is in
+   * `incomplete_details.reason`, and failing that in `status`. Logs and dumps read the three
+   * in that order.
+   */
+  describe("finish reason written to logs and dumps", () => {
+    const outputSchema = z.object({ response: z.string() });
+    const base = { inputParams: { message: "Hello" }, outputSchema, systemPrompts: ["sys"] };
+
+    it("reads incomplete_details.reason when there is no finish_reason", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: {
+          usage_metadata: { input_tokens: 10, output_tokens: 5 },
+          response_metadata: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+          content: '{"response":"ok"}',
+        },
+      });
+
+      await service.call(base);
+
+      expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({ finishReason: "max_output_tokens" }));
+    });
+
+    it("reads status when there is neither finish_reason nor incomplete_details", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: {
+          usage_metadata: { input_tokens: 10, output_tokens: 5 },
+          response_metadata: { status: "completed" },
+          content: '{"response":"ok"}',
+        },
+      });
+
+      await service.call(base);
+
+      expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({ finishReason: "completed" }));
+    });
+
+    it("prefers finish_reason over the other two", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: { response: "ok" },
+        raw: {
+          usage_metadata: { input_tokens: 10, output_tokens: 5 },
+          response_metadata: {
+            finish_reason: "stop",
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+          },
+          content: '{"response":"ok"}',
+        },
+      });
+
+      await service.call(base);
+
+      expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({ finishReason: "stop" }));
+    });
+
+    it("names the Responses API reason in the structured output failure", async () => {
+      mockStructuredLLM.invoke.mockResolvedValueOnce({
+        parsed: null,
+        raw: {
+          usage_metadata: { input_tokens: 10, output_tokens: 5 },
+          response_metadata: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+          content: "not json at all",
+        },
+      });
+
+      await expect(service.call(base)).rejects.toThrow(/Finish reason: max_output_tokens\./);
+    });
+
+    it("reads the same order for a tool loop response", async () => {
+      const tool: ToolDouble = {
+        name: "lookup",
+        description: "looks things up",
+        schema: z.object({ id: z.string() }),
+        invoke: vi.fn().mockResolvedValue("{}"),
+      };
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValueOnce({
+          content: "draft",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 50, output_tokens: 25 },
+          response_metadata: { status: "completed" },
+        }),
+      });
+
+      await service.call({ ...base, tools: asTools(tool) });
+
+      expect(recordResponseMock.mock.calls[0][0].finishReason).toBe("completed");
+    });
+
+    it("reads the same order in callStep()", async () => {
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          content: "",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 100, output_tokens: 40 },
+          response_metadata: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+        }),
+      });
+
+      await service.callStep({
+        systemPrompts: ["sys"],
+        messages: [],
+        tools: asTools({ name: "do_thing", description: "d", schema: {}, invoke: vi.fn() }),
+      });
+
+      expect(recordResponseMock).toHaveBeenCalledWith(expect.objectContaining({ finishReason: "max_output_tokens" }));
+    });
+
+    it("reads the same order in the extractViaTool() diagnostic", async () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValue({
+          tool_calls: [],
+          content: "no tool call",
+          usage_metadata: { input_tokens: 10, output_tokens: 5 },
+          response_metadata: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+        }),
+      });
+
+      await expect(
+        service.extractViaTool({
+          systemPrompts: ["sys"],
+          prompt: "extract this",
+          tool: { name: "extract", description: "d", schema: z.object({ value: z.string() }) },
+        }),
+      ).rejects.toThrow(/did not call the tool/);
+
+      expect(errorSpy.mock.calls.some((c) => /finish_reason=max_output_tokens /.test(String(c[0])))).toBe(true);
+      errorSpy.mockRestore();
+    });
+  });
+
+  /**
+   * A tool can stop the run. Any other throw from a tool is answered to the model as a
+   * ToolMessage, so a dependency that is down costs one billed model round per retry the
+   * model decides to make. A `ToolLoopAbortError` leaves the loop and reaches the caller
+   * as the same instance.
+   */
+  describe("tool loop abort (ToolLoopAbortError)", () => {
+    const outputSchema = z.object({ response: z.string() });
+    const attributed = {
+      inputParams: { message: "Hello" },
+      outputSchema,
+      systemPrompts: ["You are a helpful assistant"],
+      tokenUsageType: "legal_research",
+      relationshipId: "research-1",
+      relationshipType: "LegalResearch",
+    };
+    const searchSchema = z.object({ query: z.string() });
+
+    it("carries the message and the cause", () => {
+      const cause = new Error("connect ECONNREFUSED 10.0.0.5:3403");
+
+      const error = new ToolLoopAbortError({ message: "corpus down", cause });
+
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(ToolLoopAbortError);
+      expect(error.name).toBe("ToolLoopAbortError");
+      expect(error.message).toBe("corpus down");
+      expect(error.cause).toBe(cause);
+    });
+
+    // Review focus 5.
+    it("leaves the loop as the same instance, after the usage of the calls already made is persisted", async () => {
+      // A cause the transient retry would otherwise read as "try the whole call again".
+      const cause = Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:3403"), { code: "ECONNREFUSED" });
+      const abort = new ToolLoopAbortError({ message: "corpus down", cause });
+      const tool: ToolDouble = {
+        name: "search_massime",
+        description: "searches the massime",
+        schema: searchSchema,
+        invoke: vi.fn().mockResolvedValueOnce("[]").mockRejectedValueOnce(abort),
+      };
+      const boundInvoke = vi
+        .fn()
+        .mockResolvedValueOnce({
+          content: "",
+          tool_calls: [{ id: "c1", name: "search_massime", args: { query: "art. 2043 c.c." } }],
+          usage_metadata: { input_tokens: 1_000, output_tokens: 40 },
+        })
+        .mockResolvedValueOnce({
+          content: "",
+          tool_calls: [{ id: "c2", name: "search_massime", args: { query: "danno ingiusto" } }],
+          usage_metadata: { input_tokens: 1_500, output_tokens: 60 },
+        });
+      mockLLM.bindTools = vi.fn().mockReturnValue({ invoke: boundInvoke });
+      const order: string[] = [];
+      recordTokenUsageMock.mockImplementationOnce(async () => {
+        order.push("usage persisted");
+      });
+
+      const caught = await service.call({ ...attributed, tools: asTools(tool) }).then(
+        () => undefined,
+        (error: unknown) => {
+          order.push("rejected");
+          return error;
+        },
+      );
+
+      expect(caught).toBe(abort);
+      expect(order).toEqual(["usage persisted", "rejected"]);
+      // Both model rounds were served and billed before the tool stopped the run.
+      expect(recordTokenUsageMock).toHaveBeenCalledTimes(1);
+      expect(recordTokenUsageMock.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          type: "legal_research",
+          relationshipId: "research-1",
+          relationshipType: "LegalResearch",
+          tokens: { input: 2_500, output: 100, cached: 0 },
+        }),
+      );
+      // The model is not called again: no third round, no structured round, no retry of the call.
+      expect(boundInvoke).toHaveBeenCalledTimes(2);
+      expect(tool.invoke).toHaveBeenCalledTimes(2);
+      expect(mockStructuredLLM.invoke).not.toHaveBeenCalled();
+      expect(mockModelService.getLLM).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledTimes(1);
+      expect(closeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          finalStatus: "error",
+          errorMessage: "corpus down",
+          totalTokens: { input: 2_500, output: 100, cached: 0 },
+        }),
+      );
+    });
+
+    it("does not run the tool calls that follow the abort in the same round, and answers nothing to the model", async () => {
+      const abort = new ToolLoopAbortError({ message: "corpus down", cause: new Error("503") });
+      const failing: ToolDouble = {
+        name: "search_massime",
+        description: "searches the massime",
+        schema: searchSchema,
+        invoke: vi.fn().mockRejectedValue(abort),
+      };
+      const following: ToolDouble = {
+        name: "search_judgements",
+        description: "searches the judgements",
+        schema: searchSchema,
+        invoke: vi.fn().mockResolvedValue("[]"),
+      };
+      mockLLM.bindTools = vi.fn().mockReturnValue({
+        invoke: vi.fn().mockResolvedValueOnce({
+          content: "",
+          tool_calls: [
+            { id: "c1", name: "search_massime", args: { query: "art. 2043 c.c." } },
+            { id: "c2", name: "search_judgements", args: { query: "art. 2043 c.c." } },
+          ],
+          usage_metadata: { input_tokens: 1_000, output_tokens: 40 },
+        }),
+      });
+
+      await expect(service.call({ ...attributed, tools: asTools(failing, following) })).rejects.toBe(abort);
+
+      expect(following.invoke).not.toHaveBeenCalled();
+      expect(recordToolResultMock).not.toHaveBeenCalled();
+    });
+
+    it("still answers any other tool error to the model", async () => {
+      const tool: ToolDouble = {
+        name: "search_massime",
+        description: "searches the massime",
+        schema: searchSchema,
+        invoke: vi.fn().mockRejectedValueOnce(new Error("boom")),
+      };
+      const boundInvoke = vi
+        .fn()
+        .mockResolvedValueOnce({
+          content: "",
+          tool_calls: [{ id: "c1", name: "search_massime", args: { query: "art. 2043 c.c." } }],
+          usage_metadata: { input_tokens: 1_000, output_tokens: 40 },
+        })
+        .mockResolvedValueOnce({
+          content: "draft",
+          tool_calls: [],
+          usage_metadata: { input_tokens: 1_200, output_tokens: 30 },
+        });
+      mockLLM.bindTools = vi.fn().mockReturnValue({ invoke: boundInvoke });
+
+      const result = await service.call({ ...attributed, tools: asTools(tool) });
+
+      expect(result.response).toBe("test response");
+      expect(recordToolResultMock).toHaveBeenCalledWith("c1", "search_massime", "Tool error: boom");
+      expect(boundInvoke).toHaveBeenCalledTimes(2);
+      expect(mockStructuredLLM.invoke).toHaveBeenCalledTimes(1);
     });
   });
 });

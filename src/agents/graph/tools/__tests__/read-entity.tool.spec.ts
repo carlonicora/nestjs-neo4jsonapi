@@ -555,7 +555,12 @@ describe("ReadEntityTool", () => {
         describedRecorder(),
       );
 
-      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "SUMMARISES", limit: 50 });
+      expect(source.findRelatedIds).toHaveBeenCalledWith({
+        id: "m1",
+        cypherLabel: "SUMMARISES",
+        limit: 50,
+        relationship: { name: "judgement", direction: "out" },
+      });
       expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
       expect(judgementsSvc.findRelatedRecordsByEdge).not.toHaveBeenCalled();
     });
@@ -618,7 +623,12 @@ describe("ReadEntityTool", () => {
         limit: 50,
       });
       expect(source.findRelatedIds).toHaveBeenCalledTimes(1);
-      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "CITES", limit: 50 });
+      expect(source.findRelatedIds).toHaveBeenCalledWith({
+        id: "m1",
+        cypherLabel: "CITES",
+        limit: 50,
+        relationship: { name: "law", direction: "both" },
+      });
       expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
       expect(out.related.law).toEqual([{ id: "l1", type: "laws", summary: "laws:c.c." }]);
     });
@@ -678,7 +688,12 @@ describe("ReadEntityTool", () => {
         describedRecorder(),
       );
 
-      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "CITES", limit: 50 });
+      expect(source.findRelatedIds).toHaveBeenCalledWith({
+        id: "m1",
+        cypherLabel: "CITES",
+        limit: 50,
+        relationship: { name: "law", direction: "both" },
+      });
       expect(lawsSvc.findRecordById).toHaveBeenCalledTimes(50);
       expect(scopeGuard.filter).toHaveBeenCalledWith(expect.objectContaining({ type: "laws", ctx: scopedCtx }));
       expect(out.related.law).toHaveLength(49);

@@ -125,6 +125,7 @@ export class ReadEntityTool {
                   id: input.id,
                   cypherLabel: rel.cypherLabel,
                   limit: INCLUDE_LIMIT,
+                  relationship: { name: rel.name, direction: rel.polymorphic ? "both" : rel.cypherDirection },
                 });
                 items = await this.readTypedPairs(
                   pairs.slice(0, INCLUDE_LIMIT).map((p) => ({ id: p.id, type: p.type ?? rel.targetType })),

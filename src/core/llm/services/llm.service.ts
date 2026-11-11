@@ -36,6 +36,8 @@ import {
 import { mockFromZodSchema } from "../utils/mock-from-zod";
 import { repairTruncatedJson } from "../utils/repair-truncated-json";
 import { LLMRawResponse, StructuredOutputResponse, isValidRaw } from "../common/llm-raw-response";
+import { LLMContentFilterError, contentFilterOutcome } from "../errors/llm.content-filter.error";
+import { ToolLoopAbortError } from "../errors/tool-loop-abort.error";
 import { DumpSession, DumpSessionStartParams, LLMCallDumper } from "./llm-call-dumper.service";
 import { openRouterEscalatingFetch } from "./openrouter-fetch";
 import {
@@ -56,6 +58,12 @@ const { streamText, streamObject } = wrapAISDK(ai);
 
 // Re-export for the existing test import path.
 export { injectOpenRouterProvider } from "./openrouter-fetch";
+
+// The typed LLM errors live in ../errors, one file per class, and leave the package through
+// this file: core/llm/index.ts already has `export * from "./services/llm.service"`
+// so no index file changes.
+export { LLMContentFilterError, contentFilterOutcome } from "../errors/llm.content-filter.error";
+export { ToolLoopAbortError } from "../errors/tool-loop-abort.error";
 
 /** Fallbacks used only when no `ai` config block is registered (test harnesses). */
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
@@ -256,6 +264,33 @@ export class LLMTimeoutError extends Error {
     super(`LLM call "${label}" exceeded its ${Math.round(deadlineMs / 1000)}s deadline`);
     this.name = "LLMTimeoutError";
   }
+}
+
+/**
+ * The reason a response ended, for logs and dumps. Chat completions put it in
+ * `finish_reason`. The Responses API has no such field: an unfinished response carries
+ * `incomplete_details.reason`, and every response carries `status`. Read in that order.
+ */
+function finishReasonOf(raw: LLMRawResponse | undefined): string | undefined {
+  const metadata = raw?.response_metadata;
+  if (!metadata) return undefined;
+  if (typeof metadata.finish_reason === "string") return metadata.finish_reason;
+  const details = metadata.incomplete_details;
+  if (typeof details === "object" && details !== null && "reason" in details && typeof details.reason === "string")
+    return details.reason;
+  return typeof metadata.status === "string" ? metadata.status : undefined;
+}
+
+/**
+ * A stream has no LangChain message, only the Vercel AI SDK's unified finish reason, which
+ * spells the provider's `content_filter` as `content-filter`. This builds the message-shaped
+ * value {@link contentFilterOutcome} reads, so the streaming paths run the same check as
+ * `call()`.
+ */
+function streamFinalMessage(finishReason: string): { response_metadata: { finish_reason: string } } {
+  return {
+    response_metadata: { finish_reason: finishReason === "content-filter" ? "content_filter" : finishReason },
+  };
 }
 
 /**
@@ -720,6 +755,10 @@ export class LLMService {
       try {
         return await this.runBounded(label, attemptTimeoutMs, controller, () => work(controller.signal, attempt));
       } catch (error) {
+        // A typed outcome is final, whatever its cause looks like. A tool that stopped the
+        // run because a dependency refused the connection carries a cause that reads as a
+        // transient network failure, and a retry here would run the whole tool loop again.
+        if (error instanceof ToolLoopAbortError || error instanceof LLMContentFilterError) throw error;
         if (attempt >= maxAttempts - 1 || !this.isTransientNetworkError(error)) throw error;
         options?.onTransientFailure?.(attempt, error);
         // The attempt is over; release whatever socket it may still hold before
@@ -1085,6 +1124,9 @@ export class LLMService {
    * unaffected.
    *
    * @returns Promise resolving to parsed output + token usage metadata
+   * @throws {LLMContentFilterError} If the provider's content filter refused the prompt or
+   *   the output. Not wrapped, and never retried.
+   * @throws {ToolLoopAbortError} The instance a tool threw to stop the run. Not wrapped.
    * @throws {Error} If LLM call fails or returns invalid structured output
    *
    * @example Simple case (auto-generated instructions):
@@ -1261,6 +1303,14 @@ export class LLMService {
         this.ratesForCandidate(servingCandidate),
       );
       console.error("[LLMService] Error calling LLM:", error);
+      // Two outcomes leave as they are, after the session is closed and the usage is
+      // recorded above like any other failure. A tool that stopped the run reaches the
+      // caller as the instance the tool threw. A content filter refusal reaches it as one
+      // typed error, whether it was raised on the raw response or arrives here as a
+      // provider error.
+      if (error instanceof ToolLoopAbortError || error instanceof LLMContentFilterError) throw error;
+      const filterStage = contentFilterOutcome(error);
+      if (filterStage) throw new LLMContentFilterError({ stage: filterStage, cause: error });
       // The message text is load-bearing — callers match on "LLM service error:"
       // — so it stays byte-for-byte identical, and the original error rides along
       // as `cause`. Without it every network diagnosis stopped at this wrapper:
@@ -1457,7 +1507,7 @@ export class LLMService {
             input: (toolResponse as unknown as LLMRawResponse).usage_metadata?.input_tokens ?? 0,
             output: (toolResponse as unknown as LLMRawResponse).usage_metadata?.output_tokens ?? 0,
           },
-          finishReason: (toolResponse as unknown as LLMRawResponse).response_metadata?.finish_reason,
+          finishReason: finishReasonOf(toolResponse as unknown as LLMRawResponse),
         });
 
         // One line per iteration, so a slow agentic call is diagnosable from the
@@ -1578,6 +1628,10 @@ export class LLMService {
             // A success clears the streak: the model is making progress again.
             failureStreaks.delete(toolCallSignature(toolCall.name, toolCall.args));
           } catch (error) {
+            // A tool that must stop the run throws this. It is not answered to the model:
+            // it leaves the loop, and `call()` records the usage of the rounds already made
+            // before the caller sees it.
+            if (error instanceof ToolLoopAbortError) throw error;
             failedToolCalls++;
             console.error(`[LLMService] Tool error: ${toolCall.name}`, error);
 
@@ -1776,7 +1830,7 @@ export class LLMService {
         input: raw?.usage_metadata?.input_tokens ?? 0,
         output: raw?.usage_metadata?.output_tokens ?? 0,
       },
-      finishReason: raw?.response_metadata?.finish_reason,
+      finishReason: finishReasonOf(raw),
     });
     // The final structured response's OWN usage. Reported separately from the
     // totals because the tool loop has already handed its share to `addTokens`;
@@ -1835,7 +1889,7 @@ export class LLMService {
       // `TypeError: rawContent.substring is not a function`, which killed the caller
       // instead of letting the salvage ladder run.
       const rawContent = extractMessageText(raw?.content) || "No content";
-      const finishReason = raw?.response_metadata?.finish_reason;
+      const finishReason = finishReasonOf(raw);
 
       console.error("[LLMService] Parsing failed:", {
         rawContentPreview: rawContent.substring(0, 500),
@@ -1966,6 +2020,19 @@ export class LLMService {
         );
       }
     };
+
+    // A refused answer is not a parse failure. Checked before the salvage ladder, whose last
+    // rung would repair a cut-off answer into a shorter, clean-looking one, and before a
+    // parsed value is returned. A refusal part counts only when nothing was parsed, so with
+    // a parsed value only the response metadata is read. The answer was generated and
+    // billed, so its usage is reported before the throw. `call()` rethrows this unwrapped.
+    const filterStage = response.parsed
+      ? contentFilterOutcome({ response_metadata: raw?.response_metadata })
+      : contentFilterOutcome(raw);
+    if (filterStage) {
+      addTokens(finalInput, finalOutput, finalCached);
+      throw new LLMContentFilterError({ stage: filterStage, cause: raw });
+    }
 
     // Enhanced error handling with detailed diagnostics
     if (!response.parsed) return salvageParse();
@@ -2203,11 +2270,18 @@ export class LLMService {
             const output = usage?.outputTokens ?? 0;
             const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
+            const finishReason = String(await attempt.handle.finishReason);
             session.recordResponse({
               content: JSON.stringify(finalObject),
               tokenUsage: { input, output },
-              finishReason: String(await attempt.handle.finishReason),
+              finishReason,
             });
+            // The check `call()` runs on its raw response, on the stream's final message.
+            // Thrown inside this try, so the catch below closes the session and records the
+            // usage, then rethrows it unwrapped.
+            const finalMessage = streamFinalMessage(finishReason);
+            const filterStage = contentFilterOutcome(finalMessage);
+            if (filterStage) throw new LLMContentFilterError({ stage: filterStage, cause: finalMessage });
             session.close({
               finalStatus: "success",
               totalTokens: { input, output, cached },
@@ -2267,6 +2341,7 @@ export class LLMService {
               { input, output, cached },
             );
             console.error("[LLMService.streamCall] Error:", error);
+            if (error instanceof LLMContentFilterError) throw error;
             const wrapped = new Error(`LLM streamCall error: ${message}`);
             (wrapped as Error & { cause?: unknown }).cause = error;
             throw wrapped;
@@ -2441,11 +2516,16 @@ export class LLMService {
           const output = usage?.outputTokens ?? 0;
           const cached = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
 
+          const finishReason = String(await attempt.handle.finishReason);
           session.recordResponse({
             content: text,
             tokenUsage: { input, output },
-            finishReason: String(await attempt.handle.finishReason),
+            finishReason,
           });
+          // See streamCall: the same check, on the stream's final message.
+          const finalMessage = streamFinalMessage(finishReason);
+          const filterStage = contentFilterOutcome(finalMessage);
+          if (filterStage) throw new LLMContentFilterError({ stage: filterStage, cause: finalMessage });
           session.close({
             finalStatus: "success",
             totalTokens: { input, output, cached },
@@ -2502,6 +2582,7 @@ export class LLMService {
             { input, output, cached },
           );
           console.error("[LLMService.streamText] Error:", error);
+          if (error instanceof LLMContentFilterError) throw error;
           const wrapped = new Error(`LLM streamText error: ${message}`);
           (wrapped as Error & { cause?: unknown }).cause = error;
           throw wrapped;
@@ -2646,7 +2727,7 @@ export class LLMService {
         const call0 = (r?.tool_calls ?? [])[0];
         console.error(
           `[extractViaTool] ${params.tool.name} ${attempt}: no parseable tool call — ` +
-            `finish_reason=${(r as any)?.response_metadata?.finish_reason} ` +
+            `finish_reason=${finishReasonOf(r as unknown as LLMRawResponse)} ` +
             `tool_calls=${(r?.tool_calls ?? []).length} invalid_tool_calls=${((r as any)?.invalid_tool_calls ?? []).length} ` +
             `contentLen=${content?.length ?? 0}`,
         );
@@ -2914,7 +2995,7 @@ export class LLMService {
           args: c.args,
         })),
         tokenUsage: { input, output },
-        finishReason: raw.response_metadata?.finish_reason,
+        finishReason: finishReasonOf(raw),
       });
 
       session.close({

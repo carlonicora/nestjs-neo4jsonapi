@@ -30,6 +30,18 @@ export interface ExternalRelatedId {
   id: string;
 }
 
+/**
+ * The relationship a {@link ExternalEntitySource.findRelatedIds} call is for. `name` is the
+ * relationship's name on the source's descriptor. `direction` is its catalogued direction from
+ * the source record: "out", "in", or "both" for a polymorphic relationship, which has none.
+ * Two relationships may share one `cypherLabel` (a forward one and its reverse): the source
+ * MUST read by `direction`, never both sides of the label.
+ */
+export interface ExternalRelationshipRef {
+  name: string;
+  direction: "out" | "in" | "both";
+}
+
 /** The operators an external source supports on one field, returned by {@link ExternalEntitySource.filterCapabilities}. */
 export interface ExternalFilterCapability {
   field: string;
@@ -68,7 +80,7 @@ export interface ExternalEntitySource {
    * {@link ExternalEntitySource.relatedIdsForEveryRelationship}:
    * - without it, only POLYMORPHIC relationships: the polymorphic `traverse`
    *   and a polymorphic `read_entity` include call it with `{ id, cypherLabel,
-   *   limit }`. A typed relationship keeps the target's
+   *   limit, relationship }`. A typed relationship keeps the target's
    *   `findRelatedRecordsByEdge` in both tools.
    * - with it, EVERY relationship of this source: `traverse` and `read_entity`
    *   never call the target's `findRelatedRecordsByEdge` for it.
@@ -81,11 +93,14 @@ export interface ExternalEntitySource {
    * reads the returned ids in order and does no filtering or sorting of its
    * own. `limit` is then the truncation probe (the page size + 1). The
    * polymorphic traverse and read_entity never send filters or sort.
+   *
+   * `relationship` names the relationship asked for and its direction; `cypherLabel` alone does not identify it.
    */
   findRelatedIds?(params: {
     id: string;
     cypherLabel: string;
     limit: number;
+    relationship: ExternalRelationshipRef;
     filters?: FilterCriterion[];
     orderByFields?: SortCriterion[];
   }): Promise<ExternalRelatedId[]>;
