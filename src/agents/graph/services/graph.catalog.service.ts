@@ -57,7 +57,7 @@ export interface DescriptorSource {
         relationship: string;
         cardinality: "one" | "many";
         description?: string;
-        reverse?: { name: string; description: string };
+        reverse?: { name: string; description: string; cardinality?: "one" | "many" };
         /** JSON:API `relationships` key override; the descriptor key when absent. */
         dtoKey?: string;
         /** Set when the value is filled from CLS instead of the DTO. */
@@ -349,7 +349,9 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           dtoKey: rel.reverse.name,
           sourceType: rel.model.type,
           targetType: d.model.type,
-          cardinality: rel.cardinality,
+          // The reverse side's declared cardinality; without one it copies the
+          // forward cardinality (the behaviour every consumer relies on).
+          cardinality: rel.reverse.cardinality ?? rel.cardinality,
           description: rel.reverse.description,
           cypherDirection: rel.direction === "out" ? "in" : "out",
           cypherLabel: rel.relationship,

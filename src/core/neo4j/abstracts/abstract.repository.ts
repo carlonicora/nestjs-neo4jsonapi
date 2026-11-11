@@ -414,6 +414,54 @@ export abstract class AbstractRepository<
   }
 
   /**
+   * The RETURN part for a node whose read must not ship some of its stored properties:
+   * `<map> AS <alias>`, where the map is in the Neo4j node shape EntityFactory maps
+   * (`{ labels, properties }`). For reads that return whole nodes through `readOne`/`readMany`
+   * but never use a large property (an `embedding` vector, a long text): a plain node column
+   * ships it on every row. Anything the query computes from an omitted property (a filter, a
+   * cosine score) still runs in the database; only the result leaves it out.
+   *
+   * `properties` is an explicit list, not `.*`: `.*` still loads every property, the omitted
+   * ones included, before the map is built. The list is what the descriptor's mapper reads:
+   * `id`, `createdAt`, `updatedAt`, every field, and every computed and virtual field name
+   * (a computed field may read the stored property of the same name), minus `omit`. So:
+   * - a stored property the descriptor does not declare is not returned;
+   * - a listed property the node does not store comes back as null, not absent.
+   *
+   * The column keeps the alias, so EntityFactory finds the root node (`nodeName`) or a related
+   * node (`<nodeName>_<relationship>`) as with a plain node column. Labels are kept for
+   * polymorphic discriminators. For a related node pass its `descriptor`; `omit` is then typed
+   * against that entity. Property names go into the Cypher text (they cannot be parameters):
+   * each must be a plain identifier and is backtick-quoted, anything else throws.
+   *
+   * @example `RETURN ${this.projectNodeOmitting(massimaMeta.nodeName, ["embedding"])}, score`
+   * @example `${this.projectNodeOmitting("massima_judgement", ["abstract"], JudgementDescriptor)}`
+   */
+  protected projectNodeOmitting<N = T>(
+    alias: string,
+    omit: readonly (keyof N & string)[],
+    descriptor: EntityDescriptor<N, any> = this.descriptor as unknown as EntityDescriptor<N, any>,
+  ): string {
+    const omitted = new Set<string>(omit);
+    const names = [
+      ...new Set([
+        "id",
+        "createdAt",
+        "updatedAt",
+        ...descriptor.fieldNames,
+        ...Object.keys(descriptor.computed ?? {}),
+        ...Object.keys(descriptor.virtualFields ?? {}),
+      ]),
+    ].filter((name) => !omitted.has(name));
+
+    const invalid = [...names, ...omit].filter((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+    if (invalid.length > 0) throw new Error(`projectNodeOmitting: invalid property names ${JSON.stringify(invalid)}`);
+
+    const properties = names.map((name) => `.\`${name}\``).join(", ");
+    return `CASE WHEN ${alias} IS NULL THEN NULL ELSE { labels: labels(${alias}), properties: ${alias} { ${properties} } } END AS ${alias}`;
+  }
+
+  /**
    * Returns the Cypher query parameters that `buildReturnStatement` references
    * for multi-label polymorphic relationships. Each entry maps
    * `polyLabels_<relationshipName>` → the list of Neo4j labels accepted as

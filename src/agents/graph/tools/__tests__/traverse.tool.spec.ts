@@ -2,6 +2,8 @@ import { vi } from "vitest";
 import { TraverseTool, traverseInputSchema } from "../traverse.tool";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+import { ToolFactory } from "../tool.factory";
+import { ExternalSourceUnavailableError } from "../../../../common/interfaces/external.entity.source.interface";
 
 describe("TraverseTool", () => {
   const formatter = new ToolFieldFormatterService(new BlockNoteService());
@@ -200,6 +202,23 @@ describe("TraverseTool", () => {
       [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
     );
     expect(out.error).toMatch(/ghost/);
+  });
+
+  it("an unknown filter field returns the filterable list", async () => {
+    const tool = new TraverseTool(factory, {} as any, {} as any, {} as any, formatter, {} as any);
+    const out: any = await tool.invoke(
+      {
+        fromType: "accounts",
+        fromId: "a1",
+        relationship: "orders",
+        filters: [{ field: "ghost", op: "eq", value: "x" }],
+      },
+      ctx,
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
+    );
+    expect(out.error).toBe(
+      'Field "ghost" is not available on orders. Valid filter fields for orders: total (eq, ne, in, gt, gte, lt, lte, isNull, isNotNull), createdAt (eq, ne, gt, gte, lt, lte, isNull, isNotNull).\nSortable fields: total, createdAt.',
+    );
   });
 
   it("walks a reverse catalog relationship via the edge spec (no inverseKey required)", async () => {
@@ -905,5 +924,244 @@ describe("TraverseTool — filter capabilities and generated", () => {
     );
     expect(out.items[0].generated).toEqual(["abstract"]);
     expect(out.items[1]).not.toHaveProperty("generated");
+  });
+});
+
+describe("TraverseTool — non-polymorphic relationship on a source with findRelatedIds", () => {
+  const OPT_IN = { relatedIdsForEveryRelationship: true as const };
+  const formatter = new ToolFieldFormatterService(new BlockNoteService());
+  const ctx = { companyId: "c", userId: "u", userModuleIds: ["m"] };
+  const massime: any = {
+    type: "massime",
+    moduleId: "m",
+    description: "A massima.",
+    fields: [{ name: "text", type: "string", filterable: true, sortable: false }],
+    relationships: [
+      {
+        name: "judgement",
+        targetType: "judgements",
+        cardinality: "one",
+        description: "The judgement.",
+        cypherDirection: "in",
+        cypherLabel: "HAS_MASSIMA",
+        isReverse: false,
+        sourceType: "massime",
+      },
+      {
+        name: "related",
+        targetType: "*",
+        cardinality: "many",
+        description: "Anything related.",
+        cypherDirection: "out",
+        cypherLabel: "RELATES_TO",
+        isReverse: false,
+        sourceType: "massime",
+        polymorphic: true,
+      },
+    ],
+    nodeName: "massima",
+    labelName: "Massima",
+  };
+  const judgements: any = {
+    type: "judgements",
+    moduleId: "m",
+    description: "A judgement.",
+    fields: [{ name: "year", type: "number", filterable: true, sortable: true }],
+    relationships: [],
+    nodeName: "judgement",
+    labelName: "Judgement",
+    summary: (d: any) => `judgement:${d.id}`,
+  };
+  const described = [{ tool: "describe_entity", input: { type: "massime" }, durationMs: 0 }] as any[];
+  const judgementRecords: Record<string, any> = {
+    j1: { id: "j1", year: 2021 },
+    j2: { id: "j2", year: 2023 },
+    j3: { id: "j3", year: 2024 },
+  };
+
+  function build(sourceExtras: Record<string, unknown>) {
+    const services: Record<string, any> = {
+      massime: { findRecordById: vi.fn(async () => ({ id: "m1", text: "x" })), ...sourceExtras },
+      judgements: {
+        findRecordById: vi.fn(async (p: { id: string }) => judgementRecords[p.id] ?? null),
+        findRelatedRecordsByEdge: vi.fn(async () => [{ id: "j9", year: 2020 }]),
+      },
+    };
+    const factory: any = {
+      resolveEntity: (t: string) =>
+        t === "massime" ? massime : t === "judgements" ? judgements : { error: `Entity type "${t}" is not available.` },
+      resolveService: (t: string) => services[t],
+      // The real capture: it turns an ExternalSourceUnavailableError into the tool value.
+      capture: (r: any, fn: any, rec: any[]) =>
+        ToolFactory.prototype.capture.call({ logger: { log: () => {}, warn: () => {} } }, r, fn, rec),
+    };
+    const relatedEdges: any = { findRelatedIds: vi.fn(async () => []) };
+    const catalog: any = { getAllEntities: () => [massime, judgements] };
+    const tool = new TraverseTool(factory, catalog, {} as any, {} as any, formatter, relatedEdges);
+    return { tool, services, relatedEdges };
+  }
+
+  it("resolves the relationship through an opted-in source's findRelatedIds, not the target's edge lookup", async () => {
+    const { tool, services, relatedEdges } = build({
+      ...OPT_IN,
+      findRelatedIds: vi.fn(async () => [{ type: "judgements", id: "j2" }]),
+    });
+    const out: any = await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "judgement" }, ctx, [
+      ...described,
+    ]);
+    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "HAS_MASSIMA", limit: 11 });
+    expect(services.judgements.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+    expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
+    expect(services.judgements.findRecordById).toHaveBeenCalledWith({ id: "j2" });
+    expect(out).toEqual({
+      items: [{ id: "j2", type: "judgements", summary: "judgement:j2", fields: { year: 2023 } }],
+    });
+  });
+
+  it("passes the filters, sort and limit+1 to an opted-in source and keeps its page and order", async () => {
+    const { tool, services } = build({
+      ...OPT_IN,
+      // The source applies the criteria: it answers the ordered page, probe included.
+      findRelatedIds: vi.fn(async () => [
+        { type: "judgements", id: "j3" },
+        { type: "judgements", id: "j2" },
+      ]),
+    });
+    const out: any = await tool.invoke(
+      {
+        fromType: "massime",
+        fromId: "m1",
+        relationship: "judgement",
+        filters: [{ field: "year", op: "gte", value: 2022 }],
+        sort: [{ field: "year", direction: "desc" }],
+        limit: 1,
+      },
+      ctx,
+      [...described],
+    );
+    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({
+      id: "m1",
+      cypherLabel: "HAS_MASSIMA",
+      limit: 2,
+      filters: [{ field: "year", op: "gte", value: 2022 }],
+      orderByFields: [{ field: "year", direction: "desc" }],
+    });
+    expect(services.judgements.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+    expect(services.judgements.findRecordById).not.toHaveBeenCalledWith({ id: "j2" });
+    expect(out.items.map((i: any) => i.id)).toEqual(["j3"]);
+    expect(out.hasMore).toBe(true);
+    expect(out.note).toBe(
+      'Only the first 1 matches are shown. Call this tool again with a higher "limit" (max 50) to fetch the rest.',
+    );
+  });
+
+  it("returns the records in the order the source answered, without filtering them again", async () => {
+    const { tool } = build({
+      ...OPT_IN,
+      findRelatedIds: vi.fn(async () => [
+        { type: "judgements", id: "j1" },
+        { type: "judgements", id: "j3" },
+        { type: "judgements", id: "j2" },
+      ]),
+    });
+    const out: any = await tool.invoke(
+      {
+        fromType: "massime",
+        fromId: "m1",
+        relationship: "judgement",
+        filters: [{ field: "year", op: "gte", value: 2022 }],
+        limit: 5,
+      },
+      ctx,
+      [...described],
+    );
+    expect(out.items.map((i: any) => i.id)).toEqual(["j1", "j3", "j2"]);
+    expect(out).not.toHaveProperty("hasMore");
+  });
+
+  it("still validates the filters against the target type before reading", async () => {
+    const { tool, services } = build({
+      ...OPT_IN,
+      findRelatedIds: vi.fn(async () => [{ type: "judgements", id: "j1" }]),
+    });
+    const out: any = await tool.invoke(
+      {
+        fromType: "massime",
+        fromId: "m1",
+        relationship: "judgement",
+        filters: [{ field: "court", op: "eq", value: "x" }],
+      },
+      ctx,
+      [...described],
+    );
+    expect(out.error).toContain('Field "court" is not available on judgements.');
+    expect(services.massime.findRelatedIds).not.toHaveBeenCalled();
+  });
+
+  it("returns the unavailable result when the source does not answer", async () => {
+    const { tool, services } = build({
+      ...OPT_IN,
+      findRelatedIds: vi.fn(async () => {
+        throw new ExternalSourceUnavailableError({ message: "The corpus did not answer." });
+      }),
+    });
+    const out: any = await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "judgement" }, ctx, [
+      ...described,
+    ]);
+    expect(out).toEqual({ error: "The corpus did not answer.", code: "source_unavailable", retryable: true });
+    expect(services.judgements.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+  });
+
+  it("a source without the opt-in keeps the edge lookup for a typed relationship and is asked only for polymorphic ones", async () => {
+    const { tool, services, relatedEdges } = build({
+      findRelatedIds: vi.fn(async () => [{ type: "judgements", id: "j2" }]),
+    });
+    const typed: any = await tool.invoke(
+      {
+        fromType: "massime",
+        fromId: "m1",
+        relationship: "judgement",
+        filters: [{ field: "year", op: "gte", value: 2019 }],
+        sort: [{ field: "year", direction: "desc" }],
+      },
+      ctx,
+      [...described],
+    );
+    expect(services.massime.findRelatedIds).not.toHaveBeenCalled();
+    expect(services.judgements.findRelatedRecordsByEdge).toHaveBeenCalledWith({
+      cypherLabel: "HAS_MASSIMA",
+      cypherDirection: "out",
+      relatedLabel: "Massima",
+      relatedId: "m1",
+      filters: [{ field: "year", op: "gte", value: 2019 }],
+      orderByFields: [{ field: "year", direction: "desc" }],
+      limit: 11,
+    });
+    expect(typed.items.map((i: any) => i.id)).toEqual(["j9"]);
+
+    const polymorphic: any = await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "related" }, ctx, [
+      ...described,
+    ]);
+    expect(services.massime.findRelatedIds).toHaveBeenCalledTimes(1);
+    expect(services.massime.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "RELATES_TO", limit: 11 });
+    expect(relatedEdges.findRelatedIds).not.toHaveBeenCalled();
+    expect(polymorphic.items.map((i: any) => i.id)).toEqual(["j2"]);
+  });
+
+  it("keeps the target's edge lookup when the source has no findRelatedIds", async () => {
+    const { tool, services } = build({});
+    const out: any = await tool.invoke({ fromType: "massime", fromId: "m1", relationship: "judgement" }, ctx, [
+      ...described,
+    ]);
+    expect(services.judgements.findRelatedRecordsByEdge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cypherLabel: "HAS_MASSIMA",
+        cypherDirection: "out",
+        relatedLabel: "Massima",
+        relatedId: "m1",
+        limit: 11,
+      }),
+    );
+    expect(out.items.map((i: any) => i.id)).toEqual(["j9"]);
   });
 });

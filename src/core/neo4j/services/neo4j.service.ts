@@ -1,6 +1,18 @@
 import { BadRequestException, Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { auth, driver, Driver, Session } from "neo4j-driver";
+import {
+  auth,
+  driver,
+  Driver,
+  isDate,
+  isDateTime,
+  isDuration,
+  isInt,
+  isLocalDateTime,
+  isLocalTime,
+  isTime,
+  Session,
+} from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { RelatedNodeRule, relatedNodeRuleForLabel } from "../../../common/registries/entity-tenancy.registry";
@@ -46,6 +58,30 @@ const relatedNodePredicate = (alias: string, rule: RelatedNodeRule): string => {
       return `(NOT EXISTS { MATCH (${alias})${edge}(:${label}) } OR ${own})`;
     }
   }
+};
+
+/**
+ * One row of a scalar read (`Neo4jService.readScalars`): the record's columns as plain values.
+ * Driver integers are numbers, temporal values ISO strings, lists and maps converted the same way.
+ */
+export type Neo4jScalarRow = {
+  [column: string]: string | number | boolean | null | string[] | number[] | Neo4jScalarRow;
+};
+
+/** A driver value as a plain JS value: Integer → number, temporal → ISO string, recursively. */
+const toScalar = (value: any): any => {
+  if (value === null || value === undefined) return null;
+  if (isInt(value)) return value.toNumber();
+  if (isDate(value)) return value.toString();
+  if (isDateTime(value)) return value.toStandardDate().toISOString();
+  if (isLocalDateTime(value) || isTime(value) || isLocalTime(value) || isDuration(value)) return value.toString();
+  if (Array.isArray(value)) return value.map(toScalar);
+  if (typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [key, inner] of Object.entries(value)) out[key] = toScalar(inner);
+    return out;
+  }
+  return value;
 };
 
 export type QueryType<T> = {
@@ -273,6 +309,30 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(error);
       throw error;
     }
+  }
+
+  /**
+   * Reads rows of scalar columns (counts, sums, distinct values, dates) that have no entity to
+   * serialise, and returns each one through `map`.
+   *
+   * Each record becomes a plain object (`record.toObject()`): driver `Integer` → `number`,
+   * a `Date` → `YYYY-MM-DD`, a `DateTime` → full ISO string, other temporal values → their ISO
+   * text; nested lists and maps are converted the same way.
+   *
+   * It applies NO company scope and does not call `initQuery()`: the query runs exactly as given.
+   * A caller reading company-scoped labels seeds the query with `initQuery()` (which binds
+   * `$companyId` and the `company` match that `buildDefaultMatch()` relies on), appends its Cypher
+   * with `query.query +=` after `buildDefaultMatch()`, and passes `query.query` and
+   * `query.queryParams` here. `buildDefaultMatch()` alone, without that seed, does not scope.
+   * Rows that return graph nodes still go through `readOne()` / `readMany()` with a serialiser.
+   */
+  async readScalars<T>(params: {
+    query: string;
+    queryParams?: Record<string, unknown>;
+    map: (row: Neo4jScalarRow) => T;
+  }): Promise<T[]> {
+    const result = await this.read(params.query, params.queryParams);
+    return result.records.map((record: any) => params.map(toScalar(record.toObject()) as Neo4jScalarRow));
   }
 
   /**

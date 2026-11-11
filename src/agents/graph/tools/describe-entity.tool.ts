@@ -112,6 +112,18 @@ export interface DescribeEntityResult {
 }
 
 /**
+ * What the MCP `describe_entity` tool returns for a known type: the structured
+ * description of {@link DescribeEntityTool.buildDescription} (fields with their
+ * filter operators, relationships with their cardinality, detail fields, bridge)
+ * plus the same compact `schema` text the operator tool returns. An MCP client
+ * reads the fields as data; a model can read the text.
+ */
+export interface McpDescribeEntityResult extends EntityDescription {
+  /** `renderCompactDescriptions([description], { standalone: true })`. */
+  schema: string;
+}
+
+/**
  * The `describe_entity` tool: the fields, relationships, filter operators and
  * writable parts of one entity type, returned as `{ type, schema }` where
  * `schema` is the compact text of {@link renderCompactDescriptions} rendered
@@ -158,6 +170,32 @@ export class DescribeEntityTool {
     }
     const text = descriptions.length ? renderCompactDescriptions(descriptions, { standalone: false }) : "";
     return { text, types: descriptions.map((d) => d.type), approxTokens: Math.ceil(text.length / 4) };
+  }
+
+  /**
+   * The MCP form of `describe_entity`: the structured description of `type`
+   * plus its compact `schema` text (the exact text {@link invoke} returns).
+   * Recorded through the factory like {@link invoke}, so the describe-first
+   * gate of the read tools sees it. An unknown or inaccessible type returns
+   * the factory's `{ error, suggestion? }` object.
+   */
+  async invokeForMcp(
+    input: z.infer<typeof inputSchema>,
+    ctx: UserContext,
+    recorder: ToolCallRecord[],
+  ): Promise<McpDescribeEntityResult | { error: string; suggestion?: string }> {
+    return this.factory.capture(
+      { tool: "describe_entity", input },
+      async () => {
+        const description = this.buildDescription(input.type, ctx);
+        if ("error" in description) return description;
+        return {
+          ...description,
+          schema: renderCompactDescriptions([description], { standalone: true }),
+        };
+      },
+      recorder,
+    );
   }
 
   async invoke(

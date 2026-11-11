@@ -20,7 +20,7 @@ describe("McpGenericToolsService describe-first seeding", () => {
   const searchTool = { invoke: vi.fn().mockResolvedValue([]) };
   const readTool = { invoke: vi.fn().mockResolvedValue({}) };
   const traverseTool = { invoke: vi.fn().mockResolvedValue([]) };
-  const describeTool = { invoke: vi.fn().mockResolvedValue({}) };
+  const describeTool = { invoke: vi.fn().mockResolvedValue({}), invokeForMcp: vi.fn().mockResolvedValue({}) };
   const resolveTool = { invoke: vi.fn().mockResolvedValue({}) };
   const searchDocsTool = { invoke: vi.fn().mockResolvedValue("") };
   const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
@@ -69,7 +69,35 @@ describe("McpGenericToolsService describe-first seeding", () => {
   it("describe_entity and resolve_entity do not seed", async () => {
     const tools = service.build(ctx);
     await tools.find((t) => t.name === "describe_entity")!.execute({ type: "orders" }, ctx);
-    expect(recorderPassedTo(describeTool.invoke)).toEqual([]);
+    expect(recorderPassedTo(describeTool.invokeForMcp)).toEqual([]);
+  });
+
+  it("the MCP describe_entity tool returns fields, relationships and schema", async () => {
+    const reply = {
+      type: "orders",
+      description: "An order.",
+      fields: [
+        {
+          name: "name",
+          type: "string",
+          description: "Display name.",
+          filterable: true,
+          sortable: true,
+          operators: ["eq", "like"],
+        },
+      ],
+      relationships: [{ name: "account", targetType: "accounts", cardinality: "one", description: "Buyer." }],
+      schema: "## orders",
+    };
+    describeTool.invokeForMcp.mockResolvedValueOnce(reply);
+    const out = await service
+      .build(ctx)
+      .find((t) => t.name === "describe_entity")!
+      .execute({ type: "orders" }, ctx);
+    expect(describeTool.invokeForMcp).toHaveBeenCalledWith({ type: "orders" }, ctx, expect.any(Array));
+    expect(describeTool.invoke).not.toHaveBeenCalled();
+    expect(out.isError).toBeUndefined();
+    expect(JSON.parse(out.content[0].text as string)).toEqual(reply);
   });
 });
 
@@ -244,7 +272,7 @@ describe("McpGenericToolsService ping", () => {
  */
 describe("McpGenericToolsService tool-level errors", () => {
   const searchTool = { invoke: vi.fn() };
-  const describeTool = { invoke: vi.fn() };
+  const describeTool = { invoke: vi.fn(), invokeForMcp: vi.fn() };
   const idle = { invoke: vi.fn().mockResolvedValue({}) };
   const writeService = { buildTools: vi.fn().mockReturnValue([]), hasWritableTypes: vi.fn().mockReturnValue(false) };
 
@@ -279,7 +307,7 @@ describe("McpGenericToolsService tool-level errors", () => {
 
   it("maps an unknown type to unknown_type", async () => {
     const message = 'Entity type "ordes" is not available. Retry this call now with type "orders".';
-    describeTool.invoke.mockResolvedValue({ error: message, suggestion: "orders" });
+    describeTool.invokeForMcp.mockResolvedValue({ error: message, suggestion: "orders" });
     const out = await build()
       .find((t) => t.name === "describe_entity")!
       .execute({ type: "ordes" }, ctx);

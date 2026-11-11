@@ -22,6 +22,8 @@ export type Chunk = Entity & {
   /** Stored on the node as a JSON string; exposed here parsed via a computed field. */
   dates?: ChunkDate[];
   propagatedDates?: ChunkDate[];
+  /** Similarity read from a `score` column a query projects next to the chunk; undefined on every other read. */
+  score?: number;
 };
 
 /** Parse a `dates` / `propagatedDates` value that is persisted as a JSON-string blob. */
@@ -37,6 +39,12 @@ const parseChunkDates = (raw: unknown): ChunkDate[] => {
   }
   return [];
 };
+
+/** Convert a Neo4j driver Integer (or a plain number) to a JS number. */
+const toNumber = (value: unknown): number =>
+  value !== null && typeof value === "object" && "toNumber" in value
+    ? (value as { toNumber: () => number }).toNumber()
+    : Number(value);
 
 export const ChunkDescriptor = defineEntity<Chunk>()({
   ...chunkMeta,
@@ -66,6 +74,13 @@ export const ChunkDescriptor = defineEntity<Chunk>()({
   computed: {
     dates: { compute: (params) => parseChunkDates(params.data?.dates) },
     propagatedDates: { compute: (params) => parseChunkDates(params.data?.propagatedDates) },
+    score: {
+      compute: (params) => {
+        if (!params.record.has("score")) return undefined;
+        const raw = params.record.get("score");
+        return raw === null || raw === undefined ? undefined : toNumber(raw);
+      },
+    },
   },
 
   relationships: {

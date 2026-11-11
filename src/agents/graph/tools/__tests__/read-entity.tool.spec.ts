@@ -2,6 +2,10 @@ import { vi } from "vitest";
 import { ReadEntityTool } from "../read-entity.tool";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
+import {
+  ExternalSourceUnavailableError,
+  externalSourceUnavailableResult,
+} from "../../../../common/interfaces/external.entity.source.interface";
 
 describe("ReadEntityTool", () => {
   const accounts = {
@@ -472,6 +476,243 @@ describe("ReadEntityTool", () => {
       expect(out.fields.body).toBe("Bridge body");
       expect(out.fields.position).toBe(1);
       expect(out.__materialised).toEqual(["item"]);
+    });
+  });
+
+  describe("includes resolved by an external source (findRelatedIds)", () => {
+    const moduleId = "11111111-1111-1111-1111-111111111111";
+    const entity = (type: string, labelName: string, relationships: any[] = []) => ({
+      type,
+      moduleId,
+      description: type,
+      fields: [{ name: "name", type: "string", description: "n", filterable: true, sortable: true }],
+      relationships,
+      nodeName: labelName.toLowerCase(),
+      labelName,
+      summary: (d: any) => `${type}:${d.name}`,
+    });
+    const massime = entity("massime", "Massima", [
+      {
+        name: "judgement",
+        sourceType: "massime",
+        targetType: "judgements",
+        cardinality: "one",
+        description: "x",
+        cypherDirection: "out",
+        cypherLabel: "SUMMARISES",
+        isReverse: false,
+      },
+      {
+        name: "law",
+        sourceType: "massime",
+        targetType: "laws",
+        cardinality: "many",
+        description: "x",
+        cypherDirection: "out",
+        cypherLabel: "CITES",
+        isReverse: false,
+        polymorphic: true,
+      },
+    ]);
+    const entities: Record<string, any> = {
+      massime,
+      judgements: entity("judgements", "Judgement"),
+      laws: entity("laws", "Law"),
+      "law-articles": entity("law-articles", "LawArticle"),
+    };
+    const describedRecorder = () => [{ tool: "describe_entity", input: { type: "massime" }, durationMs: 0 }] as any[];
+    const buildFactory = (services: Record<string, any>): any => ({
+      resolveEntity: (t: string) => entities[t] ?? { error: "nope" },
+      resolveService: (t: string) => services[t],
+      capture: async (_r: any, fn: any, rec: any[]) => {
+        const v = await fn();
+        rec.push({});
+        return v;
+      },
+    });
+    const recordsById = (records: Record<string, any>) => vi.fn(async ({ id }: { id: string }) => records[id] ?? null);
+
+    it("asks an opted-in source's findRelatedIds for a typed include", async () => {
+      const source = {
+        relatedIdsForEveryRelationship: true as const,
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async () => [{ id: "j1", type: "judgements" }]),
+      };
+      const judgementsSvc = {
+        findRecordById: recordsById({ j1: { id: "j1", name: "Cass. 1/2024" } }),
+        findRelatedRecordsByEdge: vi.fn(async () => []),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, judgements: judgementsSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke(
+        { type: "massime", id: "m1", include: ["judgement"] },
+        ctx,
+        describedRecorder(),
+      );
+
+      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "SUMMARISES", limit: 50 });
+      expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
+      expect(judgementsSvc.findRelatedRecordsByEdge).not.toHaveBeenCalled();
+    });
+
+    it("returns each polymorphic target by its own type", async () => {
+      const source = {
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async () => [
+          { id: "l1", type: "laws" },
+          { id: "a1", type: "law-articles" },
+        ]),
+      };
+      const lawsSvc = { findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) };
+      const articlesSvc = { findRecordById: recordsById({ a1: { id: "a1", name: "art. 2043" } }) };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, laws: lawsSvc, "law-articles": articlesSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke({ type: "massime", id: "m1", include: ["law"] }, ctx, describedRecorder());
+
+      expect(out.related.law).toEqual([
+        { id: "l1", type: "laws", summary: "laws:c.c." },
+        { id: "a1", type: "law-articles", summary: "law-articles:art. 2043" },
+      ]);
+      expect(lawsSvc.findRecordById).toHaveBeenCalledWith({ id: "l1" });
+      expect(articlesSvc.findRecordById).toHaveBeenCalledWith({ id: "a1" });
+    });
+
+    it("a source without the opt-in keeps the edge lookup for a typed include and is asked only for polymorphic ones", async () => {
+      const source = {
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async () => [{ id: "l1", type: "laws" }]),
+      };
+      const judgementsSvc = {
+        findRecordById: vi.fn(async () => null),
+        findRelatedRecordsByEdge: vi.fn(async () => [{ id: "j1", name: "Cass. 1/2024" }]),
+      };
+      const lawsSvc = { findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, judgements: judgementsSvc, laws: lawsSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke(
+        { type: "massime", id: "m1", include: ["judgement", "law"] },
+        ctx,
+        describedRecorder(),
+      );
+
+      expect(judgementsSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith({
+        cypherLabel: "SUMMARISES",
+        cypherDirection: "in",
+        relatedLabel: "Massima",
+        relatedId: "m1",
+        limit: 50,
+      });
+      expect(source.findRelatedIds).toHaveBeenCalledTimes(1);
+      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "CITES", limit: 50 });
+      expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
+      expect(out.related.law).toEqual([{ id: "l1", type: "laws", summary: "laws:c.c." }]);
+    });
+
+    it("keeps the edge lookup when the source has no findRelatedIds", async () => {
+      const source = { findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })) };
+      const judgementsSvc = {
+        findRecordById: vi.fn(async () => null),
+        findRelatedRecordsByEdge: vi.fn(async () => [{ id: "j1", name: "Cass. 1/2024" }]),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, judgements: judgementsSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke(
+        { type: "massime", id: "m1", include: ["judgement"] },
+        ctx,
+        describedRecorder(),
+      );
+
+      expect(judgementsSvc.findRelatedRecordsByEdge).toHaveBeenCalledWith({
+        cypherLabel: "SUMMARISES",
+        cypherDirection: "in",
+        relatedLabel: "Massima",
+        relatedId: "m1",
+        limit: 50,
+      });
+      expect(judgementsSvc.findRecordById).not.toHaveBeenCalled();
+      expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
+    });
+
+    it("applies the scope filter and the 50 limit to external includes", async () => {
+      const many = Array.from({ length: 60 }, (_, i) => ({ id: `l${i}`, type: "laws" }));
+      const source = {
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async () => many),
+      };
+      const lawsSvc = { findRecordById: vi.fn(async ({ id }: { id: string }) => ({ id, name: id })) };
+      const scopeGuard: any = {
+        isInScope: vi.fn(async () => true),
+        filter: vi.fn(async ({ records }: any) => records.filter((r: any) => r.id !== "l1")),
+      };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, laws: lawsSvc }),
+        {} as any,
+        {} as any,
+        scopeGuard,
+        formatter,
+      );
+      const scopedCtx = { ...ctx, scopeId: "p1", scopeType: "pratiche" };
+      const out: any = await tool.invoke(
+        { type: "massime", id: "m1", include: ["law"] },
+        scopedCtx,
+        describedRecorder(),
+      );
+
+      expect(source.findRelatedIds).toHaveBeenCalledWith({ id: "m1", cypherLabel: "CITES", limit: 50 });
+      expect(lawsSvc.findRecordById).toHaveBeenCalledTimes(50);
+      expect(scopeGuard.filter).toHaveBeenCalledWith(expect.objectContaining({ type: "laws", ctx: scopedCtx }));
+      expect(out.related.law).toHaveLength(49);
+      expect(out.related.law.map((r: any) => r.id)).not.toContain("l1");
+    });
+
+    it("reports an unavailable external source for that include only", async () => {
+      const source = {
+        relatedIdsForEveryRelationship: true as const,
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async ({ cypherLabel }: { cypherLabel: string }) => {
+          if (cypherLabel === "CITES") throw new ExternalSourceUnavailableError({ message: "corpus" });
+          return [{ id: "j1", type: "judgements" }];
+        }),
+      };
+      const judgementsSvc = { findRecordById: recordsById({ j1: { id: "j1", name: "Cass. 1/2024" } }) };
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, judgements: judgementsSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+      const out: any = await tool.invoke(
+        { type: "massime", id: "m1", include: ["law", "judgement"] },
+        ctx,
+        describedRecorder(),
+      );
+
+      expect(out.id).toBe("m1");
+      expect(out.related.law).toEqual(
+        externalSourceUnavailableResult(new ExternalSourceUnavailableError({ message: "corpus" })),
+      );
+      expect(out.related.judgement).toEqual([{ id: "j1", type: "judgements", summary: "judgements:Cass. 1/2024" }]);
     });
   });
 });

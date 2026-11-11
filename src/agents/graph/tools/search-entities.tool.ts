@@ -3,6 +3,7 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { ToolFactory, ToolCallRecord, UserContext } from "./tool.factory";
 import { renderEntitySchema } from "./describe-entity.tool";
+import { filterFieldsMessage } from "./filter-fields.message";
 import { CatalogEntity, CatalogField } from "../interfaces/graph.catalog.interface";
 import { GraphSearchService } from "../services/graph.search.service";
 import { GraphCatalogService } from "../services/graph.catalog.service";
@@ -10,6 +11,7 @@ import { ToolFieldFormatterService } from "../services/field-formatting";
 import { materialiseBridge } from "../services/materialise-bridge";
 import { EntityServiceRegistry } from "../../../common/registries/entity.service.registry";
 import { ScopeGuard } from "../services/scope.guard";
+import { hasSearchWarnings } from "../../../common/interfaces/external.entity.source.interface";
 import {
   coerceFilters,
   coerceSort,
@@ -70,6 +72,7 @@ export class SearchEntitiesTool {
     const coercedSort = coerceSort(input.sort);
     const sort = "error" in coercedSort ? [] : coercedSort.sort;
     const localMaterialised: Array<{ relName: string; count: number }> = [];
+    let searchWarnings: string[] = [];
 
     const result = await this.factory.capture(
       {
@@ -101,13 +104,12 @@ export class SearchEntitiesTool {
         const capabilities = serviceFilterCapabilities(svc);
 
         const byName = new Map<string, CatalogField>(entity.fields.map((f) => [f.name, f]));
-        const validFieldNames = entity.fields.map((f) => f.name).join(", ");
         const relationshipNames = entity.relationships.map((r) => r.name).join(", ");
         for (const f of filters) {
           const def = byName.get(f.field);
           if (!def) {
             return {
-              error: `Field "${f.field}" is not available on ${entity.type}. Valid fields for filter/sort on ${entity.type}: [${validFieldNames}]. To reach records connected via a relationship, use the traverse tool — relationships on ${entity.type}: [${relationshipNames || "none"}]. Dotted paths like "account.name" are never valid here.`,
+              error: `Field "${f.field}" is not available on ${entity.type}. ${filterFieldsMessage(entity, capabilities)}\nTo reach records connected via a relationship, use the traverse tool — relationships on ${entity.type}: [${relationshipNames || "none"}]. Dotted paths like "account.name" are never valid here.`,
             };
           }
           const opError = filterOperatorError({ field: def, op: f.op, entityType: entity.type, capabilities });
@@ -136,6 +138,16 @@ export class SearchEntitiesTool {
           entity.scope?.path.length === 1 && !entity.scope.path[0].inline ? entity.scope.path[0].key : undefined;
         const useScopedRead = !!ctx.scopeId && entity.scope?.rootType === ctx.scopeType;
 
+        // An unscoped search prefers the service's findRecordsWithWarnings hook,
+        // whose warnings come from the same search as the records.
+        const readUnscoped = async (): Promise<any[]> => {
+          const params = { filters, orderByFields: sort, limit: limit + 1 };
+          if (!hasSearchWarnings(svc)) return svc.findRecords(params);
+          const found = await svc.findRecordsWithWarnings(params);
+          searchWarnings = found.warnings ?? [];
+          return found.records;
+        };
+
         // A 1-hop scope is expressible as a relationship read, which reuses the
         // entity's own repository (and therefore its ownership rules). Deeper
         // chains fall back to an unrestricted read plus a ScopeGuard filter.
@@ -153,20 +165,14 @@ export class SearchEntitiesTool {
                 orderByFields: sort,
                 limit: limit + 1,
               })
-            : await this.filterInScope(
-                entity.type,
-                await svc.findRecords({
-                  filters,
-                  orderByFields: sort,
-                  limit: limit + 1,
-                }),
-                ctx,
-              );
+            : await this.filterInScope(entity.type, await readUnscoped(), ctx);
         const hasMore = fetched.length > limit;
         const records = hasMore ? fetched.slice(0, limit) : fetched;
 
         const applied: SearchEntitiesApplied = { filters, sort, limit };
-        const output = await this.buildOutput(entity, records, ctx, localMaterialised, applied);
+        const built = await this.buildOutput(entity, records, ctx, localMaterialised, applied);
+        // Warnings the service returned with the records (findRecordsWithWarnings); the key is omitted when empty.
+        const output = searchWarnings.length ? { ...built, warnings: searchWarnings } : built;
         return hasMore
           ? {
               ...output,

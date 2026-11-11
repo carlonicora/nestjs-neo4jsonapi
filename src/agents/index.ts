@@ -82,7 +82,8 @@ export { UserModulesRepository } from "./graph/repositories/user-modules.reposit
 // their own LLM calls (each .build(ctx, recorder) returns a DynamicStructuredTool).
 export { ResolveEntityTool } from "./graph/tools/resolve-entity.tool";
 export { DescribeEntityTool, describeCatalogEntity, renderEntitySchema } from "./graph/tools/describe-entity.tool";
-export type { DescribeEntityResult } from "./graph/tools/describe-entity.tool";
+export type { DescribeEntityResult, McpDescribeEntityResult } from "./graph/tools/describe-entity.tool";
+export { filterFieldsMessage } from "./graph/tools/filter-fields.message";
 // The compact text form of type descriptions: describe_entity's output, and a
 // catalog of many types rendered together with one shared preamble.
 export { renderCompactDescriptions } from "./graph/services/compact-description";

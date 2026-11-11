@@ -86,6 +86,35 @@ describe("DescribeEntityTool", () => {
     expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
   });
 
+  it("invokeForMcp returns the structured description and the schema text", async () => {
+    const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] };
+    const recorder: any[] = [];
+    const out: any = await tool.invokeForMcp({ type: "accounts" }, ctx, recorder);
+    const viaInvoke: any = await tool.invoke({ type: "accounts" }, ctx, []);
+    expect(out.type).toBe("accounts");
+    expect(out.fields[0].operators).toEqual(["eq", "ne", "in", "like", "isNull", "isNotNull"]);
+    expect(out.relationships[0].cardinality).toBe("many");
+    expect(out.schema).toBe(viaInvoke.schema);
+    expect(out).toEqual({ ...tool.buildDescription("accounts", ctx), schema: viaInvoke.schema });
+    // Recorded like invoke: the describe-first gate depends on it.
+    expect(recorder).toHaveLength(1);
+  });
+
+  it("invokeForMcp returns the error object for an unknown type", async () => {
+    const out = await tool.invokeForMcp(
+      { type: "widgets" },
+      { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] },
+      [],
+    );
+    expect(out).toEqual({ error: 'Entity type "widgets" is not available.' });
+  });
+
+  it("invoke still returns {type, schema} only", async () => {
+    const ctx = { companyId: "c", userId: "u", userModuleIds: ["11111111-1111-1111-1111-111111111111"] };
+    const out: any = await tool.invoke({ type: "accounts" }, ctx, []);
+    expect(Object.keys(out).sort()).toEqual(["schema", "type"]);
+  });
+
   describe("filter operators", () => {
     const fields = [
       { name: "name", type: "string", description: "Name.", filterable: true, sortable: true },

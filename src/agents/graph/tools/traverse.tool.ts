@@ -13,8 +13,10 @@ import type {
   ExternalEntitySource,
   ExternalFilterCapability,
 } from "../../../common/interfaces/external.entity.source.interface";
+import { answersRelatedIds } from "../../../common/interfaces/external.entity.source.interface";
 import { allowedFilterOperators, serviceFilterCapabilities } from "../services/filter-operators";
 import { renderEntitySchema } from "./describe-entity.tool";
+import { filterFieldsMessage } from "./filter-fields.message";
 
 // Moved to services/filter-operators; re-exported so existing imports keep working.
 export { TYPE_TO_OP_ALLOWED, serviceFilterCapabilities, allowedFilterOperators } from "../services/filter-operators";
@@ -312,6 +314,12 @@ export function coerceFilters(raw: unknown): FilterCoercionResult {
   return { filters: out };
 }
 
+/** One related record and the catalog entity it is projected with. */
+type RelatedRow = { entity: CatalogEntity; record: any };
+
+/** The related records a typed traverse returns, and its truncation marker. */
+type RelatedRead = { rows: RelatedRow[]; truncation: { hasMore?: true; note?: string } };
+
 @Injectable()
 export class TraverseTool {
   constructor(
@@ -386,7 +394,6 @@ export class TraverseTool {
         const capabilities = serviceFilterCapabilities(targetSvc);
 
         const byName = new Map(target.fields.map((f) => [f.name, f]));
-        const validFieldNames = target.fields.map((f) => f.name).join(", ");
         const sortableFieldNames = target.fields
           .filter((f) => f.sortable)
           .map((f) => f.name)
@@ -395,7 +402,7 @@ export class TraverseTool {
           const def = byName.get(f.field);
           if (!def) {
             return {
-              error: `Field "${f.field}" is not available on ${target.type}. Valid fields on ${target.type}: [${validFieldNames}].`,
+              error: `Field "${f.field}" is not available on ${target.type}. ${filterFieldsMessage(target, capabilities)}`,
             };
           }
           const opError = filterOperatorError({ field: def, op: f.op, entityType: target.type, capabilities });
@@ -413,72 +420,43 @@ export class TraverseTool {
         if (!targetSvc) return { error: `Service not available for "${target.type}".` };
 
         const limit = Math.min(Math.max(input.limit ?? 10, 1), MAX_LIST_LIMIT);
-        // Walk via the catalog's raw edge spec so the traversal works even
-        // when the target's own descriptor does not declare the relationship
-        // (e.g. a reverse-only materialisation). Direction is inverted
-        // because catalog.cypherDirection is from the source's perspective,
-        // but findRelatedRecordsByEdge expects it from the target's (this-node)
-        // perspective.
-        const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
-        // Probe one extra record so truncation is visible to the model:
-        // without this, a silently clipped list is reported as complete.
-        const fetched: any[] = await this.filterInScope(
-          target.type,
-          await targetSvc.findRelatedRecordsByEdge({
-            cypherLabel: rel.cypherLabel,
-            cypherDirection: targetDirection,
-            relatedLabel: source.labelName,
-            relatedId: input.fromId,
-            filters,
-            orderByFields: sort,
-            limit: limit + 1,
-          }),
-          ctx,
-        );
-        const hasMore = fetched.length > limit;
-        const records = hasMore ? fetched.slice(0, limit) : fetched;
-        const truncation = hasMore
-          ? {
-              hasMore: true,
-              note: truncationNote(limit),
-            }
-          : {};
 
-        const baseItems = records.map((r) => {
-          const { fields, availableOnRead, generated } = this.formatter.build({
-            entity: target,
-            record: r,
-            stage: "list",
-          });
-          return {
-            id: r.id,
-            type: target.type,
-            summary: target.summary ? target.summary(r) : String(r.name ?? r.id),
-            fields,
-            ...(availableOnRead ? { availableOnRead } : {}),
-            ...(generated ? { generated } : {}),
-          };
-        });
+        // A source whose edges do not live in the app database supplies its
+        // own related ids for a typed relationship only when it opted in
+        // (ExternalEntitySource.relatedIdsForEveryRelationship) — the same rule
+        // read_entity applies to its includes. Every other source keeps the
+        // target's edge lookup.
+        const sourceSvc = this.factory.resolveService(source.type);
+        const read =
+          sourceSvc && answersRelatedIds(sourceSvc, rel)
+            ? await this.readExternalRelated({ source, sourceSvc, rel, input, filters, sort, limit, ctx })
+            : await this.readEdgeRelated({ source, target, targetSvc, rel, input, filters, sort, limit, ctx });
+        if ("error" in read) return read;
+        const { rows, truncation } = read;
 
-        if (!target.bridge) {
+        const baseItems = rows.map(({ entity, record }) => this.listItem(entity, record));
+
+        if (!rows.some(({ entity }) => entity.bridge)) {
           return { items: baseItems, ...truncation };
         }
 
         // Bridge fanout: each item gets its `materialiseTo` relationships inlined.
         const items = await Promise.all(
-          baseItems.map((item) =>
-            materialiseBridge({
-              bridge: target,
-              record: { id: item.id, fields: item.fields },
-              ctx,
-              deps: {
-                catalog: this.catalog,
-                registry: this.registry,
-                scopeGuard: this.scopeGuard,
-                formatter: this.formatter,
-              },
-              onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
-            }).then((m) => (item.generated ? { ...m, generated: item.generated } : m)),
+          baseItems.map((item, index) =>
+            rows[index].entity.bridge
+              ? materialiseBridge({
+                  bridge: rows[index].entity,
+                  record: { id: item.id, fields: item.fields },
+                  ctx,
+                  deps: {
+                    catalog: this.catalog,
+                    registry: this.registry,
+                    scopeGuard: this.scopeGuard,
+                    formatter: this.formatter,
+                  },
+                  onMaterialised: (relName, count) => localMaterialised.push({ relName, count }),
+                }).then((m) => (item.generated ? { ...m, generated: item.generated } : m))
+              : item,
           ),
         );
         return { items, ...truncation };
@@ -558,11 +536,121 @@ export class TraverseTool {
         }
       : {};
 
+    const items = (await this.readTypedPairs(kept, ctx)).map(({ entity, record }) => this.listItem(entity, record));
+
+    return { items, ...truncation };
+  }
+
+  /**
+   * The edge lookup for a typed relationship: the TARGET service reads the
+   * records linked to the source by the catalog's raw edge spec, applying the
+   * filters, sort and limit itself.
+   */
+  private async readEdgeRelated(params: {
+    source: CatalogEntity;
+    target: CatalogEntity;
+    targetSvc: NonNullable<ReturnType<ToolFactory["resolveService"]>>;
+    rel: CatalogRelationship;
+    input: z.infer<typeof inputSchema>;
+    filters: NormalisedFilter[];
+    sort: NormalisedSort[];
+    limit: number;
+    ctx: UserContext;
+  }): Promise<RelatedRead> {
+    const { source, target, targetSvc, rel, input, filters, sort, limit, ctx } = params;
+    // Walk via the catalog's raw edge spec so the traversal works even
+    // when the target's own descriptor does not declare the relationship
+    // (e.g. a reverse-only materialisation). Direction is inverted
+    // because catalog.cypherDirection is from the source's perspective,
+    // but findRelatedRecordsByEdge expects it from the target's (this-node)
+    // perspective.
+    const targetDirection: "in" | "out" = rel.cypherDirection === "out" ? "in" : "out";
+    // Probe one extra record so truncation is visible to the model:
+    // without this, a silently clipped list is reported as complete.
+    const fetched: any[] = await this.filterInScope(
+      target.type,
+      await targetSvc.findRelatedRecordsByEdge({
+        cypherLabel: rel.cypherLabel,
+        cypherDirection: targetDirection,
+        relatedLabel: source.labelName,
+        relatedId: input.fromId,
+        filters,
+        orderByFields: sort,
+        limit: limit + 1,
+      }),
+      ctx,
+    );
+    const hasMore = fetched.length > limit;
+    const records = hasMore ? fetched.slice(0, limit) : fetched;
+    return {
+      rows: records.map((record) => ({ entity: target, record })),
+      truncation: hasMore ? { hasMore: true, note: truncationNote(limit) } : {},
+    };
+  }
+
+  /**
+   * A typed relationship on a source that implements
+   * `ExternalEntitySource.findRelatedIds` and declares
+   * `relatedIdsForEveryRelationship`: the source receives the validated
+   * filters, sort and `limit + 1` (the truncation probe) and returns the typed
+   * ids of the final ordered page. Each record is then read on its own type's
+   * service and scope-filtered (the polymorphic path's read), in the order the
+   * source returned. An ExternalSourceUnavailableError propagates to
+   * `ToolFactory.capture`, which turns it into the unavailable-source result.
+   */
+  private async readExternalRelated(params: {
+    source: CatalogEntity;
+    sourceSvc: Required<Pick<ExternalEntitySource, "findRelatedIds">> &
+      NonNullable<ReturnType<ToolFactory["resolveService"]>>;
+    rel: CatalogRelationship;
+    input: z.infer<typeof inputSchema>;
+    filters: NormalisedFilter[];
+    sort: NormalisedSort[];
+    limit: number;
+    ctx: UserContext;
+  }): Promise<RelatedRead | { error: string }> {
+    const { source, sourceSvc, rel, input, filters, sort, limit, ctx } = params;
+
+    // Source gate: the same company-scoped read the polymorphic path performs.
+    const sourceRecord = await sourceSvc.findRecordById({ id: input.fromId });
+    if (!sourceRecord) return { error: `No ${source.type} with id ${input.fromId}.` };
+
+    const pairs = await sourceSvc.findRelatedIds({
+      id: input.fromId,
+      cypherLabel: rel.cypherLabel,
+      limit: limit + 1,
+      ...(filters.length ? { filters } : {}),
+      ...(sort.length ? { orderByFields: sort } : {}),
+    });
+    const hasMore = pairs.length > limit;
+    const kept = (hasMore ? pairs.slice(0, limit) : pairs).map((pair) => ({
+      id: pair.id,
+      type: pair.type ?? rel.targetType,
+    }));
+    // readTypedPairs groups by type; put the rows back in the source's order.
+    const position = new Map(kept.map((pair, index) => [pair.id, index]));
+    const rows = (await this.readTypedPairs(kept, ctx)).sort(
+      (a, b) => (position.get(a.record.id) ?? 0) - (position.get(b.record.id) ?? 0),
+    );
+    return { rows, truncation: hasMore ? { hasMore: true, note: truncationNote(limit) } : {} };
+  }
+
+  /**
+   * Read typed (id, type) pairs through each type's own service, grouped by
+   * type, then scope-filter per type. Tenancy stays in the repository layer.
+   * Silent drops (no type, unknown or module-gated type, missing or
+   * out-of-scope record) match the materialise-bridge contract: the model is
+   * never told a record exists that it may not see.
+   */
+  private async readTypedPairs(
+    pairs: Array<{ id: string; type: string | undefined }>,
+    ctx: UserContext,
+  ): Promise<RelatedRow[]> {
     const entityByType = new Map<string, CatalogEntity>();
     const idsByType = new Map<string, string[]>();
     const gatedTypes = new Set<string>();
     const seenIds = new Set<string>();
-    for (const pair of kept) {
+    for (const pair of pairs) {
       // The Cypher DISTINCT is the primary defence against a pair linked in
       // both directions; this set keeps the guarantee local to the tool too.
       if (seenIds.has(pair.id)) continue;
@@ -580,7 +668,7 @@ export class TraverseTool {
       idsByType.set(type, [...(idsByType.get(type) ?? []), pair.id]);
     }
 
-    const items: unknown[] = [];
+    const rows: RelatedRow[] = [];
     for (const [type, ids] of idsByType) {
       const entity = entityByType.get(type)!;
       const svc = this.factory.resolveService(type);
@@ -592,22 +680,23 @@ export class TraverseTool {
         const record: any = await svc.findRecordById({ id });
         if (record) records.push(record);
       }
-      for (const record of await this.filterInScope(type, records, ctx)) {
-        const { fields, availableOnRead, generated } = this.formatter.build({ entity, record, stage: "list" });
-        items.push({
-          id: record.id,
-          type,
-          summary: entity.summary ? entity.summary(record) : String(record.name ?? record.id),
-          fields,
-          ...(availableOnRead ? { availableOnRead } : {}),
-          ...(generated ? { generated } : {}),
-        });
-      }
+      for (const record of await this.filterInScope(type, records, ctx)) rows.push({ entity, record });
     }
-
-    return { items, ...truncation };
+    return rows;
   }
 
+  /** One list item: the record projected with its own type's stage-1 fields. */
+  private listItem(entity: CatalogEntity, record: any) {
+    const { fields, availableOnRead, generated } = this.formatter.build({ entity, record, stage: "list" });
+    return {
+      id: record.id,
+      type: entity.type,
+      summary: entity.summary ? entity.summary(record) : String(record.name ?? record.id),
+      fields,
+      ...(availableOnRead ? { availableOnRead } : {}),
+      ...(generated ? { generated } : {}),
+    };
+  }
   /**
    * Drop records outside the run's scope. An unscoped run short-circuits
    * before the guard is consulted — the same contract ScopeGuard.filter

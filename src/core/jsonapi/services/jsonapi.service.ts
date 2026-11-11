@@ -420,7 +420,9 @@ export class JsonApiService {
         if (edgePropsMap && edgePropsMap[result.id] && relationship.edgeFields) {
           minData.meta = {};
           for (const field of relationship.edgeFields) {
-            if (edgePropsMap[result.id][field.name] !== undefined) {
+            // Neo4j stores no null properties: a null here is an absent edge property, so it is
+            // left out of the meta (a client reads it as absent, never as a value).
+            if (edgePropsMap[result.id][field.name] !== undefined && edgePropsMap[result.id][field.name] !== null) {
               minData.meta[field.name] = edgePropsMap[result.id][field.name];
             }
           }

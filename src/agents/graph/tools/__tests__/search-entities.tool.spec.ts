@@ -65,6 +65,21 @@ describe("SearchEntitiesTool", () => {
     expect(out.error).toMatch(/secret/);
   });
 
+  it("an unknown filter field returns the filterable list", async () => {
+    registryGet.mockReturnValue({ filterCapabilities: () => [{ field: "name", operators: ["eq", "like"] }] });
+    const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
+    const out: any = await tool.invoke(
+      { type: "accounts", filters: [{ field: "secret", op: "eq", value: "x" }] },
+      ctx,
+      [{ tool: "describe_entity", input: { type: "accounts" }, durationMs: 0 }],
+    );
+    expect(out.error).toContain(
+      'Field "secret" is not available on accounts. Valid filter fields for accounts: name (eq, like).\nSortable fields: name, status.',
+    );
+    expect(out.error).not.toMatch(/status \(/);
+    expect(out.error).toContain("use the traverse tool");
+  });
+
   it("rejects sort on undescribed field", async () => {
     const tool = new SearchEntitiesTool(factory, unusedSearch, {} as any, {} as any, {} as any, formatter);
     const out: any = await tool.invoke({ type: "accounts", sort: [{ field: "ghost", direction: "asc" }] }, ctx, [

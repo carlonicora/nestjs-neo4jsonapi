@@ -717,6 +717,51 @@ describe("JsonApiService", () => {
       expect(result.data.relationships.tags.data[0].id).toBe("t1");
     });
 
+    it("omits a null edge property from the per-item meta (Neo4j stores no null properties: null means absent)", async () => {
+      const tagBuilder = {
+        type: "tags",
+        id: "id",
+        attributes: { name: "name" },
+        create: vi.fn().mockReturnValue({
+          type: "tags",
+          id: "id",
+          attributes: { name: "name" },
+        }),
+      };
+
+      const data = {
+        id: "123",
+        title: "Test Post",
+        tags: [
+          { id: "t1", name: "JavaScript" },
+          { id: "t2", name: "TypeScript" },
+        ],
+        tagsEdgeProps: {
+          t1: { relevance: 60, reason: "scored" },
+          t2: { relevance: null, reason: "unscored" },
+        },
+      };
+
+      const builder = {
+        type: "posts",
+        id: "id",
+        attributes: { title: "title" },
+        relationships: {
+          tags: {
+            data: tagBuilder,
+            perItemMeta: true,
+            edgePropsKey: "tagsEdgeProps",
+            edgeFields: [{ name: "relevance" }, { name: "reason" }],
+          },
+        },
+      };
+
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
+
+      expect(result.data.relationships.tags.data[0].meta).toEqual({ relevance: 60, reason: "scored" });
+      expect(result.data.relationships.tags.data[1].meta).toEqual({ reason: "unscored" });
+    });
+
     it("should handle forceSingle on array relationships", async () => {
       const userBuilder = {
         type: "users",

@@ -730,4 +730,49 @@ describe("GraphCatalogService", () => {
       expect(Object.keys(folder.relationships)).toEqual(["notes", "versions"]);
     });
   });
+  describe("reverse cardinality", () => {
+    const moduleId = "77777777-7777-7777-7777-777777777777";
+
+    function reverseOf(forward: "one" | "many", reverse: Record<string, unknown>) {
+      const source = descriptor({
+        type: "sources",
+        moduleId,
+        description: "Source.",
+        relationships: {
+          target: {
+            model: { type: "targets", nodeName: "target", labelName: "Target" },
+            direction: "out",
+            relationship: "POINTS_TO",
+            cardinality: forward,
+            description: "The target.",
+            reverse,
+          },
+        },
+      });
+      const target = descriptor({ type: "targets", moduleId, description: "Target." });
+      const svc = new GraphCatalogService({ loadAll: () => [source, target] } as any);
+      svc.buildCatalog();
+      return svc.getEntityDetail("targets", [moduleId])!.relationships.find((r) => r.name === "sources");
+    }
+
+    it("a reverse of a one forward defaults to one (the forward cardinality)", () => {
+      expect(reverseOf("one", { name: "sources", description: "Sources." })?.cardinality).toBe("one");
+    });
+
+    it("a reverse declares many explicitly", () => {
+      expect(reverseOf("one", { name: "sources", description: "Sources.", cardinality: "many" })?.cardinality).toBe(
+        "many",
+      );
+    });
+
+    it("a reverse declares one explicitly", () => {
+      expect(reverseOf("one", { name: "sources", description: "Sources.", cardinality: "one" })?.cardinality).toBe(
+        "one",
+      );
+    });
+
+    it("a reverse of a many forward is many", () => {
+      expect(reverseOf("many", { name: "sources", description: "Sources." })?.cardinality).toBe("many");
+    });
+  });
 });

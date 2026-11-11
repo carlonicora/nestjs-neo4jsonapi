@@ -10,9 +10,13 @@ import { EntityServiceRegistry } from "../../../common/registries/entity.service
 import { ScopeGuard } from "../services/scope.guard";
 import { isDetailFieldsSource } from "../../../common/interfaces/detail.fields.source.interface";
 import {
+  answersRelatedIds,
   externalSourceUnavailableResult,
   isExternalSourceUnavailableError,
 } from "../../../common/interfaces/external.entity.source.interface";
+
+/** Most related records one include returns. */
+const INCLUDE_LIMIT = 50;
 
 const inputSchema = z.object({
   type: z.string(),
@@ -109,6 +113,32 @@ export class ReadEntityTool {
         if (input.include?.length) {
           for (const name of input.include) {
             const rel = entity.relationships.find((r) => r.name === name)!;
+            // A source whose edges do not live in the app database (an
+            // ExternalEntitySource implementing findRelatedIds) supplies its own
+            // related ids, already typed, for a polymorphic include — and for a
+            // typed one only when it declares relatedIdsForEveryRelationship.
+            // The same rule traverse applies.
+            if (answersRelatedIds(svc, rel)) {
+              let items: Array<{ id: string; type: string; summary: string }>;
+              try {
+                const pairs = await svc.findRelatedIds({
+                  id: input.id,
+                  cypherLabel: rel.cypherLabel,
+                  limit: INCLUDE_LIMIT,
+                });
+                items = await this.readTypedPairs(
+                  pairs.slice(0, INCLUDE_LIMIT).map((p) => ({ id: p.id, type: p.type ?? rel.targetType })),
+                  ctx,
+                );
+              } catch (e) {
+                if (!isExternalSourceUnavailableError(e)) throw e;
+                related[name] = externalSourceUnavailableResult(e);
+                continue;
+              }
+              linkedRecords += items.length;
+              related[name] = items;
+              continue;
+            }
             const targetSvc = this.factory.resolveService(rel.targetType);
             if (!targetSvc) {
               related[name] = { error: `Service for ${rel.targetType} not available.` };
@@ -126,7 +156,7 @@ export class ReadEntityTool {
                   cypherDirection: targetDirection,
                   relatedLabel: entity.labelName,
                   relatedId: input.id,
-                  limit: 50,
+                  limit: INCLUDE_LIMIT,
                 }),
                 ctx,
               );
@@ -221,6 +251,43 @@ export class ReadEntityTool {
       recorder[recorder.length - 1].walkedEdge = true;
     }
     return result;
+  }
+
+  /**
+   * Read typed (id, type) pairs through each type's own service, grouped by
+   * type, then scope-filter per type — mirrors traverse's polymorphic read.
+   * A type that is unknown or module-gated, or a record that is missing or out
+   * of scope, is dropped silently.
+   */
+  private async readTypedPairs(
+    pairs: Array<{ id: string; type: string }>,
+    ctx: UserContext,
+  ): Promise<Array<{ id: string; type: string; summary: string }>> {
+    const idsByType = new Map<string, string[]>();
+    const seenIds = new Set<string>();
+    for (const pair of pairs) {
+      if (seenIds.has(pair.id)) continue;
+      seenIds.add(pair.id);
+      idsByType.set(pair.type, [...(idsByType.get(pair.type) ?? []), pair.id]);
+    }
+
+    const items: Array<{ id: string; type: string; summary: string }> = [];
+    for (const [type, ids] of idsByType) {
+      const targetEntity = this.factory.resolveEntity(type, ctx);
+      if ("error" in targetEntity) continue;
+      const targetSvc = this.factory.resolveService(type);
+      if (!targetSvc) continue;
+      const records: any[] = [];
+      for (const id of ids) {
+        const record: any = await targetSvc.findRecordById({ id });
+        if (record) records.push(record);
+      }
+      const summariser = targetEntity.summary ?? ((d: any) => String(d.name ?? d.id));
+      for (const record of await this.filterInScope(type, records, ctx)) {
+        items.push({ id: record.id, type, summary: summariser(record) });
+      }
+    }
+    return items;
   }
 
   /**

@@ -175,7 +175,7 @@ export class McpGenericToolsService {
     });
     return [
       read("describe_entity", DESCRIBE_DESCRIPTION, describeEntityInputSchema, (i) =>
-        this.describeEntityTool.invoke(i, ctx, recorder),
+        this.describeEntityTool.invokeForMcp(i, ctx, recorder),
       ),
       read("resolve_entity", RESOLVE_DESCRIPTION, resolveEntityInputSchema, (i) =>
         this.resolveEntityTool.invoke(i, ctx, recorder),
