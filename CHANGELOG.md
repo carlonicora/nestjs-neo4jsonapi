@@ -1,3 +1,9 @@
+## [8.26.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.25.0...v8.26.0) (2026-11-12)
+
+### 🚀 Features
+
+* **graph,jsonapi:** a reverse relationship with no declared cardinality is now "many" instead of a copy of the forward one; JSON:API meta leaves out an edge property the edge does not store on to-one relationships too, and sends no empty meta; services gain findRecordsByIds, and read_entity includes and traverse read related records once per type; a Chunk reads its score only from a chunk_score column; readScalars throws on an integer too large to read exactly; projectNodeOmitting rejects a bad alias and a property the node does not store is absent, not null; ExternalSourceUnavailableError takes retryable (default true); docs/UPGRADING.md lists what changed ([ad692ef](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ad692ef3f3cdb385459e14d7b28420f03153a2dd))
+
 ## [8.25.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.24.0...v8.25.0) (2026-11-12)
 
 ### 🚀 Features
