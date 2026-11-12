@@ -249,11 +249,10 @@ export interface RelationshipDef {
     description: string;
     /**
      * How many source records one target record reaches through the reverse
-     * traversal. Default: the forward relationship's `cardinality`. A descriptor
-     * sets "many" when several source records can point at one target (each
-     * article has one law, a law has many articles), so a forward "one" does not
-     * hide records on the reverse side. Set "one" to state a true one-to-one
-     * explicitly (e.g. an account that owns exactly one calendar).
+     * traversal. Default: "many", whatever the forward relationship's
+     * `cardinality` (each article has one law, a law has many articles; a
+     * forward "many" can reverse to either). Set "one" only to state a true
+     * one-to-one (e.g. an account that owns exactly one calendar).
      */
     cardinality?: "one" | "many";
   };

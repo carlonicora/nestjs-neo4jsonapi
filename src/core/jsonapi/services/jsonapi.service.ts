@@ -253,6 +253,17 @@ export class JsonApiService {
             }
           }
 
+          // Edge properties of a to-one relationship built from a descriptor: the
+          // parent entity carries each value under the field's name. `edgeFields`
+          // and `perItemMeta` are set by DescriptorBasedSerialiser and are not part
+          // of JsonApiDataInterface, so they are read untyped, as
+          // buildMinimalDataWithPerItemMeta reads them (`relationship?: any`).
+          const rel = relationship as any;
+          if (rel.edgeFields && !rel.perItemMeta) {
+            const edgeMeta = this.buildEdgeMeta(data as Record<string, unknown>, rel.edgeFields);
+            if (edgeMeta) resourceLinkage.meta = { ...(resourceLinkage.meta ?? {}), ...edgeMeta };
+          }
+
           // Only add to included if:
           // 1. include parameter was not specified (include all), OR
           // 2. this relationship is explicitly in the include list
@@ -411,21 +422,16 @@ export class JsonApiService {
   /**
    * Build minimal data array with per-item meta for MANY relationships with edge properties.
    * If the relationship has perItemMeta flag, adds meta from the EdgePropsMap to each item.
+   * An item whose edge stores none of the declared properties carries no meta.
    */
   private buildMinimalDataWithPerItemMeta(serialisedData: any[], relationship?: any, parentEntity?: any): any[] {
     if (relationship?.perItemMeta && relationship?.edgePropsKey && parentEntity) {
       const edgePropsMap = parentEntity[relationship.edgePropsKey];
       return serialisedData.map((result) => {
         const minData: any = { type: result.type, id: result.id };
-        if (edgePropsMap && edgePropsMap[result.id] && relationship.edgeFields) {
-          minData.meta = {};
-          for (const field of relationship.edgeFields) {
-            // Neo4j stores no null properties: a null here is an absent edge property, so it is
-            // left out of the meta (a client reads it as absent, never as a value).
-            if (edgePropsMap[result.id][field.name] !== undefined && edgePropsMap[result.id][field.name] !== null) {
-              minData.meta[field.name] = edgePropsMap[result.id][field.name];
-            }
-          }
+        if (edgePropsMap && relationship.edgeFields) {
+          const meta = this.buildEdgeMeta(edgePropsMap[result.id], relationship.edgeFields);
+          if (meta) minData.meta = meta;
         }
         return minData;
       });
@@ -433,5 +439,24 @@ export class JsonApiService {
 
     // Default behavior: return type and id only
     return serialisedData.map((result) => ({ type: result.type, id: result.id }));
+  }
+
+  /**
+   * The JSON:API meta of one edge: each declared edge field the edge stores. Neo4j stores no
+   * null properties, so a null or undefined value is an absent property and is left out (a
+   * client reads it as absent, never as a value). Undefined when no field remains, so an empty
+   * meta object is never sent.
+   */
+  private buildEdgeMeta(
+    values: Record<string, unknown> | undefined,
+    edgeFields: Array<{ name: string }>,
+  ): Record<string, unknown> | undefined {
+    if (!values) return undefined;
+    const meta: Record<string, unknown> = {};
+    for (const field of edgeFields) {
+      const value = values[field.name];
+      if (value !== undefined && value !== null) meta[field.name] = value;
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
   }
 }

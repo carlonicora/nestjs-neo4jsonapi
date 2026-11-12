@@ -88,7 +88,7 @@ only when the user's catalog has at least one `chat.writable` type, see
 
 | Tool | Kind | Notes |
 |---|---|---|
-| `describe_entity` | read | Descriptor → fields, relationships, filter/sort markers |
+| `describe_entity` | read | `{ type, description, fields, relationships, detailFields?, bridge?, schema }` (`McpDescribeEntityResult` in `src/agents/graph/tools/describe-entity.tool.ts`): each field with its operators, each relationship with its cardinality, and the compact `schema` text |
 | `resolve_entity` | read | Fuzzy name → ranked entity candidates |
 | `search_entities` | read | Filters, sort, cursor pagination |
 | `read_entity` | read | One record by id, optional one-hop includes |

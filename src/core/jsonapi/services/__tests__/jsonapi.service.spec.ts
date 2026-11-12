@@ -762,6 +762,45 @@ describe("JsonApiService", () => {
       expect(result.data.relationships.tags.data[1].meta).toEqual({ reason: "unscored" });
     });
 
+    it("sends no meta on a to-many item whose edge stores none of its properties", async () => {
+      const tagBuilder = {
+        type: "tags",
+        id: "id",
+        attributes: { name: "name" },
+        create: vi.fn().mockReturnValue({ type: "tags", id: "id", attributes: { name: "name" } }),
+      };
+      const data = {
+        id: "123",
+        title: "Test Post",
+        tags: [
+          { id: "t1", name: "JavaScript" },
+          { id: "t2", name: "TypeScript" },
+        ],
+        tagsEdgeProps: {
+          t1: { relevance: 60, reason: null },
+          t2: { relevance: null, reason: null },
+        },
+      };
+      const builder = {
+        type: "posts",
+        id: "id",
+        attributes: { title: "title" },
+        relationships: {
+          tags: {
+            data: tagBuilder,
+            perItemMeta: true,
+            edgePropsKey: "tagsEdgeProps",
+            edgeFields: [{ name: "relevance" }, { name: "reason" }],
+          },
+        },
+      };
+
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
+
+      expect(result.data.relationships.tags.data[0]).toEqual({ type: "tags", id: "t1", meta: { relevance: 60 } });
+      expect(result.data.relationships.tags.data[1]).toEqual({ type: "tags", id: "t2" });
+    });
+
     it("should handle forceSingle on array relationships", async () => {
       const userBuilder = {
         type: "users",
@@ -870,6 +909,56 @@ describe("JsonApiService", () => {
 
       expect(result.data.relationships.author.meta).toBeDefined();
       expect(result.data.relationships.author.meta.permissionCount).toBe(2);
+    });
+
+    const authorBuilder = () => ({
+      type: "users",
+      id: "id",
+      attributes: { name: "name" },
+      create: vi.fn().mockReturnValue({ type: "users", id: "id", attributes: { name: "name" } }),
+    });
+
+    it("a to-one edge sends only the properties the edge stores", async () => {
+      const data = { id: "123", title: "Test Post", author: { id: "456", name: "John" }, role: "editor", since: null };
+      const builder = {
+        type: "posts",
+        id: "id",
+        attributes: { title: "title" },
+        relationships: { author: { data: authorBuilder(), edgeFields: [{ name: "role" }, { name: "since" }] } },
+      };
+
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
+
+      expect(result.data.relationships.author.meta).toEqual({ role: "editor" });
+    });
+
+    it("a to-one edge that stores none of its properties sends no meta", async () => {
+      const data = { id: "123", title: "Test Post", author: { id: "456", name: "John" }, role: null };
+      const builder = {
+        type: "posts",
+        id: "id",
+        attributes: { title: "title" },
+        relationships: { author: { data: authorBuilder(), edgeFields: [{ name: "role" }, { name: "since" }] } },
+      };
+
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
+
+      expect(result.data.relationships.author).not.toHaveProperty("meta");
+      expect(result.data.relationships.author.data).toEqual({ type: "users", id: "456" });
+    });
+
+    it("a hand-written meta map keeps sending a null value", async () => {
+      const data = { id: "123", title: "Test Post", author: { id: "456", name: "John" }, authorRole: null };
+      const builder = {
+        type: "posts",
+        id: "id",
+        attributes: { title: "title" },
+        relationships: { author: { data: authorBuilder(), meta: { role: "authorRole" } } },
+      };
+
+      const result = asDocument(await service.serialise(data, builder as any, "https://api.example.com/posts"));
+
+      expect(result.data.relationships.author.meta).toEqual({ role: null });
     });
   });
 });

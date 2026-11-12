@@ -9,6 +9,20 @@ import { TokenResolverService } from "../services/token-resolver.service";
 export class EntityFactory {
   constructor(private readonly tokenResolverService: TokenResolverService) {}
 
+  /**
+   * The stored properties of a node-shaped value: a driver Node, or the `{ labels, properties }`
+   * map `AbstractRepository.projectNodeOmitting` returns. Neo4j stores no null properties, so a
+   * null key can only come from a projection that lists a property the node does not store: it
+   * is dropped, and the mapper reads the property as absent, as with a plain node column.
+   */
+  private static storedProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> {
+    const stored: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(properties ?? {})) {
+      if (value !== null) stored[key] = value;
+    }
+    return stored;
+  }
+
   createGraphList<T extends DataModelInterface<any>>(params: { model: T; records: any[] }): ReturnType<T["mapper"]>[] {
     const nodeMap = new Map<string, any>();
     const rootEntityIds = new Set<string>();
@@ -157,7 +171,7 @@ export class EntityFactory {
     if (isNode && params.polymorphic && !params.polymorphic.discriminatorRelationship && modelRegistry) {
       try {
         const resolved = params.polymorphic.discriminator({
-          properties: data.properties ?? {},
+          properties: EntityFactory.storedProperties(data.properties),
           labels: data.labels ?? [],
         });
         const resolvedModel = modelRegistry.get(resolved.nodeName);
@@ -192,7 +206,7 @@ export class EntityFactory {
 
         entity = effectiveModel.mapper({
           data: {
-            ...data.properties,
+            ...EntityFactory.storedProperties(data.properties),
             labels: data.labels,
           },
           record: params.record,
@@ -212,7 +226,7 @@ export class EntityFactory {
             // Create parent entity using the resolved model's mapper
             const parentEntity = effectiveModel.mapper({
               data: {
-                ...parentNode.properties,
+                ...EntityFactory.storedProperties(parentNode.properties),
                 labels: parentNode.labels,
               },
               record: params.record,
@@ -548,7 +562,7 @@ export class EntityFactory {
     if (data.properties !== undefined) {
       return {
         id: data.properties.id,
-        ...data.properties,
+        ...EntityFactory.storedProperties(data.properties),
         labels: data.labels,
       };
     }

@@ -1,4 +1,5 @@
 import { GraphCatalogService } from "../graph.catalog.service";
+import { FeatureDescriptor } from "../../../../foundations/feature/entities/feature";
 
 function descriptor(opts: Partial<any>): any {
   return {
@@ -755,8 +756,8 @@ describe("GraphCatalogService", () => {
       return svc.getEntityDetail("targets", [moduleId])!.relationships.find((r) => r.name === "sources");
     }
 
-    it("a reverse of a one forward defaults to one (the forward cardinality)", () => {
-      expect(reverseOf("one", { name: "sources", description: "Sources." })?.cardinality).toBe("one");
+    it("an undeclared reverse of a one forward is many", () => {
+      expect(reverseOf("one", { name: "sources", description: "Sources." })?.cardinality).toBe("many");
     });
 
     it("a reverse declares many explicitly", () => {
@@ -773,6 +774,14 @@ describe("GraphCatalogService", () => {
 
     it("a reverse of a many forward is many", () => {
       expect(reverseOf("many", { name: "sources", description: "Sources." })?.cardinality).toBe("many");
+    });
+
+    it("the library's own feature reverse declares nothing and is read as many", () => {
+      const rel = FeatureDescriptor.relationships.module;
+      expect(rel.reverse).not.toHaveProperty("cardinality");
+      expect(reverseOf(rel.cardinality, { name: "sources", description: rel.reverse!.description })?.cardinality).toBe(
+        "many",
+      );
     });
   });
 });

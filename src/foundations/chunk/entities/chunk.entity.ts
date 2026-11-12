@@ -22,7 +22,10 @@ export type Chunk = Entity & {
   /** Stored on the node as a JSON string; exposed here parsed via a computed field. */
   dates?: ChunkDate[];
   propagatedDates?: ChunkDate[];
-  /** Similarity read from a `score` column a query projects next to the chunk; undefined on every other read. */
+  /**
+   * Similarity read from a `chunk_score` column a query projects next to the chunk
+   * (`… AS chunk_score`); undefined on every other read and for a value that is not a finite number.
+   */
   score?: number;
 };
 
@@ -40,11 +43,14 @@ const parseChunkDates = (raw: unknown): ChunkDate[] => {
   return [];
 };
 
-/** Convert a Neo4j driver Integer (or a plain number) to a JS number. */
-const toNumber = (value: unknown): number =>
-  value !== null && typeof value === "object" && "toNumber" in value
-    ? (value as { toNumber: () => number }).toNumber()
-    : Number(value);
+/** A Neo4j driver Integer or a plain number as a finite JS number; undefined for anything else. */
+const toFiniteNumber = (value: unknown): number | undefined => {
+  const number =
+    value !== null && typeof value === "object" && "toNumber" in value
+      ? (value as { toNumber: () => number }).toNumber()
+      : value;
+  return typeof number === "number" && Number.isFinite(number) ? number : undefined;
+};
 
 export const ChunkDescriptor = defineEntity<Chunk>()({
   ...chunkMeta,
@@ -75,10 +81,10 @@ export const ChunkDescriptor = defineEntity<Chunk>()({
     dates: { compute: (params) => parseChunkDates(params.data?.dates) },
     propagatedDates: { compute: (params) => parseChunkDates(params.data?.propagatedDates) },
     score: {
+      // Only the column a query names for the chunk: a bare `score` belongs to no node of the row.
       compute: (params) => {
-        if (!params.record.has("score")) return undefined;
-        const raw = params.record.get("score");
-        return raw === null || raw === undefined ? undefined : toNumber(raw);
+        if (typeof params.record?.has !== "function" || !params.record.has("chunk_score")) return undefined;
+        return toFiniteNumber(params.record.get("chunk_score"));
       },
     },
   },

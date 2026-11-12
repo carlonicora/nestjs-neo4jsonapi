@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { TraverseTool, traverseInputSchema } from "../traverse.tool";
+import { withBatch } from "./batch-double";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 import { ToolFactory } from "../tool.factory";
@@ -586,11 +587,12 @@ describe("TraverseTool — polymorphic related traversal", () => {
       a2: { id: "a2", title: "Alpha two", body: "short" },
       b1: { id: "b1", label: "Beta one" },
     };
-    const svcFor = (type: string) => ({
-      findRecordById: vi.fn(async (p: { id: string }) => records[p.id] ?? null),
-      findRelatedRecordsByEdge: vi.fn(async () => [{ id: "a1", title: "Alpha one", body: "short" }]),
-      __type: type,
-    });
+    const svcFor = (type: string) =>
+      withBatch({
+        findRecordById: vi.fn(async (p: { id: string }) => records[p.id] ?? null),
+        findRelatedRecordsByEdge: vi.fn(async () => [{ id: "a1", title: "Alpha one", body: "short" }]),
+        __type: type,
+      });
     const services: Record<string, any> = {
       things: {
         findRecordById: vi.fn(async () =>
@@ -721,6 +723,37 @@ describe("TraverseTool — polymorphic related traversal", () => {
     expect(out.items).toHaveLength(1);
     expect(out.items[0].id).toBe("a1");
     expect(scopeGuard.filter).toHaveBeenCalled();
+  });
+
+  it("reads each type with one findRecordsByIds call, then applies the scope filter", async () => {
+    const scopeGuard = { filter: vi.fn(async (p: { type: string; records: any[] }) => p.records) };
+    const { tool, services } = build({
+      pairs: [
+        { id: "a1", label: "Alpha" },
+        { id: "b1", label: "Beta" },
+        { id: "a2", label: "Alpha" },
+      ],
+      scopeGuard,
+    });
+
+    await tool.invoke(
+      { fromType: "things", fromId: "id1", relationship: "related", limit: 10 },
+      { ...ctx, scopeId: "camp-1", scopeType: "campaigns" },
+      describedRecorder(),
+    );
+
+    expect(services.alphas.findRecordsByIds).toHaveBeenCalledTimes(1);
+    expect(services.alphas.findRecordsByIds).toHaveBeenCalledWith({ ids: ["a1", "a2"] });
+    expect(services.betas.findRecordsByIds).toHaveBeenCalledWith({ ids: ["b1"] });
+    expect(services.alphas.findRecordsByIds.mock.invocationCallOrder[0]).toBeLessThan(
+      scopeGuard.filter.mock.invocationCallOrder[0],
+    );
+    expect(scopeGuard.filter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "alphas",
+        records: [expect.objectContaining({ id: "a1" }), expect.objectContaining({ id: "a2" })],
+      }),
+    );
   });
 
   it("refuses filters and sort with an explanatory error", async () => {
@@ -997,10 +1030,10 @@ describe("TraverseTool — non-polymorphic relationship on a source with findRel
   function build(sourceExtras: Record<string, unknown>) {
     const services: Record<string, any> = {
       massime: { findRecordById: vi.fn(async () => ({ id: "m1", text: "x" })), ...sourceExtras },
-      judgements: {
+      judgements: withBatch({
         findRecordById: vi.fn(async (p: { id: string }) => judgementRecords[p.id] ?? null),
         findRelatedRecordsByEdge: vi.fn(async () => [{ id: "j9", year: 2020 }]),
-      },
+      }),
     };
     const factory: any = {
       resolveEntity: (t: string) =>

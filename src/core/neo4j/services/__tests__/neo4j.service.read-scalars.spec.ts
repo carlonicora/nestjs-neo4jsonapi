@@ -82,6 +82,44 @@ describe("Neo4jService.readScalars", () => {
     expect(typeof row.total).toBe("number");
   });
 
+  it("throws for an integer outside the safe range and names the column", async () => {
+    const { service } = await makeService([record({ big: neo4j.int("9007199254740993") })]);
+
+    await expect(service.readScalars({ query: "RETURN 9007199254740993 AS big", map: (r) => r })).rejects.toThrow(
+      'readScalars: column "big" holds the integer 9007199254740993, outside the safe JavaScript integer range',
+    );
+  });
+
+  it("names the column of an unsafe integer nested in a list or a map", async () => {
+    const { service: inList } = await makeService([record({ ids: [neo4j.int(1), neo4j.int("-9007199254740993")] })]);
+    await expect(inList.readScalars({ query: "RETURN [1] AS ids", map: (r) => r })).rejects.toThrow(
+      'readScalars: column "ids"',
+    );
+
+    const { service: inMap } = await makeService([record({ props: { size: neo4j.int("9223372036854775807") } })]);
+    await expect(inMap.readScalars({ query: "RETURN {} AS props", map: (r) => r })).rejects.toThrow(
+      'readScalars: column "props"',
+    );
+  });
+
+  it("keeps the largest safe integer", async () => {
+    const { service } = await makeService([record({ max: neo4j.int(Number.MAX_SAFE_INTEGER) })]);
+
+    const [row] = await service.readScalars({ query: "RETURN 1 AS max", map: (r) => r });
+
+    expect(row.max).toBe(9007199254740991);
+  });
+
+  it("returns a DateTime as UTC with millisecond precision, without its offset (unchanged behaviour)", async () => {
+    const { service } = await makeService([
+      record({ at: new neo4j.types.DateTime(2026, 11, 9, 10, 30, 15, 123456789, 3600) }),
+    ]);
+
+    const [row] = await service.readScalars({ query: "RETURN datetime() AS at", map: (r) => r });
+
+    expect(row.at).toBe("2026-11-09T09:30:15.123Z");
+  });
+
   it("converts a Date and a DateTime to ISO strings", async () => {
     const { service } = await makeService([
       record({

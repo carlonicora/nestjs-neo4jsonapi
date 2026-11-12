@@ -349,9 +349,11 @@ export class GraphCatalogService implements OnApplicationBootstrap {
           dtoKey: rel.reverse.name,
           sourceType: rel.model.type,
           targetType: d.model.type,
-          // The reverse side's declared cardinality; without one it copies the
-          // forward cardinality (the behaviour every consumer relies on).
-          cardinality: rel.reverse.cardinality ?? rel.cardinality,
+          // The reverse side's declared cardinality. An undeclared reverse is
+          // "many": the forward cardinality cannot tell how many source records
+          // reach one target, and "many" never hides a record. A true one-to-one
+          // declares "one".
+          cardinality: rel.reverse.cardinality ?? "many",
           description: rel.reverse.description,
           cypherDirection: rel.direction === "out" ? "in" : "out",
           cypherLabel: rel.relationship,

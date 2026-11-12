@@ -181,20 +181,15 @@ export class DescriptorBasedSerialiser extends AbstractJsonApiSerialiser impleme
           // Create dynamic factory for polymorphic relationships
           relationship.dynamicFactory = new PolymorphicRelationshipFactory(this.serialiserFactory, relDef.polymorphic);
         }
-        // Add relationship meta for edge properties (stored on the relationship)
+        // Edge properties (stored on the relationship). Both cardinalities carry
+        // `edgeFields`: JsonApiService leaves out an edge property the edge does
+        // not store, and sends no meta when none remains.
         if (relDef.fields && relDef.fields.length > 0) {
-          if (relDef.cardinality === "one") {
-            // SINGLE relationship: use relationship-level meta (existing behavior)
-            relationship.meta = {};
-            for (const field of relDef.fields) {
-              // Maps entity property (populated by computed field) to relationship meta
-              relationship.meta[field.name] = field.name;
-            }
-          } else {
-            // MANY relationship: use per-item meta
+          relationship.edgeFields = relDef.fields;
+          if (relDef.cardinality !== "one") {
+            // MANY relationship: per-item meta, read from the `<name>EdgeProps` map.
             relationship.perItemMeta = true;
             relationship.edgePropsKey = `${relName}EdgeProps`;
-            relationship.edgeFields = relDef.fields;
           }
         }
         relationships[relName] = relationship;

@@ -375,7 +375,7 @@ export function defineEntity<T>() {
               }
               return null;
             },
-            // No meta: true - relationship properties only appear in relationship.meta, not entity meta
+            // No meta: true - the value reaches the relationship's JSON:API meta through the serialiser's edgeFields (left out when the edge does not store it), never the entity meta
           };
         }
       }

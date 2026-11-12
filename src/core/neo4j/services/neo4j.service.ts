@@ -62,23 +62,37 @@ const relatedNodePredicate = (alias: string, rule: RelatedNodeRule): string => {
 
 /**
  * One row of a scalar read (`Neo4jService.readScalars`): the record's columns as plain values.
- * Driver integers are numbers, temporal values ISO strings, lists and maps converted the same way.
+ * Driver integers are numbers (an integer outside the safe range throws), a Date is `YYYY-MM-DD`,
+ * a DateTime is UTC ISO text with millisecond precision, lists and maps converted the same way.
  */
 export type Neo4jScalarRow = {
   [column: string]: string | number | boolean | null | string[] | number[] | Neo4jScalarRow;
 };
 
-/** A driver value as a plain JS value: Integer → number, temporal → ISO string, recursively. */
-const toScalar = (value: any): any => {
+/**
+ * A driver value as a plain JS value, recursively: an Integer → number, a Date → `YYYY-MM-DD`,
+ * a DateTime → ISO text in UTC with millisecond precision (the stored offset or zone, and anything
+ * finer than a millisecond, are dropped), other temporal values → their ISO text. `column` is the
+ * top-level column the value came from: an Integer outside the safe JavaScript range throws an
+ * error naming it, never a silently changed number.
+ */
+const toScalar = (value: any, column: string): any => {
   if (value === null || value === undefined) return null;
-  if (isInt(value)) return value.toNumber();
+  if (isInt(value)) {
+    if (!value.inSafeRange()) {
+      throw new Error(
+        `readScalars: column "${column}" holds the integer ${value.toString()}, outside the safe JavaScript integer range`,
+      );
+    }
+    return value.toNumber();
+  }
   if (isDate(value)) return value.toString();
   if (isDateTime(value)) return value.toStandardDate().toISOString();
   if (isLocalDateTime(value) || isTime(value) || isLocalTime(value) || isDuration(value)) return value.toString();
-  if (Array.isArray(value)) return value.map(toScalar);
+  if (Array.isArray(value)) return value.map((inner) => toScalar(inner, column));
   if (typeof value === "object") {
     const out: Record<string, any> = {};
-    for (const [key, inner] of Object.entries(value)) out[key] = toScalar(inner);
+    for (const [key, inner] of Object.entries(value)) out[key] = toScalar(inner, column);
     return out;
   }
   return value;
@@ -315,9 +329,11 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
    * Reads rows of scalar columns (counts, sums, distinct values, dates) that have no entity to
    * serialise, and returns each one through `map`.
    *
-   * Each record becomes a plain object (`record.toObject()`): driver `Integer` → `number`,
-   * a `Date` → `YYYY-MM-DD`, a `DateTime` → full ISO string, other temporal values → their ISO
-   * text; nested lists and maps are converted the same way.
+   * Each record becomes a plain object (`record.toObject()`): driver `Integer` → `number` (an
+   * integer outside the safe range throws an error naming its column), a `Date` → `YYYY-MM-DD`,
+   * a `DateTime` → ISO text in UTC with millisecond precision (the stored offset or zone, and
+   * anything finer, are dropped), other temporal values → their ISO text; nested lists and maps
+   * are converted the same way.
    *
    * It applies NO company scope and does not call `initQuery()`: the query runs exactly as given.
    * A caller reading company-scoped labels seeds the query with `initQuery()` (which binds
@@ -332,7 +348,13 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
     map: (row: Neo4jScalarRow) => T;
   }): Promise<T[]> {
     const result = await this.read(params.query, params.queryParams);
-    return result.records.map((record: any) => params.map(toScalar(record.toObject()) as Neo4jScalarRow));
+    return result.records.map((record: any) => {
+      const row: Record<string, unknown> = {};
+      for (const [column, value] of Object.entries(record.toObject() as Record<string, unknown>)) {
+        row[column] = toScalar(value, column);
+      }
+      return params.map(row as Neo4jScalarRow);
+    });
   }
 
   /**

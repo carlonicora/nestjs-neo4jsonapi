@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { ReadEntityTool } from "../read-entity.tool";
+import { withBatch } from "./batch-double";
 import { ToolFieldFormatterService } from "../../services/field-formatting";
 import { BlockNoteService } from "../../../../core/blocknote/services/blocknote.service";
 import {
@@ -538,10 +539,10 @@ describe("ReadEntityTool", () => {
         findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
         findRelatedIds: vi.fn(async () => [{ id: "j1", type: "judgements" }]),
       };
-      const judgementsSvc = {
+      const judgementsSvc = withBatch({
         findRecordById: recordsById({ j1: { id: "j1", name: "Cass. 1/2024" } }),
         findRelatedRecordsByEdge: vi.fn(async () => []),
-      };
+      });
       const tool = new ReadEntityTool(
         buildFactory({ massime: source, judgements: judgementsSvc }),
         {} as any,
@@ -573,8 +574,8 @@ describe("ReadEntityTool", () => {
           { id: "a1", type: "law-articles" },
         ]),
       };
-      const lawsSvc = { findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) };
-      const articlesSvc = { findRecordById: recordsById({ a1: { id: "a1", name: "art. 2043" } }) };
+      const lawsSvc = withBatch({ findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) });
+      const articlesSvc = withBatch({ findRecordById: recordsById({ a1: { id: "a1", name: "art. 2043" } }) });
       const tool = new ReadEntityTool(
         buildFactory({ massime: source, laws: lawsSvc, "law-articles": articlesSvc }),
         {} as any,
@@ -592,6 +593,35 @@ describe("ReadEntityTool", () => {
       expect(articlesSvc.findRecordById).toHaveBeenCalledWith({ id: "a1" });
     });
 
+    it("reads each type of an include with one findRecordsByIds call", async () => {
+      const source = {
+        findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
+        findRelatedIds: vi.fn(async () => [
+          { id: "l1", type: "laws" },
+          { id: "a1", type: "law-articles" },
+          { id: "l2", type: "laws" },
+        ]),
+      };
+      const lawsSvc = withBatch({
+        findRecordById: recordsById({ l1: { id: "l1", name: "First" }, l2: { id: "l2", name: "Second" } }),
+      });
+      const articlesSvc = withBatch({ findRecordById: recordsById({ a1: { id: "a1", name: "Third" } }) });
+      const tool = new ReadEntityTool(
+        buildFactory({ massime: source, laws: lawsSvc, "law-articles": articlesSvc }),
+        {} as any,
+        {} as any,
+        undefined as any,
+        formatter,
+      );
+
+      const out: any = await tool.invoke({ type: "massime", id: "m1", include: ["law"] }, ctx, describedRecorder());
+
+      expect(lawsSvc.findRecordsByIds).toHaveBeenCalledTimes(1);
+      expect(lawsSvc.findRecordsByIds).toHaveBeenCalledWith({ ids: ["l1", "l2"] });
+      expect(articlesSvc.findRecordsByIds).toHaveBeenCalledWith({ ids: ["a1"] });
+      expect(out.related.law.map((item: { id: string }) => item.id)).toEqual(["l1", "l2", "a1"]);
+    });
+
     it("a source without the opt-in keeps the edge lookup for a typed include and is asked only for polymorphic ones", async () => {
       const source = {
         findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
@@ -601,7 +631,7 @@ describe("ReadEntityTool", () => {
         findRecordById: vi.fn(async () => null),
         findRelatedRecordsByEdge: vi.fn(async () => [{ id: "j1", name: "Cass. 1/2024" }]),
       };
-      const lawsSvc = { findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) };
+      const lawsSvc = withBatch({ findRecordById: recordsById({ l1: { id: "l1", name: "c.c." } }) });
       const tool = new ReadEntityTool(
         buildFactory({ massime: source, judgements: judgementsSvc, laws: lawsSvc }),
         {} as any,
@@ -669,7 +699,7 @@ describe("ReadEntityTool", () => {
         findRecordById: vi.fn(async () => ({ id: "m1", name: "M" })),
         findRelatedIds: vi.fn(async () => many),
       };
-      const lawsSvc = { findRecordById: vi.fn(async ({ id }: { id: string }) => ({ id, name: id })) };
+      const lawsSvc = withBatch({ findRecordById: vi.fn(async ({ id }: { id: string }) => ({ id, name: id })) });
       const scopeGuard: any = {
         isInScope: vi.fn(async () => true),
         filter: vi.fn(async ({ records }: any) => records.filter((r: any) => r.id !== "l1")),
@@ -695,6 +725,10 @@ describe("ReadEntityTool", () => {
         relationship: { name: "law", direction: "both" },
       });
       expect(lawsSvc.findRecordById).toHaveBeenCalledTimes(50);
+      expect(lawsSvc.findRecordsByIds).toHaveBeenCalledTimes(1);
+      expect(lawsSvc.findRecordsByIds.mock.invocationCallOrder[0]).toBeLessThan(
+        scopeGuard.filter.mock.invocationCallOrder[0],
+      );
       expect(scopeGuard.filter).toHaveBeenCalledWith(expect.objectContaining({ type: "laws", ctx: scopedCtx }));
       expect(out.related.law).toHaveLength(49);
       expect(out.related.law.map((r: any) => r.id)).not.toContain("l1");
@@ -709,7 +743,7 @@ describe("ReadEntityTool", () => {
           return [{ id: "j1", type: "judgements" }];
         }),
       };
-      const judgementsSvc = { findRecordById: recordsById({ j1: { id: "j1", name: "Cass. 1/2024" } }) };
+      const judgementsSvc = withBatch({ findRecordById: recordsById({ j1: { id: "j1", name: "Cass. 1/2024" } }) });
       const tool = new ReadEntityTool(
         buildFactory({ massime: source, judgements: judgementsSvc }),
         {} as any,

@@ -87,6 +87,13 @@ describe("AbstractRepository.projectNodeOmitting", () => {
   it("refuses an omitted property name that is not a plain identifier", () => {
     expect(() => repository.project("host", ["embedding` : 1 } //" as any])).toThrow(/invalid property names/);
   });
+
+  it("refuses an alias that is not a plain identifier", () => {
+    expect(() => repository.project("host) RETURN 1 //", ["embedding"])).toThrow(
+      'projectNodeOmitting: invalid alias "host) RETURN 1 //"',
+    );
+    expect(() => repository.projectOther("host-other", ["abstract"])).toThrow(/invalid alias/);
+  });
 });
 
 describe("EntityFactory maps the omitting projection like a node", () => {
@@ -117,5 +124,31 @@ describe("EntityFactory maps the omitting projection like a node", () => {
     });
 
     expect(host).toEqual({ id: "h1", content: "text", embedding: undefined, labels: ["Host"] });
+  });
+
+  it("leaves out a listed property the node does not store (projected as null)", () => {
+    const mapper = vi.fn((params: { data: any }) => ({ ...params.data }));
+    const hostModel: DataModelInterface<any> = {
+      type: "hosts",
+      endpoint: "hosts",
+      nodeName: "host",
+      labelName: "Host",
+      entity: undefined as any,
+      mapper,
+    };
+    const cols: Record<string, unknown> = {
+      host: { labels: ["Host"], properties: { id: "h1", content: "text", summary: null, flag: false, count: 0 } },
+    };
+    const record = { keys: Object.keys(cols), has: (k: string) => k in cols, get: (k: string) => cols[k] };
+
+    const [host] = new EntityFactory(new TokenResolverService()).createGraphList({
+      model: hostModel,
+      records: [record as any],
+    });
+
+    expect(mapper).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { id: "h1", content: "text", flag: false, count: 0, labels: ["Host"] } }),
+    );
+    expect(host).not.toHaveProperty("summary");
   });
 });

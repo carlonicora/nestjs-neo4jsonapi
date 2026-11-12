@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { ExternalSourceUnavailableError } from "../../../../common/interfaces/external.entity.source.interface";
+import {
+  ExternalSourceUnavailableError,
+  externalSourceUnavailableResult,
+} from "../../../../common/interfaces/external.entity.source.interface";
 import { mcpError, mcpToolResult } from "../../../../mcp/services/mcp.errors";
 import { ReadEntityTool } from "../read-entity.tool";
 import { ToolCallRecord, ToolFactory } from "../tool.factory";
@@ -102,6 +105,42 @@ describe("external source unavailable", () => {
 
     expect(out.fields).toEqual({ content: "Massima." });
     expect(out.related.judgement).toMatchObject({ code: "corpus_unavailable", retryable: true });
+  });
+
+  it("a source defect raised with retryable false is not retryable in the tool value or over MCP", async () => {
+    const defect = new ExternalSourceUnavailableError({
+      message: "The source answered with an error. The record could not be read.",
+      code: "source_error",
+      retryable: false,
+    });
+    const { tool, recorder } = setup({ findRecordById: vi.fn().mockRejectedValue(defect) });
+
+    const out = await tool.invoke({ type: "massime", id: "m1" }, ctx, recorder);
+
+    expect(out).toEqual({ error: defect.message, code: "source_error", retryable: false });
+    expect(payload(mcpToolResult(out) as any)).toMatchObject({ code: "source_error", retryable: false });
+    expect(payload(mcpError(defect) as any)).toMatchObject({ code: "source_error", retryable: false });
+  });
+
+  it("an error raised without retryable stays retryable", () => {
+    const error = new ExternalSourceUnavailableError({ message: "down" });
+
+    expect(error.retryable).toBe(true);
+    expect(externalSourceUnavailableResult(error)).toEqual({
+      error: "down",
+      code: "source_unavailable",
+      retryable: true,
+    });
+    expect(payload(mcpError(error) as any)).toMatchObject({ code: "source_unavailable", retryable: true });
+  });
+
+  it("a duplicate copy of the error without the field stays retryable", () => {
+    const foreign = Object.assign(new Error("down"), {
+      name: "ExternalSourceUnavailableError",
+      code: "source_unavailable",
+    });
+
+    expect(payload(mcpError(foreign) as any)).toMatchObject({ code: "source_unavailable", retryable: true });
   });
 
   it("capture still rethrows every other error", async () => {

@@ -167,19 +167,24 @@ export function hasSearchWarnings(
  * that throws it must not be reported as not found.
  *
  * The graph tools turn it into a tool value, never a thrown error
- * (`ToolFactory.capture`): `{ error: message, code, retryable: true }`. The
- * operator keeps running, and the MCP client gets `isError` with `code`.
+ * (`ToolFactory.capture`): `{ error: message, code, retryable }`, with the
+ * error's own `retryable`: true by default (the source did not answer and may
+ * answer later), false when the source answered with a defect that a retry
+ * would meet again. The operator keeps running, and the MCP client gets
+ * `isError` with `code`.
  * `message` is the text shown to the user; the technical failure stays on `cause`.
  */
 export class ExternalSourceUnavailableError extends Error {
   readonly code: string;
-  readonly retryable = true;
+  /** Whether the same call can succeed later: true for an outage (the default), false for a defect of the source. */
+  readonly retryable: boolean;
   readonly cause?: unknown;
 
-  constructor(params: { message: string; code?: string; cause?: unknown }) {
+  constructor(params: { message: string; code?: string; cause?: unknown; retryable?: boolean }) {
     super(params.message);
     this.name = "ExternalSourceUnavailableError";
     this.code = params.code ?? "source_unavailable";
+    this.retryable = params.retryable ?? true;
     this.cause = params.cause;
   }
 }
@@ -195,11 +200,14 @@ export function isExternalSourceUnavailableError(e: unknown): e is ExternalSourc
   );
 }
 
-/** The tool value an {@link ExternalSourceUnavailableError} becomes: a status the caller reads, never a throw. */
+/**
+ * The tool value an {@link ExternalSourceUnavailableError} becomes: a status the caller reads,
+ * never a throw. `retryable` is the error's own value; a copy without the field reads as retryable.
+ */
 export function externalSourceUnavailableResult(e: ExternalSourceUnavailableError): {
   error: string;
   code: string;
-  retryable: true;
+  retryable: boolean;
 } {
-  return { error: e.message, code: e.code, retryable: true };
+  return { error: e.message, code: e.code, retryable: e.retryable !== false };
 }

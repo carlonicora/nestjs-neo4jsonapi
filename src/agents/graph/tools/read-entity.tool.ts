@@ -278,11 +278,8 @@ export class ReadEntityTool {
       if ("error" in targetEntity) continue;
       const targetSvc = this.factory.resolveService(type);
       if (!targetSvc) continue;
-      const records: any[] = [];
-      for (const id of ids) {
-        const record: any = await targetSvc.findRecordById({ id });
-        if (record) records.push(record);
-      }
+      // One read for every id of this type: the service may answer them in one call.
+      const records: any[] = (await targetSvc.findRecordsByIds({ ids })).map((found) => found.record);
       const summariser = targetEntity.summary ?? ((d: any) => String(d.name ?? d.id));
       for (const record of await this.filterInScope(type, records, ctx)) {
         items.push({ id: record.id, type, summary: summariser(record) });

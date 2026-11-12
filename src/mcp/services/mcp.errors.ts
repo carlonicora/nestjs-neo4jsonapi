@@ -20,7 +20,7 @@ export type McpErrorCode =
  * - an error named `TimeoutError` (the `DOMException` an `AbortSignal.timeout`
  *   fetch rejects with) → timeout with `retryable: true`
  * - `ExternalSourceUnavailableError` → its own `code` (e.g. corpus_unavailable)
- *   with `retryable: true`: the source did not answer, so the record is
+ *   and its own `retryable` (true unless the error says false): the record is
  *   unknown, never not_found
  * - other `Error` → internal with the error message
  *
@@ -31,7 +31,7 @@ export function mcpError(e: unknown): McpToolResult {
   let message = "Unexpected error";
   let meta: Record<string, unknown> = {};
   if (isExternalSourceUnavailableError(e)) {
-    return mcpFlatError(e.code, e.message, { retryable: true });
+    return mcpFlatError(e.code, e.message, { retryable: e.retryable !== false });
   }
   if (e instanceof HttpException) {
     const status = e.getStatus();

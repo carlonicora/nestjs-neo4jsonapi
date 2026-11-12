@@ -196,6 +196,25 @@ export abstract class AbstractService<
   }
 
   /**
+   * Typed records for several ids (bypasses JSON:API serialisation), for the graph tools that
+   * read related records. Each entry pairs the id that was asked for with its record:
+   * `record.id` can differ when a service answers a retired id with its replacement. An id with
+   * no record is left out, and the order follows `ids`.
+   *
+   * The default reads `findRecordById` once per id, one after the other, so it applies the same
+   * access rules and returns the same records. A service whose store reads many ids in one call
+   * overrides it.
+   */
+  async findRecordsByIds(params: { ids: string[] }): Promise<Array<{ id: string; record: T }>> {
+    const found: Array<{ id: string; record: T }> = [];
+    for (const id of params.ids) {
+      const record = await this.findRecordById({ id });
+      if (record) found.push({ id, record });
+    }
+    return found;
+  }
+
+  /**
    * Create a new entity
    * Override this method to map DTO fields to repository create params
    *

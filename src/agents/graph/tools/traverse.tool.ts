@@ -675,13 +675,10 @@ export class TraverseTool {
       const entity = entityByType.get(type)!;
       const svc = this.factory.resolveService(type);
       if (!svc) continue;
-      const records: any[] = [];
-      for (const id of ids) {
-        // Typed, company-scoped read — the only place a related record's
-        // contents are ever loaded.
-        const record: any = await svc.findRecordById({ id });
-        if (record) records.push(record);
-      }
+      // Typed, company-scoped read: the only place a related record's contents are
+      // ever loaded. One read for every id of this type; the service may answer them
+      // in one call.
+      const records: any[] = (await svc.findRecordsByIds({ ids })).map((found) => found.record);
       for (const record of await this.filterInScope(type, records, ctx)) rows.push({ entity, record });
     }
     return rows;

@@ -431,13 +431,16 @@ export abstract class AbstractRepository<
    * `id`, `createdAt`, `updatedAt`, every field, and every computed and virtual field name
    * (a computed field may read the stored property of the same name), minus `omit`. So:
    * - a stored property the descriptor does not declare is not returned;
-   * - a listed property the node does not store comes back as null, not absent.
+   * - a listed property the node does not store comes back as null in the map; EntityFactory
+   *   drops a null key of a node-shaped map, so the mapped entity reads it as absent, as with a
+   *   plain node column.
    *
    * The column keeps the alias, so EntityFactory finds the root node (`nodeName`) or a related
    * node (`<nodeName>_<relationship>`) as with a plain node column. Labels are kept for
    * polymorphic discriminators. For a related node pass its `descriptor`; `omit` is then typed
-   * against that entity. Property names go into the Cypher text (they cannot be parameters):
-   * each must be a plain identifier and is backtick-quoted, anything else throws.
+   * against that entity. The alias and the property names go into the Cypher text (they cannot
+   * be parameters): each must be a plain identifier (property names are also backtick-quoted),
+   * anything else throws.
    *
    * @example `RETURN ${this.projectNodeOmitting(massimaMeta.nodeName, ["embedding"])}, score`
    * @example `${this.projectNodeOmitting("massima_judgement", ["abstract"], JudgementDescriptor)}`
@@ -447,6 +450,9 @@ export abstract class AbstractRepository<
     omit: readonly (keyof N & string)[],
     descriptor: EntityDescriptor<N, any> = this.descriptor as unknown as EntityDescriptor<N, any>,
   ): string {
+    const identifier = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    if (!identifier.test(alias)) throw new Error(`projectNodeOmitting: invalid alias ${JSON.stringify(alias)}`);
+
     const omitted = new Set<string>(omit);
     const names = [
       ...new Set([
@@ -459,7 +465,7 @@ export abstract class AbstractRepository<
       ]),
     ].filter((name) => !omitted.has(name));
 
-    const invalid = [...names, ...omit].filter((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+    const invalid = [...names, ...omit].filter((name) => !identifier.test(name));
     if (invalid.length > 0) throw new Error(`projectNodeOmitting: invalid property names ${JSON.stringify(invalid)}`);
 
     const properties = names.map((name) => `.\`${name}\``).join(", ");

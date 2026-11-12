@@ -186,7 +186,7 @@ export class ToolFactory {
   /**
    * Runs one tool call and records it. An ExternalSourceUnavailableError (an
    * external source that did not answer) resolves to the value
-   * `{ error, code, retryable: true }` instead of rejecting, so the operator
+   * `{ error, code, retryable }` (the error's own `retryable`) instead of rejecting, so the operator
    * keeps running and the caller is told the source is down, never that the
    * record does not exist. Every other rejection is rethrown.
    */
