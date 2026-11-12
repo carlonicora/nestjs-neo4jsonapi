@@ -3,7 +3,9 @@ import { ConfigService } from "@nestjs/config";
 import { DataModelInterface } from "../../../common/interfaces/datamodel.interface";
 import { BaseConfigInterface, ConfigContentTypesInterface } from "../../../config/interfaces";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { ContentDescriptor } from "../../content/entities/content";
 import { contentMeta } from "../../content/entities/content.meta";
@@ -93,6 +95,7 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
     id: string;
     type?: string;
     cursor?: JsonApiCursorInterface;
+    orderByFields?: SortCriterion[];
   }): Promise<T[]> {
     await this.assertSourceAccessible({ id: params.id });
 
@@ -125,12 +128,24 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
 
       ${this.securityService.userHasAccess({ validator: validator })}
       WITH *
-      ORDER BY totalScore DESC
+      ${this.relevanceOrderBy({ nodeAlias: params.model.nodeName, sort: params.orderByFields })}
       {CURSOR}
       ${params.cypherService.returnStatement({ useTotalScore: true })}
     `;
 
     return this.neo4j.readMany(query);
+  }
+
+  /**
+   * The order of a relevance list: the ranking (`totalScore DESC`) by default; a requested sort
+   * replaces it until cleared (spec call C17). Ends with `<alias>.id ASC`.
+   */
+  private relevanceOrderBy(params: { nodeAlias: string; sort?: SortCriterion[] }): string {
+    return buildListOrderByClause({
+      nodeAlias: params.nodeAlias,
+      sort: params.sort,
+      defaultOrderBy: codeOrderBy("totalScore DESC"),
+    });
   }
 
   private async _findRelevantByAuthor<T>(params: {
@@ -196,16 +211,25 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
     cypherService: any;
     id: string;
     cursor: JsonApiCursorInterface;
+    /** Validated sort; replaces the relevance ranking while set. */
+    orderByFields?: SortCriterion[];
   }): Promise<T[]> {
     return this._findRelevant({
       model: params.model,
       cypherService: params.cypherService,
       id: params.id,
       cursor: params.cursor,
+      orderByFields: params.orderByFields,
     });
   }
 
-  async findUsersById(params: { cypherService: any; id: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
+  async findUsersById(params: {
+    cypherService: any;
+    id: string;
+    cursor: JsonApiCursorInterface;
+    /** Validated sort; replaces the relevance ranking while set. */
+    orderByFields?: SortCriterion[];
+  }): Promise<User[]> {
     await this.assertSourceAccessible({ id: params.id });
 
     const query = this.neo4j.initQuery({ serialiser: UserDescriptor.model, cursor: params.cursor });
@@ -216,7 +240,10 @@ export class RelevancyRepository<T> implements RelevanceRepositoryInterface<T> {
     };
 
     query.query += `
-      ${contentToAuthorQuery({ sourceLabels: this.getContentLabels() })}
+      ${contentToAuthorQuery({
+        sourceLabels: this.getContentLabels(),
+        orderBy: this.relevanceOrderBy({ nodeAlias: "author", sort: params.orderByFields }),
+      })}
       WITH author as user, totalScore
       RETURN user, totalScore
     `;

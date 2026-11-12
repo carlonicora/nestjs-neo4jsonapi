@@ -20,11 +20,14 @@
 // The architecture gate raises a FILE-LEVEL manual-query-no-company-scope finding
 // on this shape; per-line ignores do not clear it, so this header note is the
 // documented resolution.
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { convertFieldValue } from "../../../common/helpers/define-entity";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
+import { caseInsensitiveSortKey } from "../../../core/neo4j/helpers/build-order-by";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { companyMeta } from "../../company/entities/company.meta";
 import { userMeta } from "../../user/entities/user.meta";
@@ -54,6 +57,33 @@ export const REFERRAL_ADMIN_SORTS = {
   credits: "creditsEarned DESC, paying DESC",
 } as const;
 export type ReferralAdminSort = keyof typeof REFERRAL_ADMIN_SORTS;
+
+/**
+ * The columns the referrals list may be sorted by (JSON:API `sort` key → RETURN alias of
+ * `findReferrals`). A lookup rather than an interpolation of the caller's string: nothing that
+ * did not come from this table can ever reach the query text.
+ */
+export const REFERRAL_ADMIN_REFERRAL_SORTS = {
+  source: "source",
+  status: "status",
+  referredAt: "referredAt",
+  tokensAwarded: "tokensAwarded",
+} as const;
+
+/**
+ * Validates the referrals list's JSON:API `sort` (`-referredAt`, `status`) against
+ * {@link REFERRAL_ADMIN_REFERRAL_SORTS}. Throws `BadRequestException("Invalid sort")` for anything
+ * else; `undefined` when no sort was requested.
+ */
+export function parseReferralAdminReferralSort(sort?: string): SortCriterion[] | undefined {
+  const criteria = parseJsonApiSort({ sort, allow: Object.keys(REFERRAL_ADMIN_REFERRAL_SORTS) });
+  // parseJsonApiSort always accepts createdAt / updatedAt; these rows carry neither, so refuse them.
+  if (
+    criteria?.some((criterion) => !Object.prototype.hasOwnProperty.call(REFERRAL_ADMIN_REFERRAL_SORTS, criterion.field))
+  )
+    throw new BadRequestException("Invalid sort");
+  return criteria;
+}
 
 type ReferralAdminWindow = "current" | "previous";
 type AdminQuery = { query: string; queryParams: Record<string, unknown> };
@@ -246,6 +276,8 @@ export class ReferralAdminRepository extends AbstractRepository<Referral, typeof
   async findReferrals(params: {
     from: string | null;
     excludeUserIds: string[];
+    /** Validated by {@link parseReferralAdminReferralSort}; the default is newest first. */
+    sort?: SortCriterion[];
   }): Promise<ReferralAdminReferralEntity[]> {
     const seed = this._adminQuery({
       from: params.from,
@@ -283,7 +315,7 @@ export class ReferralAdminRepository extends AbstractRepository<Referral, typeof
              referral.createdAt                       AS referredAt,
              referral.completedAt                     AS completedAt,
              referral.tokensAwarded                   AS tokensAwarded
-      ORDER BY referral.createdAt DESC
+      ${this._referralsOrderBy(params.sort)}
     `;
 
     const result = await this.neo4j.read(seed.query, seed.queryParams);
@@ -308,6 +340,19 @@ export class ReferralAdminRepository extends AbstractRepository<Referral, typeof
         tokensAwarded: tokensAwarded == null ? undefined : int(tokensAwarded),
       };
     }) as ReferralAdminReferralEntity[];
+  }
+
+  /**
+   * The referrals list's ORDER BY: each criterion's column comes from
+   * {@link REFERRAL_ADMIN_REFERRAL_SORTS}, never from the request; `id ASC` keeps ties stable.
+   */
+  private _referralsOrderBy(sort?: SortCriterion[]): string {
+    const keys = (sort ?? []).flatMap((criterion) => {
+      if (!Object.prototype.hasOwnProperty.call(REFERRAL_ADMIN_REFERRAL_SORTS, criterion.field)) return [];
+      const column = REFERRAL_ADMIN_REFERRAL_SORTS[criterion.field as keyof typeof REFERRAL_ADMIN_REFERRAL_SORTS];
+      return [`${caseInsensitiveSortKey(column)} ${criterion.direction === "desc" ? "DESC" : "ASC"}`];
+    });
+    return `ORDER BY ${[...(keys.length ? keys : ["referredAt DESC"]), "id ASC"].join(", ")}`;
   }
 
   /** One window of the summary, [from, to). */

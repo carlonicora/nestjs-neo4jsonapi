@@ -109,14 +109,18 @@ export class WaitlistService extends AbstractService<Waitlist, typeof WaitlistDe
 
   /**
    * Find entries with optional status filter.
+   *
+   * @param params.sort - JSON:API `sort`, validated against the descriptor (400 when a field is not sortable).
    */
-  async findAllByStatus(params: { query: any; status?: WaitlistStatus }): Promise<JsonApiListDocument> {
+  async findAllByStatus(params: { query: any; status?: WaitlistStatus; sort?: string }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator = new JsonApiPaginator(params.query);
     return this.jsonApiService.buildList(
       WaitlistDescriptor.model,
       await this.waitlistRepository.findAllByStatus({
         status: params.status,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );

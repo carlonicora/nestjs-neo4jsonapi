@@ -4,6 +4,13 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { getContentModel } from "../../content/entities/content";
 import { ContentRepository } from "../../content/repositories/content.repository";
 import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
+
+/**
+ * The content fields a list request may sort by (Content has no descriptor of its own, so the
+ * allow-list lives here). `createdAt` / `updatedAt` are always accepted.
+ */
+export const CONTENT_SORTABLE_FIELDS: readonly string[] = ["name"];
 
 @Injectable()
 export class ContentService {
@@ -16,8 +23,12 @@ export class ContentService {
     query: any;
     term?: string;
     fetchAll?: boolean;
+    /** Legacy single-field order; ignored when `sort` is present. */
     orderBy?: string;
+    /** JSON:API `sort`, validated against {@link CONTENT_SORTABLE_FIELDS} (400 otherwise); wins over `orderBy`. */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: CONTENT_SORTABLE_FIELDS });
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -25,18 +36,26 @@ export class ContentService {
       await this.contentRepository.find({
         fetchAll: params.fetchAll,
         term: params.term,
-        orderBy: params.orderBy,
+        orderBy: orderByFields ? undefined : params.orderBy,
+        orderByFields,
         cursor: paginator.generateCursor(),
       }),
       paginator,
     );
   }
 
-  async findByIds(params: { contentIds: string[] }): Promise<JsonApiListDocument> {
+  async findByIds(params: {
+    contentIds: string[];
+    /** JSON:API `sort`, validated against {@link CONTENT_SORTABLE_FIELDS} (400 otherwise). */
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: CONTENT_SORTABLE_FIELDS });
+
     return this.builder.buildList(
       getContentModel(),
       await this.contentRepository.findByIds({
         contentIds: params.contentIds,
+        orderByFields,
       }),
     );
   }
@@ -46,8 +65,12 @@ export class ContentService {
     query: any;
     term?: string;
     fetchAll?: boolean;
+    /** Legacy single-field order; ignored when `sort` is present. */
     orderBy?: string;
+    /** JSON:API `sort`, validated against {@link CONTENT_SORTABLE_FIELDS} (400 otherwise); wins over `orderBy`. */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: CONTENT_SORTABLE_FIELDS });
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -56,7 +79,8 @@ export class ContentService {
         ownerId: params.ownerId,
         fetchAll: params.fetchAll,
         term: params.term,
-        orderBy: params.orderBy,
+        orderBy: orderByFields ? undefined : params.orderBy,
+        orderByFields,
         cursor: paginator.generateCursor(),
       }),
       paginator,

@@ -39,8 +39,8 @@ export class RoleController {
   @UseGuards(JwtAuthGuard)
   // @Roles(UserRole.Administrator, UserRole.CompanyAdministrator)
   @Get()
-  async find(@Query() query: any, @Query("search") search?: string) {
-    return await this.roleService.find({ term: search, query: query });
+  async find(@Query() query: any, @Query("search") search?: string, @Query("sort") sort?: string) {
+    return await this.roleService.find({ term: search, query: query, sort: sort });
   }
 
   @UseGuards(JwtAuthGuard)

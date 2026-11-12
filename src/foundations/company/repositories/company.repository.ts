@@ -4,7 +4,9 @@ import { ClsService } from "nestjs-cls";
 import { updateRelationshipQuery } from "../../../core";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning.interface";
 import { Company, CompanyDescriptor } from "../../company/entities/company";
@@ -569,7 +571,14 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
     await this.neo4j.writeOne(query);
   }
 
-  async find(params: { term: string; cursor: JsonApiCursorInterface }): Promise<Company[]> {
+  /**
+   * @param params.orderByFields - Validated sort (from `parseJsonApiSort`); the default is `name ASC`.
+   */
+  async find(params: {
+    term: string;
+    cursor: JsonApiCursorInterface;
+    orderByFields?: SortCriterion[];
+  }): Promise<Company[]> {
     const query = this.neo4j.initQuery({ serialiser: CompanyDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
@@ -587,6 +596,11 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
       ${where}
       
       WITH company
+      ${buildListOrderByClause({
+        nodeAlias: companyMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("company.name ASC"),
+      })}
       {CURSOR}
       
       RETURN company

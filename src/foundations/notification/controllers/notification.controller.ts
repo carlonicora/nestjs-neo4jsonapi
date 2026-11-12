@@ -19,8 +19,18 @@ export class NotificationController {
   ) {}
 
   @Get(notificationMeta.endpoint)
-  async findList(@Req() request: any, @Query() query: any, @Query("isArchived") isArchived?: boolean) {
-    return await this.service.findForUser({ query: query, userId: request.user.userId, isArchived: isArchived });
+  async findList(
+    @Req() request: any,
+    @Query() query: any,
+    @Query("isArchived") isArchived?: boolean,
+    @Query("sort") sort?: string,
+  ) {
+    return await this.service.findForUser({
+      query: query,
+      userId: request.user.userId,
+      isArchived: isArchived,
+      sort: sort,
+    });
   }
 
   @Get(`${notificationMeta.endpoint}/:notificationId`)

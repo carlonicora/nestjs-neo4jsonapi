@@ -7,6 +7,14 @@ import { RelevanceServiceInterface } from "../../relevancy/interfaces/relevance.
 import { RelevancyRepository } from "../../relevancy/repositories/relevancy.repository";
 import { UserDescriptor } from "../../user/entities/user";
 import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
+
+/** Fields a relevant-contents list may sort by (spec call C17). `createdAt` / `updatedAt` are always accepted. */
+export const RELEVANT_CONTENT_SORTABLE_FIELDS: readonly string[] = ["name"];
+
+/** Fields a relevant-users list may sort by (spec call C17). `createdAt` / `updatedAt` are always accepted. */
+export const RELEVANT_USER_SORTABLE_FIELDS: readonly string[] = ["name", "email"];
 
 @Injectable()
 export class RelevancyService<T> implements RelevanceServiceInterface {
@@ -21,12 +29,14 @@ export class RelevancyService<T> implements RelevanceServiceInterface {
       cypherService: any;
       id: string;
       cursor: JsonApiCursorInterface;
+      orderByFields?: SortCriterion[];
     }) => Promise<T[]>;
     model: DataModelInterface<T>;
     cypherService: any;
     type?: string;
     id: string;
     query?: any;
+    orderByFields?: SortCriterion[];
   }): Promise<JsonApiListDocument> {
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
@@ -37,6 +47,7 @@ export class RelevancyService<T> implements RelevanceServiceInterface {
         cypherService: params.cypherService,
         id: params.id,
         cursor: paginator.generateCursor(),
+        ...(params.orderByFields ? { orderByFields: params.orderByFields } : {}),
       }),
       paginator,
     );
@@ -58,22 +69,40 @@ export class RelevancyService<T> implements RelevanceServiceInterface {
     });
   }
 
+  /**
+   * @param params.sort - JSON:API `sort` over {@link RELEVANT_CONTENT_SORTABLE_FIELDS} (400 otherwise).
+   *   It replaces the relevance ranking while set (spec call C17).
+   */
   async findRelevant<T>(params: {
     model: DataModelInterface<T>;
     cypherService: any;
     id: string;
     query?: any;
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: RELEVANT_CONTENT_SORTABLE_FIELDS });
+
     return this._findRelevant({
       function: (args) => this.relevancyRepository.findById(args),
       model: params.model,
       cypherService: params.cypherService,
       id: params.id,
       query: params.query,
+      orderByFields,
     });
   }
 
-  async findRelevantUsers(params: { cypherService: any; id: string; query?: any }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort` over {@link RELEVANT_USER_SORTABLE_FIELDS} (400 otherwise).
+   *   It replaces the relevance ranking while set (spec call C17).
+   */
+  async findRelevantUsers(params: {
+    cypherService: any;
+    id: string;
+    query?: any;
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: RELEVANT_USER_SORTABLE_FIELDS });
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -82,6 +111,7 @@ export class RelevancyService<T> implements RelevanceServiceInterface {
         cypherService: params.cypherService,
         id: params.id,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );

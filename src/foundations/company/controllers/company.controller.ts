@@ -47,8 +47,9 @@ export class CompanyController {
     @Res() reply: FastifyReply,
     @Query() query: any,
     @Query("search") search?: string,
+    @Query("sort") sort?: string,
   ) {
-    const response = await this.companyService.find({ term: search, query: query });
+    const response = await this.companyService.find({ term: search, query: query, sort: sort });
     reply.send(response);
   }
 

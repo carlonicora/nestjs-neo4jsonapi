@@ -30,6 +30,7 @@ export class AssistantMessageController {
     @Query() query: any,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
     return this.relationships.findByRelated(reply, {
       relationship: AssistantMessageDescriptor.relationshipKeys.assistant,
@@ -37,6 +38,7 @@ export class AssistantMessageController {
       query,
       fetchAll,
       orderBy: orderBy ?? "position",
+      sort,
     });
   }
 

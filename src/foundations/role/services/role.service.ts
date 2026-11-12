@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
 import { RolePostDataDTO } from "../../role/dtos/role.post.dto";
 import { RoleDescriptor } from "../../role/entities/role";
 import { RoleRepository } from "../repositories/role.repository";
@@ -9,6 +10,12 @@ import {
   JsonApiListDocument,
   JsonApiSingleDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+
+/**
+ * The role fields a list request may sort by (RoleRepository has no descriptor-driven base class,
+ * so the allow-list lives here). `createdAt` / `updatedAt` are always accepted.
+ */
+export const ROLE_SORTABLE_FIELDS: readonly string[] = ["name", "description"];
 
 @Injectable()
 export class RoleService {
@@ -32,7 +39,11 @@ export class RoleService {
     );
   }
 
-  async find(params: { term?: string; query: any }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort` over {@link ROLE_SORTABLE_FIELDS} (400 otherwise).
+   */
+  async find(params: { term?: string; query: any; sort?: string }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: ROLE_SORTABLE_FIELDS });
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -40,12 +51,17 @@ export class RoleService {
       await this.roleRepository.find({
         term: params.term,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );
   }
 
-  async findForUser(params: { userId: string; term: string; query: any }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort` over {@link ROLE_SORTABLE_FIELDS} (400 otherwise).
+   */
+  async findForUser(params: { userId: string; term: string; query: any; sort?: string }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: ROLE_SORTABLE_FIELDS });
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
@@ -54,6 +70,7 @@ export class RoleService {
         userId: params.userId,
         term: params.term,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );

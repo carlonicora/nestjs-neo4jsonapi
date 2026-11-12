@@ -26,16 +26,16 @@ export const StripeCouponCodeDescriptor = defineEntity<StripeCouponCode>()({
 
   fields: {
     stripePromotionCodeId: { type: "string", required: true },
-    code: { type: "string" },
+    code: { type: "string", sortable: true },
     active: { type: "boolean", required: true, default: true },
-    automatic: { type: "boolean", required: true, default: false },
+    automatic: { type: "boolean", required: true, default: false, sortable: true },
     firstTimeTransaction: { type: "boolean", required: true, default: false },
     minimumAmount: { type: "number" },
     minimumAmountCurrency: { type: "string" },
     stripeCustomerId: { type: "string" },
-    expiresAt: { type: "datetime" },
+    expiresAt: { type: "datetime", sortable: true },
     maxRedemptions: { type: "number" },
-    timesRedeemed: { type: "number", required: true, default: 0 },
+    timesRedeemed: { type: "number", required: true, default: 0, sortable: true },
   },
 
   relationships: {

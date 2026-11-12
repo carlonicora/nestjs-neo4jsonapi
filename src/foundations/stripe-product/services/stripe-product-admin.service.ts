@@ -1,9 +1,16 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
 import { StripeProductPostDataDTO, StripeProductPutDataDTO } from "../dtos/stripe-product.dto";
 import { StripeProductModel } from "../entities/stripe-product.model";
 import { StripeProductRepository } from "../repositories/stripe-product.repository";
 import { StripeProductApiService } from "./stripe-product-api.service";
+
+/**
+ * The product fields the admin list may sort by (StripeProductRepository has no descriptor, so the
+ * allow-list lives here). `createdAt` / `updatedAt` are always accepted.
+ */
+export const STRIPE_PRODUCT_SORTABLE_FIELDS: readonly string[] = ["name", "active"];
 
 /**
  * StripeProductAdminService
@@ -43,11 +50,18 @@ export class StripeProductAdminService {
    * });
    * ```
    */
-  async listProducts(params: { query: any; active?: boolean }): Promise<JsonApiListDocument> {
+  async listProducts(params: {
+    query: any;
+    active?: boolean;
+    /** JSON:API `sort` over {@link STRIPE_PRODUCT_SORTABLE_FIELDS} (400 otherwise). */
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: STRIPE_PRODUCT_SORTABLE_FIELDS });
     const paginator = new JsonApiPaginator(params.query);
 
     const products = await this.stripeProductRepository.findAll({
       active: params.active,
+      orderByFields,
     });
 
     return this.jsonApiService.buildList(StripeProductModel, products, paginator);

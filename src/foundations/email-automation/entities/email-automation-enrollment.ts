@@ -34,13 +34,13 @@ export const EmailAutomationEnrollmentDescriptor = defineEntity<EmailAutomationE
   isCompanyScoped: false,
 
   fields: {
-    email: { type: "string", required: true },
-    name: { type: "string" },
+    email: { type: "string", required: true, sortable: true },
+    name: { type: "string", sortable: true },
     recipientType: { type: "string", required: true },
     recipientId: { type: "string", required: true },
-    status: { type: "string", required: true, default: "active" },
+    status: { type: "string", required: true, default: "active", sortable: true },
     enrolledAt: { type: "datetime", required: true },
-    nextSendAt: { type: "datetime" },
+    nextSendAt: { type: "datetime", sortable: true },
     finishedAt: { type: "datetime" },
     attempts: { type: "number", required: true, default: 0 },
     lastError: { type: "string" },

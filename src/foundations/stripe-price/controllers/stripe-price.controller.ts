@@ -54,11 +54,13 @@ export class StripePriceController {
     @Query() query: any,
     @Query("productId") productId?: string,
     @Query("active") active?: string,
+    @Query("sort") sort?: string,
   ) {
     const response = await this.stripePriceAdminService.listPrices({
       query,
       productId,
       active: active !== undefined ? active === "true" : undefined,
+      sort,
     });
 
     reply.send(response);

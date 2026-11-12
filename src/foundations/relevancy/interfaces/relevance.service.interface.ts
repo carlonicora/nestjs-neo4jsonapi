@@ -14,5 +14,7 @@ export interface RelevanceServiceInterface {
     cypherService: any;
     id: string;
     query?: any;
+    /** JSON:API `sort`; replaces the relevance ranking while set. */
+    sort?: string;
   }): Promise<JsonApiListDocument>;
 }

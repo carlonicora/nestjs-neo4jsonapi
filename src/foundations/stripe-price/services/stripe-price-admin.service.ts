@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
 import { StripeProductRepository } from "../../stripe-product/repositories/stripe-product.repository";
 import { StripeProductAdminService } from "../../stripe-product/services/stripe-product-admin.service";
 import { StripeProductApiService } from "../../stripe-product/services/stripe-product-api.service";
@@ -7,6 +8,18 @@ import { StripePricePostDataDTO, StripePricePutDataDTO } from "../dtos/stripe-pr
 import { StripePriceModel } from "../entities/stripe-price.model";
 import { toStripePriceRecurringInterval } from "../entities/stripe-price.entity";
 import { StripePriceRepository } from "../repositories/stripe-price.repository";
+
+/**
+ * The price fields the admin list may sort by (StripePriceRepository has no descriptor, so the
+ * allow-list lives here). `createdAt` / `updatedAt` are always accepted.
+ */
+export const STRIPE_PRICE_SORTABLE_FIELDS: readonly string[] = [
+  "nickname",
+  "unitAmount",
+  "recurringInterval",
+  "token",
+  "active",
+];
 
 /**
  * StripePriceAdminService
@@ -52,12 +65,20 @@ export class StripePriceAdminService {
    * });
    * ```
    */
-  async listPrices(params: { query: any; productId?: string; active?: boolean }): Promise<JsonApiListDocument> {
+  async listPrices(params: {
+    query: any;
+    productId?: string;
+    active?: boolean;
+    /** JSON:API `sort` over {@link STRIPE_PRICE_SORTABLE_FIELDS} (400 otherwise). */
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, allow: STRIPE_PRICE_SORTABLE_FIELDS });
     const paginator = new JsonApiPaginator(params.query);
 
     const prices = await this.stripePriceRepository.findAll({
       productId: params.productId,
       active: params.active,
+      orderByFields,
     });
 
     return this.jsonApiService.buildList(StripePriceModel, prices, paginator);

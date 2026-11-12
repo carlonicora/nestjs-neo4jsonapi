@@ -52,6 +52,19 @@ describe("createCrudHandlers", () => {
   });
 
   describe("findAll", () => {
+    it("forwards the JSON:API sort to service.find", async () => {
+      await handlers.findAll(mockReply as any, { query: {}, sort: "name" });
+
+      expect(mockService.find).toHaveBeenCalledTimes(1);
+      expect(mockService.find.mock.calls[0][0]).toMatchObject({ query: {}, sort: "name" });
+    });
+
+    it("forwards both sort and the legacy orderBy, so the service can let sort win", async () => {
+      await handlers.findAll(mockReply as any, { query: {}, sort: "-name", orderBy: "createdAt" });
+
+      expect(mockService.find.mock.calls[0][0]).toMatchObject({ sort: "-name", orderBy: "createdAt" });
+    });
+
     it("should call service.find with correct params and send response", async () => {
       const params: ListQueryParams = {
         query: { include: "relationships" },

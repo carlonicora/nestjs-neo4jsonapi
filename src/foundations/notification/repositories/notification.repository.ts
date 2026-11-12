@@ -6,7 +6,9 @@ import { modelRegistry } from "../../../common/registries/registry";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { updateRelationshipQuery } from "../../../core/neo4j/queries/update.relationship";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { Notification, NotificationDescriptor } from "../../notification/entities/notification";
 import { notificationMeta } from "../../notification/entities/notification.meta";
@@ -118,6 +120,8 @@ export class NotificationRepository extends AbstractRepository<
     userId: string;
     cursor?: JsonApiCursorInterface;
     isArchived?: boolean;
+    /** Validated sort (from `parseJsonApiSort`); the default is `createdAt DESC`. */
+    orderByFields?: SortCriterion[];
   }): Promise<Notification[]> {
     const query = this.neo4j.initQuery({ serialiser: this.getNotificationModel(), cursor: params.cursor });
 
@@ -133,7 +137,11 @@ export class NotificationRepository extends AbstractRepository<
       ${params.isArchived ? `AND ${notificationMeta.nodeName}.isArchived = true` : `AND ${notificationMeta.nodeName}.isArchived IS null`}
 
       WITH ${notificationMeta.nodeName}
-      ORDER BY ${notificationMeta.nodeName}.createdAt DESC
+      ${buildListOrderByClause({
+        nodeAlias: notificationMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("notification.createdAt DESC"),
+      })}
       {CURSOR}
 
       OPTIONAL MATCH (${notificationMeta.nodeName})-[:TRIGGERED_BY]->(${notificationMeta.nodeName}_actor:${userMeta.labelName})

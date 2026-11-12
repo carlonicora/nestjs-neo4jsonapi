@@ -64,7 +64,9 @@ describe("AbstractRepository.find with structured filters and multi-key sort", (
       { field: "createdAt", direction: "desc" },
     ];
     await repo.find({ orderByFields: sort });
-    expect(capturedRef.query.query).toContain("ORDER BY account.status ASC, account.createdAt DESC");
+    expect(capturedRef.query.query).toContain(
+      "ORDER BY CASE WHEN account.status IS :: STRING THEN toLower(account.status) ELSE account.status END ASC, account.createdAt DESC",
+    );
   });
 
   it("falls back to legacy orderBy string when orderByFields is absent (backwards compat)", async () => {

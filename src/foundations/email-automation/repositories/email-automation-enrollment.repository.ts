@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import {
   EmailAutomationEnrollment,
@@ -443,6 +445,8 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
     automationId: string;
     status?: string;
     cursor: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `enrolledAt DESC`. */
+    orderByFields?: SortCriterion[];
   }): Promise<EmailAutomationEnrollment[]> {
     const { nodeName } = emailAutomationEnrollmentMeta;
     const query = this.neo4j.initQuery({
@@ -465,7 +469,11 @@ export class EmailAutomationEnrollmentRepository extends AbstractRepository<
       }
       ${statusFilter}
       WITH ${nodeName}
-      ORDER BY ${nodeName}.enrolledAt DESC
+      ${buildListOrderByClause({
+        nodeAlias: nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("emailAutomationEnrollment.enrolledAt DESC"),
+      })}
       {CURSOR}
       ${this.buildReturnStatement()}
     `;

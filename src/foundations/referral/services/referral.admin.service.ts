@@ -13,6 +13,7 @@ import {
   ReferralAdminPeriod,
   ReferralAdminRepository,
   ReferralAdminSort,
+  parseReferralAdminReferralSort,
 } from "../repositories/referral.admin.repository";
 import { ReferralRepository } from "../repositories/referral.repository";
 
@@ -70,12 +71,18 @@ export class ReferralAdminService extends AbstractService<Referral, typeof Refer
     return this.jsonApiService.buildList(ReferralAdminReferrerDescriptor.model, rows);
   }
 
-  async getReferrals(params: { period: ReferralAdminPeriod }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort` over the referrals columns (source, status, referredAt,
+   *   tokensAwarded); 400 for anything else, before any query runs.
+   */
+  async getReferrals(params: { period: ReferralAdminPeriod; sort?: string }): Promise<JsonApiListDocument> {
+    const sort = parseReferralAdminReferralSort(params.sort);
     const excludeUserIds = await this._excludeUserIds();
 
     const rows = await this.referralAdminRepository.findReferrals({
       from: this._from(params.period),
       excludeUserIds,
+      sort,
     });
 
     return this.jsonApiService.buildList(ReferralAdminReferralDescriptor.model, rows);

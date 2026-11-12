@@ -31,16 +31,18 @@ export class ContentController {
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
     @Query("contentIds") contentIds?: string,
+    @Query("sort") sort?: string,
   ) {
     let response;
     if (contentIds) {
-      response = await this.contentService.findByIds({ contentIds: contentIds.split(",") });
+      response = await this.contentService.findByIds({ contentIds: contentIds.split(","), sort: sort });
     } else {
       response = await this.contentService.find({
         term: search,
         query: query,
         fetchAll: fetchAll,
         orderBy: orderBy,
+        sort: sort,
       });
     }
 
@@ -56,6 +58,7 @@ export class ContentController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
     const response = await this.contentService.findByOwner({
       ownerId: ownerId,
@@ -63,6 +66,7 @@ export class ContentController {
       query: query,
       fetchAll: fetchAll,
       orderBy: orderBy,
+      sort: sort,
     });
 
     reply.send(response);
@@ -77,6 +81,7 @@ export class ContentController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
     const response = await this.contentService.findByOwner({
       ownerId: authorId,
@@ -84,18 +89,24 @@ export class ContentController {
       query: query,
       fetchAll: fetchAll,
       orderBy: orderBy,
+      sort: sort,
     });
 
     reply.send(response);
   }
 
   @Get(`${contentMeta.endpoint}/:contentId/relevance`)
-  async findContentsRelevantForContent(@Query() query: any, @Param("contentId") contentId: string) {
+  async findContentsRelevantForContent(
+    @Query() query: any,
+    @Param("contentId") contentId: string,
+    @Query("sort") sort?: string,
+  ) {
     return await this.relevancyService.findRelevant({
       model: getContentModel(),
       cypherService: this.cypherService,
       id: contentId,
       query: query,
+      sort: sort,
     });
   }
 }

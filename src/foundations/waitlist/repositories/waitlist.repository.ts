@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { Waitlist, WaitlistDescriptor, WaitlistStatus } from "../entities/waitlist";
 
@@ -86,7 +88,12 @@ export class WaitlistRepository extends AbstractRepository<Waitlist, typeof Wait
    * Find all waitlist entries with optional status filter.
    * Uses cursor-based pagination.
    */
-  async findAllByStatus(params: { status?: WaitlistStatus; cursor?: JsonApiCursorInterface }): Promise<Waitlist[]> {
+  async findAllByStatus(params: {
+    status?: WaitlistStatus;
+    cursor?: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `createdAt DESC`. */
+    orderByFields?: SortCriterion[];
+  }): Promise<Waitlist[]> {
     const { nodeName, labelName } = this.descriptor.model;
     const query = this.neo4j.initQuery({
       serialiser: this.descriptor.model,
@@ -103,7 +110,12 @@ export class WaitlistRepository extends AbstractRepository<Waitlist, typeof Wait
     query.query = `
       MATCH (${nodeName}:${labelName})
       ${statusFilter}
-      ORDER BY ${nodeName}.createdAt DESC
+      WITH ${nodeName}
+      ${buildListOrderByClause({
+        nodeAlias: nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("waitlist.createdAt DESC"),
+      })}
       {CURSOR}
       RETURN ${nodeName}
     `;

@@ -1,7 +1,9 @@
 import { RoleId } from "../../../common/constants/system.roles";
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { RoleDescriptor, Role } from "../../role/entities/role";
 
 @Injectable()
@@ -61,7 +63,14 @@ export class RoleRepository implements OnModuleInit {
     return this.neo4j.readOne(query);
   }
 
-  async find(params: { term?: string; cursor: JsonApiCursorInterface }): Promise<Role[]> {
+  /**
+   * @param params.orderByFields - Validated sort (from `parseJsonApiSort`); the default is `name ASC`.
+   */
+  async find(params: {
+    term?: string;
+    cursor: JsonApiCursorInterface;
+    orderByFields?: SortCriterion[];
+  }): Promise<Role[]> {
     const query = this.neo4j.initQuery({ serialiser: RoleDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
@@ -75,7 +84,7 @@ export class RoleRepository implements OnModuleInit {
       ${params.term ? "AND toLower(role.name) CONTAINS toLower($term)" : ""}
       
       WITH role
-      ORDER BY role.name ASC
+      ${buildListOrderByClause({ nodeAlias: "role", sort: params.orderByFields, defaultOrderBy: codeOrderBy("role.name ASC") })}
       {CURSOR}
       
       RETURN role
@@ -84,7 +93,15 @@ export class RoleRepository implements OnModuleInit {
     return this.neo4j.readMany(query);
   }
 
-  async findForUser(params: { userId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<Role[]> {
+  /**
+   * @param params.orderByFields - Validated sort (from `parseJsonApiSort`); the default is `name ASC`.
+   */
+  async findForUser(params: {
+    userId: string;
+    term?: string;
+    cursor: JsonApiCursorInterface;
+    orderByFields?: SortCriterion[];
+  }): Promise<Role[]> {
     const query = this.neo4j.initQuery({ serialiser: RoleDescriptor.model, cursor: params.cursor });
 
     query.queryParams = {
@@ -106,7 +123,7 @@ export class RoleRepository implements OnModuleInit {
       ${params.term ? "AND toLower(role.name) CONTAINS toLower($term)" : ""}
 
       WITH DISTINCT role
-      ORDER BY role.name ASC
+      ${buildListOrderByClause({ nodeAlias: "role", sort: params.orderByFields, defaultOrderBy: codeOrderBy("role.name ASC") })}
       {CURSOR}
       
       RETURN role

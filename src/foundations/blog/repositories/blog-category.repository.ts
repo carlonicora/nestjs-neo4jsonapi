@@ -3,6 +3,7 @@ import { ClsService } from "nestjs-cls";
 import { AiStatus } from "../../../common/enums/ai.status";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
 import { buildFulltextTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { BlogCategory, BlogCategoryDescriptor } from "../entities/blog-category";
@@ -52,7 +53,12 @@ export class BlogCategoryRepository extends AbstractRepository<
         LIMIT 1
       }
       WITH ${category}, score
-      ORDER BY score DESC
+      ${buildListOrderByClause({
+        nodeAlias: category,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("blogCategory.updatedAt DESC"),
+        scoreVariable: "score",
+      })}
       {CURSOR}
       ${this.buildReturnStatement()}
     `;

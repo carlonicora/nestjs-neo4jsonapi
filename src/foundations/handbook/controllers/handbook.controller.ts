@@ -44,8 +44,9 @@ export class HandbookController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
-    return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
+    return this.crud.findAll(reply, { query, search, fetchAll, orderBy, sort });
   }
 
   @Get(handbookSectionMeta.endpoint)
@@ -55,8 +56,9 @@ export class HandbookController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
-    return this.sections.findAll(reply, { query, search, fetchAll, orderBy });
+    return this.sections.findAll(reply, { query, search, fetchAll, orderBy, sort });
   }
 
   // Declared BEFORE the :handbookPageId route so "sync" is never read as an id.

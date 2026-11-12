@@ -63,8 +63,9 @@ export class EmailBlastController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
-    return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
+    return this.crud.findAll(reply, { query, search, fetchAll, orderBy, sort });
   }
 
   @Get(`${emailBlastMeta.endpoint}/:emailBlastId`)

@@ -579,7 +579,7 @@ describe("RelevancyRepository", () => {
           "WITH content, company, currentUser, totalScore " +
           "WHERE (NOT content:Document OR (<DOC>)) " +
           "WITH content, company, currentUser, totalScore " +
-          "WITH * ORDER BY totalScore DESC {CURSOR} " +
+          "WITH * ORDER BY totalScore DESC, content.id ASC {CURSOR} " +
           "MATCH (content)-[:BELONGS_TO]->(content_company:Company)",
       );
     });
@@ -603,7 +603,7 @@ describe("RelevancyRepository", () => {
           "MATCH (company:Company {id: $companyId}) " +
           "MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company) " +
           "WITH content, company, currentUser, totalScore " +
-          "WITH * ORDER BY totalScore DESC {CURSOR} " +
+          "WITH * ORDER BY totalScore DESC, content.id ASC {CURSOR} " +
           "MATCH (content)-[:BELONGS_TO]->(content_company:Company)",
       );
       expect(query).not.toContain("NOT content:");
@@ -627,7 +627,7 @@ describe("RelevancyRepository", () => {
 
         const query = mockQuery.query.replace(/\s+/g, " ");
         expect(query).toContain(
-          "MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company) WITH * ORDER BY totalScore DESC {CURSOR}",
+          "MATCH (currentUser:User {id: $currentUserId})-[:BELONGS_TO]->(company) WITH * ORDER BY totalScore DESC, content.id ASC {CURSOR}",
         );
         expect(query).not.toContain("<DOC>");
       } finally {

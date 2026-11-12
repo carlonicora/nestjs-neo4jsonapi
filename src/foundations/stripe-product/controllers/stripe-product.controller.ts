@@ -56,10 +56,16 @@ export class StripeProductController {
   @Get(stripeProductMeta.endpoint)
   @UseGuards(JwtAuthGuard)
   @Roles(RoleId.Administrator, RoleId.CompanyAdministrator)
-  async listProducts(@Res() reply: FastifyReply, @Query() query: any, @Query("active") active?: string) {
+  async listProducts(
+    @Res() reply: FastifyReply,
+    @Query() query: any,
+    @Query("active") active?: string,
+    @Query("sort") sort?: string,
+  ) {
     const response = await this.stripeProductAdminService.listProducts({
       query,
       active: active !== undefined ? active === "true" : undefined,
+      sort,
     });
 
     reply.send(response);

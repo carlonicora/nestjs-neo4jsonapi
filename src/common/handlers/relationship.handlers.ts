@@ -11,7 +11,10 @@ export interface RelatedQueryParams {
   query: any;
   search?: string;
   fetchAll?: boolean;
+  /** Legacy single-field order (`name`, `createdAt DESC`). Ignored when `sort` is present. */
   orderBy?: string;
+  /** JSON:API `sort` (`-publicationDate,name`), validated by the service against its descriptor. Wins over `orderBy`. */
+  sort?: string;
   filters?: FilterCriterion[];
 }
 
@@ -35,7 +38,7 @@ export interface RelatedQueryParams {
  *   async findByOwner(@Res() reply, @Param("userId") userId, @Query() query, ...) {
  *     return this.relationships.findByRelated(reply, {
  *       relationship: GalleryDescriptor.relationshipKeys.owner,
- *       id: userId, query, search, fetchAll, orderBy,
+ *       id: userId, query, search, fetchAll, orderBy, sort,
  *     });
  *   }
  *
@@ -61,6 +64,7 @@ export function createRelationshipHandlers<TService extends AbstractService<any,
         query: params.query,
         fetchAll: params.fetchAll,
         orderBy: params.orderBy,
+        sort: params.sort,
         filters: params.filters,
       });
       reply.send(response);

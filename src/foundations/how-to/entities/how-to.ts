@@ -47,6 +47,7 @@ export const HowToDescriptor = defineEntity<HowTo>()({
     name: {
       type: "string",
       required: true,
+      sortable: true,
       description: 'The title of the how-to guide (e.g. "How to create a proceeding").',
     },
     description: {

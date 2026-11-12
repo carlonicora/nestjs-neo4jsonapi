@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
 import { StripeProduct } from "../entities/stripe-product.entity";
 import { stripeProductMeta } from "../entities/stripe-product.meta";
@@ -56,9 +58,10 @@ export class StripeProductRepository implements OnModuleInit {
    * @param params - Optional query parameters
    * @param params.active - Optional filter by active status. `true` also keeps only
    *   the active prices of each product: an archived price is not on sale.
-   * @returns Array of products ordered by name
+   * @param params.orderByFields - Validated sort (from `parseJsonApiSort`); the default is `name ASC`
+   * @returns Array of products ordered by name, or by `orderByFields`
    */
-  async findAll(params?: { active?: boolean }): Promise<StripeProduct[]> {
+  async findAll(params?: { active?: boolean; orderByFields?: SortCriterion[] }): Promise<StripeProduct[]> {
     const query = this.neo4j.initQuery({ serialiser: StripeProductModel });
 
     const whereParams: string[] = [];
@@ -77,7 +80,11 @@ export class StripeProductRepository implements OnModuleInit {
       OPTIONAL MATCH (${stripeProductMeta.nodeName})<-[:BELONGS_TO]-(${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}:${stripePriceMeta.labelName})
       ${priceWhere}
       RETURN ${stripeProductMeta.nodeName}, ${stripeProductMeta.nodeName}_${stripePriceMeta.nodeName}
-      ORDER BY ${stripeProductMeta.nodeName}.name
+      ${buildListOrderByClause({
+        nodeAlias: stripeProductMeta.nodeName,
+        sort: params?.orderByFields,
+        defaultOrderBy: codeOrderBy("stripeProduct.name ASC"),
+      })}
     `;
 
     return this.neo4j.readMany(query);

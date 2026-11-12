@@ -51,8 +51,8 @@ export class ReferralAdminController {
 
   @Get(referralAdminReferralMeta.endpoint)
   @Roles(SystemRoles.Administrator)
-  async getReferrals(@Res() reply: FastifyReply, @Query("period") period?: string) {
-    reply.send(await this.service.getReferrals({ period: this._period(period) }));
+  async getReferrals(@Res() reply: FastifyReply, @Query("period") period?: string, @Query("sort") sort?: string) {
+    reply.send(await this.service.getReferrals({ period: this._period(period), sort }));
   }
 
   private _period(value?: string): ReferralAdminPeriod {

@@ -45,18 +45,18 @@ export const StripeCouponDescriptor = defineEntity<StripeCoupon>()({
 
   fields: {
     stripeCouponId: { type: "string" },
-    name: { type: "string", required: true },
-    discountType: { type: "string", required: true },
-    percentOff: { type: "number" },
-    amountOff: { type: "number" },
+    name: { type: "string", required: true, sortable: true },
+    discountType: { type: "string", required: true, sortable: true },
+    percentOff: { type: "number", sortable: true },
+    amountOff: { type: "number", sortable: true },
     currency: { type: "string" },
     duration: { type: "string", required: true },
     durationInMonths: { type: "number" },
     stripeProductIds: { type: "string[]" },
     redeemBy: { type: "datetime" },
-    maxRedemptions: { type: "number" },
-    timesRedeemed: { type: "number", required: true, default: 0 },
-    valid: { type: "boolean", required: true, default: true },
+    maxRedemptions: { type: "number", sortable: true },
+    timesRedeemed: { type: "number", required: true, default: 0, sortable: true },
+    valid: { type: "boolean", required: true, default: true, sortable: true },
   },
 
   relationships: {

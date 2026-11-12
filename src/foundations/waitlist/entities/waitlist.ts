@@ -35,7 +35,7 @@ export const WaitlistDescriptor = defineEntity<Waitlist>()({
   isCompanyScoped: false,
 
   fields: {
-    email: { type: "string", required: true },
+    email: { type: "string", required: true, sortable: true },
     gdprConsent: { type: "boolean", required: true },
     gdprConsentAt: { type: "datetime", required: true },
     marketingConsent: { type: "boolean" },
@@ -47,7 +47,7 @@ export const WaitlistDescriptor = defineEntity<Waitlist>()({
     confirmationCode: { type: "string", excludeFromJsonApi: true },
     confirmationCodeExpiration: { type: "datetime", excludeFromJsonApi: true },
     confirmedAt: { type: "datetime" },
-    status: { type: "string", required: true, default: WaitlistStatus.Pending },
+    status: { type: "string", required: true, default: WaitlistStatus.Pending, sortable: true },
     inviteCode: { type: "string", excludeFromJsonApi: true },
     inviteCodeExpiration: { type: "datetime", excludeFromJsonApi: true },
     invitedAt: { type: "datetime" },

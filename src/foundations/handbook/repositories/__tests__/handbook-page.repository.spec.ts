@@ -127,8 +127,14 @@ describe("HandbookPageRepository", () => {
     await repository.find({});
 
     const query = (neo4j.readMany.mock.calls.at(-1)![0] as any).query as string;
-    expect(query).toContain("ORDER BY handbookPage.section ASC, handbookPage.order ASC");
-    expect(query.indexOf("ORDER BY handbookPage.section")).toBeLessThan(query.indexOf("{CURSOR}"));
+    expect(query).toContain(
+      "ORDER BY CASE WHEN handbookPage.section IS :: STRING THEN toLower(handbookPage.section) ELSE handbookPage.section END ASC, CASE WHEN handbookPage.order IS :: STRING THEN toLower(handbookPage.order) ELSE handbookPage.order END ASC",
+    );
+    expect(
+      query.indexOf(
+        "ORDER BY CASE WHEN handbookPage.section IS :: STRING THEN toLower(handbookPage.section) ELSE handbookPage.section END",
+      ),
+    ).toBeLessThan(query.indexOf("{CURSOR}"));
     expect(query).not.toMatch(/\bSKIP\b|\bLIMIT\b/);
   });
 

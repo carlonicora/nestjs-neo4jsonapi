@@ -281,7 +281,7 @@ describe("ReferralAdminRepository", () => {
     expect(rows[1]).toMatchObject({ name: "", email: "", referrerName: "", referrerEmail: "", source: "direct" });
     expect(rows[1].completedAt).toBeUndefined();
     expect(rows[1].tokensAwarded).toBeUndefined();
-    expect(seen[0].q).toContain("ORDER BY referral.createdAt DESC");
+    expect(seen[0].q).toContain("ORDER BY referredAt DESC, id ASC");
   });
 
   it("a referral written before source existed stays unknown", async () => {

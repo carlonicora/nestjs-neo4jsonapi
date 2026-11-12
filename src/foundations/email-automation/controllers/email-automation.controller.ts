@@ -65,8 +65,9 @@ export class EmailAutomationController {
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
     @Query("orderBy") orderBy?: string,
+    @Query("sort") sort?: string,
   ) {
-    return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
+    return this.crud.findAll(reply, { query, search, fetchAll, orderBy, sort });
   }
 
   @Get(`${emailAutomationMeta.endpoint}/:emailAutomationId`)
@@ -125,8 +126,9 @@ export class EmailAutomationController {
     @Param("emailAutomationId") emailAutomationId: string,
     @Query() query: any,
     @Query("status") status?: string,
+    @Query("sort") sort?: string,
   ) {
-    const response = await this.emailAutomationService.findEnrollments({ id: emailAutomationId, status, query });
+    const response = await this.emailAutomationService.findEnrollments({ id: emailAutomationId, status, query, sort });
     reply.send(response);
   }
 

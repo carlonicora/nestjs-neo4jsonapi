@@ -58,8 +58,8 @@ export const UserDescriptor = defineEntity<User>()({
 
   // Field definitions
   fields: {
-    email: { type: "string", required: true },
-    name: { type: "string" },
+    email: { type: "string", required: true, sortable: true },
+    name: { type: "string", sortable: true },
     title: { type: "string" },
     bio: { type: "string" },
     password: { type: "string", excludeFromJsonApi: true, excludeFromSearch: true },

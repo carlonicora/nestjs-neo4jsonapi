@@ -77,6 +77,7 @@ export const BlogPostDescriptor = defineEntity<BlogPost>()({
       type: "string",
       required: true,
       excludeFromSearch: true,
+      sortable: true,
       description:
         "Publication state: draft (never shown publicly), published (shown on the public blog) or unpublished (taken down; can be published again). Server-owned, changed only by the publish and unpublish actions.",
     },
@@ -100,6 +101,7 @@ export const BlogPostDescriptor = defineEntity<BlogPost>()({
     },
     publishedAt: {
       type: "datetime",
+      sortable: true,
       description:
         "When the post was first published. Set on the first publish and kept through unpublish and republish; the public list is ordered by it, newest first.",
     },

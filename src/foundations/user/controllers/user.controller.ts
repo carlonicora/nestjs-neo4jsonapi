@@ -81,6 +81,7 @@ export class UserController {
     @Query("search") search?: string,
     @Query("includeDeleted") includeDeleted?: boolean,
     @Query("contentIds") contentIds?: string,
+    @Query("sort") sort?: string,
   ) {
     const isAdmin = this.security.isUserInRoles({
       user: request.user,
@@ -89,13 +90,14 @@ export class UserController {
 
     let response;
     if (contentIds) {
-      response = await this.users.findByContentIds({ contentIds: contentIds.split(","), query: query });
+      response = await this.users.findByContentIds({ contentIds: contentIds.split(","), query: query, sort: sort });
     } else {
       response = await this.users.findMany({
         query: query,
         term: search,
         isAdmin: isAdmin,
         includeDeleted: includeDeleted ?? false,
+        sort: sort,
       });
     }
 
@@ -150,6 +152,7 @@ export class UserController {
     @Query("search") search?: string,
     @Query("includeDeleted") includeDeleted?: boolean,
     @Query("isDeleted") isDeleted?: boolean,
+    @Query("sort") sort?: string,
   ) {
     // The URL company replaces the CLS company below, so only the caller's own
     // company (or a platform administrator) may be listed.
@@ -164,6 +167,7 @@ export class UserController {
       isDeleted: isDeleted ?? false,
       includeDeleted: includeDeleted ?? false,
       companyId: companyId,
+      sort: sort,
     });
 
     reply.send(response);
@@ -347,6 +351,7 @@ export class UserController {
     @Param("roleId") roleId: string,
     @Query("notInRole") notInRole?: boolean,
     @Query("search") search?: string,
+    @Query("sort") sort?: string,
   ) {
     const isAdmin = this.security.isUserInRoles({
       user: req.user,
@@ -358,6 +363,7 @@ export class UserController {
         term: search,
         query: query,
         isAdmin: isAdmin,
+        sort: sort,
       });
 
     return await this.users.findInRole({
@@ -365,6 +371,7 @@ export class UserController {
       term: search,
       query: query,
       isAdmin: isAdmin,
+      sort: sort,
     });
   }
 
@@ -426,11 +433,16 @@ export class UserController {
   }
 
   @Get(`${contentMeta.endpoint}/:contentId/user-relevance`)
-  async findContentsRelevantForContent(@Query() query: any, @Param("contentId") contentId: string) {
+  async findContentsRelevantForContent(
+    @Query() query: any,
+    @Param("contentId") contentId: string,
+    @Query("sort") sort?: string,
+  ) {
     return await this.relevancyService.findRelevantUsers({
       cypherService: this.cypherService,
       id: contentId,
       query: query,
+      sort: sort,
     });
   }
 }

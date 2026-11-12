@@ -376,12 +376,16 @@ export class CompanyService extends AbstractService<Company, typeof CompanyDescr
     );
   }
 
-  async find(params: { term?: string; query: any }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort`, validated against the descriptor (400 when a field is not sortable).
+   */
+  async find(params: { term?: string; query: any; sort?: string }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.builder.buildList(
       CompanyDescriptor.model,
-      await this.companyRepository.find({ term: params.term, cursor: paginator.generateCursor() }),
+      await this.companyRepository.find({ term: params.term, cursor: paginator.generateCursor(), orderByFields }),
       paginator,
     );
   }

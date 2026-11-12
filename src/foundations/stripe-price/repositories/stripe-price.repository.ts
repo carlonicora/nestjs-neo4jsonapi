@@ -1,6 +1,8 @@
 import { Injectable, OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Neo4jService } from "../../../core/neo4j";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { updateRelationshipQuery } from "../../../core";
 import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
 import { featureMeta } from "../../feature/entities/feature.meta";
@@ -68,10 +70,20 @@ export class StripePriceRepository implements OnModuleInit {
    * @param params - Optional query parameters
    * @param params.productId - Optional filter by product ID
    * @param params.active - Optional filter by active status
-   * @returns Array of prices ordered by creation date descending
+   * @param params.orderByFields - Validated sort (from `parseJsonApiSort`); the default is `createdAt DESC`
+   * @returns Array of prices ordered by creation date descending, or by `orderByFields`
    */
-  async findAll(params?: { productId?: string; active?: boolean }): Promise<StripePrice[]> {
+  async findAll(params?: {
+    productId?: string;
+    active?: boolean;
+    orderByFields?: SortCriterion[];
+  }): Promise<StripePrice[]> {
     const query = this.neo4j.initQuery({ serialiser: StripePriceModel });
+    const orderBy = buildListOrderByClause({
+      nodeAlias: stripePriceMeta.nodeName,
+      sort: params?.orderByFields,
+      defaultOrderBy: codeOrderBy("stripePrice.createdAt DESC"),
+    });
 
     const whereParams: string[] = [];
 
@@ -89,7 +101,7 @@ export class StripePriceRepository implements OnModuleInit {
         ${where}
         OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
         RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
-        ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
+        ${orderBy}
       `;
     } else {
       query.query = `
@@ -97,7 +109,7 @@ export class StripePriceRepository implements OnModuleInit {
         ${where}
         OPTIONAL MATCH (${stripePriceMeta.nodeName})-[:HAS_FEATURE]->(${stripePriceMeta.nodeName}_${featureMeta.nodeName}:${featureMeta.labelName})
         RETURN ${stripePriceMeta.nodeName}, ${stripeProductMeta.nodeName} AS ${stripePriceMeta.nodeName}_${stripeProductMeta.nodeName}, ${stripePriceMeta.nodeName}_${featureMeta.nodeName}
-        ORDER BY ${stripePriceMeta.nodeName}.createdAt DESC
+        ${orderBy}
       `;
     }
 

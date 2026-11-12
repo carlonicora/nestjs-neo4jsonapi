@@ -8,7 +8,10 @@ export interface ListQueryParams {
   query: any;
   search?: string;
   fetchAll?: boolean;
+  /** Legacy single-field order (`name`, `createdAt DESC`). Ignored when `sort` is present. */
   orderBy?: string;
+  /** JSON:API `sort` (`-publicationDate,name`), validated by the service against its descriptor. Wins over `orderBy`. */
+  sort?: string;
 }
 
 /**
@@ -29,7 +32,7 @@ export interface ListQueryParams {
  *
  *   @Get(endpoint)
  *   async findAll(@Res() reply, @Query() query, @Query("search") search?, ...) {
- *     return this.crud.findAll(reply, { query, search, fetchAll, orderBy });
+ *     return this.crud.findAll(reply, { query, search, fetchAll, orderBy, sort });
  *   }
  *
  *   @Put(`${endpoint}/:id`)
@@ -52,6 +55,7 @@ export function createCrudHandlers<TService extends AbstractService<any, any>>(g
         query: params.query,
         fetchAll: params.fetchAll,
         orderBy: params.orderBy,
+        sort: params.sort,
       });
       reply.send(response);
     },

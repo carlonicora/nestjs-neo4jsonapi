@@ -60,7 +60,11 @@ ${
     `;
 };
 
-const queryForAuthor = (params: { term?: string }): string => {
+/**
+ * @param params.orderBy - A code-built ORDER BY clause over `author` / `totalScore` (from
+ *   `buildListOrderByClause`); defaults to `ORDER BY totalScore DESC`.
+ */
+const queryForAuthor = (params: { term?: string; orderBy?: string }): string => {
   return `
         OPTIONAL MATCH (chunk)-[:HAS_ATOMIC_FACT]->(:AtomicFact)-[:HAS_KEY_CONCEPT]->(startingKC:KeyConcept)
         OPTIONAL MATCH (chunk)<-[:OCCURS_IN]-(startingKCR:KeyConceptRelationship)-[:BELONGS_TO]->(company)
@@ -107,7 +111,7 @@ const queryForAuthor = (params: { term?: string }): string => {
 
         ${params.term ? "WHERE toLower(author.name) CONTAINS toLower($term)" : ""}
 
-        ORDER BY totalScore DESC
+        ${params.orderBy ?? "ORDER BY totalScore DESC"}
         {CURSOR}
     `;
 };
@@ -154,11 +158,11 @@ export const authorQuery = (params: { term?: string; deferCursor?: boolean }): s
 `;
 };
 
-export const contentToAuthorQuery = (params: { term?: string; sourceLabels?: string[] }): string => {
+export const contentToAuthorQuery = (params: { term?: string; sourceLabels?: string[]; orderBy?: string }): string => {
   return `
     MATCH (${sourcePattern(params.sourceLabels)})-[:BELONGS_TO]->(company)
     MATCH (source)-[:HAS_CHUNK]->(chunk:Chunk)
-    ${queryForAuthor({ term: params.term })}
+    ${queryForAuthor({ term: params.term, orderBy: params.orderBy })}
 `;
 };
 

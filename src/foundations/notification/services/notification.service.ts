@@ -35,7 +35,16 @@ export class NotificationServices extends AbstractService<Notification, typeof N
     super(builder, notificationRepository, clsService, NotificationDescriptor.model);
   }
 
-  async findForUser(params: { query: any; userId: string; isArchived?: boolean }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort`, validated against the descriptor (400 when a field is not sortable).
+   */
+  async findForUser(params: {
+    query: any;
+    userId: string;
+    isArchived?: boolean;
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -44,6 +53,7 @@ export class NotificationServices extends AbstractService<Notification, typeof N
         userId: params.userId,
         isArchived: params.isArchived,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );

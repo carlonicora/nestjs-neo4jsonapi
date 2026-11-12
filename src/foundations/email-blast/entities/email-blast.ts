@@ -26,17 +26,17 @@ export const EmailBlastDescriptor = defineEntity<EmailBlast>()({
   tenancy: "internal",
 
   fields: {
-    subject: { type: "string", required: true },
+    subject: { type: "string", required: true, sortable: true },
     body: { type: "string", required: true },
     replyTo: { type: "string" },
-    purpose: { type: "string" },
+    purpose: { type: "string", sortable: true },
     // Not required: the POST DTO never carries it, the default sets it
-    status: { type: "string", default: "draft" },
-    sentAt: { type: "datetime" },
+    status: { type: "string", default: "draft", sortable: true },
+    sentAt: { type: "datetime", sortable: true },
     recipientCount: { type: "number" },
-    sentCount: { type: "number", default: 0 },
-    failedCount: { type: "number", default: 0 },
-    unsubscribedCount: { type: "number", default: 0 },
+    sentCount: { type: "number", default: 0, sortable: true },
+    failedCount: { type: "number", default: 0, sortable: true },
+    unsubscribedCount: { type: "number", default: 0, sortable: true },
   },
 
   relationships: {},

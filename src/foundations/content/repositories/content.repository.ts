@@ -2,7 +2,13 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { BaseConfigInterface, ConfigContentTypesInterface } from "../../../config/interfaces";
 import { JsonApiCursorInterface } from "../../../core/jsonapi/interfaces/jsonapi.cursor.interface";
+import {
+  buildLegacyOrderByClause,
+  buildListOrderByClause,
+  codeOrderBy,
+} from "../../../core/neo4j/helpers/build-order-by";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { Content, getContentModel } from "../../content/entities/content";
 import { contentMeta } from "../../content/entities/content.meta";
@@ -30,6 +36,37 @@ export class ContentRepository {
     private readonly configService: ConfigService<BaseConfigInterface>,
   ) {}
 
+  /**
+   * The ORDER BY of a paginated content list. A validated `orderByFields` (from `parseJsonApiSort`)
+   * wins; otherwise the legacy `orderBy` (one property and an optional direction, refused with a 400
+   * otherwise) or the default `updatedAt DESC`. Both end with `content.id ASC`.
+   */
+  private listOrderBy(params: { orderBy?: string; orderByFields?: SortCriterion[] }): string {
+    if (params.orderByFields?.length)
+      return buildListOrderByClause({
+        nodeAlias: contentMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("content.updatedAt DESC"),
+      });
+
+    return buildLegacyOrderByClause({
+      nodeAlias: contentMeta.nodeName,
+      orderBy: params.orderBy,
+      fallback: "updatedAt DESC",
+    });
+  }
+
+  /** The by-ids read's ORDER BY: the validated sort, else `updatedAt DESC` (the paginated lists' default), always ending with `content.id ASC`. */
+  private byIdsOrderBy(orderByFields?: SortCriterion[]): string {
+    return `
+        WITH *
+        ${buildListOrderByClause({
+          nodeAlias: contentMeta.nodeName,
+          sort: orderByFields,
+          defaultOrderBy: codeOrderBy("content.updatedAt DESC"),
+        })}`;
+  }
+
   private getContentTypes(): string[] {
     const types = this.configService.get<ConfigContentTypesInterface>("contentTypes")?.types ?? [];
     return types.length > 0 ? types : [contentMeta.labelName];
@@ -38,7 +75,10 @@ export class ContentRepository {
   async find(params: {
     fetchAll?: boolean;
     term?: string;
+    /** Legacy single-field order (`name`, `createdAt DESC`); validated, ignored when `orderByFields` is set. */
     orderBy?: string;
+    /** Validated sort (from `parseJsonApiSort`). */
+    orderByFields?: SortCriterion[];
     cursor?: JsonApiCursorInterface;
   }): Promise<Content[]> {
     const query = this.neo4j.initQuery({
@@ -56,7 +96,7 @@ export class ContentRepository {
       ${this.contentCypherService.default()}
       ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
 
-      ORDER BY ${contentMeta.nodeName}.${params.orderBy ? `${params.orderBy}` : `updatedAt DESC`}
+      ${this.listOrderBy(params)}
       {CURSOR}
 
       ${this.contentCypherService.returnStatement()}
@@ -65,7 +105,11 @@ export class ContentRepository {
     return this.neo4j.readMany(query);
   }
 
-  async findByIds(params: { contentIds: string[] }): Promise<Content[]> {
+  async findByIds(params: {
+    contentIds: string[];
+    /** Validated sort (from `parseJsonApiSort`); without it the rows are ordered `updatedAt DESC`, then id. */
+    orderByFields?: SortCriterion[];
+  }): Promise<Content[]> {
     const query = this.neo4j.initQuery({ serialiser: getContentModel() });
 
     query.queryParams = {
@@ -76,7 +120,7 @@ export class ContentRepository {
     query.query += `
         MATCH (${contentMeta.nodeName}:${this.getContentTypes().join("|")})-[:BELONGS_TO]->(company)
         WHERE ${contentMeta.nodeName}.id IN $ids${this.contentCypherService.tldrFilter()}
-        ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
+        ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}${this.byIdsOrderBy(params.orderByFields)}
         ${this.contentCypherService.returnStatement()}
       `;
 
@@ -86,7 +130,10 @@ export class ContentRepository {
   async findByOwner(params: {
     ownerId: string;
     term?: string;
+    /** Legacy single-field order (`name`, `createdAt DESC`); validated, ignored when `orderByFields` is set. */
     orderBy?: string;
+    /** Validated sort (from `parseJsonApiSort`). */
+    orderByFields?: SortCriterion[];
     fetchAll?: boolean;
     cursor?: JsonApiCursorInterface;
   }) {
@@ -107,7 +154,7 @@ export class ContentRepository {
       ${this.securityService.userHasAccess({ validator: this.contentCypherService.userHasAccess })}
       ${this.contentCypherService.ownerMatch({ target: `:${ownerMeta.labelName} {id: $ownerId}` })}
 
-      ORDER BY ${contentMeta.nodeName}.${params.orderBy ? `${params.orderBy}` : `updatedAt DESC`}
+      ${this.listOrderBy(params)}
       {CURSOR}
 
       ${this.contentCypherService.returnStatement()}

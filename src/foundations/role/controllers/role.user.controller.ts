@@ -25,6 +25,7 @@ export class RoleUserController {
     @Param("userId") userId: string,
     @Query("search") search?: string,
     @Query("userNotIn") userNotIn?: boolean,
+    @Query("sort") sort?: string,
   ) {
     if (userNotIn)
       return await this.roleServide.findNotInUser({
@@ -37,6 +38,7 @@ export class RoleUserController {
       userId: userId,
       term: search,
       query: query,
+      sort: sort,
     });
   }
 }

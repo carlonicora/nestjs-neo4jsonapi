@@ -49,6 +49,7 @@ export class StripeCouponCodeController {
     @Query() query: any,
     @Query("search") search?: string,
     @Query("fetchAll") fetchAll?: boolean,
+    @Query("sort") sort?: string,
   ) {
     return this.relationships.findByRelated(reply, {
       relationship: StripeCouponCodeDescriptor.relationshipKeys.coupon,
@@ -57,6 +58,7 @@ export class StripeCouponCodeController {
       search,
       fetchAll,
       orderBy: "createdAt",
+      sort,
     });
   }
 

@@ -68,8 +68,8 @@ export class WaitlistController {
   @Get()
   @UseGuards(AdminJwtAuthGuard)
   @Roles(RoleId.Administrator)
-  async findAll(@Query() query: any, @Query("status") status?: WaitlistStatus) {
-    return await this.service.findAllByStatus({ query, status });
+  async findAll(@Query() query: any, @Query("status") status?: WaitlistStatus, @Query("sort") sort?: string) {
+    return await this.service.findAllByStatus({ query, status, sort });
   }
 
   /**

@@ -54,7 +54,9 @@ describe("BlogCategoryRepository", () => {
     it("scopes every full-text hit through buildDefaultMatch and keeps the score", async () => {
       await repo.find({ term: "fiume", cursor: {} as any });
       expect(captured.query).toContain("blogCategory_fulltextAccess");
-      expect(captured.query).toMatch(/WITH blogCategory, score\s+ORDER BY score DESC\s+\{CURSOR\}/);
+      expect(captured.query).toMatch(
+        /WITH blogCategory, score\s+ORDER BY score DESC, blogCategory\.id ASC\s+\{CURSOR\}/,
+      );
     });
   });
 

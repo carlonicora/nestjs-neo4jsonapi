@@ -39,12 +39,12 @@ export const EmailAutomationDescriptor = defineEntity<EmailAutomation>()({
   isCompanyScoped: false,
 
   fields: {
-    name: { type: "string", required: true },
-    trigger: { type: "string" },
+    name: { type: "string", required: true, sortable: true },
+    trigger: { type: "string", sortable: true },
     exitTrigger: { type: "string" },
     replyTo: { type: "string" },
-    purpose: { type: "string" },
-    isActive: { type: "boolean", required: true, default: false },
+    purpose: { type: "string", sortable: true },
+    isActive: { type: "boolean", required: true, default: false, sortable: true },
     stepCount: { type: "number" },
     activeCount: { type: "number" },
     completedCount: { type: "number" },

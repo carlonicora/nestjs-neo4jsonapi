@@ -85,6 +85,8 @@ export interface FieldDef {
    * creates it again with the new fields.
    */
   excludeFromSearch?: boolean;
+  /** Opt-in: the field may be named in a list request's `sort`. Own stored scalar fields only; never a computed value. */
+  sortable?: boolean;
   /**
    * If false, field is suppressed from JSON:API output (attributes and meta).
    * Defaults to true. Used for storage-only fields (e.g. cents storage backing

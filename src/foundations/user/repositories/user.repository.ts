@@ -21,6 +21,8 @@ import { User, UserDescriptor } from "../../user/entities/user";
 import { userMeta } from "../../user/entities/user.meta";
 import { UserCypherService } from "../../user/services/user.cypher.service";
 import { buildFulltextTerm } from "../../../core/neo4j/helpers/build-fulltext-term";
+import { buildListOrderByClause, codeOrderBy } from "../../../core/neo4j/helpers/build-order-by";
+import { SortCriterion } from "../../../core/neo4j/types/filter.criterion";
 import { sanitiseSignupSource, SignupSource } from "../../waitlist/utils/signup-source";
 import { revokeUserOAuthTokensClause } from "../../oauth/queries/revoke-user-oauth-tokens.query";
 
@@ -327,6 +329,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     term?: string;
     includeDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `name ASC`, or the search score. */
+    orderByFields?: SortCriterion[];
   }): Promise<User[]> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
@@ -351,13 +355,22 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       }
 
       WITH node as ${userMeta.nodeName}, score
-      ORDER BY score DESC
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+        scoreVariable: "score",
+      })}
     `;
     } else {
       query.query += `
       ${this.userCypherService.default()}
 
-      ORDER BY ${userMeta.nodeName}.name ASC
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+      })}
     `;
     }
 
@@ -379,6 +392,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     contentIds: string[];
     term?: string;
     includeDeleted?: boolean;
+    /** Validated sort (from `parseJsonApiSort`); the default is `name ASC`. */
+    orderByFields?: SortCriterion[];
   }): Promise<User[]> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, fetchAll: true });
 
@@ -393,7 +408,11 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
      MATCH (${userMeta.nodeName})-[:PUBLISHED|:EDITED]->(content)
      WHERE content.id IN $contentIds
       
-      ORDER BY user.name ASC
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+      })}
       {CURSOR}
 
       ${this.userCypherService.returnStatement()}
@@ -408,6 +427,8 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     includeDeleted?: boolean;
     isDeleted?: boolean;
     cursor?: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `name ASC`. */
+    orderByFields?: SortCriterion[];
   }): Promise<User[]> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
@@ -423,12 +444,23 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       ${params.term ? `${params.isDeleted ? `AND` : `WHERE`} toLower(user.name) CONTAINS toLower($term)` : ``}
       ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
       RETURN user, user_role
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+      })}
     `;
 
     return this.neo4j.readMany(query);
   }
 
-  async findInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
+  async findInRole(params: {
+    roleId: string;
+    term?: string;
+    cursor: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `name ASC`. */
+    orderByFields?: SortCriterion[];
+  }): Promise<User[]> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
@@ -443,7 +475,11 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       ${membershipRoleMatchRequired({ userAlias: "user", roleAlias: "role" })}
 
       WITH DISTINCT user
-      ORDER BY user.name ASC
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+      })}
       {CURSOR}
 
       ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}
@@ -454,7 +490,13 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
     return this.neo4j.readMany(query);
   }
 
-  async findNotInRole(params: { roleId: string; term?: string; cursor: JsonApiCursorInterface }): Promise<User[]> {
+  async findNotInRole(params: {
+    roleId: string;
+    term?: string;
+    cursor: JsonApiCursorInterface;
+    /** Validated sort (from `parseJsonApiSort`); the default is `name ASC`. */
+    orderByFields?: SortCriterion[];
+  }): Promise<User[]> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model, cursor: params.cursor });
 
     query.queryParams = {
@@ -474,7 +516,11 @@ export class UserRepository extends AbstractRepository<User, typeof UserDescript
       ${params.term ? "AND toLower(user.name) CONTAINS toLower($term)" : ""}
 
       WITH DISTINCT user
-      ORDER BY user.name ASC
+      ${buildListOrderByClause({
+        nodeAlias: userMeta.nodeName,
+        sort: params.orderByFields,
+        defaultOrderBy: codeOrderBy("user.name ASC"),
+      })}
       {CURSOR}
 
       ${membershipRoleMatch({ userAlias: "user", roleAlias: "user_role" })}

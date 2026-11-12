@@ -5,6 +5,7 @@ import { EntityDescriptor, FieldDef, RelationshipDef } from "../../../common/int
 import { AuditService } from "../../../foundations/audit/services/audit.service";
 import { JsonApiPaginator } from "../../jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../jsonapi/services/jsonapi.service";
+import { parseJsonApiSort } from "../helpers/parse-jsonapi-sort";
 import { ExtraWhereCondition, FilterCriterion, SortCriterion } from "../types/filter.criterion";
 import { AbstractRepository } from "./abstract.repository";
 import { JsonApiListDocument, JsonApiSingleDocument } from "../../jsonapi/interfaces/jsonapi.document.interface";
@@ -80,19 +81,26 @@ export abstract class AbstractService<
   /**
    * Find entities with optional search term, ordering, and pagination
    * Total count is automatically computed by Neo4jService when {CURSOR} is detected
+   *
+   * @param params.orderBy - Legacy single-field order; ignored when `sort` is present.
+   * @param params.sort - JSON:API `sort` (`-name,createdAt`), validated by {@link parseSort}; 400 when a
+   *   field is not sortable. It becomes the repository's `orderByFields`.
    */
   async find(params: {
     query: any;
     term?: string;
     fetchAll?: boolean;
     orderBy?: string;
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator = new JsonApiPaginator(params.query);
 
     const data = await this.repository.find({
       fetchAll: params.fetchAll,
       term: params.term,
-      orderBy: params.orderBy,
+      orderBy: orderByFields ? undefined : params.orderBy,
+      orderByFields,
       cursor: paginator.generateCursor(),
     });
 
@@ -562,11 +570,15 @@ export abstract class AbstractService<
     query: any;
     term?: string;
     fetchAll?: boolean;
+    /** Legacy single-field order; ignored when `sort` is present. */
     orderBy?: string;
+    /** JSON:API `sort`, validated by {@link parseSort} (400 when a field is not sortable); wins over `orderBy`. */
+    sort?: string;
     filters?: FilterCriterion[];
     /** Caller-written, parameterised WHERE condition, passed unchanged to the repository; `clause` must never contain request input. */
     extraWhere?: ExtraWhereCondition;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator = new JsonApiPaginator(params.query);
 
     const data = await this.repository.findByRelated({
@@ -574,7 +586,8 @@ export abstract class AbstractService<
       id: params.id,
       fetchAll: params.fetchAll,
       term: params.term,
-      orderBy: params.orderBy,
+      orderBy: orderByFields ? undefined : params.orderBy,
+      orderByFields,
       filters: params.filters,
       extraWhere: params.extraWhere,
       cursor: paginator.generateCursor(),
@@ -583,6 +596,20 @@ export abstract class AbstractService<
     });
 
     return this.jsonApiService.buildList(this.model, data, paginator);
+  }
+
+  /**
+   * The request's `sort` validated against this service's descriptor; `undefined` when absent.
+   * Accepts descriptor fields marked `sortable: true`, `createdAt` / `updatedAt`, and the names in
+   * `allow`; anything else throws `BadRequestException("Invalid sort")`.
+   *
+   * @param sort - The raw JSON:API `sort` request value.
+   * @param allow - Extra code-held field names this list accepts (e.g. a rank computed in the query).
+   */
+  protected parseSort(sort?: string, allow?: readonly string[]): SortCriterion[] | undefined {
+    // Field names are the string keys of T, as in mapDTOToParams below.
+    const fields = this.descriptor.fields as Record<string, FieldDef | undefined>;
+    return parseJsonApiSort({ sort, descriptor: { fields }, allow });
   }
 
   /**

@@ -5,6 +5,7 @@ import {
   JsonApiSingleDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
+import { parseJsonApiSort } from "../../../core/neo4j/helpers/parse-jsonapi-sort";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService, JsonApiDTOData } from "../../../core/neo4j/abstracts/abstract.service";
 import { EmailAutomation, EmailAutomationDescriptor } from "../entities/email-automation";
@@ -68,13 +69,24 @@ export class EmailAutomationService extends AbstractService<
     await this.stepRepository.clearPositions({ automationId: params.id });
   }
 
-  async findEnrollments(params: { id: string; status?: string; query: any }): Promise<JsonApiListDocument> {
+  /**
+   * @param params.sort - JSON:API `sort`, validated against the enrolment descriptor (400 when a
+   *   field is not sortable; the computed step and sent count never are).
+   */
+  async findEnrollments(params: {
+    id: string;
+    status?: string;
+    query: any;
+    sort?: string;
+  }): Promise<JsonApiListDocument> {
+    const orderByFields = parseJsonApiSort({ sort: params.sort, descriptor: EmailAutomationEnrollmentDescriptor });
     const paginator = new JsonApiPaginator(params.query);
 
     const data = await this.enrollmentRepository.findByAutomation({
       automationId: params.id,
       status: params.status,
       cursor: paginator.generateCursor(),
+      orderByFields,
     });
 
     return this.jsonApiService.buildList(EmailAutomationEnrollmentDescriptor.model, data, paginator);

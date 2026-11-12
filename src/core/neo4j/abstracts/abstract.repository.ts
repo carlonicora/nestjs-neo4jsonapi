@@ -7,7 +7,12 @@ import { JsonApiCursorInterface } from "../../jsonapi/interfaces/jsonapi.cursor.
 import { SecurityService } from "../../security/services/security.service";
 import { buildFilterClauses } from "../helpers/build-filter-clauses";
 import { buildFulltextTerm } from "../helpers/build-fulltext-term";
-import { buildLegacyOrderByClause, buildOrderByClause } from "../helpers/build-order-by";
+import {
+  buildLegacyOrderByClause,
+  buildListOrderByClause,
+  buildOrderByClause,
+  codeOrderBy,
+} from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
 import { ExtraWhereCondition, FilterCriterion, SortCriterion } from "../types/filter.criterion";
@@ -525,8 +530,14 @@ export abstract class AbstractRepository<
    *
    * @param hitFilter - optional predicate over the raw `node` yielded by the index
    * @param filterClause - optional structured-filter clause over the entity alias
+   * @param orderByClause - optional code-built ORDER BY replacing `ORDER BY score DESC` (a requested
+   *   sort on search results, from {@link buildListOrderByClause}); it may reference the entity alias and `score`
    */
-  protected buildFulltextAccessCheckedMatch(params: { hitFilter?: string; filterClause?: string }): string {
+  protected buildFulltextAccessCheckedMatch(params: {
+    hitFilter?: string;
+    filterClause?: string;
+    orderByClause?: string;
+  }): string {
     const { nodeName } = this.descriptor.model;
     const aliases = this.boundRequestAliases();
     const carried = [nodeName, ...aliases].join(", ");
@@ -544,8 +555,23 @@ export abstract class AbstractRepository<
       }
       WITH ${carried}, score
       ${params.filterClause ? `WHERE ${params.filterClause}` : ``}
-      ORDER BY score DESC
+      ${params.orderByClause ?? "ORDER BY score DESC"}
     `;
+  }
+
+  /**
+   * ORDER BY for a fulltext search with a requested sort: the sort keys, then `score DESC`, then
+   * `<alias>.id ASC`. `undefined` without a sort, so search results keep their relevance order.
+   */
+  private buildSearchOrderByClause(orderByFields?: SortCriterion[]): string | undefined {
+    if (!orderByFields?.length) return undefined;
+    return buildListOrderByClause({
+      nodeAlias: this.descriptor.model.nodeName,
+      sort: orderByFields,
+      // Never used: a sort is present. Required by the helper for the no-sort path.
+      defaultOrderBy: codeOrderBy("score DESC"),
+      scoreVariable: "score",
+    });
   }
 
   /**
@@ -554,7 +580,8 @@ export abstract class AbstractRepository<
    * Backwards-compatible: callers that only pass { term, orderBy, cursor, fetchAll } continue to work.
    * New callers may pass:
    *   - filters: FilterCriterion[]    → appended to WHERE as AND-joined parameterised fragments
-   *   - orderByFields: SortCriterion[] → multi-key ORDER BY; overrides legacy orderBy string when present
+   *   - orderByFields: SortCriterion[] → multi-key ORDER BY ending in `<alias>.id ASC`; overrides legacy orderBy
+   *     string when present; with a term it orders the search results, then `score DESC`, then id
    */
   async find(params: {
     fetchAll?: boolean;
@@ -594,7 +621,10 @@ export abstract class AbstractRepository<
           });
 
     if (params.term && this.descriptor.fulltextIndexName) {
-      query.query += this.buildFulltextAccessCheckedMatch({ filterClause: filterResult.clause });
+      query.query += this.buildFulltextAccessCheckedMatch({
+        filterClause: filterResult.clause,
+        orderByClause: this.buildSearchOrderByClause(params.orderByFields),
+      });
     } else {
       query.query += `
       ${this.buildDefaultMatch()}
@@ -760,6 +790,7 @@ export abstract class AbstractRepository<
       query.query += this.buildFulltextAccessCheckedMatch({
         hitFilter: relatedFilter,
         filterClause: whereClause,
+        orderByClause: this.buildSearchOrderByClause(params.orderByFields),
       });
     } else {
       // Use default query with relationship match

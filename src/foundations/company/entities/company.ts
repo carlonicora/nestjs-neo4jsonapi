@@ -86,7 +86,7 @@ export const CompanyDescriptor = defineEntity<Company>()({
 
   // Field definitions
   fields: {
-    name: { type: "string", required: true },
+    name: { type: "string", required: true, sortable: true },
     logo: { type: "string" },
     logoUrl: { type: "string" },
     // DELIBERATELY still serialised. Sibling applications (neural-erp, phlow) read

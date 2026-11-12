@@ -522,7 +522,7 @@ describe("ContentRepository", () => {
       expect(mockQuery.query).not.toContain("content_author");
     });
 
-    it("should keep findByIds byte-identical without accessPredicates", async () => {
+    it("should keep findByIds unchanged without accessPredicates (plus its default order)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([]);
@@ -533,14 +533,11 @@ describe("ContentRepository", () => {
 
       await defaultRepository.findByIds({ contentIds: [TEST_IDS.contentId1] });
 
-      expect(mockQuery.query).toContain(`
-        MATCH (content:Article|Document)-[:BELONGS_TO]->(company)
-        WHERE content.id IN $ids
-        
-      WITH content, company, currentUser
-    
-        
-      MATCH (content)-[:BELONGS_TO]->(content_company:Company)`);
+      expect(mockQuery.query.replace(/\s+/g, " ")).toContain(
+        "MATCH (content:Article|Document)-[:BELONGS_TO]->(company) WHERE content.id IN $ids " +
+          "WITH content, company, currentUser WITH * ORDER BY content.updatedAt DESC, content.id ASC " +
+          "MATCH (content)-[:BELONGS_TO]->(content_company:Company)",
+      );
       expect(mockQuery.query).not.toContain("NOT content:");
     });
 
@@ -558,7 +555,8 @@ describe("ContentRepository", () => {
       const query = mockQuery.query.replace(/\s+/g, " ");
       expect(query).toContain(
         `WHERE content.id IN $ids AND content.tldr IS NOT NULL AND content.tldr <> "" ` +
-          "WITH content, company, currentUser WHERE (NOT content:Document OR (<DOC>)) WITH content, company, currentUser MATCH",
+          "WITH content, company, currentUser WHERE (NOT content:Document OR (<DOC>)) WITH content, company, currentUser " +
+          "WITH * ORDER BY content.updatedAt DESC, content.id ASC MATCH",
       );
     });
 

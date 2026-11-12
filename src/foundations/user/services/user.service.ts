@@ -92,7 +92,10 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term?: string;
     userIds?: string[];
     includeDeleted?: boolean;
+    /** JSON:API `sort`, validated against the descriptor (400 when a field is not sortable). */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -101,6 +104,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         term: params.term,
         cursor: paginator.generateCursor(),
         includeDeleted: params.includeDeleted ?? false,
+        orderByFields,
       }),
       paginator,
     );
@@ -111,7 +115,10 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     query: any;
     term?: string;
     includeDeleted?: boolean;
+    /** JSON:API `sort`, validated against the descriptor (400 when a field is not sortable). */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -120,6 +127,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         contentIds: params.contentIds,
         includeDeleted: params.includeDeleted ?? false,
         term: params.term,
+        orderByFields,
       }),
       paginator,
     );
@@ -132,7 +140,10 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term?: string;
     userIds?: string[];
     includeDeleted?: boolean;
+    /** JSON:API `sort`, validated against the descriptor (400 when a field is not sortable). */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -143,6 +154,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         cursor: paginator.generateCursor(),
         includeDeleted: params.includeDeleted ?? false,
         isDeleted: params.isDeleted ?? false,
+        orderByFields,
       }),
       paginator,
     );
@@ -153,7 +165,10 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term: string;
     query: any;
     isAdmin: boolean;
+    /** JSON:API `sort`, validated against the descriptor (400 when a field is not sortable). */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -162,6 +177,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         roleId: params.roleId,
         term: params.term,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );
@@ -172,7 +188,10 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     term: string;
     query: any;
     isAdmin: boolean;
+    /** JSON:API `sort`, validated against the descriptor (400 when a field is not sortable). */
+    sort?: string;
   }): Promise<JsonApiListDocument> {
+    const orderByFields = this.parseSort(params.sort);
     const paginator: JsonApiPaginator = new JsonApiPaginator(params.query);
 
     return this.jsonApiService.buildList(
@@ -181,6 +200,7 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
         roleId: params.roleId,
         term: params.term,
         cursor: paginator.generateCursor(),
+        orderByFields,
       }),
       paginator,
     );

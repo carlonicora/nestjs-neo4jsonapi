@@ -45,6 +45,18 @@ describe("createRelationshipHandlers", () => {
   });
 
   describe("findByRelated", () => {
+    it("forwards the JSON:API sort to service.findByRelated", async () => {
+      await handlers.findByRelated(mockReply as any, {
+        relationship: "owner",
+        id: TEST_IDS.relatedId,
+        query: {},
+        sort: "-name",
+        orderBy: "createdAt",
+      });
+
+      expect(mockService.findByRelated.mock.calls[0][0]).toMatchObject({ sort: "-name", orderBy: "createdAt" });
+    });
+
     it("should call service.findByRelated with single ID and send response", async () => {
       const params: RelatedQueryParams = {
         relationship: "owner",
