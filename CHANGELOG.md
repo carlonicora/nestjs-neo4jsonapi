@@ -1,3 +1,9 @@
+## [8.25.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.24.0...v8.25.0) (2026-11-12)
+
+### 🚀 Features
+
+* **lists:** list endpoints accept a JSON:API sort (?sort=-name,createdAt) on the fields a descriptor marks sortable: true, plus createdAt and updatedAt, and answer 400 for any other field; text sorts ignore case; every list order ends with the row id, so pages never repeat or skip rows; the content list orderBy accepts only one field and an optional ASC or DESC (400 otherwise) instead of passing the value into the query; the admin companies list is ordered by name; the users, roles, companies, content, notifications, waitlist, Stripe products, prices and coupons, blog, email automations and blasts, how-tos and referrals lists declare their sortable fields; adds AbstractService.parseSort, parseJsonApiSort, buildListOrderByClause and codeOrderBy ([6211668](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6211668afacb036888ba1be31aacaa97e3040cd6))
+
 ## [8.24.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.23.0...v8.24.0) (2026-11-11)
 
 ### 🚀 Features
