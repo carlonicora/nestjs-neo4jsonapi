@@ -1,3 +1,9 @@
+## [8.27.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.26.0...v8.27.0) (2026-11-13)
+
+### 🚀 Features
+
+* **assistant:** a user message can carry a clientContext of string values, stored on the message and passed with the thread and message ids to the seed providers and operator tools of its turn; an app can narrow the tools of an operator turn by binding OPERATOR_TOOL_FILTER; a follow-up turn of a thread bound to a resource now stays scoped to it, because the binding is read as the JSON:API type and not the lowercased label; the final reply of an operator turn can state facts from the seed context ([c3d313d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c3d313d12f7c7ed0a9899053e584fde2cb2e984f))
+
 ## [8.26.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.25.0...v8.26.0) (2026-11-12)
 
 ### 🚀 Features
