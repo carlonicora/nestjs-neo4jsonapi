@@ -127,6 +127,9 @@ describe("AssistantService", () => {
     } as any;
 
     const graphCatalog = {
+      // Every type is catalogued here, so a bound record's type is used as it is.
+      hasType: vi.fn(() => true),
+      getAllEntities: vi.fn(() => []),
       getEntityDetail: vi.fn((type: string) => ({
         type,
         moduleId: "11111111-1111-1111-1111-111111111111",

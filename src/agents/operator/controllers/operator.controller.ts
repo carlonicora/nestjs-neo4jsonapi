@@ -84,7 +84,7 @@ export class OperatorController {
 
     if (this.gate && req.user?.companyId) await this.gate.validateCredits({ companyId: req.user.companyId });
 
-    const { content, title, howToMode, limitToHowToId } = body.data.attributes;
+    const { content, title, howToMode, limitToHowToId, clientContext } = body.data.attributes;
     // Same resolution as `AssistantController.create` — the two engines share
     // `AssistantPostDto`, so an operator thread must bind to the scope the
     // client sent (`relationships.content`) exactly as a responder thread does.
@@ -104,6 +104,7 @@ export class OperatorController {
         howToMode,
         limitToHowToId,
         boundContent,
+        clientContext,
       });
     const document: JsonApiSingleDocument = await this.jsonApi.buildSingle(AssistantDescriptor.model, assistant);
     const messagesDoc: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [
@@ -141,7 +142,7 @@ export class OperatorController {
 
     if (this.gate && req.user?.companyId) await this.gate.validateCredits({ companyId: req.user.companyId });
 
-    const { content, howToMode, limitToHowToId } = body.data.attributes;
+    const { content, howToMode, limitToHowToId, clientContext } = body.data.attributes;
     this.logger.log(`append: assistantId=${assistantId} userId=${req.user.userId} messageLen=${content.length}`);
     const { userMessage, assistantMessage, toolCalls, action } = await this.assistants.appendMessageOperator({
       assistantId,
@@ -150,6 +151,7 @@ export class OperatorController {
       newMessage: content,
       howToMode,
       limitToHowToId,
+      clientContext,
     });
 
     const document: JsonApiListDocument = await this.jsonApi.buildList(AssistantMessageDescriptor.model, [

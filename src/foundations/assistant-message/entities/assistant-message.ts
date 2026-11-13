@@ -21,6 +21,8 @@ export type AssistantMessage = Entity & {
   outputTokens?: number;
   trace?: string;
   messageType?: string;
+  /** User messages only: the client context sent with the message, as a JSON string. */
+  clientContext?: string;
   company: Company;
   assistant: Assistant;
   references?: unknown[];
@@ -40,6 +42,7 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
     outputTokens: { type: "number" },
     trace: { type: "string" },
     messageType: { type: "string" },
+    clientContext: { type: "string" },
   },
   relationships: {
     assistant: {

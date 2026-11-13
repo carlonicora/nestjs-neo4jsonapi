@@ -126,6 +126,9 @@ describe("AssistantService — campaign binding, mentions and pinned focus", () 
     // "campaigns" is the compiled scope root (empty hop path); everything else
     // sits one hop below it.
     const graphCatalog = {
+      // Every type is catalogued here, so a bound record's type is used as it is.
+      hasType: vi.fn(() => true),
+      getAllEntities: vi.fn(() => []),
       getEntityDetail: vi.fn((type: string) => ({
         type,
         moduleId: "m-1",

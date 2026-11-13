@@ -106,7 +106,11 @@ describe("AssistantService — user message listener", () => {
       assistantMessages as unknown as AssistantMessageService,
       assistantMessageRepo as unknown as AssistantMessageRepository,
       // A bound turn asks the catalog for its scope; no root means the turn runs unscoped.
-      { getEntityDetail: vi.fn().mockReturnValue(undefined) } as unknown as GraphCatalogService,
+      {
+        getEntityDetail: vi.fn().mockReturnValue(undefined),
+        hasType: vi.fn().mockReturnValue(true),
+        getAllEntities: vi.fn().mockReturnValue([]),
+      } as unknown as GraphCatalogService,
       undefined as unknown as EntityServiceRegistry,
       undefined as unknown as OperatorService, // runOperatorTurn is stubbed
       undefined as unknown as AssistantActionService,

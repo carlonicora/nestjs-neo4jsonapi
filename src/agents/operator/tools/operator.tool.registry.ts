@@ -7,10 +7,12 @@ import { SearchEntitiesTool } from "../../graph/tools/search-entities.tool";
 import { ToolCallRecord, UserContext } from "../../graph/tools/tool.factory";
 import { TraverseTool } from "../../graph/tools/traverse.tool";
 import {
+  OPERATOR_TOOL_FILTER,
   OPERATOR_TOOLS,
   OperatorRetrievalContext,
   OperatorToolContribution,
   OperatorToolDefinition,
+  OperatorToolFilter,
 } from "../interfaces/operator.tool.interface";
 import { EntityWriteTools } from "./entity-write.tools";
 import { OperatorTestActionTool } from "./operator-test-action.tool";
@@ -27,6 +29,8 @@ import { SearchDocumentsTool } from "./search-documents.tool";
  * - the test-only destructive tool (non-production environments only)
  * - any app-contributed factories registered under the OPERATOR_TOOLS token,
  *   built per turn with the same ctx + recorder as the built-ins
+ * - finally, the host's OPERATOR_TOOL_FILTER (when bound) narrows the set for
+ *   this turn, after the duplicate-name guard; unbound, the set is unchanged
  */
 @Injectable()
 export class OperatorToolRegistry {
@@ -44,6 +48,7 @@ export class OperatorToolRegistry {
     // stays constructible without the write-tool provider. Nest resolves it from
     // OperatorModule like every other built-in.
     private readonly entityWriteTools?: EntityWriteTools,
+    @Optional() @Inject(OPERATOR_TOOL_FILTER) private readonly toolFilter?: OperatorToolFilter,
   ) {}
 
   build(ctx: OperatorRetrievalContext, recorder: ToolCallRecord[]): OperatorToolDefinition[] {
@@ -101,6 +106,6 @@ export class OperatorToolRegistry {
       seen.add(name);
     }
 
-    return all;
+    return this.toolFilter ? this.toolFilter.filter(all, ctx) : all;
   }
 }

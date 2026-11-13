@@ -35,6 +35,11 @@ import {
   ASSISTANT_USER_MESSAGE_LISTENER,
   AssistantUserMessageListener,
 } from "../../../common/interfaces/assistant.user-message.interface";
+import {
+  AssistantClientContext,
+  isAssistantClientContext,
+  parseAssistantClientContext,
+} from "../../../common/interfaces/assistant.client-context.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import {
   ASSISTANT_SEED_CONTEXT_PROVIDERS,
@@ -156,12 +161,15 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     handbookMode?: boolean;
     limitToHandbookPageId?: string;
     boundContent?: { type: string; id: string };
+    /** Opaque client context, stored on the user message and handed to the turn. */
+    clientContext?: AssistantClientContext;
   }): Promise<{
     assistant: Assistant;
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
     toolCalls: ToolCallRecord[];
   }> {
+    const clientContext = this.assertClientContext(params.clientContext);
     const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
     const ctx = this.buildTurnContext({
       companyId: params.companyId,
@@ -207,6 +215,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           role: "user",
           content: firstMessage,
           position: 0,
+          ...(clientContext ? { clientContext: JSON.stringify(clientContext) } : {}),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: assistantId } },
@@ -244,6 +253,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       limitToHowToId: params.limitToHowToId,
       handbookMode: params.handbookMode,
       limitToHandbookPageId: params.limitToHandbookPageId,
+      clientContext,
+      userMessageId,
     });
 
     // 4. Create the assistant message at position 1 with denormalised references JSON.
@@ -302,11 +313,14 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     limitToHowToId?: string;
     handbookMode?: boolean;
     limitToHandbookPageId?: string;
+    /** Opaque client context, stored on the user message and handed to the turn. */
+    clientContext?: AssistantClientContext;
   }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
     toolCalls: ToolCallRecord[];
   }> {
+    const clientContext = this.assertClientContext(params.clientContext);
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
     const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
@@ -344,6 +358,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           role: "user",
           content: newMessage,
           position: nextPosition,
+          ...(clientContext ? { clientContext: JSON.stringify(clientContext) } : {}),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
@@ -370,6 +385,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       limitToHowToId: params.limitToHowToId,
       handbookMode: params.handbookMode,
       limitToHandbookPageId: params.limitToHandbookPageId,
+      clientContext,
+      userMessageId,
     });
 
     const assistantMessageId = turn.id;
@@ -431,6 +448,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     howToMode?: boolean;
     limitToHowToId?: string;
     boundContent?: { type: string; id: string };
+    /** Opaque client context, stored on the user message and handed to the turn. */
+    clientContext?: AssistantClientContext;
   }): Promise<{
     assistant: Assistant;
     userMessage: AssistantMessage;
@@ -438,6 +457,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     toolCalls: ToolCallRecord[];
     action?: AssistantAction;
   }> {
+    const clientContext = this.assertClientContext(params.clientContext);
     const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
     const ctx = this.buildTurnContext({
       companyId: params.companyId,
@@ -484,6 +504,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           role: "user",
           content: firstMessage,
           position: 0,
+          ...(clientContext ? { clientContext: JSON.stringify(clientContext) } : {}),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: assistantId } },
@@ -521,6 +542,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentScope,
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      clientContext,
+      userMessageId,
     });
 
     const outcome = await this.persistOperatorOutcome({
@@ -551,12 +574,15 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     newMessage: string;
     howToMode?: boolean;
     limitToHowToId?: string;
+    /** Opaque client context, stored on the user message and handed to the turn. */
+    clientContext?: AssistantClientContext;
   }): Promise<{
     userMessage: AssistantMessage;
     assistantMessage: AssistantMessage;
     toolCalls: ToolCallRecord[];
     action?: AssistantAction;
   }> {
+    const clientContext = this.assertClientContext(params.clientContext);
     // Verify ownership via the owner-RBAC-enforcing findById.
     await this.repository.findById({ id: params.assistantId });
     const userModuleIds = await this.userModuleIdsRepository.findModuleIdsForUser(params.userId, params.companyId);
@@ -592,6 +618,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           role: "user",
           content: newMessage,
           position: nextPosition,
+          ...(clientContext ? { clientContext: JSON.stringify(clientContext) } : {}),
         },
         relationships: {
           assistant: { data: { type: assistantMeta.type, id: params.assistantId } },
@@ -618,6 +645,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       contentScope,
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      clientContext,
+      userMessageId,
     });
 
     const outcome = await this.persistOperatorOutcome({
@@ -660,7 +689,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       throw new ConflictException("This action has already been resolved or has expired.");
     }
 
-    const [assistantId] = action.threadId.split(":");
+    const [assistantId, userMessageId] = action.threadId.split(":");
     const userId = this.clsService.get("userId");
     const companyId = action.company?.id ?? this.clsService.get("companyId");
 
@@ -699,10 +728,27 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userModuleIds,
       boundContent: this.toBoundContent(contentScope ?? {}),
     });
+    // The context comes from the message that started the turn: the thread id
+    // is `<assistantId>:<userMessageId>`. A failed read must not block the
+    // approval — the resume proceeds without a client context.
+    let clientContext: AssistantClientContext | undefined;
+    if (userMessageId) {
+      try {
+        const startMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+        clientContext = parseAssistantClientContext(startMessage?.clientContext);
+      } catch (err) {
+        this.assistantLogger.warn(
+          `resolveAction: could not read message=${userMessageId} for action=${params.actionId} — proceeding without client context: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     const seedContexts = await this.collectSeedContexts({
       ctx: resumeCtx,
       contentScope: contentScope ?? {},
       question: "",
+      assistantId,
+      clientContext,
     });
 
     let result: OperatorRunResult;
@@ -722,6 +768,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         // DRIFT no entity, and an unscoped resume loses its thread fallback.
         scopeLabel: resumeCtx.scopeLabel,
         assistantId,
+        clientContext,
+        userMessageId,
         seedContexts,
         messages,
         dataLimits: await this.boundDataLimits(contentScope ?? {}, resumeCtx),
@@ -847,8 +895,23 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
    */
   async findBoundContent(params: { assistantId: string }): Promise<{ id: string; type: string } | undefined> {
     const assistant = await this.repository.findById({ id: params.assistantId });
-    const content = assistant.content as { id?: string; type?: string } | undefined;
-    return content?.id && content?.type ? { id: content.id, type: content.type } : undefined;
+    return this.boundContentOf(assistant.content);
+  }
+
+  /**
+   * The `{ id, type }` of a hydrated `BOUND_TO` target, typed by its JSON:API type. A hydrated
+   * record's own `type` is its first Neo4j label, lowercased, which the graph catalog does not
+   * know; the catalog entity of that label is looked up instead. Several descriptors can share a
+   * label (a projection, a lookup): the one that is a scope root wins, as a thread is bound to a root.
+   */
+  private boundContentOf(content: unknown): { id: string; type: string } | undefined {
+    const record = content as { id?: string; type?: string; labels?: string[] } | undefined;
+    if (!record?.id || !record?.type) return undefined;
+    if (this.graphCatalog.hasType(record.type)) return { id: record.id, type: record.type };
+    const labels = new Set((record.labels?.length ? record.labels : [record.type]).map((label) => label.toLowerCase()));
+    const matches = this.graphCatalog.getAllEntities().filter((entity) => labels.has(entity.labelName.toLowerCase()));
+    const root = matches.find((entity) => entity.scope?.path.length === 0 && entity.scope.rootType === entity.type);
+    return { id: record.id, type: (root ?? matches[0])?.type ?? record.type };
   }
 
   /**
@@ -909,6 +972,17 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * Second check of a client context behind the DTO, for callers that bypass
+   * the controllers. Throws 400 `invalid_client_context` for a present value of
+   * the wrong shape, before the turn writes anything.
+   */
+  private assertClientContext(value: unknown): AssistantClientContext | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (!isAssistantClientContext(value)) throw new BadRequestException("invalid_client_context");
+    return value;
+  }
+
+  /**
    * Collects seed-context blocks from the app-registered providers for one
    * turn. Documentation turns — help mode and handbook mode alike — are never
    * seeded: a seed provider supplies the app's own domain context (the open
@@ -925,6 +999,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     limitToHowToId?: string;
     handbookMode?: boolean;
     limitToHandbookPageId?: string;
+    assistantId?: string;
+    clientContext?: AssistantClientContext;
   }): Promise<AssistantSeedContext[]> {
     if (!this.seedContextProviders?.length) return [];
     if (params.howToMode || params.limitToHowToId) return [];
@@ -941,6 +1017,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           contentId: params.contentScope.contentId,
           contentType: params.contentScope.contentType,
           question: params.question,
+          assistantId: params.assistantId,
+          clientContext: params.clientContext,
         });
         if (seed) collected.push(seed);
       } catch (err) {
@@ -1135,8 +1213,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   private async resolveContentScope(assistantId: string): Promise<{ contentId?: string; contentType?: string }> {
     try {
       const assistant = await this.repository.findById({ id: assistantId });
-      const c = (assistant as any).content;
-      return { contentId: c?.id, contentType: c?.type };
+      return this.toContentScope(this.boundContentOf(assistant.content));
     } catch {
       // If load fails, proceed without content scope.
       return {};
@@ -1158,6 +1235,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     contentScope: { contentId?: string; contentType?: string };
     howToMode?: boolean;
     limitToHowToId?: string;
+    clientContext?: AssistantClientContext;
+    userMessageId?: string;
   }): Promise<OperatorRunResult> {
     const now = new Date();
     this.clsService.set("assistantTurnContext", {
@@ -1184,6 +1263,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       question: params.question,
       howToMode: params.howToMode,
       limitToHowToId: params.limitToHowToId,
+      assistantId: params.assistantId,
+      clientContext: params.clientContext,
     });
 
     return await this.operator.run({
@@ -1199,6 +1280,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       messages,
       question: params.question,
       threadId: params.threadId,
+      clientContext: params.clientContext,
+      userMessageId: params.userMessageId,
       seedContexts,
       dataLimits: await this.boundDataLimits(params.contentScope, params.ctx),
       inlineEntityLinks: this.inlineEntityLinks(),
@@ -1339,6 +1422,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     limitToHowToId?: string;
     handbookMode?: boolean;
     limitToHandbookPageId?: string;
+    clientContext?: AssistantClientContext;
+    userMessageId?: string;
   }): Promise<AgentTurnResult> {
     // Anchor every LLMService.call() in this turn to the same assistant/turn
     // pair so the dumper can group dumps under
@@ -1372,6 +1457,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       limitToHowToId: params.limitToHowToId,
       handbookMode: params.handbookMode,
       limitToHandbookPageId: params.limitToHandbookPageId,
+      assistantId: params.assistantId,
+      clientContext: params.clientContext,
     });
 
     const response = await this.responder.run({

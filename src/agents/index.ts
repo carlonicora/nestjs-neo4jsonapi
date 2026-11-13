@@ -120,7 +120,7 @@ export {
 } from "./operator/services/operator.checkpointer.service";
 
 // Operator (tool layer)
-export { OPERATOR_TOOLS } from "./operator/interfaces/operator.tool.interface";
+export { OPERATOR_TOOL_FILTER, OPERATOR_TOOLS } from "./operator/interfaces/operator.tool.interface";
 export type {
   OperatorActionProposal,
   OperatorChunkCitation,
@@ -128,6 +128,7 @@ export type {
   OperatorToolCallRecord,
   OperatorToolContribution,
   OperatorToolDefinition,
+  OperatorToolFilter,
   ProposalRef,
 } from "./operator/interfaces/operator.tool.interface";
 export { SearchDocumentsTool } from "./operator/tools/search-documents.tool";

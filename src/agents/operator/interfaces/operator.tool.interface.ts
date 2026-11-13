@@ -1,4 +1,5 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
+import type { AssistantClientContext } from "../../../common/interfaces/assistant.client-context.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { ToolCallRecord, UserContext } from "../../graph/tools/tool.factory";
@@ -91,6 +92,14 @@ export interface OperatorRetrievalContext extends UserContext {
    * absent scope root means the sub-agent's spend is not recorded.
    */
   assistantId?: string;
+  /**
+   * The client context of the user message that started the turn (on an
+   * approval resume: the message named by the thread id). Opaque to the
+   * library; a tool must check every value it relies on against the caller.
+   */
+  clientContext?: AssistantClientContext;
+  /** Id of the user message that started the turn. */
+  userMessageId?: string;
 }
 
 /**
@@ -106,3 +115,11 @@ export interface OperatorToolContribution {
 
 /** Multi-provider DI token: consuming apps contribute OperatorToolContribution factories. */
 export const OPERATOR_TOOLS = Symbol("OPERATOR_TOOLS");
+
+/** Host hook: narrows the tool set of one operator turn. Unbound, every turn keeps the full set. */
+export interface OperatorToolFilter {
+  filter(definitions: OperatorToolDefinition[], ctx: OperatorRetrievalContext): OperatorToolDefinition[];
+}
+
+/** Optional DI token resolving to one OperatorToolFilter. */
+export const OPERATOR_TOOL_FILTER = Symbol("OPERATOR_TOOL_FILTER");

@@ -7,6 +7,7 @@ import {
   OperatorToolCallRecord,
   OperatorToolContribution,
   OperatorToolDefinition,
+  OperatorToolFilter,
 } from "../../interfaces/operator.tool.interface";
 import { SearchDocumentsTool } from "../search-documents.tool";
 import { SearchCommunitiesTool } from "../search-communities.tool";
@@ -254,7 +255,7 @@ describe("OperatorTestActionTool", () => {
 describe("OperatorToolRegistry", () => {
   const graphToolNames = ["resolve_entity", "describe_entity", "search_entities", "read_entity", "traverse"];
 
-  function buildRegistry(contributed?: OperatorToolContribution[]) {
+  function buildRegistry(contributed?: OperatorToolContribution[], toolFilter?: OperatorToolFilter) {
     const contextualiser = { run: vi.fn().mockResolvedValue({ notebook: [] }) } as any;
     const drift = { search: vi.fn().mockResolvedValue({ answer: "" }) } as any;
     return new OperatorToolRegistry(
@@ -267,6 +268,8 @@ describe("OperatorToolRegistry", () => {
       new SearchCommunitiesTool(factory, drift),
       new OperatorTestActionTool(factory),
       contributed,
+      undefined,
+      toolFilter,
     );
   }
 
@@ -406,5 +409,36 @@ describe("OperatorToolRegistry", () => {
     await test.tool.invoke({ note: "n" });
 
     expect(recorder.map((r) => r.tool)).toEqual(["search_documents", "operator_test_action"]);
+  });
+
+  it("build applies the bound OPERATOR_TOOL_FILTER after the duplicate-name guard", () => {
+    const filter = vi.fn((definitions: OperatorToolDefinition[], _ctx: OperatorRetrievalContext) =>
+      definitions.filter((d) => !d.destructive),
+    );
+    const definitions = buildRegistry(undefined, { filter }).build(ctx, []);
+
+    expect(filter).toHaveBeenCalledTimes(1);
+    expect(filter.mock.calls[0][1]).toBe(ctx);
+    expect(filter.mock.calls[0][0].map((d: OperatorToolDefinition) => d.tool.name)).toContain("operator_test_action");
+    expect(definitions.some((d) => d.destructive)).toBe(false);
+    expect(definitions.map((d) => d.tool.name)).toContain("search_documents");
+  });
+
+  it("build runs the duplicate-name guard before the filter sees the definitions", () => {
+    const filter = vi.fn((definitions: OperatorToolDefinition[], _ctx: OperatorRetrievalContext) => definitions);
+    const clash: OperatorToolContribution = {
+      build: () => ({ tool: stubGraphTool("traverse").build(ctx, []), destructive: false }),
+    };
+
+    expect(() => buildRegistry([clash], { filter }).build(ctx, [])).toThrow(/duplicate tool name "traverse"/);
+    expect(filter).not.toHaveBeenCalled();
+  });
+
+  it("build without a filter returns every definition", () => {
+    const names = buildRegistry()
+      .build(ctx, [])
+      .map((d) => d.tool.name);
+
+    expect(names).toEqual([...graphToolNames, "search_documents", "search_communities", "operator_test_action"]);
   });
 });

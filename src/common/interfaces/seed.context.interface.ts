@@ -1,3 +1,5 @@
+import type { AssistantClientContext } from "./assistant.client-context.interface";
+
 /**
  * Seed context: blocks of app-provided context guaranteed present in an
  * assistant turn, independent of what the retrieval branches fetch.
@@ -47,6 +49,18 @@ export interface AssistantSeedContextProviderParams {
   contentId?: string;
   contentType?: string;
   question: string;
+  /**
+   * Id of the `Assistant` (thread) node this turn belongs to. Absent only for a
+   * caller that runs a turn outside a stored thread.
+   */
+  assistantId?: string;
+  /**
+   * The client context attached to the user message that started this turn
+   * (on an approval resume: the message named by the action's thread id).
+   * Opaque to the library; validated for shape only, never for meaning — a
+   * provider must check every value it relies on against the caller's access.
+   */
+  clientContext?: AssistantClientContext;
 }
 
 /**

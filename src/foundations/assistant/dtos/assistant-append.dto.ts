@@ -1,5 +1,16 @@
 import { Type } from "class-transformer";
-import { Equals, IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from "class-validator";
+import {
+  Equals,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Validate,
+  ValidateNested,
+} from "class-validator";
+import type { AssistantClientContext } from "../../../common/interfaces/assistant.client-context.interface";
+import { AssistantClientContextConstraint } from "./assistant-client-context.constraint";
 
 export class AssistantAppendAttributesDto {
   /**
@@ -28,6 +39,15 @@ export class AssistantAppendAttributesDto {
   @IsOptional()
   @IsString()
   limitToHandbookPageId?: string;
+
+  /**
+   * Opaque context the client attaches to this user message (string values
+   * only). Stored on the message and handed to the turn's seed providers and
+   * operator tools.
+   */
+  @IsOptional()
+  @Validate(AssistantClientContextConstraint)
+  clientContext?: AssistantClientContext;
 }
 
 export class AssistantAppendDataDto {

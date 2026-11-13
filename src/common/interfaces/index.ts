@@ -1,3 +1,4 @@
+export * from "./assistant.client-context.interface";
 export * from "./assistant.scope.interface";
 export * from "./assistant.title.interface";
 export * from "./assistant.user-message.interface";
