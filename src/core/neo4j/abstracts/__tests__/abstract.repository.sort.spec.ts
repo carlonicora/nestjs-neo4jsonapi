@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { codeOrderBy } from "../../helpers/build-order-by";
 import { AbstractRepository } from "../abstract.repository";
 
 class TestRepo extends AbstractRepository<any, any> {
@@ -95,6 +96,73 @@ describe("AbstractRepository list order (term + sort, id tiebreaker)", () => {
   it("findByRelated with a term and no sort keeps the relevance order unchanged", async () => {
     const { repo, cypher } = buildSut();
     await repo.findByRelated({ relationship: "owner", id: "u-1", term: "acme" });
+
+    expect(cypher()).toContain("ORDER BY score DESC {CURSOR}");
+  });
+});
+
+describe("AbstractRepository sortExpressions (code-authored rank sort keys)", () => {
+  const rank = () => ({ rank: codeOrderBy("CASE n.rank WHEN 'a' THEN 0 ELSE 1 END") });
+
+  it("find orders ascending by the code-authored expression, then id", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.find({ orderByFields: [{ field: "rank", direction: "asc" }], sortExpressions: rank() });
+
+    expect(cypher()).toContain("ORDER BY CASE n.rank WHEN 'a' THEN 0 ELSE 1 END ASC, n.id ASC {CURSOR}");
+  });
+
+  it("find orders descending by the code-authored expression, then id", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.find({ orderByFields: [{ field: "rank", direction: "desc" }], sortExpressions: rank() });
+
+    expect(cypher()).toContain("ORDER BY CASE n.rank WHEN 'a' THEN 0 ELSE 1 END DESC, n.id ASC {CURSOR}");
+  });
+
+  it("findByRelated mixes an expression key with a plain property key", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.findByRelated({
+      relationship: "owner",
+      id: "u1",
+      orderByFields: [
+        { field: "rank", direction: "asc" },
+        { field: "updatedAt", direction: "desc" },
+      ],
+      sortExpressions: rank(),
+    });
+
+    expect(cypher()).toContain(
+      "ORDER BY CASE n.rank WHEN 'a' THEN 0 ELSE 1 END ASC, n.updatedAt DESC, n.id ASC {CURSOR}",
+    );
+  });
+
+  it("findByRelated with a term orders by the expression sort, then score, then id", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.findByRelated({
+      relationship: "owner",
+      id: "u1",
+      term: "acme",
+      orderByFields: [
+        { field: "rank", direction: "asc" },
+        { field: "updatedAt", direction: "desc" },
+      ],
+      sortExpressions: rank(),
+    });
+
+    expect(cypher()).toContain(
+      "ORDER BY CASE n.rank WHEN 'a' THEN 0 ELSE 1 END ASC, n.updatedAt DESC, score DESC, n.id ASC {CURSOR}",
+    );
+  });
+
+  it("sortExpressions without orderByFields keeps the default order", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.find({ sortExpressions: rank() });
+
+    expect(cypher()).toContain("ORDER BY n.updatedAt DESC, n.id ASC {CURSOR}");
+  });
+
+  it("sortExpressions without orderByFields keeps the relevance order on a search", async () => {
+    const { repo, cypher } = buildSut();
+    await repo.find({ term: "acme", sortExpressions: rank() });
 
     expect(cypher()).toContain("ORDER BY score DESC {CURSOR}");
   });

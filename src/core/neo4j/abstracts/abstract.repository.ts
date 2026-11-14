@@ -12,6 +12,7 @@ import {
   buildListOrderByClause,
   buildOrderByClause,
   codeOrderBy,
+  CodeOrderBy,
 } from "../helpers/build-order-by";
 import { updateRelationshipQuery } from "../queries/update.relationship";
 import { Neo4jService } from "../services/neo4j.service";
@@ -568,8 +569,12 @@ export abstract class AbstractRepository<
   /**
    * ORDER BY for a fulltext search with a requested sort: the sort keys, then `score DESC`, then
    * `<alias>.id ASC`. `undefined` without a sort, so search results keep their relevance order.
+   * `sortExpressions` supplies code-authored keys for sort fields that are not a plain property.
    */
-  private buildSearchOrderByClause(orderByFields?: SortCriterion[]): string | undefined {
+  private buildSearchOrderByClause(
+    orderByFields?: SortCriterion[],
+    sortExpressions?: Record<string, CodeOrderBy>,
+  ): string | undefined {
     if (!orderByFields?.length) return undefined;
     return buildListOrderByClause({
       nodeAlias: this.descriptor.model.nodeName,
@@ -577,6 +582,27 @@ export abstract class AbstractRepository<
       // Never used: a sort is present. Required by the helper for the no-sort path.
       defaultOrderBy: codeOrderBy("score DESC"),
       scoreVariable: "score",
+      expressions: sortExpressions,
+    });
+  }
+
+  /**
+   * ORDER BY for a requested sort without a search term. Without `sortExpressions` it is the
+   * unchanged {@link buildOrderByClause}; with them the sort goes through
+   * {@link buildListOrderByClause} so a field can map to a code-authored expression.
+   */
+  private buildSortedOrderByClause(
+    orderByFields: SortCriterion[],
+    sortExpressions?: Record<string, CodeOrderBy>,
+  ): string {
+    const { nodeName } = this.descriptor.model;
+    if (!sortExpressions) return buildOrderByClause({ nodeAlias: nodeName, sort: orderByFields });
+    return buildListOrderByClause({
+      nodeAlias: nodeName,
+      sort: orderByFields,
+      // Never used: a sort is present. Required by the helper for the no-sort path.
+      defaultOrderBy: codeOrderBy(`${nodeName}.id ASC`),
+      expressions: sortExpressions,
     });
   }
 
@@ -588,12 +614,16 @@ export abstract class AbstractRepository<
    *   - filters: FilterCriterion[]    → appended to WHERE as AND-joined parameterised fragments
    *   - orderByFields: SortCriterion[] → multi-key ORDER BY ending in `<alias>.id ASC`; overrides legacy orderBy
    *     string when present; with a term it orders the search results, then `score DESC`, then id
+   *   - sortExpressions: Record<string, CodeOrderBy> → code-authored ORDER BY keys for sort fields that
+   *     are not a plain property (a rank); used only with orderByFields. Omitting it builds the identical query
    */
   async find(params: {
     fetchAll?: boolean;
     term?: string;
     orderBy?: string;
     orderByFields?: SortCriterion[];
+    /** Code-authored ORDER BY keys for sort fields that are not a plain property; used with orderByFields. */
+    sortExpressions?: Record<string, CodeOrderBy>;
     filters?: FilterCriterion[];
     cursor?: JsonApiCursorInterface;
   }): Promise<T[]> {
@@ -619,7 +649,7 @@ export abstract class AbstractRepository<
 
     const orderByClause =
       params.orderByFields && params.orderByFields.length
-        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        ? this.buildSortedOrderByClause(params.orderByFields, params.sortExpressions)
         : buildLegacyOrderByClause({
             nodeAlias: nodeName,
             orderBy: params.orderBy,
@@ -629,7 +659,7 @@ export abstract class AbstractRepository<
     if (params.term && this.descriptor.fulltextIndexName) {
       query.query += this.buildFulltextAccessCheckedMatch({
         filterClause: filterResult.clause,
-        orderByClause: this.buildSearchOrderByClause(params.orderByFields),
+        orderByClause: this.buildSearchOrderByClause(params.orderByFields, params.sortExpressions),
       });
     } else {
       query.query += `
@@ -716,6 +746,10 @@ export abstract class AbstractRepository<
    *   in both the default and the full-text branch. `extraWhere.clause` is caller-written code that
    *   must never contain request input: every value goes in `extraWhere.params`, which are merged into
    *   the query parameters. Omitting it builds the identical query as before.
+   *
+   * @param sortExpressions - Optional code-authored ORDER BY keys (`codeOrderBy(...)`) for sort fields
+   *   that are not a plain property (a rank); used only with `orderByFields`. Omitting it builds the
+   *   identical query as before.
    */
   async findByRelated(params: {
     relationship: keyof R & string;
@@ -726,6 +760,8 @@ export abstract class AbstractRepository<
     cursor?: JsonApiCursorInterface;
     filters?: FilterCriterion[];
     orderByFields?: SortCriterion[];
+    /** Code-authored ORDER BY keys for sort fields that are not a plain property; used with orderByFields. */
+    sortExpressions?: Record<string, CodeOrderBy>;
     /** ISO datetime: only nodes with `updatedAt` after it (offline sync). */
     updatedSince?: string;
     /** Caller-written, parameterised condition AND-ed with `filters`; never request input in `clause`. */
@@ -777,7 +813,7 @@ export abstract class AbstractRepository<
 
     const orderByClause =
       params.orderByFields && params.orderByFields.length
-        ? buildOrderByClause({ nodeAlias: nodeName, sort: params.orderByFields })
+        ? this.buildSortedOrderByClause(params.orderByFields, params.sortExpressions)
         : buildLegacyOrderByClause({
             nodeAlias: nodeName,
             orderBy: params.orderBy,
@@ -796,7 +832,7 @@ export abstract class AbstractRepository<
       query.query += this.buildFulltextAccessCheckedMatch({
         hitFilter: relatedFilter,
         filterClause: whereClause,
-        orderByClause: this.buildSearchOrderByClause(params.orderByFields),
+        orderByClause: this.buildSearchOrderByClause(params.orderByFields, params.sortExpressions),
       });
     } else {
       // Use default query with relationship match
