@@ -1,3 +1,9 @@
+## [8.28.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.27.0...v8.28.0) (2026-11-14)
+
+### 🚀 Features
+
+* **lists:** find and findByRelated take sortExpressions, code-written ORDER BY expressions for sort fields that are not a plain property (a rank), used in both the plain and the search order; without it the query is the same as before ([3c809e3](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3c809e3efd45d9880dad9149e34c49439228a3f2))
+
 ## [8.27.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.26.0...v8.27.0) (2026-11-13)
 
 ### 🚀 Features
