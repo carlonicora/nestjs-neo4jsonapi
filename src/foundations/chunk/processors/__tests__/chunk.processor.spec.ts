@@ -3,7 +3,7 @@ import type { Job } from "bullmq";
 import { ChunkProcessor } from "../chunk.processor";
 
 describe("ChunkProcessor", () => {
-  const build = () => {
+  const build = (creditValidator?: { validateCredits: any; isAiEnabled?: any }) => {
     const chunkService = { generateGraph: vi.fn(async () => undefined) };
     const cls = { run: vi.fn(async (fn: () => Promise<void>) => fn()), set: vi.fn() };
     const config = { get: vi.fn(() => undefined) };
@@ -15,6 +15,7 @@ describe("ChunkProcessor", () => {
       { updateStatus: vi.fn() } as any,
       {} as any,
       config as any,
+      creditValidator as any,
     );
     return { processor, chunkService };
   };
@@ -53,5 +54,33 @@ describe("ChunkProcessor", () => {
     await processor.process(job({ finalise: false }));
 
     expect(chunkService.generateGraph).toHaveBeenCalledWith(expect.objectContaining({ finalise: false }));
+  });
+
+  it("indexes platform content (no company) without running the company gates", async () => {
+    // A platform administrator's reindex queues how-to chunks with no companyId.
+    // The app's validator looks the company up by id, which throws without one.
+    const creditValidator = {
+      validateCredits: vi.fn(async () => {
+        throw new Error("Neo4j Read Error: Expected parameter(s): companyId");
+      }),
+      isAiEnabled: vi.fn(async () => false),
+    };
+    const { processor, chunkService } = build(creditValidator);
+
+    await processor.process(job({ companyId: undefined }));
+
+    expect(creditValidator.isAiEnabled).not.toHaveBeenCalled();
+    expect(creditValidator.validateCredits).not.toHaveBeenCalled();
+    expect(chunkService.generateGraph).toHaveBeenCalledWith(expect.objectContaining({ companyId: undefined }));
+  });
+
+  it("still gates company content on the company's plan", async () => {
+    const creditValidator = { validateCredits: vi.fn(async () => undefined), isAiEnabled: vi.fn(async () => false) };
+    const { processor, chunkService } = build(creditValidator);
+
+    await processor.process(job({}));
+
+    expect(creditValidator.isAiEnabled).toHaveBeenCalledWith({ companyId: "c-1" });
+    expect(chunkService.generateGraph).not.toHaveBeenCalled();
   });
 });

@@ -73,14 +73,23 @@ export class ChunkProcessor extends WorkerHost {
       this.clsService.set("companyId", job.data.companyId);
       this.clsService.set("userId", job.data.userId);
 
+      // Platform content (how-tos, handbook pages) is queued with no company:
+      // a platform administrator belongs to none. There is no plan to gate it
+      // on and no balance to charge, so the company gates below do not apply.
+      // Running them anyway looks up `Company {id: undefined}` and fails every job.
+      const isCompanyContent = !!job.data.companyId;
+
       // No AI on this plan: drop silently. Deliberately BEFORE the credit
       // check so nothing is ever marked pending or deferred — an AI-free
       // company must accumulate no backlog.
-      if (!(await isAiEnabledVia(this.creditValidator, { companyId: job.data.companyId }))) return;
+      if (isCompanyContent && !(await isAiEnabledVia(this.creditValidator, { companyId: job.data.companyId }))) return;
 
       // Pre-flight credit gate (spec §2): defer, don't fail — the chunk stays
       // marked and approval re-processes it via its owning entity. Not a job failure.
-      if (!(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))) {
+      if (
+        isCompanyContent &&
+        !(await hasAvailableCreditsVia(this.creditValidator, { companyId: job.data.companyId }))
+      ) {
         await this.chunkRepository.updateStatus({ id: job.data.chunkId, aiStatus: AiStatus.PendingCredits });
         // Roll the deferral up under the owning entity (spec §3.2) so the backlog
         // lists it even when the debounce gate passed but credits ran out mid-fan-out.
