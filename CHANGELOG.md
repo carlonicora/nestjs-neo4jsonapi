@@ -1,3 +1,9 @@
+## [8.30.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.29.0...v8.30.0) (2026-11-15)
+
+### 🚀 Features
+
+* **billing:** administrators get two routes for one company's billing, its subscriptions (current one first, or with oneTime=true its old extra-page purchases) and its invoices with the price each one was for; the admin companies list returns each company's plan, subscription status and next date and is no longer cached; each invoice now records the plan and period it covered, from the Stripe webhook and from a one-off worker backfill of older invoices; StripeInvoice now uses the descriptor and AbstractRepository, keeping every exported name and method signature ([773d4d6](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/773d4d6c2cf1e9c692de2d2b8f7836c3d6c132d8))
+
 ## [8.29.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.28.1...v8.29.0) (2026-11-15)
 
 ### 🚀 Features
