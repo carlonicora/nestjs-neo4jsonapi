@@ -1,15 +1,18 @@
 import { Injectable } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
-import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { Neo4jScalarRow, Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
+import { userMeta } from "../../user/entities/user.meta";
 import { AnalyticsDailySummary, AnalyticsDailySummaryDescriptor } from "../entities/analytics-daily-summary";
 import { analyticsPageViewMeta } from "../entities/analytics-page-view.meta";
 import { analyticsSessionMeta } from "../entities/analytics-session.meta";
+import { Audience } from "../common/analytics.admin.filters";
+import { audienceOf } from "./analytics-audience.cypher";
 
 type SummaryRow = {
   id: string;
-  section: string;
+  audience: Audience;
   dimension: string;
   key: string;
   visitors: number;
@@ -17,16 +20,23 @@ type SummaryRow = {
   pageViews: number;
 };
 
-const toNumber = (v: unknown): number => {
-  if (v === null || v === undefined) return 0;
-  if (typeof v === "number") return v;
-  if (typeof (v as { toNumber?: () => number }).toNumber === "function")
-    return (v as { toNumber: () => number }).toNumber();
-  return Number(v) || 0;
+/** One aggregate row as read: both people counts, the audience picks one. */
+type AggregateRow = {
+  audience: Audience;
+  dimension: string;
+  key: string;
+  visitorIds: number;
+  users: number;
+  sessions: number;
+  pageViews: number;
 };
 
 const S = analyticsSessionMeta.nodeName; // "analyticsSession"
 const PV = analyticsPageViewMeta.nodeName; // "analyticsPageView"
+const U = userMeta.nodeName; // "user"
+const S_NODE = `${S}:${analyticsSessionMeta.labelName}`;
+const PV_NODE = `${PV}:${analyticsPageViewMeta.labelName}`;
+const U_NODE = `${U}:${userMeta.labelName}`;
 
 /** Key for a session with no value for a dimension; must match AnalyticsAdminRepository's coalesce. */
 const NONE_KEY = "(none)";
@@ -36,8 +46,7 @@ const NONE_KEY = "(none)";
  * page views are deleted. Platform-level, written outside HTTP/CLS context.
  *
  * The aggregate reads RETURN scalar columns, not graph nodes, so
- * readOne()/readMany() cannot map them; they read the columns off the driver
- * result, the same shape and rationale as TokenUsageAdminRepository.
+ * readOne()/readMany() cannot map them; they go through Neo4jService.readScalars().
  */
 @Injectable()
 export class AnalyticsDailySummaryRepository extends AbstractRepository<
@@ -62,12 +71,20 @@ export class AnalyticsDailySummaryRepository extends AbstractRepository<
   }
 
   /**
-   * MERGEs one row per (section, dimension, key) for the sessions that started
+   * MERGEs one row per (audience, dimension, key) for the sessions that started
    * on `date`: `total` plus source, medium, campaign, referrer and landing from
-   * the sessions, and route from their page views. Sessions without a value for
-   * a dimension (no UTM, no external referrer) are written under the key
-   * '(none)', the same key AnalyticsAdminRepository's breakdown uses for raw
-   * rows, so raw and summarised rows merge.
+   * the sessions, route from their page views, and exit from each session's
+   * last page view. The audience comes from audienceOf(), the same expression
+   * the admin reports use. People are distinct visitor ids for `visitors` and
+   * distinct users for `users`, counted within one audience only. Sessions
+   * without a value for a dimension (no UTM, no external referrer, no page
+   * view) are written under the key '(none)', the same key
+   * AnalyticsAdminRepository's breakdown uses for raw rows, so raw and
+   * summarised rows merge.
+   *
+   * The analytics labels are platform-level (`isCompanyScoped: false`, no
+   * tenancy) and this runs from the worker cron outside CLS, so no company seed
+   * applies: the reads go to readScalars() exactly as written.
    *
    * Every property is set ON CREATE only, so an existing row is never
    * overwritten. That keeps a re-run idempotent after a crash part-way through
@@ -77,10 +94,22 @@ export class AnalyticsDailySummaryRepository extends AbstractRepository<
    * Returns the number of rows written.
    */
   async rollupDay(params: { date: string }): Promise<number> {
-    const sessionResult = await this.neo4j.read(
-      `
-        MATCH (${S}:${analyticsSessionMeta.labelName})
+    const map = (r: Neo4jScalarRow): AggregateRow => ({
+      audience: r.audience === "users" ? "users" : "visitors",
+      dimension: String(r.dimension),
+      key: typeof r.key === "string" ? r.key : "",
+      visitorIds: Number(r.visitorIds ?? 0),
+      users: Number(r.users ?? 0),
+      sessions: Number(r.sessions ?? 0),
+      pageViews: Number(r.pageViews ?? 0),
+    });
+
+    const sessionRows = await this.neo4j.readScalars({
+      query: `
+        MATCH (${S_NODE})
         WHERE date(${S}.startedAt) = date($date)
+        OPTIONAL MATCH (${S})-[:BY_USER]->(${U_NODE})
+        WITH ${S}, ${U}, ${audienceOf(S)} AS audience
         UNWIND [
           ['total', ''],
           ['source', coalesce(${S}.utmSource, $noneKey)],
@@ -89,45 +118,68 @@ export class AnalyticsDailySummaryRepository extends AbstractRepository<
           ['referrer', coalesce(${S}.referrerHost, $noneKey)],
           ['landing', coalesce(${S}.landingRoute, $noneKey)]
         ] AS pair
-        WITH ${S}, pair[0] AS dimension, pair[1] AS key
-        RETURN ${S}.section AS section,
+        WITH ${S}, ${U}, audience, pair[0] AS dimension, pair[1] AS key
+        RETURN audience,
           dimension,
           key,
-          count(DISTINCT ${S}.visitorId) AS visitors,
+          count(DISTINCT ${S}.visitorId) AS visitorIds,
+          count(DISTINCT ${U}) AS users,
           count(DISTINCT ${S}) AS sessions,
           sum(${S}.pageViews) AS pageViews
       `,
-      { date: params.date, noneKey: NONE_KEY },
-    );
+      queryParams: { date: params.date, noneKey: NONE_KEY },
+      map,
+    });
 
-    const pageViewResult = await this.neo4j.read(
-      `
-        MATCH (${PV}:${analyticsPageViewMeta.labelName})-[:IN_SESSION]->(${S}:${analyticsSessionMeta.labelName})
+    const pageViewRows = await this.neo4j.readScalars({
+      query: `
+        MATCH (${PV_NODE})-[:IN_SESSION]->(${S_NODE})
         WHERE date(${S}.startedAt) = date($date)
-        RETURN ${PV}.section AS section,
+        OPTIONAL MATCH (${S})-[:BY_USER]->(${U_NODE})
+        WITH ${PV}, ${S}, ${U}, ${audienceOf(S)} AS audience
+        RETURN audience,
           'route' AS dimension,
           ${PV}.route AS key,
-          count(DISTINCT ${S}.visitorId) AS visitors,
+          count(DISTINCT ${S}.visitorId) AS visitorIds,
+          count(DISTINCT ${U}) AS users,
           count(DISTINCT ${S}) AS sessions,
           count(${PV}) AS pageViews
       `,
-      { date: params.date },
-    );
-
-    const rows: SummaryRow[] = [...sessionResult.records, ...pageViewResult.records].map((r: any) => {
-      const section = r.get("section") as string;
-      const dimension = r.get("dimension") as string;
-      const key = (r.get("key") as string) ?? "";
-      return {
-        id: `${params.date}|${section}|${dimension}|${key}`,
-        section,
-        dimension,
-        key,
-        visitors: toNumber(r.get("visitors")),
-        sessions: toNumber(r.get("sessions")),
-        pageViews: toNumber(r.get("pageViews")),
-      };
+      queryParams: { date: params.date },
+      map,
     });
+
+    const exitRows = await this.neo4j.readScalars({
+      query: `
+        MATCH (${S_NODE})
+        WHERE date(${S}.startedAt) = date($date)
+        OPTIONAL MATCH (${S})-[:BY_USER]->(${U_NODE})
+        OPTIONAL MATCH (${PV_NODE})-[:IN_SESSION]->(${S})
+        WITH ${S}, ${U}, ${PV}
+        ORDER BY ${PV}.createdAt DESC
+        WITH ${S}, ${U}, collect(${PV}.route)[0] AS lastRoute
+        WITH ${S}, ${U}, ${audienceOf(S)} AS audience, coalesce(lastRoute, $noneKey) AS key
+        RETURN audience,
+          'exit' AS dimension,
+          key,
+          count(DISTINCT ${S}.visitorId) AS visitorIds,
+          count(DISTINCT ${U}) AS users,
+          count(DISTINCT ${S}) AS sessions,
+          sum(${S}.pageViews) AS pageViews
+      `,
+      queryParams: { date: params.date, noneKey: NONE_KEY },
+      map,
+    });
+
+    const rows: SummaryRow[] = [...sessionRows, ...pageViewRows, ...exitRows].map((r) => ({
+      id: `${params.date}|${r.audience}|${r.dimension}|${r.key}`,
+      audience: r.audience,
+      dimension: r.dimension,
+      key: r.key,
+      visitors: r.audience === "users" ? r.users : r.visitorIds,
+      sessions: r.sessions,
+      pageViews: r.pageViews,
+    }));
 
     if (rows.length === 0) return 0;
 
@@ -139,7 +191,7 @@ export class AnalyticsDailySummaryRepository extends AbstractRepository<
       MERGE (${nodeName}:${labelName} {id: row.id})
       ON CREATE SET
         ${nodeName}.date = date(left($date, 10)),
-        ${nodeName}.section = row.section,
+        ${nodeName}.audience = row.audience,
         ${nodeName}.dimension = row.dimension,
         ${nodeName}.key = row.key,
         ${nodeName}.visitors = row.visitors,

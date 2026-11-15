@@ -14,6 +14,9 @@ import { analyticsSessionMeta } from "./analytics-session.meta";
  * `visitorId` is `c:<uuid>` when it came from the consent cookie (`consented`
  * is then true) or `d:<sha256>` for the daily salted hash. Raw IP and raw user
  * agent are never stored; `deviceType` is the only user-agent derivative.
+ *
+ * `byDeletedUser` is set by the retention cron when it unlinks a soft-deleted
+ * returning user, so the session still counts under the users audience.
  */
 export type AnalyticsSession = Entity & {
   visitorId: string;
@@ -30,6 +33,7 @@ export type AnalyticsSession = Entity & {
   utmTerm?: string;
   utmContent?: string;
   deviceType: string;
+  byDeletedUser?: boolean;
 
   user?: User;
 };
@@ -64,6 +68,7 @@ export const AnalyticsSessionDescriptor = defineEntity<AnalyticsSession>()({
     utmTerm: { type: "string" },
     utmContent: { type: "string" },
     deviceType: { type: "string", required: true },
+    byDeletedUser: { type: "boolean" },
   },
 
   relationships: {

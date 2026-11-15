@@ -1,17 +1,28 @@
-import { int } from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { audienceOf } from "../analytics-audience.cypher";
 import { AnalyticsDailySummaryRepository } from "../analytics-daily-summary.repository";
 
-const record = (values: Record<string, unknown>) => ({ get: (key: string) => values[key] });
+type ScalarRow = Record<string, unknown>;
+
+const row = (values: Partial<ScalarRow> & { audience: string; dimension: string; key: string }): ScalarRow => ({
+  visitorIds: 0,
+  users: 0,
+  sessions: 0,
+  pageViews: 0,
+  ...values,
+});
 
 describe("AnalyticsDailySummaryRepository", () => {
   let repository: AnalyticsDailySummaryRepository;
   let neo4j: any;
   let written: Array<{ query: string; queryParams?: Record<string, unknown> }>;
+  /** One result list per readScalars call, in call order (sessions, page views, exit). */
+  let scalarResults: ScalarRow[][];
 
   beforeEach(() => {
     written = [];
+    scalarResults = [];
     neo4j = {
       initQuery: vi.fn(() => ({ query: "", queryParams: {} })),
       writeOne: vi.fn(async (q: any) => {
@@ -19,6 +30,7 @@ describe("AnalyticsDailySummaryRepository", () => {
         return null;
       }),
       read: vi.fn(async () => ({ records: [] })),
+      readScalars: vi.fn(async (params: { map: (r: any) => unknown }) => (scalarResults.shift() ?? []).map(params.map)),
       readOne: vi.fn(),
       readMany: vi.fn(async () => []),
     };
@@ -38,180 +50,148 @@ describe("AnalyticsDailySummaryRepository", () => {
     );
   });
 
-  it("rollupDay merges total and every dimension per section", async () => {
-    neo4j.read
-      .mockResolvedValueOnce({
-        records: [
-          record({
-            section: "public",
-            dimension: "total",
-            key: "",
-            visitors: int(5),
-            sessions: int(6),
-            pageViews: int(9),
-          }),
-          record({
-            section: "public",
-            dimension: "source",
-            key: "linkedin",
-            visitors: int(2),
-            sessions: int(2),
-            pageViews: int(4),
-          }),
-          record({
-            section: "app",
-            dimension: "landing",
-            key: "/rolls",
-            visitors: int(1),
-            sessions: int(1),
-            pageViews: int(3),
-          }),
-        ],
-      })
-      .mockResolvedValueOnce({
-        records: [
-          record({
-            section: "app",
-            dimension: "route",
-            key: "/rolls/:id",
-            visitors: int(1),
-            sessions: int(1),
-            pageViews: int(2),
-          }),
-        ],
-      });
+  it("groups every session dimension by audience", async () => {
+    scalarResults = [
+      [
+        row({ audience: "visitors", dimension: "total", key: "", visitorIds: 3, users: 1, sessions: 4, pageViews: 9 }),
+        row({ audience: "users", dimension: "total", key: "", visitorIds: 2, users: 2, sessions: 2, pageViews: 5 }),
+      ],
+    ];
 
-    const rows = await repository.rollupDay({ date: "2025-09-01" });
+    await expect(repository.rollupDay({ date: "2026-01-01" })).resolves.toBe(2);
 
-    expect(rows).toBe(4);
-
-    // Sessions-based dimensions in one read, page-view-based in another.
-    expect(neo4j.read).toHaveBeenCalledTimes(2);
-    const [sessionQuery, sessionParams] = neo4j.read.mock.calls[0];
-    const [pageViewQuery, pageViewParams] = neo4j.read.mock.calls[1];
-
-    expect(sessionParams).toEqual({ date: "2025-09-01", noneKey: "(none)" });
-    expect(pageViewParams).toEqual({ date: "2025-09-01" });
-    expect(sessionQuery).toContain("date(analyticsSession.startedAt) = date($date)");
-    expect(sessionQuery).toContain("count(DISTINCT analyticsSession.visitorId) AS visitors");
+    expect(neo4j.readScalars).toHaveBeenCalledTimes(3);
+    const sessionCall = neo4j.readScalars.mock.calls[0][0];
+    expect(sessionCall.query).toContain(audienceOf("analyticsSession"));
+    expect(sessionCall.query).toContain("date(analyticsSession.startedAt) = date($date)");
+    expect(sessionCall.query).toContain("OPTIONAL MATCH (analyticsSession)-[:BY_USER]->(user:User)");
     for (const dimension of ["total", "source", "medium", "campaign", "referrer", "landing"]) {
-      expect(sessionQuery).toContain(`'${dimension}'`);
+      expect(sessionCall.query).toContain(`'${dimension}'`);
     }
-    expect(pageViewQuery).toContain(
+    for (const field of ["utmSource", "utmMedium", "utmCampaign", "referrerHost", "landingRoute"]) {
+      expect(sessionCall.query).toContain(`coalesce(analyticsSession.${field}, $noneKey)`);
+    }
+    expect(sessionCall.query).not.toContain("'(none)'");
+    expect(sessionCall.queryParams).toEqual({ date: "2026-01-01", noneKey: "(none)" });
+
+    const pageViewCall = neo4j.readScalars.mock.calls[1][0];
+    expect(pageViewCall.query).toContain(
       "MATCH (analyticsPageView:AnalyticsPageView)-[:IN_SESSION]->(analyticsSession:AnalyticsSession)",
     );
-    expect(pageViewQuery).toContain("date(analyticsSession.startedAt) = date($date)");
-    expect(pageViewQuery).toContain("'route'");
-    expect(pageViewQuery).toContain("count(DISTINCT analyticsSession.visitorId) AS visitors");
+    expect(pageViewCall.query).toContain(audienceOf("analyticsSession"));
+    expect(pageViewCall.query).toContain("'route' AS dimension");
 
-    expect(written).toHaveLength(1);
-    const { query, queryParams } = written[0];
-    expect(query).toContain("UNWIND $rows AS row");
-    expect(query).toContain("MERGE (analyticsDailySummary:AnalyticsDailySummary {id: row.id})");
-    expect(query).toContain("analyticsDailySummary.date = date(left($date, 10))");
-    expect(queryParams!.date).toBe("2025-09-01");
-    expect(queryParams!.rows).toEqual([
+    const rows = written[0].queryParams!.rows as Array<{ id: string }>;
+    expect(rows.map((r) => r.id)).toEqual(["2026-01-01|visitors|total|", "2026-01-01|users|total|"]);
+  });
+
+  it("writes one row set per audience", async () => {
+    scalarResults = [
+      [
+        row({ audience: "visitors", dimension: "total", key: "", visitorIds: 1, users: 0, sessions: 1, pageViews: 1 }),
+        row({ audience: "users", dimension: "total", key: "", visitorIds: 1, users: 1, sessions: 1, pageViews: 1 }),
+      ],
+    ];
+
+    await repository.rollupDay({ date: "2026-01-01" });
+
+    expect(written[0].queryParams!.rows).toEqual([
       {
-        id: "2025-09-01|public|total|",
-        section: "public",
+        id: "2026-01-01|visitors|total|",
+        audience: "visitors",
         dimension: "total",
         key: "",
-        visitors: 5,
-        sessions: 6,
-        pageViews: 9,
+        visitors: 1,
+        sessions: 1,
+        pageViews: 1,
       },
       {
-        id: "2025-09-01|public|source|linkedin",
-        section: "public",
-        dimension: "source",
-        key: "linkedin",
+        id: "2026-01-01|users|total|",
+        audience: "users",
+        dimension: "total",
+        key: "",
+        visitors: 1,
+        sessions: 1,
+        pageViews: 1,
+      },
+    ]);
+    for (const written_row of written[0].queryParams!.rows as Array<{ visitors: number }>) {
+      expect(written_row.visitors).not.toBe(2);
+    }
+  });
+
+  it("counts people as users, not visitor ids, on the users audience", async () => {
+    scalarResults = [
+      [row({ audience: "users", dimension: "total", key: "", visitorIds: 3, users: 1, sessions: 3, pageViews: 6 })],
+    ];
+
+    await repository.rollupDay({ date: "2026-01-01" });
+
+    expect((written[0].queryParams!.rows as Array<{ visitors: number }>)[0].visitors).toBe(1);
+  });
+
+  it("rolls up the exit page of each session", async () => {
+    scalarResults = [
+      [],
+      [],
+      [
+        row({
+          audience: "visitors",
+          dimension: "exit",
+          key: "/pricing",
+          visitorIds: 2,
+          users: 0,
+          sessions: 2,
+          pageViews: 5,
+        }),
+      ],
+    ];
+
+    await expect(repository.rollupDay({ date: "2026-01-01" })).resolves.toBe(1);
+
+    const exitCall = neo4j.readScalars.mock.calls[2][0];
+    expect(exitCall.query).toContain("ORDER BY analyticsPageView.createdAt DESC");
+    expect(exitCall.query).toContain("collect(analyticsPageView.route)[0]");
+    expect(exitCall.query).toContain("coalesce(lastRoute, $noneKey)");
+    expect(exitCall.query).toContain("'exit' AS dimension");
+    expect(exitCall.query).toContain(audienceOf("analyticsSession"));
+    expect(exitCall.queryParams).toEqual({ date: "2026-01-01", noneKey: "(none)" });
+
+    expect(written[0].queryParams!.rows).toEqual([
+      {
+        id: "2026-01-01|visitors|exit|/pricing",
+        audience: "visitors",
+        dimension: "exit",
+        key: "/pricing",
         visitors: 2,
         sessions: 2,
-        pageViews: 4,
-      },
-      {
-        id: "2025-09-01|app|landing|/rolls",
-        section: "app",
-        dimension: "landing",
-        key: "/rolls",
-        visitors: 1,
-        sessions: 1,
-        pageViews: 3,
-      },
-      {
-        id: "2025-09-01|app|route|/rolls/:id",
-        section: "app",
-        dimension: "route",
-        key: "/rolls/:id",
-        visitors: 1,
-        sessions: 1,
-        pageViews: 2,
+        pageViews: 5,
       },
     ]);
   });
 
-  it("rollupDay writes sessions without a value under the '(none)' key instead of skipping them", async () => {
-    neo4j.read
-      .mockResolvedValueOnce({
-        records: [
-          record({
-            section: "public",
-            dimension: "total",
-            key: "",
-            visitors: int(1),
-            sessions: int(1),
-            pageViews: int(2),
-          }),
-          record({
-            section: "public",
-            dimension: "source",
-            key: "(none)",
-            visitors: int(1),
-            sessions: int(1),
-            pageViews: int(2),
-          }),
-        ],
-      })
-      .mockResolvedValueOnce({ records: [] });
+  it("writes the audience field, never section", async () => {
+    scalarResults = [
+      [row({ audience: "visitors", dimension: "total", key: "", visitorIds: 1, sessions: 1, pageViews: 1 })],
+    ];
 
-    await expect(repository.rollupDay({ date: "2025-09-01" })).resolves.toBe(2);
+    await repository.rollupDay({ date: "2026-01-01" });
 
-    const [sessionQuery, sessionParams] = neo4j.read.mock.calls[0];
-    for (const field of ["utmSource", "utmMedium", "utmCampaign", "referrerHost", "landingRoute"]) {
-      expect(sessionQuery).toContain(`coalesce(analyticsSession.${field}, $noneKey)`);
-    }
-    expect(sessionQuery).not.toContain("'(none)'");
-    expect(sessionParams).toEqual(expect.objectContaining({ noneKey: "(none)" }));
-    expect(sessionQuery).not.toContain("WHERE key IS NOT NULL");
-
-    expect(written[0].queryParams!.rows).toContainEqual({
-      id: "2025-09-01|public|source|(none)",
-      section: "public",
-      dimension: "source",
-      key: "(none)",
-      visitors: 1,
-      sessions: 1,
-      pageViews: 2,
-    });
+    const { query, queryParams } = written[0];
+    expect(query).toContain("UNWIND $rows AS row");
+    expect(query).toContain("MERGE (analyticsDailySummary:AnalyticsDailySummary {id: row.id})");
+    expect(query).toContain("analyticsDailySummary.date = date(left($date, 10))");
+    expect(query).toContain("analyticsDailySummary.audience = row.audience");
+    expect(query).not.toContain(".section");
+    expect(queryParams!.date).toBe("2026-01-01");
   });
 
   it("rollupDay sets every property ON CREATE only, so a re-run never lowers an existing row", async () => {
-    neo4j.read
-      .mockResolvedValueOnce({
-        records: [
-          record({
-            section: "public",
-            dimension: "total",
-            key: "",
-            visitors: int(1),
-            sessions: int(1),
-            pageViews: int(1),
-          }),
-        ],
-      })
-      .mockResolvedValueOnce({ records: [] });
+    scalarResults = [
+      [row({ audience: "visitors", dimension: "total", key: "", visitorIds: 1, sessions: 1, pageViews: 1 })],
+    ];
 
-    await repository.rollupDay({ date: "2025-09-01" });
+    await repository.rollupDay({ date: "2026-01-01" });
 
     const { query } = written[0];
     const afterMerge = query.slice(query.indexOf("MERGE ("));
@@ -222,12 +202,11 @@ describe("AnalyticsDailySummaryRepository", () => {
     }
     expect(afterMerge).not.toContain("+=");
     expect(afterMerge).not.toContain("ON MATCH SET");
-    // The ON CREATE SET is the only SET clause after the MERGE.
     expect(afterMerge.match(/\bSET\b/g)).toHaveLength(1);
   });
 
   it("rollupDay writes nothing for a day without data", async () => {
-    await expect(repository.rollupDay({ date: "2025-09-01" })).resolves.toBe(0);
+    await expect(repository.rollupDay({ date: "2026-01-01" })).resolves.toBe(0);
     expect(written).toHaveLength(0);
   });
 });

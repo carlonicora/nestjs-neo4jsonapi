@@ -10,7 +10,6 @@ const models = vi.hoisted(() => ({
   summary: { type: "analytics-summaries" },
   timeline: { type: "analytics-timelines" },
   breakdown: { type: "analytics-breakdowns" },
-  dailyUniqueTimeline: { type: "analytics-daily-unique-timelines" },
 }));
 
 vi.mock("../../entities/analytics-session", () => ({
@@ -27,9 +26,6 @@ vi.mock("../../entities/analytics-timeline", () => ({
 }));
 vi.mock("../../entities/analytics-breakdown", () => ({
   AnalyticsBreakdownDescriptor: { model: models.breakdown, relationships: {} },
-}));
-vi.mock("../../entities/analytics-daily-unique-timeline", () => ({
-  AnalyticsDailyUniqueTimelineDescriptor: { model: models.dailyUniqueTimeline, relationships: {} },
 }));
 vi.mock("../../repositories/analytics-session.repository", () => ({
   AnalyticsSessionRepository: class AnalyticsSessionRepository {},
@@ -62,7 +58,6 @@ function makeService(
     findSummary: vi.fn(async () => []),
     findTimeline: vi.fn(async () => []),
     findBreakdown: vi.fn(async () => []),
-    findDailyUniques: vi.fn(async () => []),
     ...overrides.admin,
   } as any;
   const sessionRepository = {
@@ -113,45 +108,45 @@ describe("AnalyticsAdminService", () => {
       admin: { findSummary: vi.fn(async () => rows) },
     });
 
-    await service.getSummary({ from: FROM, to: TO, section: "all" });
+    await service.getSummary({ from: FROM, to: TO, audience: "users" });
 
     expect(adminRepository.findSummary).toHaveBeenCalledWith({
       from: FROM,
       to: TO,
-      section: "all",
+      audience: "users",
       retentionCutoff: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(jsonApiService.buildList).toHaveBeenCalledWith(models.summary, rows);
   });
 
   it("serialises the timeline with the timeline model", async () => {
-    const rows = [{ id: "2026-08-01|all" }];
+    const rows = [{ id: "2026-08-01|users" }];
     const { service, jsonApiService, adminRepository } = makeService({
       admin: { findTimeline: vi.fn(async () => rows) },
     });
 
-    await service.getTimeline({ from: FROM, to: TO, section: "public", granularity: "week" });
+    await service.getTimeline({ from: FROM, to: TO, audience: "users", granularity: "week" });
 
     expect(adminRepository.findTimeline).toHaveBeenCalledWith({
       from: FROM,
       to: TO,
-      section: "public",
+      audience: "users",
       granularity: "week",
       retentionCutoff: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(jsonApiService.buildList).toHaveBeenCalledWith(models.timeline, rows);
   });
 
-  it("passes the breakdown dimension, section and limit straight through", async () => {
+  it("passes the breakdown audience, dimension and limit straight through", async () => {
     const { service, jsonApiService, adminRepository } = makeService();
 
-    await service.getBreakdown({ from: FROM, to: TO, section: "app", dimension: "campaign", limit: 20 });
+    await service.getBreakdown({ from: FROM, to: TO, audience: "users", dimension: "exit", limit: 20 });
 
     expect(adminRepository.findBreakdown).toHaveBeenCalledWith({
       from: FROM,
       to: TO,
-      section: "app",
-      dimension: "campaign",
+      audience: "users",
+      dimension: "exit",
       limit: 20,
       retentionCutoff: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
@@ -169,7 +164,7 @@ describe("AnalyticsAdminService", () => {
       query: { "page[size]": "10" },
       from: FROM,
       to: TO,
-      section: "all",
+      audience: "visitors",
       visitorId: "c:abc",
       userId: "u1",
     });
@@ -180,7 +175,7 @@ describe("AnalyticsAdminService", () => {
       cursor,
       from: FROM,
       to: TO,
-      section: "all",
+      audience: null,
       visitorId: "c:abc",
       userId: "u1",
     });
@@ -190,6 +185,25 @@ describe("AnalyticsAdminService", () => {
     expect(paginator).toBeInstanceOf(JsonApiPaginator);
 
     generateCursor.mockRestore();
+  });
+
+  // Review Focus 5 — the journey page's "other sessions" must list both audiences.
+  it("skips the audience when visitorId or userId is given", async () => {
+    const { service, sessionRepository } = makeService();
+
+    await service.getSessions({ query: {}, from: FROM, to: TO, audience: "visitors", visitorId: "c:1" });
+    expect(sessionRepository.findForAdmin).toHaveBeenLastCalledWith(
+      expect.objectContaining({ audience: null, visitorId: "c:1" }),
+    );
+
+    await service.getSessions({ query: {}, from: FROM, to: TO, audience: "visitors", userId: "u1" });
+    expect(sessionRepository.findForAdmin).toHaveBeenLastCalledWith(
+      expect.objectContaining({ audience: null, userId: "u1" }),
+    );
+
+    await service.getSessions({ query: {}, from: FROM, to: TO, audience: "visitors" });
+    expect(sessionRepository.findForAdmin).toHaveBeenLastCalledWith(expect.objectContaining({ audience: "visitors" }));
+    expect(sessionRepository.findForAdmin.mock.calls[2][0]).not.toHaveProperty("section");
   });
 
   it("findById serialises one session as a single JSON:API document with the session model", async () => {
@@ -246,87 +260,5 @@ describe("AnalyticsAdminService", () => {
     const { service } = makeService({}, 1);
 
     expect(service.retentionCutoff()).toBe("2026-02-28");
-  });
-
-  describe("getDailyUniques", () => {
-    const source = (
-      day: string,
-      parts: {
-        stored?: { visitors: number; users: number };
-        raw?: { visitors: number; users: number };
-        hasOldSummary?: boolean;
-      },
-    ) => ({ day, stored: parts.stored ?? null, raw: parts.raw ?? null, hasOldSummary: parts.hasOldSummary ?? false });
-
-    const today = () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-11-04T10:00:00Z"));
-    };
-
-    it("returns one row per day from fromDate to toDate, ascending, id = day", async () => {
-      today();
-      const { service, jsonApiService, adminRepository } = makeService();
-
-      const result: any = await service.getDailyUniques({ fromDate: "2026-10-30", toDate: "2026-11-02" });
-
-      expect(adminRepository.findDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-30", toDate: "2026-11-02" });
-      expect(result.rows.map((r: any) => r.id)).toEqual(["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]);
-      expect(result.rows.map((r: any) => r.day)).toEqual(["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]);
-      expect(jsonApiService.buildList).toHaveBeenCalledWith(models.dailyUniqueTimeline, result.rows);
-    });
-
-    it("applies the four rules: stored, then raw, then unknown for an old summary, then zero", async () => {
-      today();
-      const { service } = makeService({
-        admin: {
-          findDailyUniques: vi.fn(async () => [
-            source("2026-10-01", {
-              stored: { visitors: 9, users: 4 },
-              raw: { visitors: 2, users: 1 },
-              hasOldSummary: true,
-            }),
-            source("2026-10-02", { raw: { visitors: 5, users: 2 } }),
-            source("2026-10-03", { hasOldSummary: true }),
-          ]),
-        },
-      });
-
-      const result: any = await service.getDailyUniques({ fromDate: "2026-10-01", toDate: "2026-10-04" });
-
-      expect(result.rows).toEqual([
-        { id: "2026-10-01", day: "2026-10-01", visitors: 9, users: 4 },
-        { id: "2026-10-02", day: "2026-10-02", visitors: 5, users: 2 },
-        { id: "2026-10-03", day: "2026-10-03", visitors: null, users: null },
-        { id: "2026-10-04", day: "2026-10-04", visitors: 0, users: 0 },
-      ]);
-    });
-
-    it("never returns a day after today (UTC)", async () => {
-      today();
-      const { service } = makeService();
-
-      const result: any = await service.getDailyUniques({ fromDate: "2026-11-02", toDate: "2026-11-10" });
-
-      expect(result.rows.map((r: any) => r.day)).toEqual(["2026-11-02", "2026-11-03", "2026-11-04"]);
-    });
-
-    it("returns an empty list when the whole range is in the future", async () => {
-      today();
-      const { service, jsonApiService } = makeService();
-
-      const result: any = await service.getDailyUniques({ fromDate: "2026-11-05", toDate: "2026-11-10" });
-
-      expect(result.rows).toEqual([]);
-      expect(jsonApiService.buildList).toHaveBeenCalledWith(models.dailyUniqueTimeline, []);
-    });
-
-    it("walks UTC calendar days across a DST change", async () => {
-      today();
-      const { service } = makeService();
-
-      const result: any = await service.getDailyUniques({ fromDate: "2026-10-24", toDate: "2026-10-27" });
-
-      expect(result.rows.map((r: any) => r.day)).toEqual(["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"]);
-    });
   });
 });

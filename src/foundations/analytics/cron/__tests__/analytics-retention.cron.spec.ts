@@ -1,10 +1,8 @@
-import { beforeEach, describe, expect, it, vi, type Mocked } from "vitest";
-import type { AnalyticsDailyUniqueRepository } from "../../repositories/analytics-daily-unique.repository";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Sibling-owned classes, replaced so the cron is exercised in isolation.
 vi.mock("../../repositories/analytics-session.repository", () => ({ AnalyticsSessionRepository: class {} }));
 vi.mock("../../repositories/analytics-daily-summary.repository", () => ({ AnalyticsDailySummaryRepository: class {} }));
-vi.mock("../../repositories/analytics-daily-unique.repository", () => ({ AnalyticsDailyUniqueRepository: class {} }));
 vi.mock("../../services/analytics.admin.service", () => ({ AnalyticsAdminService: class {} }));
 
 import { AnalyticsRetentionCron } from "../analytics-retention.cron";
@@ -18,7 +16,6 @@ describe("AnalyticsRetentionCron", () => {
     unlinkDeletedUsers: ReturnType<typeof vi.fn>;
   };
   let dailySummaryRepository: { rollupDay: ReturnType<typeof vi.fn> };
-  let dailyUniqueRepository: Mocked<Pick<AnalyticsDailyUniqueRepository, "rollupDay">>;
   let adminService: { retentionCutoff: ReturnType<typeof vi.fn> };
   let logger: { log: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
@@ -42,40 +39,34 @@ describe("AnalyticsRetentionCron", () => {
         return 7;
       }),
     };
-    dailyUniqueRepository = {
-      rollupDay: vi.fn(async ({ date }: { date: string }) => {
-        calls.push(`rollupDay(uniques, ${date})`);
-      }),
-    };
     adminService = { retentionCutoff: vi.fn().mockReturnValue("2025-09-03") };
     logger = { log: vi.fn(), error: vi.fn() };
     cron = new AnalyticsRetentionCron(
       sessionRepository as any,
       dailySummaryRepository as any,
-      dailyUniqueRepository as unknown as AnalyticsDailyUniqueRepository,
       adminService as any,
       logger as any,
     );
   });
 
-  it("rolls up the summary, then the daily uniques, then deletes each expired day, oldest first, max 31", async () => {
+  it("takes four dependencies", () => {
+    expect(AnalyticsRetentionCron.length).toBe(4);
+  });
+
+  it("rolls up, then deletes each expired day, oldest first, max 31", async () => {
     await cron.run();
 
     expect(sessionRepository.findExpiredDays).toHaveBeenCalledWith({ cutoff: "2025-09-03", limit: 31 });
-    expect(calls.slice(0, 6)).toEqual([
+    expect(calls.slice(0, 4)).toEqual([
       "rollupDay(summary, 2025-08-01)",
-      "rollupDay(uniques, 2025-08-01)",
       "deleteDay(2025-08-01)",
       "rollupDay(summary, 2025-08-02)",
-      "rollupDay(uniques, 2025-08-02)",
       "deleteDay(2025-08-02)",
     ]);
     expect(dailySummaryRepository.rollupDay).toHaveBeenCalledWith({ date: "2025-08-01" });
-    expect(dailyUniqueRepository.rollupDay).toHaveBeenCalledWith({ date: "2025-08-01" });
-    expect(dailyUniqueRepository.rollupDay).toHaveBeenCalledWith({ date: "2025-08-02" });
     expect(sessionRepository.deleteDay).toHaveBeenCalledWith({ date: "2025-08-02" });
     expect(logger.log).toHaveBeenCalledWith(
-      "Analytics day 2025-08-01: 7 summary rows written, daily uniques written, 2 sessions and 5 page views deleted",
+      "Analytics day 2025-08-01: 7 summary rows written, 2 sessions and 5 page views deleted",
       "AnalyticsRetentionCron",
     );
   });
@@ -93,7 +84,6 @@ describe("AnalyticsRetentionCron", () => {
     await cron.run();
 
     expect(dailySummaryRepository.rollupDay).not.toHaveBeenCalled();
-    expect(dailyUniqueRepository.rollupDay).not.toHaveBeenCalled();
     expect(sessionRepository.deleteDay).not.toHaveBeenCalled();
     expect(sessionRepository.unlinkDeletedUsers).toHaveBeenCalledTimes(1);
   });
@@ -106,22 +96,6 @@ describe("AnalyticsRetentionCron", () => {
     expect(sessionRepository.deleteDay).toHaveBeenCalledTimes(1);
     expect(sessionRepository.deleteDay).toHaveBeenCalledWith({ date: "2025-08-02" });
     expect(sessionRepository.deleteDay).not.toHaveBeenCalledWith({ date: "2025-08-01" });
-    expect(logger.error).toHaveBeenCalledWith(
-      "Failed to roll up and delete analytics day 2025-08-01: Neo4j connection lost",
-      "AnalyticsRetentionCron",
-    );
-    expect(sessionRepository.unlinkDeletedUsers).toHaveBeenCalledTimes(1);
-  });
-
-  it("a failing daily uniques rollup skips that day's delete and the next day still runs", async () => {
-    dailyUniqueRepository.rollupDay.mockRejectedValueOnce(new Error("Neo4j connection lost"));
-
-    await cron.run();
-
-    expect(sessionRepository.deleteDay).toHaveBeenCalledTimes(1);
-    expect(sessionRepository.deleteDay).not.toHaveBeenCalledWith({ date: "2025-08-01" });
-    expect(sessionRepository.deleteDay).toHaveBeenCalledWith({ date: "2025-08-02" });
-    expect(dailyUniqueRepository.rollupDay).toHaveBeenCalledWith({ date: "2025-08-02" });
     expect(logger.error).toHaveBeenCalledWith(
       "Failed to roll up and delete analytics day 2025-08-01: Neo4j connection lost",
       "AnalyticsRetentionCron",

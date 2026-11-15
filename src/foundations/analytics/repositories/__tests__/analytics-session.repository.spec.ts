@@ -2,6 +2,7 @@ import { Date as Neo4jDate, int } from "neo4j-driver";
 import { ClsService } from "nestjs-cls";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AnalyticsResolvedPageView } from "../../interfaces/analytics.resolved-page-view";
+import { audienceOf } from "../analytics-audience.cypher";
 import { AnalyticsSessionRepository } from "../analytics-session.repository";
 
 const record = (values: Record<string, unknown>) => ({ get: (key: string) => values[key] });
@@ -203,13 +204,13 @@ describe("AnalyticsSessionRepository", () => {
   });
 
   describe("findForAdmin", () => {
-    it("pages with {CURSOR} and filters by section/visitorId/userId", async () => {
+    it("pages with {CURSOR} and filters by audience/visitorId/userId", async () => {
       const cursor = { cursor: 0, take: 25 };
       await repository.findForAdmin({
         cursor,
         from: "2026-09-03T00:00:00.000Z",
         to: "2026-10-03T00:00:00.000Z",
-        section: "public",
+        audience: "visitors",
         visitorId: "d:abc",
       });
 
@@ -219,7 +220,7 @@ describe("AnalyticsSessionRepository", () => {
       expect(query.query).toContain("MATCH (analyticsSession:AnalyticsSession)");
       expect(query.query).toContain("analyticsSession.startedAt >= datetime($from)");
       expect(query.query).toContain("analyticsSession.startedAt <= datetime($to)");
-      expect(query.query).toContain("($section = 'all' OR analyticsSession.section = $section)");
+      expect(query.query).not.toContain("$section");
       expect(query.query).toContain("($visitorId IS NULL OR analyticsSession.visitorId = $visitorId)");
       expect(query.query).toContain(
         "($userId IS NULL OR EXISTS { (analyticsSession)-[:BY_USER]->(:User {id: $userId}) })",
@@ -232,13 +233,41 @@ describe("AnalyticsSessionRepository", () => {
       expect(query.queryParams).toMatchObject({
         from: "2026-09-03T00:00:00.000Z",
         to: "2026-10-03T00:00:00.000Z",
-        section: "public",
+        audience: "visitors",
         visitorId: "d:abc",
         userId: null,
       });
       // The only companyId is the one initQuery seeded; this method never binds its own.
       expect(query.queryParams.companyId).toBe("company-1");
       expect(neo4j.initQuery).toHaveBeenCalledWith({ serialiser: expect.anything(), cursor });
+    });
+
+    it("findForAdmin filters by audience when one is given", async () => {
+      await repository.findForAdmin({
+        cursor: { cursor: 0, take: 25 },
+        from: "2026-09-03T00:00:00.000Z",
+        to: "2026-10-03T00:00:00.000Z",
+        audience: "users",
+      });
+
+      const query = neo4j.readMany.mock.calls[0][0];
+      expect(query.queryParams.audience).toBe("users");
+      expect(query.query).toContain(`($audience IS NULL OR ${audienceOf("analyticsSession")} = $audience)`);
+      expect(query.query).not.toContain("$section");
+      expect(query.queryParams).not.toHaveProperty("section");
+    });
+
+    it("findForAdmin binds audience null for a per-visitor lookup", async () => {
+      await repository.findForAdmin({
+        cursor: { cursor: 0, take: 25 },
+        from: "2026-09-03T00:00:00.000Z",
+        to: "2026-10-03T00:00:00.000Z",
+        audience: null,
+        visitorId: "d:abc",
+      });
+
+      const query = neo4j.readMany.mock.calls[0][0];
+      expect(query.queryParams.audience).toBeNull();
     });
   });
 
@@ -295,8 +324,26 @@ describe("AnalyticsSessionRepository", () => {
       await expect(repository.unlinkDeletedUsers()).resolves.toBe(3);
 
       const call = neo4j.executeInTransaction.mock.calls[0][0][0];
-      expect(call.query).toContain("MATCH (:AnalyticsSession)-[r:BY_USER]->(user:User {isDeleted: true})");
+      expect(call.query).toContain(
+        "MATCH (analyticsSession:AnalyticsSession)-[r:BY_USER]->(user:User {isDeleted: true})",
+      );
       expect(call.query).toContain("DELETE r");
+    });
+
+    it("unlinkDeletedUsers flags returning-user sessions before removing the edge", async () => {
+      neo4j.executeInTransaction.mockResolvedValueOnce([{ records: [record({ unlinked: int(2) })] }]);
+
+      await repository.unlinkDeletedUsers();
+
+      const query: string = neo4j.executeInTransaction.mock.calls[0][0][0].query;
+      const createdAt = query.indexOf("user.createdAt < ");
+      const startedAt = query.indexOf("analyticsSession.startedAt", createdAt);
+      const flag = query.indexOf("SET analyticsSession.byDeletedUser = true");
+      const del = query.indexOf("DELETE r");
+      expect(createdAt).toBeGreaterThan(-1);
+      expect(startedAt).toBeGreaterThan(createdAt);
+      expect(flag).toBeGreaterThan(startedAt);
+      expect(del).toBeGreaterThan(flag);
     });
   });
 

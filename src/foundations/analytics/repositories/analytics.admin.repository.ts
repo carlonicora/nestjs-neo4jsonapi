@@ -27,33 +27,18 @@ import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { SecurityService } from "../../../core/security/services/security.service";
 import { AnalyticsBreakdownEntity } from "../entities/analytics-breakdown";
 import { analyticsDailySummaryMeta } from "../entities/analytics-daily-summary.meta";
-import { AnalyticsDailyUniqueSourceEntity } from "../entities/analytics-daily-unique-source";
-import { AnalyticsDailyUniqueTimelineDescriptor } from "../entities/analytics-daily-unique-timeline";
-import { analyticsDailyUniqueMeta } from "../entities/analytics-daily-unique.meta";
 import { analyticsPageViewMeta } from "../entities/analytics-page-view.meta";
 import { AnalyticsSession, AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { analyticsSessionMeta } from "../entities/analytics-session.meta";
 import { AnalyticsSummaryEntity } from "../entities/analytics-summary";
 import { AnalyticsTimelineDescriptor, AnalyticsTimelineEntity } from "../entities/analytics-timeline";
 import { userMeta } from "../../user/entities/user.meta";
-
-/**
- * The closed sets of values the admin endpoints accept. The controller
- * validates query params against these tuples and the unions below are derived
- * from them, so there is one declaration of each set.
- */
-export const SECTIONS = ["all", "public", "app"] as const;
-export const GRANULARITIES = ["day", "week", "month"] as const;
-export const DIMENSIONS = ["source", "medium", "campaign", "referrer", "route", "landing"] as const;
-
-export type Section = (typeof SECTIONS)[number];
-export type Granularity = (typeof GRANULARITIES)[number];
-export type Dimension = (typeof DIMENSIONS)[number];
+import { Audience, AUDIENCES, Dimension, DIMENSIONS, Granularity } from "../common/analytics.admin.filters";
+import { audienceOf } from "./analytics-audience.cypher";
 
 const SESSION = analyticsSessionMeta.nodeName; // "analyticsSession"
 const PAGE_VIEW = analyticsPageViewMeta.nodeName; // "analyticsPageView"
 const SUMMARY = analyticsDailySummaryMeta.nodeName; // "analyticsDailySummary"
-const DAILY_UNIQUE = analyticsDailyUniqueMeta.nodeName; // "analyticsDailyUnique"
 const USER = userMeta.nodeName; // "user"
 
 /**
@@ -68,29 +53,34 @@ const TRUNCATION_UNITS: Record<"week" | "month", string> = {
 };
 
 /**
- * The section filter each accepted value binds. `all` binds nothing and adds no
- * predicate; the other two are echoed from this table, never from the request.
+ * The people column each audience counts. Site visitors are counted by their
+ * anonymous visitor id; app users by the distinct BY_USER user, so one person
+ * on two devices counts once. Every raw query binds the `user` alias through
+ * the same OPTIONAL MATCH, so both expressions are always in scope.
  */
-const SECTION_FILTERS: Record<Section, string | null> = {
-  all: null,
-  public: "public",
-  app: "app",
+const PEOPLE: Record<Audience, string> = {
+  visitors: `count(DISTINCT ${SESSION}.visitorId)`,
+  users: `count(DISTINCT ${USER})`,
 };
 
+/** What a dimension reads to build its key. */
+type DimensionReads = "session" | "pageView" | "exit";
+
 /**
- * The key expression each breakdown dimension may emit, and the label it reads.
+ * The key expression each breakdown dimension may emit, and what it reads.
  * Session-based dimensions read the first page view's attribution stored on the
- * session; `route` reads every page view. Missing attribution groups under
- * `(none)` — the same key the nightly rollup writes, so raw and summarised rows
- * merge on it.
+ * session; `route` reads every page view; `exit` reads each session's last page
+ * view (bound as `lastRoute`). Missing values group under `(none)`, the same key
+ * the nightly rollup writes, so raw and summarised rows merge on it.
  */
-const DIMENSION_SPECS: Record<Dimension, { reads: "session" | "pageView"; key: string }> = {
+const DIMENSION_SPECS: Record<Dimension, { reads: DimensionReads; key: string }> = {
   source: { reads: "session", key: `coalesce(${SESSION}.utmSource, '(none)')` },
   medium: { reads: "session", key: `coalesce(${SESSION}.utmMedium, '(none)')` },
   campaign: { reads: "session", key: `coalesce(${SESSION}.utmCampaign, '(none)')` },
   referrer: { reads: "session", key: `coalesce(${SESSION}.referrerHost, '(none)')` },
   landing: { reads: "session", key: `coalesce(${SESSION}.landingRoute, '(none)')` },
   route: { reads: "pageView", key: `coalesce(${PAGE_VIEW}.route, '(none)')` },
+  exit: { reads: "exit", key: "coalesce(lastRoute, '(none)')" },
 };
 
 /** The shared metric field set every admin resource exposes. */
@@ -100,12 +90,18 @@ type AnalyticsMetrics = {
   pageViews: number;
 };
 
-/** Per-section totals for one window, before the derived ratios. */
-type SectionTotals = AnalyticsMetrics & {
-  section: string;
-  /** Distinct visitors in the RAW part only — summaries carry no consent split. */
-  rawVisitors: number;
-  consentedVisitors: number;
+/**
+ * The number each breakdown is ranked by: attribution by people, pages by
+ * views, entry and exit pages by the sessions that started or ended there.
+ */
+const RANK_BY: Record<Dimension, keyof AnalyticsMetrics> = {
+  source: "visitors",
+  medium: "visitors",
+  campaign: "visitors",
+  referrer: "visitors",
+  route: "pageViews",
+  landing: "sessions",
+  exit: "sessions",
 };
 
 const toNumber = (v: unknown): number => {
@@ -130,12 +126,14 @@ const round = (v: number, dp: number): number => {
  * analytics indexes belong to the session, page-view and daily-summary
  * repositories.
  *
- * Every aggregate is two reads merged in JS: the RAW part (sessions / page views
- * on or after `retentionCutoff`) and the SUMMARISED part (daily summaries before
- * it). Raw visitors are `count(DISTINCT visitorId)`; summarised visitors are the
- * stored per-day distinct counts, summed — so a multi-day bucket over summarised
- * data sums daily distinct visitors. The summary adds a third raw read for the
- * cross-section visitor total (see _sectionTotals).
+ * Every report reads ONE audience (site visitors or app users, see
+ * analytics-audience.cypher.ts): raw sessions are filtered by the audience
+ * expression, daily summaries by their stored `audience`. Every aggregate is two
+ * reads merged in JS: the RAW part (sessions / page views on or after
+ * `retentionCutoff`) and the SUMMARISED part (daily summaries before it). Raw
+ * people are distinct visitor ids (visitors) or distinct users (users);
+ * summarised people are the stored per-day distinct counts, summed — so a
+ * multi-day bucket over summarised data sums daily distinct people.
  */
 @Injectable()
 export class AnalyticsAdminRepository extends AbstractRepository<
@@ -149,35 +147,39 @@ export class AnalyticsAdminRepository extends AbstractRepository<
   }
 
   /**
-   * Six rows: {public, app, total} × {current, previous}. The previous window is
-   * the equal-length span immediately preceding `from`, which is what the KPI
-   * tiles' deltas are computed against.
+   * Two rows for the audience: total × {current, previous}. The previous window
+   * is the equal-length span immediately preceding `from`, which is what the
+   * KPI tiles' deltas are computed against.
    */
   async findSummary(params: {
     from: string;
     to: string;
-    section: Section;
+    audience: Audience;
     retentionCutoff: string;
   }): Promise<AnalyticsSummaryEntity[]> {
-    const section = this._section(params.section);
+    const audience = this._audience(params.audience);
     const previous = this._previousWindow(params.from, params.to);
 
-    const [current, prior] = await Promise.all([
-      this._sectionTotals({ from: params.from, to: params.to, section, retentionCutoff: params.retentionCutoff }),
-      this._sectionTotals({ from: previous.from, to: previous.to, section, retentionCutoff: params.retentionCutoff }),
+    return Promise.all([
+      this._summaryRow(
+        { from: params.from, to: params.to, audience, retentionCutoff: params.retentionCutoff },
+        "current",
+      ),
+      this._summaryRow(
+        { from: previous.from, to: previous.to, audience, retentionCutoff: params.retentionCutoff },
+        "previous",
+      ),
     ]);
-
-    return [...this._withTotal(current, "current"), ...this._withTotal(prior, "previous")];
   }
 
   async findTimeline(params: {
     from: string;
     to: string;
-    section: Section;
+    audience: Audience;
     granularity: Granularity;
     retentionCutoff: string;
   }): Promise<AnalyticsTimelineEntity[]> {
-    const section = this._section(params.section);
+    const audience = this._audience(params.audience);
     // Cypher accepts a parameter for date.truncate's unit (verified against
     // DozerDB 5.26), so the granularity is bound rather than interpolated —
     // the "always parameterised, never interpolated" guardrail applies here
@@ -188,7 +190,7 @@ export class AnalyticsAdminRepository extends AbstractRepository<
       from: params.from,
       to: params.to,
       retentionCutoff: params.retentionCutoff,
-      section,
+      audience,
       granularity,
     };
 
@@ -199,11 +201,12 @@ export class AnalyticsAdminRepository extends AbstractRepository<
     raw.query = `
       MATCH (${SESSION}:${analyticsSessionMeta.labelName})
       WHERE ${this._rawSessionWindow()}
-      ${section === null ? "" : `AND ${SESSION}.section = $section`}
-      WITH ${rawBucket} AS bucket, ${SESSION}
+      AND ${audienceOf(SESSION)} = $audience
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      WITH ${rawBucket} AS bucket, ${SESSION}, ${USER}
       RETURN bucket                                  AS bucket,
-             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
-             count(${SESSION})                       AS sessions,
+             ${PEOPLE[audience]} AS visitors,
+             count(DISTINCT ${SESSION})              AS sessions,
              sum(toInteger(${SESSION}.pageViews))    AS pageViews
       ORDER BY bucket ASC
     `;
@@ -214,7 +217,7 @@ export class AnalyticsAdminRepository extends AbstractRepository<
     summarised.query = `
       MATCH (${SUMMARY}:${analyticsDailySummaryMeta.labelName} {dimension: 'total'})
       WHERE ${this._summaryWindow()}
-      ${section === null ? "" : `AND ${SUMMARY}.section = $section`}
+      AND ${SUMMARY}.audience = $audience
       WITH ${summaryBucket} AS bucket, ${SUMMARY}
       RETURN bucket                                  AS bucket,
              sum(toInteger(${SUMMARY}.visitors))     AS visitors,
@@ -246,32 +249,33 @@ export class AnalyticsAdminRepository extends AbstractRepository<
       .map(
         ([bucketValue, metrics]) =>
           ({
-            id: `${bucketValue}|${params.section}`,
+            id: `${bucketValue}|${audience}`,
             bucket: bucketValue,
-            section: params.section,
+            section: audience,
             ...metrics,
           }) as AnalyticsTimelineEntity,
       );
   }
 
   /**
-   * Ranked rows, descending by visitors, truncated to `limit` with the exact
-   * remainder folded into a single "other" row. The full ordered set is fetched
-   * and sliced in JS so the remainder is exact rather than a second query's
-   * approximation.
+   * Ranked rows for one audience, descending by the dimension's own number
+   * (RANK_BY), then people, then page views, then key; truncated to `limit`
+   * with the exact remainder folded into a single "other" row. The full ordered
+   * set is fetched and sliced in JS so the remainder is exact rather than a
+   * second query's approximation.
    */
   async findBreakdown(params: {
     from: string;
     to: string;
-    section: Section;
+    audience: Audience;
     dimension: Dimension;
     limit: number;
     retentionCutoff: string;
   }): Promise<AnalyticsBreakdownEntity[]> {
-    const section = this._section(params.section);
+    const audience = this._audience(params.audience);
     const { dimension, spec } = this._dimension(params.dimension);
 
-    const seed = { from: params.from, to: params.to, retentionCutoff: params.retentionCutoff, section, dimension };
+    const seed = { from: params.from, to: params.to, retentionCutoff: params.retentionCutoff, audience, dimension };
 
     const raw = this._adminQuery(seed);
 
@@ -280,22 +284,42 @@ export class AnalyticsAdminRepository extends AbstractRepository<
       MATCH (${PAGE_VIEW}:${analyticsPageViewMeta.labelName})-[:IN_SESSION]->(${SESSION}:${analyticsSessionMeta.labelName})
       WHERE ${PAGE_VIEW}.createdAt >= datetime($from) AND ${PAGE_VIEW}.createdAt <= datetime($to)
       AND date(${PAGE_VIEW}.createdAt) >= date($retentionCutoff)
-      ${section === null ? "" : `AND ${PAGE_VIEW}.section = $section`}
-      WITH ${spec.key} AS key, ${PAGE_VIEW}, ${SESSION}
+      AND ${audienceOf(SESSION)} = $audience
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      WITH ${spec.key} AS key, ${PAGE_VIEW}, ${SESSION}, ${USER}
       RETURN key                                     AS key,
-             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
+             ${PEOPLE[audience]} AS visitors,
              count(DISTINCT ${SESSION})              AS sessions,
              count(${PAGE_VIEW})                     AS pageViews
+      `;
+    } else if (spec.reads === "exit") {
+      // A session's exit page is the route of its latest page view; a session
+      // with no page view groups under (none). Windowed by session start, like
+      // the other session dimensions.
+      raw.query = `
+      MATCH (${SESSION}:${analyticsSessionMeta.labelName})
+      WHERE ${this._rawSessionWindow()}
+      AND ${audienceOf(SESSION)} = $audience
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      OPTIONAL MATCH (${PAGE_VIEW}:${analyticsPageViewMeta.labelName})-[:IN_SESSION]->(${SESSION})
+      WITH ${SESSION}, ${USER}, ${PAGE_VIEW} ORDER BY ${PAGE_VIEW}.createdAt DESC
+      WITH ${SESSION}, ${USER}, collect(${PAGE_VIEW}.route)[0] AS lastRoute
+      WITH ${spec.key} AS key, ${SESSION}, ${USER}
+      RETURN key                                     AS key,
+             ${PEOPLE[audience]} AS visitors,
+             count(DISTINCT ${SESSION})              AS sessions,
+             sum(toInteger(${SESSION}.pageViews))    AS pageViews
       `;
     } else {
       raw.query = `
       MATCH (${SESSION}:${analyticsSessionMeta.labelName})
       WHERE ${this._rawSessionWindow()}
-      ${section === null ? "" : `AND ${SESSION}.section = $section`}
-      WITH ${spec.key} AS key, ${SESSION}
+      AND ${audienceOf(SESSION)} = $audience
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      WITH ${spec.key} AS key, ${SESSION}, ${USER}
       RETURN key                                     AS key,
-             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
-             count(${SESSION})                       AS sessions,
+             ${PEOPLE[audience]} AS visitors,
+             count(DISTINCT ${SESSION})              AS sessions,
              sum(toInteger(${SESSION}.pageViews))    AS pageViews
       `;
     }
@@ -305,7 +329,7 @@ export class AnalyticsAdminRepository extends AbstractRepository<
       MATCH (${SUMMARY}:${analyticsDailySummaryMeta.labelName})
       WHERE ${SUMMARY}.dimension = $dimension
       AND ${this._summaryWindow()}
-      ${section === null ? "" : `AND ${SUMMARY}.section = $section`}
+      AND ${SUMMARY}.audience = $audience
       RETURN ${SUMMARY}.key                          AS key,
              sum(toInteger(${SUMMARY}.visitors))     AS visitors,
              sum(toInteger(${SUMMARY}.sessions))     AS sessions,
@@ -323,9 +347,14 @@ export class AnalyticsAdminRepository extends AbstractRepository<
       merged.set(key, this._add(merged.get(key), this._metrics(r)));
     }
 
+    const rankBy = RANK_BY[dimension];
     const all: AnalyticsBreakdownEntity[] = [...merged.entries()]
       .sort(
-        ([ka, a], [kb, b]) => b.visitors - a.visitors || b.pageViews - a.pageViews || (ka < kb ? -1 : ka > kb ? 1 : 0),
+        ([ka, a], [kb, b]) =>
+          b[rankBy] - a[rankBy] ||
+          b.visitors - a.visitors ||
+          b.pageViews - a.pageViews ||
+          (ka < kb ? -1 : ka > kb ? 1 : 0),
       )
       .map(([key, metrics]) => ({ id: `${dimension}|${key}`, dimension, key, ...metrics }) as AnalyticsBreakdownEntity);
 
@@ -347,102 +376,26 @@ export class AnalyticsAdminRepository extends AbstractRepository<
   }
 
   /**
-   * The three sources of each day's unique visitors and unique users between
-   * `fromDate` and `toDate` (inclusive, YYYY-MM-DD, UTC days), merged by day.
-   * Only days with at least one source are returned; the service fills the
-   * rest and picks the counts by the four rules.
-   *
-   * - stored: the AnalyticsDailyUnique node the retention job wrote for the day;
-   * - raw: distinct visitors and distinct BY_USER users of the sessions still
-   *   stored for the day, across every section, with no retention cutoff (a day
-   *   past the cutoff whose rollup has not run is still in raw storage);
-   * - hasOldSummary: an AnalyticsDailySummary total row exists for the day.
+   * One window's total row for the audience: raw + summarised people, sessions
+   * and page views. Consent share is measured on the raw part only (daily
+   * summaries carry no consent split) and always over visitor ids, the unit
+   * consent is recorded against, whichever audience is counted as people.
    */
-  async findDailyUniques(params: { fromDate: string; toDate: string }): Promise<AnalyticsDailyUniqueSourceEntity[]> {
-    const seed = { fromDate: params.fromDate, toDate: params.toDate };
-
-    const raw = this._adminQuery(seed);
-    raw.query = `
-      MATCH (${SESSION}:${analyticsSessionMeta.labelName})
-      WHERE date(${SESSION}.startedAt) >= date($fromDate) AND date(${SESSION}.startedAt) <= date($toDate)
-      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
-      WITH date(${SESSION}.startedAt) AS day, ${SESSION}, ${USER}
-      RETURN day                                     AS day,
-             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
-             count(DISTINCT ${USER})                 AS users
-    `;
-
-    const stored = this._adminQuery(seed);
-    stored.query = `
-      MATCH (${DAILY_UNIQUE}:${analyticsDailyUniqueMeta.labelName})
-      WHERE ${DAILY_UNIQUE}.date >= date($fromDate) AND ${DAILY_UNIQUE}.date <= date($toDate)
-      RETURN ${DAILY_UNIQUE}.date                    AS day,
-             ${DAILY_UNIQUE}.visitors                AS visitors,
-             ${DAILY_UNIQUE}.users                   AS users
-    `;
-
-    const oldSummary = this._adminQuery(seed);
-    oldSummary.query = `
-      MATCH (${SUMMARY}:${analyticsDailySummaryMeta.labelName} {dimension: 'total'})
-      WHERE ${SUMMARY}.date >= date($fromDate) AND ${SUMMARY}.date <= date($toDate)
-      RETURN DISTINCT ${SUMMARY}.date AS day
-    `;
-
-    const [rawResult, storedResult, oldSummaryResult] = await Promise.all([
-      this.neo4j.read(raw.query, raw.queryParams),
-      this.neo4j.read(stored.query, stored.queryParams),
-      this.neo4j.read(oldSummary.query, oldSummary.queryParams),
-    ]);
-
-    // Native Neo4j Date -> YYYY-MM-DD through the framework's read-path
-    // conversion; the field type is read off the descriptor so they never drift.
-    const dayType = AnalyticsDailyUniqueTimelineDescriptor.fields.day?.type ?? "date";
-    const merged = new Map<string, AnalyticsDailyUniqueSourceEntity>();
-    const entry = (record: any): AnalyticsDailyUniqueSourceEntity => {
-      const day = convertFieldValue(record.get("day"), dayType) as string;
-      const existing = merged.get(day);
-      if (existing) return existing;
-      const created: AnalyticsDailyUniqueSourceEntity = { day, stored: null, raw: null, hasOldSummary: false };
-      merged.set(day, created);
-      return created;
-    };
-    const counts = (record: any) => ({
-      visitors: toNumber(record.get("visitors")),
-      users: toNumber(record.get("users")),
-    });
-
-    for (const r of storedResult.records as any[]) entry(r).stored = counts(r);
-    for (const r of rawResult.records as any[]) entry(r).raw = counts(r);
-    for (const r of oldSummaryResult.records as any[]) entry(r).hasOldSummary = true;
-
-    return [...merged.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
-  }
-
-  /**
-   * Raw + summarised totals split by section for one window, plus the window's
-   * total visitor count.
-   *
-   * `totalVisitors` cannot be the sum of the two sections: one visitor with
-   * sessions in both public and app would count twice. Its raw part is a third
-   * read with no section grouping (`count(DISTINCT visitorId)` across both); its
-   * summarised part is the stored per-day `total` rows summed, as for the
-   * sections, because summaries keep no visitor ids to de-duplicate.
-   */
-  private async _sectionTotals(params: {
-    from: string;
-    to: string;
-    section: string | null;
-    retentionCutoff: string;
-  }): Promise<{ sections: SectionTotals[]; totalVisitors: number }> {
+  private async _summaryRow(
+    params: { from: string; to: string; audience: Audience; retentionCutoff: string },
+    window: "current" | "previous",
+  ): Promise<AnalyticsSummaryEntity> {
     const raw = this._adminQuery(params);
     raw.query = `
       MATCH (${SESSION}:${analyticsSessionMeta.labelName})
       WHERE ${this._rawSessionWindow()}
-      ${params.section === null ? "" : `AND ${SESSION}.section = $section`}
-      RETURN ${SESSION}.section                      AS section,
-             count(DISTINCT ${SESSION}.visitorId)    AS visitors,
+      AND ${audienceOf(SESSION)} = $audience
+      OPTIONAL MATCH (${SESSION})-[:BY_USER]->(${USER}:${userMeta.labelName})
+      WITH ${SESSION}, ${USER}
+      RETURN ${PEOPLE[params.audience]} AS visitors,
+             count(DISTINCT ${SESSION}.visitorId)    AS visitorIds,
              count(DISTINCT CASE WHEN ${SESSION}.consented THEN ${SESSION}.visitorId END) AS consentedVisitors,
-             count(${SESSION})                       AS sessions,
+             count(DISTINCT ${SESSION})              AS sessions,
              sum(toInteger(${SESSION}.pageViews))    AS pageViews
     `;
 
@@ -450,107 +403,38 @@ export class AnalyticsAdminRepository extends AbstractRepository<
     summarised.query = `
       MATCH (${SUMMARY}:${analyticsDailySummaryMeta.labelName} {dimension: 'total'})
       WHERE ${this._summaryWindow()}
-      ${params.section === null ? "" : `AND ${SUMMARY}.section = $section`}
-      RETURN ${SUMMARY}.section                      AS section,
-             sum(toInteger(${SUMMARY}.visitors))     AS visitors,
+      AND ${SUMMARY}.audience = $audience
+      RETURN sum(toInteger(${SUMMARY}.visitors))     AS visitors,
              sum(toInteger(${SUMMARY}.sessions))     AS sessions,
              sum(toInteger(${SUMMARY}.pageViews))    AS pageViews
     `;
 
-    const distinct = this._adminQuery(params);
-    distinct.query = `
-      MATCH (${SESSION}:${analyticsSessionMeta.labelName})
-      WHERE ${this._rawSessionWindow()}
-      ${params.section === null ? "" : `AND ${SESSION}.section = $section`}
-      RETURN count(DISTINCT ${SESSION}.visitorId)    AS distinctVisitors
-    `;
-
-    const [rawResult, summaryResult, distinctResult] = await Promise.all([
+    const [rawResult, summaryResult] = await Promise.all([
       this.neo4j.read(raw.query, raw.queryParams),
       this.neo4j.read(summarised.query, summarised.queryParams),
-      this.neo4j.read(distinct.query, distinct.queryParams),
     ]);
 
-    let totalVisitors = (distinctResult.records as any[]).reduce(
-      (sum, r) => sum + toNumber(r.get("distinctVisitors")),
-      0,
-    );
-
-    const bySection = new Map<string, SectionTotals>();
-    const entry = (section: string): SectionTotals => {
-      const existing = bySection.get(section);
-      if (existing) return existing;
-      const created = { section, visitors: 0, sessions: 0, pageViews: 0, rawVisitors: 0, consentedVisitors: 0 };
-      bySection.set(section, created);
-      return created;
-    };
+    let metrics: AnalyticsMetrics = { visitors: 0, sessions: 0, pageViews: 0 };
+    let visitorIds = 0;
+    let consentedVisitors = 0;
 
     for (const r of rawResult.records as any[]) {
-      const row = entry(r.get("section") as string);
-      const metrics = this._metrics(r);
-      row.visitors += metrics.visitors;
-      row.sessions += metrics.sessions;
-      row.pageViews += metrics.pageViews;
-      row.rawVisitors += metrics.visitors;
-      row.consentedVisitors += toNumber(r.get("consentedVisitors"));
+      metrics = this._add(metrics, this._metrics(r));
+      visitorIds += toNumber(r.get("visitorIds"));
+      consentedVisitors += toNumber(r.get("consentedVisitors"));
     }
+    for (const r of summaryResult.records as any[]) metrics = this._add(metrics, this._metrics(r));
 
-    for (const r of summaryResult.records as any[]) {
-      const row = entry(r.get("section") as string);
-      const metrics = this._metrics(r);
-      row.visitors += metrics.visitors;
-      row.sessions += metrics.sessions;
-      row.pageViews += metrics.pageViews;
-      totalVisitors += metrics.visitors;
-    }
-
-    return { sections: [...bySection.values()], totalVisitors };
-  }
-
-  /**
-   * Guarantees both sections are present (zero-filled when a window has no
-   * rows) and appends the "total" section, so the tiles never have to branch on
-   * a missing row. Total sessions and page views are the sections' sum; total
-   * visitors is the de-duplicated count from _sectionTotals. Consent share is
-   * measured on the raw part only: daily summaries carry no consent split.
-   */
-  private _withTotal(
-    totals: { sections: SectionTotals[]; totalVisitors: number },
-    window: string,
-  ): AnalyticsSummaryEntity[] {
-    const rows = totals.sections;
-    const find = (section: string): SectionTotals =>
-      rows.find((r) => r.section === section) ?? {
-        section,
-        visitors: 0,
-        sessions: 0,
-        pageViews: 0,
-        rawVisitors: 0,
-        consentedVisitors: 0,
-      };
-
-    const publicRow = find("public");
-    const appRow = find("app");
-
-    const total: SectionTotals = {
+    return {
+      id: `total|${window}`,
       section: "total",
-      visitors: totals.totalVisitors,
-      sessions: publicRow.sessions + appRow.sessions,
-      pageViews: publicRow.pageViews + appRow.pageViews,
-      rawVisitors: publicRow.rawVisitors + appRow.rawVisitors,
-      consentedVisitors: publicRow.consentedVisitors + appRow.consentedVisitors,
-    };
-
-    return [publicRow, appRow, total].map((r) => ({
-      id: `${r.section}|${window}`,
-      section: r.section,
       window,
-      visitors: r.visitors,
-      sessions: r.sessions,
-      pageViews: r.pageViews,
-      pagesPerSession: r.sessions === 0 ? 0 : round(r.pageViews / r.sessions, 2),
-      consentShare: r.rawVisitors === 0 ? 0 : round(r.consentedVisitors / r.rawVisitors, 4),
-    })) as AnalyticsSummaryEntity[];
+      visitors: metrics.visitors,
+      sessions: metrics.sessions,
+      pageViews: metrics.pageViews,
+      pagesPerSession: metrics.sessions === 0 ? 0 : round(metrics.pageViews / metrics.sessions, 2),
+      consentShare: visitorIds === 0 ? 0 : round(consentedVisitors / visitorIds, 4),
+    } as AnalyticsSummaryEntity;
   }
 
   /** Raw sessions inside the request range and on or after the retention cutoff. */
@@ -583,18 +467,15 @@ export class AnalyticsAdminRepository extends AbstractRepository<
    *
    * Analytics nodes have no company at all, so this seed binds no `companyId`
    * parameter of any kind. Every parameter is bound only when the caller
-   * supplies it; `section`, `granularity` and `dimension` only with values
-   * echoed from this file's lookup tables. The instant-range reports pass
-   * `from` / `to` / `retentionCutoff`; the daily uniques pass the calendar days
-   * `fromDate` / `toDate`.
+   * supplies it; `audience`, `granularity` and `dimension` only with values
+   * echoed from the lookup tables (AUDIENCES and this file's). Every report
+   * passes `from` / `to` / `retentionCutoff`.
    */
   private _adminQuery(params: {
     from?: string;
     to?: string;
     retentionCutoff?: string;
-    fromDate?: string;
-    toDate?: string;
-    section?: string | null;
+    audience?: Audience;
     granularity?: string | null;
     dimension?: string;
   }): {
@@ -607,9 +488,7 @@ export class AnalyticsAdminRepository extends AbstractRepository<
         ...(params.from === undefined ? {} : { from: params.from }),
         ...(params.to === undefined ? {} : { to: params.to }),
         ...(params.retentionCutoff === undefined ? {} : { retentionCutoff: params.retentionCutoff }),
-        ...(params.fromDate === undefined ? {} : { fromDate: params.fromDate }),
-        ...(params.toDate === undefined ? {} : { toDate: params.toDate }),
-        ...(params.section === undefined || params.section === null ? {} : { section: params.section }),
+        ...(params.audience === undefined ? {} : { audience: params.audience }),
         ...(params.granularity === undefined ? {} : { granularity: params.granularity }),
         ...(params.dimension === undefined ? {} : { dimension: params.dimension }),
       },
@@ -637,13 +516,13 @@ export class AnalyticsAdminRepository extends AbstractRepository<
   }
 
   /**
-   * Resolves the requested section to the value it binds (`null` for `all`).
-   * Returns the TABLE'S OWN string, never the caller's.
+   * Resolves the requested audience against AUDIENCES. Returns the TUPLE'S OWN
+   * string, never the caller's, so PEOPLE is only ever indexed by a known key.
    */
-  private _section(section: Section): string | null {
-    if (!Object.prototype.hasOwnProperty.call(SECTION_FILTERS, section))
-      throw new BadRequestException(`section must be one of ${Object.keys(SECTION_FILTERS).join(", ")}`);
-    return SECTION_FILTERS[section];
+  private _audience(requested: Audience): Audience {
+    const audience = AUDIENCES.find((a) => a === requested);
+    if (!audience) throw new BadRequestException(`audience must be one of ${AUDIENCES.join(", ")}`);
+    return audience;
   }
 
   /**
@@ -652,7 +531,7 @@ export class AnalyticsAdminRepository extends AbstractRepository<
    */
   private _dimension(requested: Dimension): {
     dimension: Dimension;
-    spec: { reads: "session" | "pageView"; key: string };
+    spec: { reads: DimensionReads; key: string };
   } {
     const dimension = DIMENSIONS.find((d) => d === requested);
     if (!dimension) throw new BadRequestException(`dimension must be one of ${DIMENSIONS.join(", ")}`);

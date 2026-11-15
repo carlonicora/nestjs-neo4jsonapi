@@ -1,5 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Sibling-task modules (metas, admin service) are mocked so this spec exercises
 // the controller alone.
@@ -17,14 +17,6 @@ vi.mock("../../entities/analytics-session.meta", () => ({
 }));
 vi.mock("../../entities/analytics-page-view.meta", () => ({
   analyticsPageViewMeta: { endpoint: "pageviews" },
-}));
-vi.mock("../../entities/analytics-daily-unique-timeline.meta", () => ({
-  analyticsDailyUniqueTimelineMeta: {
-    type: "analytics-daily-unique-timelines",
-    endpoint: "analytics/administration/daily-uniques",
-    nodeName: "analyticsDailyUniqueTimeline",
-    labelName: "AnalyticsDailyUniqueTimeline",
-  },
 }));
 vi.mock("../../services/analytics.admin.service", () => ({
   AnalyticsAdminService: class AnalyticsAdminService {},
@@ -44,7 +36,6 @@ function makeController() {
     getBreakdown: vi.fn(async () => ({ data: [] })),
     getSessions: vi.fn(async () => ({ data: [] })),
     getSessionPageViews: vi.fn(async () => ({ data: [] })),
-    getDailyUniques: vi.fn(async () => ({ data: [] })),
     findById: vi.fn(async ({ id }: { id: string }) => ({ data: { id } })),
   } as any;
   const auditService = { logRead: vi.fn() } as any;
@@ -52,24 +43,26 @@ function makeController() {
 }
 
 describe("AnalyticsAdminController", () => {
-  it("defaults the breakdown limit to 20 and the section to all", async () => {
+  it("defaults the breakdown limit to 20 and the audience to visitors", async () => {
     const { controller, service } = makeController();
     const r = reply();
 
     await controller.getBreakdown(r, FROM, TO, undefined, "source");
 
     expect(service.getBreakdown).toHaveBeenCalledWith(
-      expect.objectContaining({ dimension: "source", section: "all", limit: 20 }),
+      expect.objectContaining({ dimension: "source", audience: "visitors", limit: 20 }),
     );
     expect(r.send).toHaveBeenCalled();
   });
 
-  it("defaults the timeline granularity to day and the section to all", async () => {
+  it("defaults the timeline granularity to day and the audience to visitors", async () => {
     const { controller, service } = makeController();
 
     await controller.getTimeline(reply(), FROM, TO);
 
-    expect(service.getTimeline).toHaveBeenCalledWith(expect.objectContaining({ granularity: "day", section: "all" }));
+    expect(service.getTimeline).toHaveBeenCalledWith(
+      expect.objectContaining({ granularity: "day", audience: "visitors" }),
+    );
   });
 
   it("rejects an unknown granularity rather than interpolating it into Cypher", async () => {
@@ -81,16 +74,16 @@ describe("AnalyticsAdminController", () => {
     expect(service.getTimeline).not.toHaveBeenCalled();
   });
 
-  it("defaults section to all, granularity to day, limit to 20", async () => {
+  it("defaults audience to visitors, granularity to day, limit to 20", async () => {
     const { controller, service } = makeController();
 
     await controller.getSummary(reply(), FROM, TO);
     await controller.getTimeline(reply(), FROM, TO);
     await controller.getBreakdown(reply(), FROM, TO);
 
-    expect(service.getSummary).toHaveBeenCalledWith({ from: FROM, to: TO, section: "all" });
-    expect(service.getTimeline).toHaveBeenCalledWith({ from: FROM, to: TO, section: "all", granularity: "day" });
-    expect(service.getBreakdown).toHaveBeenCalledWith(expect.objectContaining({ section: "all", limit: 20 }));
+    expect(service.getSummary).toHaveBeenCalledWith({ from: FROM, to: TO, audience: "visitors" });
+    expect(service.getTimeline).toHaveBeenCalledWith({ from: FROM, to: TO, audience: "visitors", granularity: "day" });
+    expect(service.getBreakdown).toHaveBeenCalledWith(expect.objectContaining({ audience: "visitors", limit: 20 }));
   });
 
   it("defaults the range to the last 30 days", async () => {
@@ -98,7 +91,7 @@ describe("AnalyticsAdminController", () => {
 
     await controller.getSummary(reply(), undefined, TO);
 
-    expect(service.getSummary).toHaveBeenCalledWith({ from: "2026-07-08T00:00:00.000Z", to: TO, section: "all" });
+    expect(service.getSummary).toHaveBeenCalledWith({ from: "2026-07-08T00:00:00.000Z", to: TO, audience: "visitors" });
   });
 
   it("rejects limit 0 and 101", async () => {
@@ -121,22 +114,86 @@ describe("AnalyticsAdminController", () => {
     expect(service.getBreakdown).toHaveBeenCalledWith(expect.objectContaining({ dimension: "route", limit: 100 }));
   });
 
-  it("rejects dimension outside the six", async () => {
+  it("rejects dimension outside the seven", async () => {
     const { controller, service } = makeController();
 
-    for (const dimension of ["source", "medium", "campaign", "referrer", "route", "landing"])
+    for (const dimension of ["source", "medium", "campaign", "referrer", "route", "landing", "exit"])
       await controller.getBreakdown(reply(), FROM, TO, undefined, dimension);
-    expect(service.getBreakdown).toHaveBeenCalledTimes(6);
+    expect(service.getBreakdown).toHaveBeenCalledTimes(7);
 
     await expect(controller.getBreakdown(reply(), FROM, TO, undefined, "company")).rejects.toThrow(BadRequestException);
-    expect(service.getBreakdown).toHaveBeenCalledTimes(6);
+    expect(service.getBreakdown).toHaveBeenCalledTimes(7);
   });
 
-  it("rejects an unknown section", async () => {
+  it("breakdown accepts exit", async () => {
     const { controller, service } = makeController();
 
-    await expect(controller.getSummary(reply(), FROM, TO, "admin")).rejects.toThrow(BadRequestException);
+    await controller.getBreakdown(reply(), FROM, TO, "visitors", "exit", "10");
+
+    expect(service.getBreakdown).toHaveBeenCalledWith({
+      from: FROM,
+      to: TO,
+      audience: "visitors",
+      dimension: "exit",
+      limit: 10,
+    });
+  });
+
+  it("defaults audience to visitors on each of the four list routes", async () => {
+    const { controller, service } = makeController();
+
+    await controller.getSummary(reply(), FROM, TO);
+    await controller.getTimeline(reply(), FROM, TO);
+    await controller.getBreakdown(reply(), FROM, TO);
+    await controller.getSessions(reply(), {}, FROM, TO);
+
+    for (const fn of [service.getSummary, service.getTimeline, service.getBreakdown, service.getSessions])
+      expect(fn.mock.calls[0][0].audience).toBe("visitors");
+  });
+
+  it("passes audience=users through on each of the four list routes", async () => {
+    const { controller, service } = makeController();
+
+    await controller.getSummary(reply(), FROM, TO, "users");
+    await controller.getTimeline(reply(), FROM, TO, "users");
+    await controller.getBreakdown(reply(), FROM, TO, "users");
+    await controller.getSessions(reply(), {}, FROM, TO, "users");
+
+    for (const fn of [service.getSummary, service.getTimeline, service.getBreakdown, service.getSessions])
+      expect(fn.mock.calls[0][0].audience).toBe("users");
+  });
+
+  it("rejects an unknown audience with 400", async () => {
+    const { controller, service } = makeController();
+
+    for (const call of [
+      () => controller.getSummary(reply(), FROM, TO, "all"),
+      () => controller.getTimeline(reply(), FROM, TO, "all"),
+      () => controller.getBreakdown(reply(), FROM, TO, "all"),
+      () => controller.getSessions(reply(), {}, FROM, TO, "all"),
+    ]) {
+      const error = await call().catch((e) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getStatus()).toBe(400);
+    }
     expect(service.getSummary).not.toHaveBeenCalled();
+    expect(service.getTimeline).not.toHaveBeenCalled();
+    expect(service.getBreakdown).not.toHaveBeenCalled();
+    expect(service.getSessions).not.toHaveBeenCalled();
+  });
+
+  it("ignores a section param", async () => {
+    const { controller, service } = makeController();
+    // A section param from an old client reaches only the raw query object
+    // used for pagination; no route reads it.
+    const query = { section: "app" };
+
+    await controller.getSessions(reply(), query, FROM, TO, undefined);
+
+    const params = service.getSessions.mock.calls[0][0];
+    expect(params.audience).toBe("visitors");
+    expect(params).not.toHaveProperty("section");
+    expect(controller.getSummary.length).toBe(4);
   });
 
   it("rejects a range longer than 400 days with 400", async () => {
@@ -159,18 +216,18 @@ describe("AnalyticsAdminController", () => {
     expect(service.getSummary).toHaveBeenCalled();
   });
 
-  it("sessions passes query, section, visitorId, userId through", async () => {
+  it("sessions passes query, audience, visitorId, userId through", async () => {
     const { controller, service } = makeController();
     const query = { "page[size]": "25" };
     const r = reply();
 
-    await controller.getSessions(r, query, FROM, TO, "public", "d:abc", "u1");
+    await controller.getSessions(r, query, FROM, TO, "users", "d:abc", "u1");
 
     expect(service.getSessions).toHaveBeenCalledWith({
       query,
       from: FROM,
       to: TO,
-      section: "public",
+      audience: "users",
       visitorId: "d:abc",
       userId: "u1",
     });
@@ -195,84 +252,5 @@ describe("AnalyticsAdminController", () => {
 
     expect(service.getSessionPageViews).toHaveBeenCalledWith({ sessionId: "session-1" });
     expect(r.send).toHaveBeenCalledWith({ data: [] });
-  });
-
-  describe("getDailyUniques", () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("passes fromDate and toDate through and sends the service's list", async () => {
-      const { controller, service } = makeController();
-      const r = reply();
-
-      await controller.getDailyUniques(r, "2026-10-05", "2026-11-04");
-
-      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
-      expect(r.send).toHaveBeenCalledWith({ data: [] });
-    });
-
-    it("accepts a single-day range", async () => {
-      const { controller, service } = makeController();
-
-      await controller.getDailyUniques(reply(), "2026-11-04", "2026-11-04");
-
-      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-11-04", toDate: "2026-11-04" });
-    });
-
-    it.each([
-      ["an impossible month", "2026-13-01", "2026-11-04"],
-      ["an impossible day", "2026-02-30", "2026-11-04"],
-      ["a word", "yesterday", "2026-11-04"],
-      ["an ISO instant", "2026-11-04T10:00:00Z", "2026-11-04"],
-      ["an impossible toDate", "2026-10-01", "2026-13-01"],
-    ])("rejects %s with 400", async (_label, fromDate, toDate) => {
-      const { controller, service } = makeController();
-
-      await expect(controller.getDailyUniques(reply(), fromDate, toDate)).rejects.toBeInstanceOf(BadRequestException);
-      expect(service.getDailyUniques).not.toHaveBeenCalled();
-    });
-
-    it("rejects fromDate later than toDate", async () => {
-      const { controller, service } = makeController();
-
-      await expect(controller.getDailyUniques(reply(), "2026-11-05", "2026-11-04")).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-      expect(service.getDailyUniques).not.toHaveBeenCalled();
-    });
-
-    it("accepts a 400-day window and rejects a 401-day one", async () => {
-      const { controller, service } = makeController();
-
-      await controller.getDailyUniques(reply(), "2025-09-30", "2026-11-04");
-      expect(service.getDailyUniques).toHaveBeenCalledTimes(1);
-
-      await expect(controller.getDailyUniques(reply(), "2025-09-29", "2026-11-04")).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-      expect(service.getDailyUniques).toHaveBeenCalledTimes(1);
-    });
-
-    it("defaults to the last 30 days ending today UTC when both dates are absent", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-11-04T23:30:00Z"));
-      const { controller, service } = makeController();
-
-      await controller.getDailyUniques(reply());
-
-      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
-    });
-
-    it("takes no section or granularity", async () => {
-      const { controller, service } = makeController();
-
-      expect(controller.getDailyUniques.length).toBe(3);
-      await controller.getDailyUniques(reply(), "2026-10-05", "2026-11-04");
-
-      expect(service.getDailyUniques).toHaveBeenCalledWith({ fromDate: "2026-10-05", toDate: "2026-11-04" });
-      expect(service.getDailyUniques.mock.calls[0][0]).not.toHaveProperty("section");
-      expect(service.getDailyUniques.mock.calls[0][0]).not.toHaveProperty("granularity");
-    });
   });
 });

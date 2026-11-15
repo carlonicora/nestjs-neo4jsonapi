@@ -10,6 +10,8 @@ import { userMeta } from "../../user/entities/user.meta";
 import { AnalyticsSession, AnalyticsSessionDescriptor } from "../entities/analytics-session";
 import { analyticsPageViewMeta } from "../entities/analytics-page-view.meta";
 import { AnalyticsResolvedPageView } from "../interfaces/analytics.resolved-page-view";
+import { Audience } from "../common/analytics.admin.filters";
+import { audienceOf } from "./analytics-audience.cypher";
 
 /** Nodes deleted per transaction by the retention job. */
 const DELETE_BATCH_SIZE = 1000;
@@ -180,6 +182,8 @@ export class AnalyticsSessionRepository extends AbstractRepository<
 
   /**
    * Administration list, newest first, with the `user` relationship included.
+   * `audience` keeps only the sessions audienceOf() places in that audience;
+   * null keeps both (the per-visitor and per-user lookups).
    * Never binds its own companyId: the only one present is what initQuery()
    * seeds from CLS for the calling administrator.
    */
@@ -187,7 +191,7 @@ export class AnalyticsSessionRepository extends AbstractRepository<
     cursor: JsonApiCursorInterface;
     from: string;
     to: string;
-    section: "all" | "public" | "app";
+    audience: Audience | null;
     visitorId?: string;
     userId?: string;
   }): Promise<AnalyticsSession[]> {
@@ -198,7 +202,7 @@ export class AnalyticsSessionRepository extends AbstractRepository<
       ...query.queryParams,
       from: params.from,
       to: params.to,
-      section: params.section,
+      audience: params.audience,
       visitorId: params.visitorId ?? null,
       userId: params.userId ?? null,
       ...this.getPolyLabelParams(),
@@ -208,7 +212,7 @@ export class AnalyticsSessionRepository extends AbstractRepository<
       ${this.buildDefaultMatch()}
       WHERE ${nodeName}.startedAt >= datetime($from)
         AND ${nodeName}.startedAt <= datetime($to)
-        AND ($section = 'all' OR ${nodeName}.section = $section)
+        AND ($audience IS NULL OR ${audienceOf(nodeName)} = $audience)
         AND ($visitorId IS NULL OR ${nodeName}.visitorId = $visitorId)
         AND ($userId IS NULL OR EXISTS { (${nodeName})-[:BY_USER]->(:${userMeta.labelName} {id: $userId}) })
       WITH ${nodeName}
@@ -298,12 +302,22 @@ export class AnalyticsSessionRepository extends AbstractRepository<
     };
   }
 
-  /** Removes every BY_USER edge whose user has been soft-deleted. Returns the edges removed. */
+  /**
+   * Removes every BY_USER edge whose user has been soft-deleted. A session of a
+   * returning user (account created before the session started) is first
+   * flagged `byDeletedUser`, so audienceOf() still counts it under users; a
+   * signup session is not flagged and stays under visitors. Returns the edges
+   * removed.
+   */
   async unlinkDeletedUsers(): Promise<number> {
+    const { nodeName, labelName } = this.descriptor.model;
     const [result] = await this.neo4j.executeInTransaction([
       {
         query: `
-          MATCH (:${this.descriptor.model.labelName})-[r:BY_USER]->(${userMeta.nodeName}:${userMeta.labelName} {isDeleted: true})
+          MATCH (${nodeName}:${labelName})-[r:BY_USER]->(${userMeta.nodeName}:${userMeta.labelName} {isDeleted: true})
+          FOREACH (_ IN CASE WHEN ${userMeta.nodeName}.createdAt < ${nodeName}.startedAt THEN [1] ELSE [] END |
+            SET ${nodeName}.byDeletedUser = true
+          )
           DELETE r
           RETURN count(*) AS unlinked
         `,

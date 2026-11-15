@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
 import { AnalyticsDailySummaryRepository } from "../repositories/analytics-daily-summary.repository";
-import { AnalyticsDailyUniqueRepository } from "../repositories/analytics-daily-unique.repository";
 import { AnalyticsSessionRepository } from "../repositories/analytics-session.repository";
 import { AnalyticsAdminService } from "../services/analytics.admin.service";
 
@@ -14,7 +13,6 @@ export class AnalyticsRetentionCron {
   constructor(
     private readonly analyticsSessionRepository: AnalyticsSessionRepository,
     private readonly analyticsDailySummaryRepository: AnalyticsDailySummaryRepository,
-    private readonly analyticsDailyUniqueRepository: AnalyticsDailyUniqueRepository,
     private readonly analyticsAdminService: AnalyticsAdminService,
     private readonly logger: AppLoggingService,
   ) {}
@@ -29,10 +27,9 @@ export class AnalyticsRetentionCron {
     for (const date of expiredDays) {
       try {
         const summaryRows = await this.analyticsDailySummaryRepository.rollupDay({ date });
-        await this.analyticsDailyUniqueRepository.rollupDay({ date });
         const deleted = await this.analyticsSessionRepository.deleteDay({ date });
         this.logger.log(
-          `Analytics day ${date}: ${summaryRows} summary rows written, daily uniques written, ${deleted.sessions} sessions and ${deleted.pageViews} page views deleted`,
+          `Analytics day ${date}: ${summaryRows} summary rows written, ${deleted.sessions} sessions and ${deleted.pageViews} page views deleted`,
           "AnalyticsRetentionCron",
         );
       } catch (error) {

@@ -8,12 +8,11 @@ import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.r
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 import { AuditService } from "../../audit/services/audit.service";
 import { analyticsBreakdownMeta } from "../entities/analytics-breakdown.meta";
-import { analyticsDailyUniqueTimelineMeta } from "../entities/analytics-daily-unique-timeline.meta";
 import { analyticsPageViewMeta } from "../entities/analytics-page-view.meta";
 import { analyticsSessionMeta } from "../entities/analytics-session.meta";
 import { analyticsSummaryMeta } from "../entities/analytics-summary.meta";
 import { analyticsTimelineMeta } from "../entities/analytics-timeline.meta";
-import { DIMENSIONS, GRANULARITIES, SECTIONS } from "../repositories/analytics.admin.repository";
+import { AUDIENCES, DIMENSIONS, GRANULARITIES } from "../common/analytics.admin.filters";
 import { AnalyticsAdminService } from "../services/analytics.admin.service";
 import { ModuleACL } from "../../../common/decorators/module.decorator";
 import { CoreModuleId } from "../../../common/constants/core-module.ids";
@@ -31,6 +30,9 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  *
  * Mounted at /analytics/administration/* — the only other analytics route is
  * the public POST /wayfinding beacon, so there is no Fastify overlap.
+ *
+ * `audience` (visitors | users, default visitors) selects the report's people;
+ * a `section` param from an old client is ignored.
  *
  * Enum-valued query params are validated against a closed allowlist here rather
  * than in a DTO: DTOs are body validation for POST/PUT/PATCH, and GET filters
@@ -55,13 +57,13 @@ export class AnalyticsAdminController {
     @Res() reply: FastifyReply,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("section") section?: string,
+    @Query("audience") audience?: string,
   ) {
     const range = this._range(from, to);
     reply.send(
       await this.service.getSummary({
         ...range,
-        section: this._oneOf(section, SECTIONS, "all"),
+        audience: this._oneOf(audience, AUDIENCES, "visitors"),
       }),
     );
   }
@@ -72,14 +74,14 @@ export class AnalyticsAdminController {
     @Res() reply: FastifyReply,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("section") section?: string,
+    @Query("audience") audience?: string,
     @Query("granularity") granularity?: string,
   ) {
     const range = this._range(from, to);
     reply.send(
       await this.service.getTimeline({
         ...range,
-        section: this._oneOf(section, SECTIONS, "all"),
+        audience: this._oneOf(audience, AUDIENCES, "visitors"),
         granularity: this._oneOf(granularity, GRANULARITIES, "day"),
       }),
     );
@@ -91,7 +93,7 @@ export class AnalyticsAdminController {
     @Res() reply: FastifyReply,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("section") section?: string,
+    @Query("audience") audience?: string,
     @Query("dimension") dimension?: string,
     @Query("limit") limit?: string,
   ) {
@@ -103,26 +105,11 @@ export class AnalyticsAdminController {
     reply.send(
       await this.service.getBreakdown({
         ...range,
-        section: this._oneOf(section, SECTIONS, "all"),
+        audience: this._oneOf(audience, AUDIENCES, "visitors"),
         dimension: this._oneOf(dimension, DIMENSIONS, "source"),
         limit: parsedLimit,
       }),
     );
-  }
-
-  /**
-   * Unique visitors and unique users per UTC day, always daily and across every
-   * section, so it takes no `section` or `granularity`. `fromDate` / `toDate`
-   * are calendar days (YYYY-MM-DD), not instants.
-   */
-  @Get(analyticsDailyUniqueTimelineMeta.endpoint)
-  @Roles(SystemRoles.Administrator)
-  async getDailyUniques(
-    @Res() reply: FastifyReply,
-    @Query("fromDate") fromDate?: string,
-    @Query("toDate") toDate?: string,
-  ) {
-    reply.send(await this.service.getDailyUniques(this._dateRange(fromDate, toDate)));
   }
 
   @Get(analyticsSessionMeta.endpoint)
@@ -132,7 +119,7 @@ export class AnalyticsAdminController {
     @Query() query: any,
     @Query("from") from?: string,
     @Query("to") to?: string,
-    @Query("section") section?: string,
+    @Query("audience") audience?: string,
     @Query("visitorId") visitorId?: string,
     @Query("userId") userId?: string,
   ) {
@@ -141,7 +128,7 @@ export class AnalyticsAdminController {
       await this.service.getSessions({
         query,
         ...range,
-        section: this._oneOf(section, SECTIONS, "all"),
+        audience: this._oneOf(audience, AUDIENCES, "visitors"),
         visitorId,
         userId,
       }),
@@ -188,38 +175,5 @@ export class AnalyticsAdminController {
       throw new BadRequestException(`The range must not exceed ${MAX_WINDOW_DAYS} days`);
 
     return { from: fromDate.toISOString(), to: toDate.toISOString() };
-  }
-
-  /**
-   * Validates a calendar-day range. Each date must be `YYYY-MM-DD` and a real
-   * day (round-tripped through Date.UTC, so 2026-02-30 is refused). When both
-   * are absent the range is the last DEFAULT_WINDOW_DAYS days ending today UTC.
-   */
-  private _dateRange(fromDate?: string, toDate?: string): { fromDate: string; toDate: string } {
-    const to = toDate ?? new Date().toISOString().slice(0, 10);
-    const toMs = this._calendarDay(to, "toDate");
-
-    const from = fromDate ?? new Date(toMs - DEFAULT_WINDOW_DAYS * ONE_DAY_MS).toISOString().slice(0, 10);
-    const fromMs = this._calendarDay(from, "fromDate");
-
-    if (fromMs > toMs) throw new BadRequestException("`fromDate` must not be later than `toDate`");
-
-    if (toMs - fromMs > MAX_WINDOW_DAYS * ONE_DAY_MS)
-      throw new BadRequestException(`The range must not exceed ${MAX_WINDOW_DAYS} days`);
-
-    return { fromDate: from, toDate: to };
-  }
-
-  /** UTC midnight of a `YYYY-MM-DD` calendar day, or a 400 when it is not one. */
-  private _calendarDay(value: string, name: string): number {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) throw new BadRequestException(`\`${name}\` must be a date in YYYY-MM-DD format`);
-
-    const [, year, month, day] = match;
-    const ms = Date.UTC(Number(year), Number(month) - 1, Number(day));
-    if (new Date(ms).toISOString().slice(0, 10) !== value)
-      throw new BadRequestException(`\`${name}\` is not a valid calendar date`);
-
-    return ms;
   }
 }
