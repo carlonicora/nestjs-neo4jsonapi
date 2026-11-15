@@ -1,7 +1,12 @@
 import { Controller, Get, Param, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { FastifyReply } from "fastify";
+import { RoleId } from "../../../common/constants/system.roles";
+import { Roles } from "../../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../../common/guards";
+import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { NoCache } from "../../../core/cache/interceptors/cache.interceptor";
+import { companyMeta } from "../../company/entities/company.meta";
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
 import { StripeInvoiceAdminService } from "../services/stripe-invoice-admin.service";
@@ -34,6 +39,24 @@ export class StripeInvoiceController {
       query,
       status,
     });
+
+    reply.send(response);
+  }
+
+  /**
+   * List every non-draft invoice of a company, for the platform administrator (WYR-98).
+   * The company comes from the URL: the administrator belongs to no company.
+   *
+   * @param reply - Fastify reply
+   * @param companyId - Company id
+   * @param query - JSON:API query parameters
+   */
+  @Get(`${companyMeta.endpoint}/:companyId/${stripeInvoiceMeta.endpoint}`)
+  @UseGuards(AdminJwtAuthGuard)
+  @Roles(RoleId.Administrator)
+  @NoCache()
+  async listForCompanyAdmin(@Res() reply: FastifyReply, @Param("companyId") companyId: string, @Query() query: any) {
+    const response = await this.stripeInvoiceAdminService.listForCompanyAdmin({ companyId, query });
 
     reply.send(response);
   }

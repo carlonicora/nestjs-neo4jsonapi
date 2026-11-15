@@ -602,8 +602,50 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
         defaultOrderBy: codeOrderBy("company.name ASC"),
       })}
       {CURSOR}
-      
-      RETURN company
+
+      WITH company
+      CALL {
+        WITH company
+        OPTIONAL MATCH (company)<-[:BELONGS_TO]-(:StripeCustomer)<-[:BELONGS_TO]-(sub:StripeSubscription)-[:USES_PRICE]->(price:StripePrice)
+        WHERE price.priceType = 'recurring'
+        WITH sub, price
+        ORDER BY CASE sub.status WHEN 'active' THEN 0 WHEN 'past_due' THEN 1 WHEN 'unpaid' THEN 2 WHEN 'trialing' THEN 3 ELSE 4 END ASC, sub.createdAt DESC
+        WITH head(collect(sub)) AS currentSub, head(collect(price)) AS currentPrice
+        OPTIONAL MATCH (currentPrice)-[:BELONGS_TO]->(currentProduct:StripeProduct)
+        RETURN currentSub, currentPrice, head(collect(currentProduct.name)) AS currentProductName
+      }
+      RETURN company,
+        CASE
+          WHEN currentPrice IS NULL THEN null
+          WHEN currentPrice.recurringInterval = 'month' AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN 'monthly'
+          WHEN currentPrice.recurringInterval = 'year' AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN 'yearly'
+          ELSE 'other'
+        END AS subscriptionPlan,
+        CASE
+          WHEN currentPrice IS NULL THEN null
+          WHEN currentPrice.recurringInterval IN ['month', 'year'] AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN null
+          ELSE coalesce(currentPrice.nickname, currentProductName)
+        END AS subscriptionPlanName,
+        CASE
+          WHEN currentSub IS NULL THEN null
+          WHEN currentSub.status = 'trialing' AND currentSub.cancelAtPeriodEnd = true THEN 'cancelled'
+          WHEN currentSub.status = 'trialing' THEN 'trial'
+          WHEN currentSub.status = 'active' AND currentSub.cancelAtPeriodEnd = true THEN 'cancelled'
+          WHEN currentSub.status = 'active' THEN 'active'
+          WHEN currentSub.status IN ['past_due', 'unpaid'] THEN 'past_due'
+          WHEN currentSub.status = 'incomplete' THEN 'incomplete'
+          WHEN currentSub.status = 'paused' THEN 'paused'
+          WHEN currentSub.status IN ['canceled', 'incomplete_expired'] THEN 'ended'
+          ELSE currentSub.status
+        END AS subscriptionStatus,
+        CASE
+          WHEN currentSub IS NULL THEN null
+          WHEN currentSub.status = 'trialing' THEN currentSub.trialEnd
+          WHEN currentSub.status = 'active' THEN currentSub.currentPeriodEnd
+          WHEN currentSub.status IN ['canceled', 'incomplete_expired'] THEN
+            CASE WHEN currentSub.canceledAt IS NULL OR currentSub.canceledAt < currentSub.currentPeriodEnd THEN currentSub.currentPeriodEnd ELSE currentSub.canceledAt END
+          ELSE null
+        END AS subscriptionNextAt
     `;
 
     return this.neo4j.readMany(query);

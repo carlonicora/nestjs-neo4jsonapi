@@ -11,6 +11,7 @@ import { StripePriceRepository } from "../../stripe-price/repositories/stripe-pr
 import { StripeCouponCodeCheckoutService } from "../../stripe-coupon/services/stripe-coupon-code-checkout.service";
 import { StripeError } from "../../stripe/errors/stripe.errors";
 import { StripePaymentService } from "../../stripe/services/stripe.payment.service";
+import { isProrationLine } from "../../stripe-invoice/utils/invoice-service-lines";
 import {
   StripeSubscription,
   StripeSubscriptionDescriptor,
@@ -47,18 +48,6 @@ export interface CreateSubscriptionResult {
  *
  * All operations update both Stripe and the local Neo4j database to maintain consistency.
  */
-/**
- * Whether an invoice line is a proration. Current Stripe API versions carry the flag
- * under `parent.*_item_details`; older ones put it on the line itself.
- */
-function isProrationLine(line: Stripe.InvoiceLineItem): boolean {
-  return (
-    line.parent?.subscription_item_details?.proration ??
-    line.parent?.invoice_item_details?.proration ??
-    (line as any).proration === true
-  );
-}
-
 @Injectable()
 export class StripeSubscriptionAdminService extends AbstractService<
   StripeSubscription,
@@ -116,6 +105,31 @@ export class StripeSubscriptionAdminService extends AbstractService<
     const subscriptions = await this.subscriptionRepository.findByStripeCustomerId({
       stripeCustomerId: customer.id,
       status: params.status,
+    });
+
+    return this.jsonApiService.buildList(StripeSubscriptionDescriptor.model, subscriptions, paginator);
+  }
+
+  /**
+   * The subscriptions of one company for the platform administrator, unpaginated.
+   * A company with no Stripe customer gets an empty list, never a 404.
+   *
+   * @param params.companyId - the company to read (from the URL)
+   * @param params.oneTime - false: recurring subscriptions, current first; true: old one-time
+   *   purchases with no invoice linked, newest first
+   * @param params.query - JSON:API query parameters
+   */
+  async listForCompanyAdmin(params: { companyId: string; oneTime: boolean; query: any }): Promise<JsonApiListDocument> {
+    const paginator = new JsonApiPaginator(params.query);
+
+    const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
+    if (!customer) {
+      return this.jsonApiService.buildList(StripeSubscriptionDescriptor.model, [], paginator);
+    }
+
+    const subscriptions = await this.subscriptionRepository.findForCompanyAdmin({
+      companyId: params.companyId,
+      oneTime: params.oneTime,
     });
 
     return this.jsonApiService.buildList(StripeSubscriptionDescriptor.model, subscriptions, paginator);

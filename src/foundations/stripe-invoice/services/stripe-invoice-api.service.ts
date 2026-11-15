@@ -101,7 +101,7 @@ export class StripeInvoiceApiService {
   }
 
   /**
-   * Get an invoice with expanded line items
+   * Get an invoice with expanded line items and payments
    *
    * @param invoiceId - The Stripe invoice ID
    * @returns Promise resolving to the invoice with expanded lines
@@ -117,7 +117,7 @@ export class StripeInvoiceApiService {
   async getInvoice(invoiceId: string): Promise<Stripe.Invoice> {
     const stripe = this.stripeService.getClient();
     return stripe.invoices.retrieve(invoiceId, {
-      expand: ["lines.data"],
+      expand: ["lines.data", "payments.data.payment"],
     });
   }
 

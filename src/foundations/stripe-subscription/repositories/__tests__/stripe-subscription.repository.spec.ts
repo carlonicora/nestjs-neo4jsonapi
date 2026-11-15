@@ -130,6 +130,75 @@ describe("StripeSubscriptionRepository", () => {
     });
   });
 
+  describe("findForCompanyAdmin", () => {
+    it("findForCompanyAdmin joins through the customer with $adminCompanyId", async () => {
+      await repository.findForCompanyAdmin({ companyId: "c1", oneTime: false });
+
+      const issued = lastCall(neo4j.readMany.mock.calls);
+      expect(issued.query.startsWith(initQueryPrefix)).toBe(true);
+      // buildDefaultMatch() first (it lets every row through with no CLS company), then the URL
+      // company joined through the customer, so customer-only subscriptions are included.
+      const q = flat(issued.query);
+      const defaultMatch = q.indexOf(
+        "MATCH (stripeSubscription:StripeSubscription) WHERE $companyId IS NULL OR EXISTS { MATCH (stripeSubscription)-[:BELONGS_TO]-(company) }",
+      );
+      const urlCompany = q.indexOf(
+        "MATCH (stripeSubscription)-[:BELONGS_TO]->(stripeSubscription_stripeCustomer:StripeCustomer)-[:BELONGS_TO]->(:Company {id: $adminCompanyId})",
+      );
+      expect(defaultMatch).toBeGreaterThan(-1);
+      expect(urlCompany).toBeGreaterThan(defaultMatch);
+      expect(issued.queryParams.adminCompanyId).toBe("c1");
+      // initQuery's own (CLS) companyId is left as it was: the method never sets it.
+      expect(issued.queryParams.companyId).toBeNull();
+      expect(neo4j.initQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true }),
+      );
+      expect(issued.query).toContain(
+        "OPTIONAL MATCH (stripeSubscription)-[:BELONGS_TO]->(stripeSubscription_company:Company)",
+      );
+      expect(issued.query).toMatch(
+        /RETURN stripeSubscription,[\s\S]*stripeSubscription_company,[\s\S]*stripeSubscription_stripeCustomer,[\s\S]*stripeSubscription_stripePrice,[\s\S]*stripeSubscription_stripePrice_stripeProduct,[\s\S]*stripeSubscription_createdBy/,
+      );
+      expect(issued.query).not.toMatch(/SKIP|LIMIT|\{CURSOR\}/);
+    });
+
+    it("recurring mode filters recurring prices and orders by the current-subscription rule", async () => {
+      await repository.findForCompanyAdmin({ companyId: "c1", oneTime: false });
+
+      const q = flat(lastCall(neo4j.readMany.mock.calls).query);
+      expect(q).toContain(
+        "MATCH (stripeSubscription)-[:USES_PRICE]->(stripeSubscription_stripePrice:StripePrice) WHERE stripeSubscription_stripePrice.priceType = 'recurring'",
+      );
+      expect(q).toContain(
+        "OPTIONAL MATCH (stripeSubscription_stripePrice)-[:BELONGS_TO]->(stripeSubscription_stripePrice_stripeProduct:StripeProduct)",
+      );
+      expect(q).toContain(
+        "ORDER BY CASE stripeSubscription.status WHEN 'active' THEN 0 WHEN 'past_due' THEN 1 WHEN 'unpaid' THEN 2 WHEN 'trialing' THEN 3 ELSE 4 END ASC, stripeSubscription.createdAt DESC",
+      );
+      expect(q).not.toContain("STARTS WITH 'pi_'");
+      expect(q).not.toContain("OPTIONAL MATCH (stripeSubscription)-[:USES_PRICE]");
+    });
+
+    it("oneTime mode returns active pi_ purchases with no invoice, priced or not", async () => {
+      await repository.findForCompanyAdmin({ companyId: "c1", oneTime: true });
+
+      const q = flat(lastCall(neo4j.readMany.mock.calls).query);
+      expect(q).toContain("stripeSubscription.stripeSubscriptionId STARTS WITH 'pi_'");
+      expect(q).toContain("stripeSubscription.status = 'active'");
+      expect(q).not.toContain("priceType");
+      expect(q).toContain(
+        "OPTIONAL MATCH (stripeSubscription)-[:USES_PRICE]->(stripeSubscription_stripePrice:StripePrice)",
+      );
+      expect(q).toContain(
+        "OPTIONAL MATCH (stripeSubscription_stripePrice)-[:BELONGS_TO]->(stripeSubscription_stripePrice_stripeProduct:StripeProduct)",
+      );
+      expect(q).toContain("NOT EXISTS { MATCH (:StripeInvoice)-[:FOR_SUBSCRIPTION]->(stripeSubscription) }");
+      expect(q).toContain("NOT EXISTS { MATCH (:StripeInvoice)-[:FOR_PURCHASE]->(stripeSubscription) }");
+      expect(q).toContain("ORDER BY stripeSubscription.currentPeriodStart DESC");
+      expect(q).not.toContain("WHEN 'active' THEN 0");
+    });
+  });
+
   describe("findByStripeSubscriptionId", () => {
     it("matches on the Stripe subscription id", async () => {
       await repository.findByStripeSubscriptionId({ stripeSubscriptionId: "sub_1" });

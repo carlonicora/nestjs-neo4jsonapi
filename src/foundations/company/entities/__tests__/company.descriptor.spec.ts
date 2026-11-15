@@ -1,3 +1,4 @@
+import neo4j from "neo4j-driver";
 import { describe, expect, it } from "vitest";
 import { CompanyDescriptor } from "../company";
 
@@ -45,5 +46,43 @@ describe("CompanyDescriptor wire surface", () => {
 
   it("declares trialEndsAt as a datetime", () => {
     expect(CompanyDescriptor.fields.trialEndsAt).toEqual({ type: "datetime" });
+  });
+
+  it("declares the four subscription virtual fields without a description", () => {
+    const virtualFields = CompanyDescriptor.virtualFields ?? {};
+    expect(Object.keys(virtualFields).sort()).toEqual([
+      "subscriptionNextAt",
+      "subscriptionPlan",
+      "subscriptionPlanName",
+      "subscriptionStatus",
+    ]);
+    for (const def of Object.values(virtualFields)) expect(def.description).toBeUndefined();
+  });
+
+  it("subscription virtual fields are undefined when the record lacks the columns", () => {
+    const virtualFields = CompanyDescriptor.virtualFields ?? {};
+    for (const def of Object.values(virtualFields)) {
+      expect(def.compute({ data: {}, record: { has: () => false } } as any)).toBeUndefined();
+    }
+  });
+
+  it("subscriptionNextAt converts a Neo4j datetime to ISO", () => {
+    const value = neo4j.types.DateTime.fromStandardDate(new Date("2027-08-14T00:00:00.000Z"));
+    const record = { has: (key: string) => key === "subscriptionNextAt", get: () => value };
+    expect(CompanyDescriptor.virtualFields.subscriptionNextAt.compute({ data: {}, record } as any)).toBe(
+      "2027-08-14T00:00:00.000Z",
+    );
+  });
+
+  it("subscription virtual fields read their record column", () => {
+    const columns: Record<string, any> = {
+      subscriptionPlan: "other",
+      subscriptionPlanName: "Pro",
+      subscriptionStatus: "active",
+    };
+    const record = { has: (key: string) => key in columns, get: (key: string) => columns[key] };
+    for (const [key, value] of Object.entries(columns)) {
+      expect(CompanyDescriptor.virtualFields[key].compute({ data: {}, record } as any)).toBe(value);
+    }
   });
 });

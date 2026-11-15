@@ -135,6 +135,10 @@ describe("CompanyController", () => {
   });
 
   describe("fetchAllCompanies", () => {
+    it("fetchAllCompanies is marked no-cache", () => {
+      expect(Reflect.getMetadata("no-cache", CompanyController.prototype.fetchAllCompanies)).toBe(true);
+    });
+
     const mockRequest = { user: mockAdminUser, params: {} } as AuthenticatedRequest;
     const mockQuery = { page: { number: 1, size: 10 } };
     const mockSearch = "test search";

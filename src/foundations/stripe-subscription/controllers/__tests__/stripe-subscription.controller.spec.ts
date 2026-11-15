@@ -15,6 +15,13 @@ vi.mock("../../../../common/guards", () => ({
   },
 }));
 
+// The admin route imports the guard from its own file, not the barrel
+vi.mock("../../../../common/guards/jwt.auth.admin.guard", () => ({
+  AdminJwtAuthGuard: class MockAdminJwtAuthGuard {
+    canActivate = vi.fn().mockReturnValue(true);
+  },
+}));
+
 // Mock the barrel export to provide only what we need
 vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
   const actual = vi.importActual("@carlonicora/nestjs-neo4jsonapi");
@@ -38,6 +45,7 @@ import { StripeSubscriptionController } from "../stripe-subscription.controller"
 import { StripeSubscriptionAdminService } from "../../services/stripe-subscription-admin.service";
 import { CacheService } from "../../../../core/cache/services/cache.service";
 import { RoleId } from "../../../../common/constants/system.roles";
+import { AdminJwtAuthGuard } from "../../../../common/guards/jwt.auth.admin.guard";
 import { AuthenticatedRequest } from "@carlonicora/nestjs-neo4jsonapi";
 import type { StripeSubscription, StripeSubscriptionStatus } from "../../entities/stripe-subscription";
 import type { StripeCustomer } from "../../../stripe-customer/entities/stripe-customer.entity";
@@ -118,6 +126,7 @@ describe("StripeSubscriptionController", () => {
   beforeEach(async () => {
     const mockStripeSubscriptionAdminService = {
       listSubscriptions: vi.fn(),
+      listForCompanyAdmin: vi.fn(),
       getSubscription: vi.fn(),
       createSubscription: vi.fn(),
       cancelSubscription: vi.fn(),
@@ -196,6 +205,37 @@ describe("StripeSubscriptionController", () => {
         companyId: TEST_IDS.companyId,
         query: customQuery,
         status: undefined,
+      });
+    });
+  });
+
+  describe("GET /companies/:companyId/stripe-subscriptions", () => {
+    it("listForCompanyAdmin is admin-only and no-cache", () => {
+      const handler = StripeSubscriptionController.prototype.listForCompanyAdmin;
+      expect(Reflect.getMetadata("__guards__", handler)).toContain(AdminJwtAuthGuard);
+      expect(Reflect.getMetadata("roles", handler)).toEqual([RoleId.Administrator]);
+      expect(Reflect.getMetadata("no-cache", handler)).toBe(true);
+      expect(Reflect.getMetadata("path", handler)).toBe("companies/:companyId/stripe-subscriptions");
+    });
+
+    it("forwards companyId and oneTime=true", async () => {
+      const response = { data: [], meta: {} } as unknown as JsonApiListDocument;
+      subscriptionService.listForCompanyAdmin.mockResolvedValue(response);
+      const query = { oneTime: "true" };
+
+      await controller.listForCompanyAdmin(mockReply, TEST_IDS.companyId, query, "true");
+      expect(subscriptionService.listForCompanyAdmin).toHaveBeenLastCalledWith({
+        companyId: TEST_IDS.companyId,
+        oneTime: true,
+        query,
+      });
+      expect(mockReply.send).toHaveBeenCalledWith(response);
+
+      await controller.listForCompanyAdmin(mockReply, TEST_IDS.companyId, {}, undefined);
+      expect(subscriptionService.listForCompanyAdmin).toHaveBeenLastCalledWith({
+        companyId: TEST_IDS.companyId,
+        oneTime: false,
+        query: {},
       });
     });
   });

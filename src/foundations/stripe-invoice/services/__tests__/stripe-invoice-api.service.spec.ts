@@ -266,7 +266,7 @@ describe("StripeInvoiceApiService", () => {
   });
 
   describe("getInvoice", () => {
-    it("should get invoice with expanded line items", async () => {
+    it("should get invoice with expanded line items and payments", async () => {
       const invoiceWithLines = {
         ...MOCK_INVOICE,
         lines: {
@@ -311,7 +311,7 @@ describe("StripeInvoiceApiService", () => {
       const result = await service.getInvoice(TEST_IDS.invoiceId);
 
       expect(mockStripe.invoices.retrieve).toHaveBeenCalledWith(TEST_IDS.invoiceId, {
-        expand: ["lines.data"],
+        expand: ["lines.data", "payments.data.payment"],
       });
       expect(result.lines.data.length).toBeGreaterThan(0);
     });

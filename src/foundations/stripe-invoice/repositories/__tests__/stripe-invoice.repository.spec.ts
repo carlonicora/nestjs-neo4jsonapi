@@ -6,8 +6,11 @@ vi.mock("../../../../foundations/chunker/chunker.module", () => ({
 vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({}));
 
 import { Test, TestingModule } from "@nestjs/testing";
+import { ClsService } from "nestjs-cls";
 import { Neo4jService } from "../../../../core/neo4j";
+import { SecurityService } from "../../../../core/security/services/security.service";
 import { StripeInvoiceRepository } from "../stripe-invoice.repository";
+import { StripeInvoiceDescriptor } from "../../entities/stripe-invoice";
 import { stripeInvoiceMeta } from "../../entities/stripe-invoice.meta";
 import { stripeCustomerMeta } from "../../../stripe-customer/entities/stripe-customer.meta";
 import { stripeSubscriptionMeta } from "../../../stripe-subscription/entities/stripe-subscription.meta";
@@ -71,6 +74,9 @@ describe("StripeInvoiceRepository", () => {
       writeOne: vi.fn(),
       readOne: vi.fn(),
       readMany: vi.fn(),
+      readCount: vi.fn(),
+      readScalars: vi.fn(),
+      validateRelatedNodes: vi.fn(),
       initQuery: vi.fn(),
     };
 
@@ -81,6 +87,8 @@ describe("StripeInvoiceRepository", () => {
           provide: Neo4jService,
           useValue: mockNeo4jService,
         },
+        { provide: SecurityService, useValue: {} },
+        { provide: ClsService, useValue: { get: vi.fn(() => undefined), has: vi.fn(() => false) } },
       ],
     }).compile();
 
@@ -133,7 +141,7 @@ describe("StripeInvoiceRepository", () => {
   });
 
   describe("findByStripeCustomerId", () => {
-    it("should find invoices by billing customer ID without status filter", async () => {
+    it("starts from buildDefaultMatch, joins the customer by id and returns only the invoice column", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
@@ -143,25 +151,22 @@ describe("StripeInvoiceRepository", () => {
       });
 
       expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
+        serialiser: StripeInvoiceDescriptor.model,
         cursor: undefined,
       });
       expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
+      expect(mockQuery.query).toContain(`MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})`);
+      expect(mockQuery.query).toContain(`WHERE $companyId IS NULL`);
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
+        `MATCH (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})`,
       );
-      expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
-      );
-      expect(mockQuery.query).toContain(`WHERE 1=1`);
-      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
-      expect(mockQuery.query).toContain(`RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`);
-      expect(mockQuery.query).toContain(`ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC`);
+      expect(mockQuery.query).toContain("{CURSOR}");
+      expect(mockQuery.query).toMatch(/RETURN stripeInvoice\s+ORDER BY stripeInvoice\.createdAt DESC\s*$/);
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual([MOCK_INVOICE]);
     });
 
-    it("should find invoices by billing customer ID with status filter", async () => {
+    it("accepts a status but applies no filter (kept quirk)", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
@@ -171,10 +176,20 @@ describe("StripeInvoiceRepository", () => {
         status: "paid",
       });
 
-      expect(mockQuery.queryParams.stripeCustomerId).toBe(TEST_IDS.stripeCustomerId);
-      expect(mockQuery.queryParams.status).toBe("paid");
-      expect(mockQuery.query).toContain(`WHERE 1=1 AND ${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(mockQuery.queryParams.status).toBeUndefined();
+      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status`);
       expect(result).toEqual([MOCK_INVOICE]);
+    });
+
+    it("passes the cursor to initQuery", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([]);
+      const cursor = { cursor: "25", take: 25 } as any;
+
+      await repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId, cursor });
+
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: StripeInvoiceDescriptor.model, cursor });
     });
 
     it("should return empty array when no invoices found", async () => {
@@ -190,26 +205,6 @@ describe("StripeInvoiceRepository", () => {
       expect(neo4jService.readMany).toHaveBeenCalledWith(mockQuery);
     });
 
-    it("should filter by specific status values", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
-
-      const statuses: StripeInvoiceStatus[] = ["draft", "open", "paid", "uncollectible", "void"];
-
-      for (const status of statuses) {
-        vi.clearAllMocks();
-        neo4jService.initQuery.mockReturnValue(createMockQuery());
-
-        await repository.findByStripeCustomerId({
-          stripeCustomerId: TEST_IDS.stripeCustomerId,
-          status,
-        });
-
-        expect(neo4jService.initQuery().queryParams.status).toBe(status);
-      }
-    });
-
     it("should handle database errors", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
@@ -220,58 +215,25 @@ describe("StripeInvoiceRepository", () => {
         "Database error",
       );
     });
-
-    it("should order results by createdAt DESC", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
-
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain(`ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC`);
-    });
-
-    it("should use OPTIONAL MATCH for subscription relationship", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
-
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
-
-      expect(mockQuery.query).toContain("OPTIONAL MATCH");
-      expect(mockQuery.query).toContain(
-        `(${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
-      );
-    });
   });
 
   describe("findById", () => {
-    it("should find invoice by ID with relationships", async () => {
+    it("matches the invoice by id through buildDefaultMatch, keeps the mandatory customer join, returns only the invoice", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readOne.mockResolvedValue(MOCK_INVOICE);
 
       const result = await repository.findById({ id: TEST_IDS.invoiceId });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams).toEqual({
-        id: TEST_IDS.invoiceId,
-      });
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: StripeInvoiceDescriptor.model });
+      expect(mockQuery.queryParams.searchValue).toBe(TEST_IDS.invoiceId);
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $searchValue})`,
       );
       expect(mockQuery.query).toContain(
-        `OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})`,
+        `MATCH (${stripeInvoiceMeta.nodeName})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName})`,
       );
-      expect(mockQuery.query).toContain(
-        `RETURN ${stripeInvoiceMeta.nodeName}, ${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}`,
-      );
+      expect(mockQuery.query).toMatch(/RETURN stripeInvoice\s*$/);
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
     });
@@ -295,32 +257,10 @@ describe("StripeInvoiceRepository", () => {
 
       await expect(repository.findById({ id: TEST_IDS.invoiceId })).rejects.toThrow("Read operation failed");
     });
-
-    it("should include billing customer in MATCH clause", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_INVOICE);
-
-      await repository.findById({ id: TEST_IDS.invoiceId });
-
-      expect(mockQuery.query).toContain(
-        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})`,
-      );
-    });
-
-    it("should use OPTIONAL MATCH for subscription relationship", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_INVOICE);
-
-      await repository.findById({ id: TEST_IDS.invoiceId });
-
-      expect(mockQuery.query).toContain("OPTIONAL MATCH");
-    });
   });
 
   describe("findByStripeInvoiceId", () => {
-    it("should find invoice by Stripe invoice ID", async () => {
+    it("matches the Stripe invoice id through buildDefaultMatch and returns only the invoice", async () => {
       const mockQuery = createMockQuery();
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readOne.mockResolvedValue(MOCK_INVOICE);
@@ -329,16 +269,12 @@ describe("StripeInvoiceRepository", () => {
         stripeInvoiceId: TEST_IDS.stripeInvoiceId,
       });
 
-      expect(neo4jService.initQuery).toHaveBeenCalledWith({
-        serialiser: expect.anything(),
-      });
-      expect(mockQuery.queryParams).toEqual({
-        stripeInvoiceId: TEST_IDS.stripeInvoiceId,
-      });
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({ serialiser: StripeInvoiceDescriptor.model });
+      expect(mockQuery.queryParams.searchValue).toBe(TEST_IDS.stripeInvoiceId);
       expect(mockQuery.query).toContain(
-        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})`,
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $searchValue})`,
       );
-      expect(mockQuery.query).toContain(`RETURN ${stripeInvoiceMeta.nodeName}`);
+      expect(mockQuery.query).toMatch(/RETURN stripeInvoice\s*$/);
       expect(neo4jService.readOne).toHaveBeenCalledWith(mockQuery);
       expect(result).toEqual(MOCK_INVOICE);
     });
@@ -364,18 +300,32 @@ describe("StripeInvoiceRepository", () => {
         "Database connection error",
       );
     });
+  });
 
-    it("should preserve exact Stripe invoice ID format", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
-      neo4jService.readOne.mockResolvedValue(MOCK_INVOICE);
+  describe("customer-facing finders: faithful RETURN", () => {
+    const finders = [
+      ["findByStripeCustomerId", () => repository.findByStripeCustomerId({ stripeCustomerId: "c" })],
+      ["findById", () => repository.findById({ id: "i" })],
+      ["findByStripeInvoiceId", () => repository.findByStripeInvoiceId({ stripeInvoiceId: "in_1" })],
+    ] as const;
 
-      const exactStripeId = "in_1MvN8z3FkJ0LJ6p";
+    for (const [name, call] of finders) {
+      it(`${name} appends to the initQuery prefix and returns neither the customer nor the subscription column`, async () => {
+        const mockQuery = { query: "PREFIX\n", queryParams: { companyId: null } as Record<string, unknown> };
+        neo4jService.initQuery.mockReturnValue(mockQuery);
+        neo4jService.readMany.mockResolvedValue([]);
+        neo4jService.readOne.mockResolvedValue(null);
 
-      await repository.findByStripeInvoiceId({ stripeInvoiceId: exactStripeId });
+        await call();
 
-      expect(mockQuery.queryParams.stripeInvoiceId).toBe(exactStripeId);
-    });
+        expect(mockQuery.query.startsWith("PREFIX\n")).toBe(true);
+        expect(mockQuery.queryParams).toHaveProperty("companyId", null);
+        expect(mockQuery.query).toMatch(/RETURN stripeInvoice(\s+ORDER BY stripeInvoice\.createdAt DESC)?\s*$/);
+        expect(mockQuery.query).not.toContain("stripeInvoice_stripeCustomer");
+        expect(mockQuery.query).not.toContain("stripeInvoice_subscription");
+        expect(mockQuery.query).not.toContain(stripeSubscriptionMeta.labelName);
+      });
+    }
   });
 
   describe("create", () => {
@@ -1146,7 +1096,7 @@ describe("StripeInvoiceRepository", () => {
 
       await repository.findById({ id: exactId });
 
-      expect(mockQuery.queryParams.id).toBe(exactId);
+      expect(mockQuery.queryParams.searchValue).toBe(exactId);
     });
 
     it("should preserve exact Stripe invoice ID format", async () => {
@@ -1158,7 +1108,7 @@ describe("StripeInvoiceRepository", () => {
 
       await repository.findByStripeInvoiceId({ stripeInvoiceId: exactStripeId });
 
-      expect(mockQuery.queryParams.stripeInvoiceId).toBe(exactStripeId);
+      expect(mockQuery.queryParams.searchValue).toBe(exactStripeId);
     });
 
     it("should preserve exact datetime values after ISO conversion", async () => {
@@ -1334,31 +1284,193 @@ describe("StripeInvoiceRepository", () => {
       );
     });
 
-    it("should build query without status filter when status not provided", async () => {
-      const mockQuery = createMockQuery();
-      neo4jService.initQuery.mockReturnValue(mockQuery);
+    it("builds the same query with or without a status (kept quirk: the status never filters)", async () => {
+      const withoutStatus = createMockQuery();
+      const withStatus = createMockQuery();
+      neo4jService.initQuery.mockReturnValueOnce(withoutStatus).mockReturnValueOnce(withStatus);
       neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
 
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-      });
+      await repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId });
+      await repository.findByStripeCustomerId({ stripeCustomerId: TEST_IDS.stripeCustomerId, status: "paid" });
 
-      expect(mockQuery.query).toContain("WHERE 1=1");
-      expect(mockQuery.query).not.toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(withStatus.query).toBe(withoutStatus.query);
+      expect(withStatus.queryParams).toEqual(withoutStatus.queryParams);
+    });
+  });
+
+  describe("recordServiceLines", () => {
+    const base = {
+      stripeInvoiceId: TEST_IDS.stripeInvoiceId,
+      servicePeriodStart: new Date("2026-10-14T09:00:00.000Z"),
+      servicePeriodEnd: new Date("2026-11-14T09:00:00.000Z"),
+    };
+
+    it("writes the covered period with datetime casts and marks the invoice checked", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.writeOne.mockResolvedValue(undefined);
+
+      await repository.recordServiceLines({ ...base, markChecked: true });
+
+      expect(mockQuery.queryParams).toMatchObject({
+        stripeInvoiceId: TEST_IDS.stripeInvoiceId,
+        servicePeriodStart: "2026-10-14T09:00:00.000Z",
+        servicePeriodEnd: "2026-11-14T09:00:00.000Z",
+      });
+      expect(mockQuery.query).toContain(
+        `MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})`,
+      );
+      expect(mockQuery.query).toContain("datetime($servicePeriodStart)");
+      expect(mockQuery.query).toContain("datetime($servicePeriodEnd)");
+      expect(mockQuery.query).toContain("SET stripeInvoice.serviceLinesCheckedAt = datetime()");
+      expect(mockQuery.query).not.toContain("FOR_PRICE");
+      expect(mockQuery.query).not.toContain("FOR_PURCHASE");
+      expect(neo4jService.readScalars).not.toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [] });
+      expect(mockQuery.query).not.toContain("`");
+      expect(neo4jService.writeOne).toHaveBeenCalledWith(mockQuery);
     });
 
-    it("should build query with status filter when status provided", async () => {
+    it("does not mark the invoice checked when markChecked is false", async () => {
       const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      await repository.recordServiceLines({ ...base, markChecked: false });
+
+      expect(mockQuery.query).not.toContain("serviceLinesCheckedAt");
+    });
+
+    it("clears the period when none is given (all-proration invoice)", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      await repository.recordServiceLines({ stripeInvoiceId: TEST_IDS.stripeInvoiceId, markChecked: true });
+
+      expect(mockQuery.queryParams.servicePeriodStart).toBeNull();
+      expect(mockQuery.queryParams.servicePeriodEnd).toBeNull();
+    });
+
+    it("links the local price when a Stripe price id is given", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      neo4jService.readScalars.mockResolvedValueOnce(["price-node-1"]);
+
+      await repository.recordServiceLines({ ...base, stripePriceId: "price_monthly", markChecked: true });
+
+      const lookup = neo4jService.readScalars.mock.calls[0][0];
+      expect(lookup.query).toContain("MATCH (price:StripePrice {stripePriceId: $stripePriceId})");
+      expect(lookup.queryParams).toEqual({ stripePriceId: "price_monthly" });
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [{ id: "price-node-1", label: "StripePrice" }],
+      });
+      expect(neo4jService.validateRelatedNodes.mock.invocationCallOrder[0]).toBeLessThan(
+        neo4jService.writeOne.mock.invocationCallOrder[0],
+      );
+      expect(mockQuery.queryParams.priceId).toBe("price-node-1");
+      expect(mockQuery.query).toContain("MATCH (price:StripePrice {id: $priceId})");
+      expect(mockQuery.query).toContain(`MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_PRICE]->(price)`);
+    });
+
+    it("does not link a price that is not stored locally", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readScalars.mockResolvedValueOnce([]);
+
+      await repository.recordServiceLines({ ...base, stripePriceId: "price_missing", markChecked: false });
+
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({ nodes: [] });
+      expect(mockQuery.query).not.toContain("FOR_PRICE");
+    });
+
+    it("links the one-time purchase by its internal id", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+
+      await repository.recordServiceLines({ ...base, purchaseSubscriptionId: "purchase-node-1", markChecked: true });
+
+      expect(neo4jService.readScalars).not.toHaveBeenCalled();
+      expect(neo4jService.validateRelatedNodes).toHaveBeenCalledWith({
+        nodes: [{ id: "purchase-node-1", label: "StripeSubscription" }],
+      });
+      expect(mockQuery.queryParams.purchaseId).toBe("purchase-node-1");
+      expect(mockQuery.query).toContain("MATCH (purchase:StripeSubscription {id: $purchaseId})");
+      expect(mockQuery.query).toContain(`MERGE (${stripeInvoiceMeta.nodeName})-[:FOR_PURCHASE]->(purchase)`);
+    });
+  });
+
+  describe("findWithoutServiceLines", () => {
+    it("returns the Stripe ids of the invoices never checked", async () => {
+      const mockQuery = createMockQuery();
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([
+        { ...MOCK_INVOICE, stripeInvoiceId: "in_a" },
+        { ...MOCK_INVOICE, stripeInvoiceId: "in_b" },
+      ]);
+
+      const result = await repository.findWithoutServiceLines();
+
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({
+        serialiser: StripeInvoiceDescriptor.model,
+        fetchAll: true,
+      });
+      expect(mockQuery.query).toContain(`WHERE ${stripeInvoiceMeta.nodeName}.serviceLinesCheckedAt IS NULL`);
+      expect(result).toEqual(["in_a", "in_b"]);
+    });
+  });
+
+  describe("priceExists", () => {
+    it("counts the local StripePrice with that Stripe price id", async () => {
+      neo4jService.readCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      await expect(repository.priceExists({ stripePriceId: "price_monthly" })).resolves.toBe(true);
+      await expect(repository.priceExists({ stripePriceId: "price_missing" })).resolves.toBe(false);
+
+      const [query, params] = neo4jService.readCount.mock.calls[0];
+      expect(query).toContain("{stripePriceId: $stripePriceId}");
+      expect(query).toContain("AS total");
+      expect(params).toEqual({ stripePriceId: "price_monthly" });
+    });
+  });
+
+  describe("findForCompanyAdmin", () => {
+    it("joins the URL company through its customer, skips drafts, returns price, product and forSubscription, newest first", async () => {
+      const mockQuery = { query: "PREFIX\n", queryParams: { companyId: null } as Record<string, unknown> };
       neo4jService.initQuery.mockReturnValue(mockQuery);
       neo4jService.readMany.mockResolvedValue([MOCK_INVOICE]);
 
-      await repository.findByStripeCustomerId({
-        stripeCustomerId: TEST_IDS.stripeCustomerId,
-        status: "paid",
-      });
+      const result = await repository.findForCompanyAdmin({ companyId: "company-9" });
 
-      expect(mockQuery.query).toContain("WHERE 1=1 AND");
-      expect(mockQuery.query).toContain(`${stripeInvoiceMeta.nodeName}.status = $status`);
+      expect(neo4jService.initQuery).toHaveBeenCalledWith({
+        serialiser: StripeInvoiceDescriptor.model,
+        fetchAll: true,
+      });
+      expect(mockQuery.query.startsWith("PREFIX\n")).toBe(true);
+      expect(mockQuery.queryParams.adminCompanyId).toBe("company-9");
+      expect(mockQuery.queryParams.companyId).toBeNull();
+      // buildDefaultMatch() first (it lets every row through with no CLS company), then the URL company.
+      const defaultMatch = mockQuery.query.indexOf("MATCH (stripeInvoice:StripeInvoice)");
+      const urlCompany = mockQuery.query.indexOf(
+        "MATCH (stripeInvoice)-[:BELONGS_TO]->(:StripeCustomer)-[:BELONGS_TO]->(:Company {id: $adminCompanyId})",
+      );
+      expect(defaultMatch).toBeGreaterThan(-1);
+      expect(mockQuery.query).toContain("WHERE $companyId IS NULL");
+      expect(urlCompany).toBeGreaterThan(defaultMatch);
+      expect(mockQuery.query).toContain("stripeInvoice.status <> 'draft'");
+      expect(mockQuery.query).toContain(
+        "EXISTS { MATCH (stripeInvoice)-[:FOR_SUBSCRIPTION]->(:StripeSubscription) } AS forSubscription",
+      );
+      const order = mockQuery.query.indexOf("ORDER BY coalesce(stripeInvoice.paidAt, stripeInvoice.periodStart) DESC");
+      const ret = mockQuery.query.lastIndexOf("RETURN");
+      expect(order).toBeGreaterThan(-1);
+      expect(order).toBeLessThan(ret);
+      const returnClause = mockQuery.query.slice(ret);
+      expect(returnClause).toContain("stripeInvoice_stripePrice");
+      expect(returnClause).toContain("stripeInvoice_stripePrice_stripeProduct");
+      expect(returnClause).toContain("forSubscription");
+      expect(mockQuery.query).not.toContain("{CURSOR}");
+      expect(mockQuery.query).not.toContain("`");
+      expect(result).toEqual([MOCK_INVOICE]);
     });
   });
 });

@@ -525,6 +525,105 @@ describe("CompanyRepository", () => {
       expect(mockNeo4jService.readMany).toHaveBeenCalled();
       expect(result).toEqual(mockCompanies);
     });
+
+    async function findQuery(): Promise<string> {
+      mockNeo4jService.readMany.mockResolvedValue([]);
+      await repository.find({ term: "", cursor: { skip: 0, limit: 10 } as any });
+      return mockNeo4jService.readMany.mock.calls[0][0].query as string;
+    }
+
+    it("adds the current-subscription subquery after the cursor", async () => {
+      const query = await findQuery();
+      const ordered = [
+        "{CURSOR}",
+        "<-[:BELONGS_TO]-(:StripeCustomer)<-[:BELONGS_TO]-",
+        "priceType = 'recurring'",
+        "WHEN 'active' THEN 0 WHEN 'past_due' THEN 1 WHEN 'unpaid' THEN 2 WHEN 'trialing' THEN 3 ELSE 4",
+      ];
+      let previous = -1;
+      for (const fragment of ordered) {
+        const index = query.indexOf(fragment);
+        expect(index, fragment).toBeGreaterThan(previous);
+        previous = index;
+      }
+      expect(query).toContain("createdAt DESC");
+      for (const column of ["subscriptionPlan", "subscriptionPlanName", "subscriptionStatus", "subscriptionNextAt"]) {
+        expect(query).toContain(`AS ${column}`);
+      }
+      expect(query).not.toContain("`");
+    });
+
+    it("derives the plan from the price interval, else its nickname or product name", async () => {
+      const query = await findQuery();
+      expect(query).toContain(
+        "currentPrice.recurringInterval = 'month' AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN 'monthly'",
+      );
+      expect(query).toContain(
+        "currentPrice.recurringInterval = 'year' AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN 'yearly'",
+      );
+      expect(query).toContain("ELSE 'other'");
+      expect(query).toContain("coalesce(currentPrice.nickname, currentProductName)");
+    });
+
+    // Shared Contracts > Status table: one case per row.
+    it.each([
+      {
+        row: "trialing, not cancelling",
+        state: "WHEN currentSub.status = 'trialing' THEN 'trial'",
+        next: "WHEN currentSub.status = 'trialing' THEN currentSub.trialEnd",
+      },
+      {
+        row: "trialing, cancelAtPeriodEnd",
+        state: "WHEN currentSub.status = 'trialing' AND currentSub.cancelAtPeriodEnd = true THEN 'cancelled'",
+        next: "WHEN currentSub.status = 'trialing' THEN currentSub.trialEnd",
+      },
+      {
+        row: "active, not cancelling",
+        state: "WHEN currentSub.status = 'active' THEN 'active'",
+        next: "WHEN currentSub.status = 'active' THEN currentSub.currentPeriodEnd",
+      },
+      {
+        row: "active, cancelAtPeriodEnd",
+        state: "WHEN currentSub.status = 'active' AND currentSub.cancelAtPeriodEnd = true THEN 'cancelled'",
+        next: "WHEN currentSub.status = 'active' THEN currentSub.currentPeriodEnd",
+      },
+      { row: "past_due", state: "WHEN currentSub.status IN ['past_due', 'unpaid'] THEN 'past_due'", next: "ELSE null" },
+      { row: "unpaid", state: "WHEN currentSub.status IN ['past_due', 'unpaid'] THEN 'past_due'", next: "ELSE null" },
+      { row: "incomplete", state: "WHEN currentSub.status = 'incomplete' THEN 'incomplete'", next: "ELSE null" },
+      { row: "paused", state: "WHEN currentSub.status = 'paused' THEN 'paused'", next: "ELSE null" },
+      {
+        row: "canceled, canceledAt earlier or missing",
+        state: "WHEN currentSub.status IN ['canceled', 'incomplete_expired'] THEN 'ended'",
+        next: "WHEN currentSub.canceledAt IS NULL OR currentSub.canceledAt < currentSub.currentPeriodEnd THEN currentSub.currentPeriodEnd",
+      },
+      {
+        row: "canceled, canceledAt later",
+        state: "WHEN currentSub.status IN ['canceled', 'incomplete_expired'] THEN 'ended'",
+        next: "ELSE currentSub.canceledAt END",
+      },
+      {
+        row: "incomplete_expired",
+        state: "WHEN currentSub.status IN ['canceled', 'incomplete_expired'] THEN 'ended'",
+        next: "WHEN currentSub.canceledAt IS NULL OR currentSub.canceledAt < currentSub.currentPeriodEnd THEN currentSub.currentPeriodEnd",
+      },
+      { row: "some_new_status (raw)", state: "ELSE currentSub.status", next: "ELSE null" },
+    ])("maps the Status table row: $row", async ({ state, next }) => {
+      const query = await findQuery();
+      const statusCase = query.slice(query.indexOf("AS subscriptionPlanName"), query.indexOf("AS subscriptionStatus"));
+      const nextCase = query.slice(query.indexOf("AS subscriptionStatus"), query.indexOf("AS subscriptionNextAt"));
+      expect(statusCase).toContain(state);
+      expect(nextCase).toContain(next);
+    });
+
+    it("checks the cancelling trial and active rows before their plain rows", async () => {
+      const query = await findQuery();
+      expect(query.indexOf("currentSub.status = 'trialing' AND currentSub.cancelAtPeriodEnd = true")).toBeLessThan(
+        query.indexOf("WHEN currentSub.status = 'trialing' THEN 'trial'"),
+      );
+      expect(query.indexOf("currentSub.status = 'active' AND currentSub.cancelAtPeriodEnd = true")).toBeLessThan(
+        query.indexOf("WHEN currentSub.status = 'active' THEN 'active'"),
+      );
+    });
   });
 
   describe("delete", () => {

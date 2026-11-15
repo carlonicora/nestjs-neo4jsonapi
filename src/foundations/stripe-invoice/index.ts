@@ -13,9 +13,16 @@ export * from "./repositories/stripe-invoice.repository";
 
 // Entities
 export * from "./entities/stripe-invoice.entity";
+export * from "./entities/stripe-invoice";
 export * from "./entities/stripe-invoice.model";
 export * from "./entities/stripe-invoice.meta";
 export * from "./entities/stripe-invoice.map";
 
 // Serializers
 export * from "./serialisers/stripe-invoice.serialiser";
+
+// Utils
+export * from "./utils/invoice-service-lines";
+
+// Backfills
+export * from "./backfills/stripe-invoice-service-lines-backfill.service";

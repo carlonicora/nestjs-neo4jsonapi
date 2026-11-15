@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, Logger } from "@nestjs/common";
 import Stripe from "stripe";
 import { JsonApiPaginator, JsonApiService, JsonApiListDocument, JsonApiSingleDocument } from "../../../core/jsonapi";
 import { StripeCustomerRepository } from "../../stripe-customer/repositories/stripe-customer.repository";
@@ -6,6 +6,7 @@ import { StripeSubscriptionRepository } from "../../stripe-subscription/reposito
 import { StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
 import { StripeInvoiceRepository } from "../repositories/stripe-invoice.repository";
+import { readServiceLines } from "../utils/invoice-service-lines";
 import { StripeInvoiceApiService } from "./stripe-invoice-api.service";
 
 /**
@@ -26,6 +27,8 @@ import { StripeInvoiceApiService } from "./stripe-invoice-api.service";
  */
 @Injectable()
 export class StripeInvoiceAdminService {
+  private readonly logger = new Logger(StripeInvoiceAdminService.name);
+
   constructor(
     private readonly stripeInvoiceRepository: StripeInvoiceRepository,
     private readonly stripeCustomerRepository: StripeCustomerRepository,
@@ -226,6 +229,7 @@ export class StripeInvoiceAdminService {
         stripeHostedInvoiceUrl: stripeInvoice.hosted_invoice_url ?? undefined,
         stripePdfUrl: stripeInvoice.invoice_pdf ?? undefined,
       });
+      await this.recordServiceLinesFromStripe(stripeInvoice);
     } else {
       // In Stripe v20, tax is calculated as total - total_excluding_tax
       const tax =
@@ -257,6 +261,69 @@ export class StripeInvoiceAdminService {
         attemptCount: stripeInvoice.attempt_count ?? 0,
         attempted: stripeInvoice.attempted ?? false,
       });
+      await this.recordServiceLinesFromStripe(stripeInvoice);
     }
+  }
+
+  /**
+   * Records what a Stripe invoice was for on its local node (WYR-98): the covered period and price
+   * of its first non-proration line, and, for a one-time purchase (no subscription parent), the
+   * `pi_` StripeSubscription record of the PaymentIntent that paid it.
+   *
+   * When the line's price is not stored locally yet, the period is written without the price edge
+   * and the invoice is left unchecked, so the backfill retries it on the next worker boot.
+   *
+   * @param stripeInvoice - the invoice as Stripe returns it, lines and payments expanded
+   * @returns "recorded", or "price-unknown" when the line's price is not stored locally
+   */
+  async recordServiceLinesFromStripe(stripeInvoice: Stripe.Invoice): Promise<"recorded" | "price-unknown"> {
+    const lines = readServiceLines(stripeInvoice);
+
+    const priceKnown =
+      !lines.stripePriceId || (await this.stripeInvoiceRepository.priceExists({ stripePriceId: lines.stripePriceId }));
+
+    const purchase =
+      !stripeInvoice.parent?.subscription_details?.subscription && lines.paymentIntentId
+        ? await this.subscriptionRepository.findByStripeSubscriptionId({ stripeSubscriptionId: lines.paymentIntentId })
+        : null;
+
+    await this.stripeInvoiceRepository.recordServiceLines({
+      stripeInvoiceId: stripeInvoice.id,
+      servicePeriodStart: lines.periodStart,
+      servicePeriodEnd: lines.periodEnd,
+      stripePriceId: priceKnown ? lines.stripePriceId : undefined,
+      purchaseSubscriptionId: purchase?.id,
+      markChecked: priceKnown,
+    });
+
+    if (!priceKnown) {
+      this.logger.warn(
+        `Invoice ${stripeInvoice.id}: price ${lines.stripePriceId} is not stored locally; service lines left unchecked`,
+      );
+      return "price-unknown";
+    }
+
+    return "recorded";
+  }
+
+  /**
+   * Every non-draft invoice of a company, for the platform administrator (WYR-98). A company
+   * without a Stripe customer gets an empty list, never a 404.
+   *
+   * @param params.companyId - the company id from the URL
+   * @param params.query - JSON:API query parameters
+   * @returns JSON:API list of invoices with their price, product and forSubscription
+   */
+  async listForCompanyAdmin(params: { companyId: string; query: any }): Promise<JsonApiListDocument> {
+    const paginator = new JsonApiPaginator(params.query);
+
+    const customer = await this.stripeCustomerRepository.findByCompanyId({ companyId: params.companyId });
+    if (!customer) {
+      return this.jsonApiService.buildList(StripeInvoiceModel, [], paginator);
+    }
+
+    const invoices = await this.stripeInvoiceRepository.findForCompanyAdmin({ companyId: params.companyId });
+
+    return this.jsonApiService.buildList(StripeInvoiceModel, invoices, paginator);
   }
 }

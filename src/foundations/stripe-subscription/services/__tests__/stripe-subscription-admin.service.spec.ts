@@ -146,6 +146,7 @@ describe("StripeSubscriptionAdminService", () => {
     const mockStripeSubscriptionRepository = {
       findById: vi.fn(),
       findByStripeCustomerId: vi.fn(),
+      findForCompanyAdmin: vi.fn(),
       findByStripeSubscriptionId: vi.fn(),
       createSubscription: vi.fn(),
       update: vi.fn(),
@@ -335,6 +336,46 @@ describe("StripeSubscriptionAdminService", () => {
       const result = await service.listSubscriptions(validParams);
 
       expect(result).toEqual({ data: [], meta: {} });
+    });
+  });
+
+  describe("listForCompanyAdmin", () => {
+    const query = { page: { number: 1, size: 10 } };
+
+    it("listForCompanyAdmin returns an empty list when the company has no Stripe customer", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
+      jsonApiService.buildList.mockResolvedValue({ data: [], meta: {} } as any);
+
+      const result = await service.listForCompanyAdmin({ companyId: TEST_IDS.companyId, oneTime: false, query });
+
+      expect(stripeCustomerRepository.findByCompanyId).toHaveBeenCalledWith({ companyId: TEST_IDS.companyId });
+      expect(subscriptionRepository.findForCompanyAdmin).not.toHaveBeenCalled();
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(StripeSubscriptionDescriptor.model, [], expect.any(Object));
+      expect(result).toEqual({ data: [], meta: {} });
+    });
+
+    it("passes oneTime through", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      subscriptionRepository.findForCompanyAdmin.mockResolvedValue([MOCK_DB_SUBSCRIPTION]);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE as any);
+
+      await service.listForCompanyAdmin({ companyId: TEST_IDS.companyId, oneTime: true, query });
+      expect(subscriptionRepository.findForCompanyAdmin).toHaveBeenLastCalledWith({
+        companyId: TEST_IDS.companyId,
+        oneTime: true,
+      });
+
+      const result = await service.listForCompanyAdmin({ companyId: TEST_IDS.companyId, oneTime: false, query });
+      expect(subscriptionRepository.findForCompanyAdmin).toHaveBeenLastCalledWith({
+        companyId: TEST_IDS.companyId,
+        oneTime: false,
+      });
+      expect(jsonApiService.buildList).toHaveBeenLastCalledWith(
+        StripeSubscriptionDescriptor.model,
+        [MOCK_DB_SUBSCRIPTION],
+        expect.any(Object),
+      );
+      expect(result).toEqual(MOCK_JSON_API_LIST_RESPONSE);
     });
   });
 

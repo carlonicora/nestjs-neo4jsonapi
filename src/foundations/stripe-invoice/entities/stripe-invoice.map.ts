@@ -1,29 +1,4 @@
-import { mapEntity } from "../../../common/abstracts/entity";
-import { EntityFactory } from "../../../core/neo4j/factories/entity.factory";
-import { StripeInvoice } from "./stripe-invoice.entity";
+import { StripeInvoiceDescriptor } from "./stripe-invoice";
 
-export const mapStripeInvoice = (params: { data: any; record: any; entityFactory: EntityFactory }): StripeInvoice => {
-  return {
-    ...mapEntity({ record: params.data }),
-    stripeInvoiceId: params.data.stripeInvoiceId,
-    stripeInvoiceNumber: params.data.stripeInvoiceNumber || null,
-    stripeHostedInvoiceUrl: params.data.stripeHostedInvoiceUrl || null,
-    stripePdfUrl: params.data.stripePdfUrl || null,
-    status: params.data.status,
-    currency: params.data.currency,
-    amountDue: Number(params.data.amountDue ?? 0),
-    amountPaid: Number(params.data.amountPaid ?? 0),
-    amountRemaining: Number(params.data.amountRemaining ?? 0),
-    subtotal: Number(params.data.subtotal ?? 0),
-    total: Number(params.data.total ?? 0),
-    tax: params.data.tax !== null ? Number(params.data.tax) : null,
-    periodStart: params.data.periodStart ? new Date(params.data.periodStart) : new Date(),
-    periodEnd: params.data.periodEnd ? new Date(params.data.periodEnd) : new Date(),
-    dueDate: params.data.dueDate ? new Date(params.data.dueDate) : null,
-    paidAt: params.data.paidAt ? new Date(params.data.paidAt) : null,
-    attemptCount: Number(params.data.attemptCount ?? 0),
-    attempted: params.data.attempted === true,
-    stripeCustomer: undefined,
-    subscription: undefined,
-  };
-};
+/** The StripeInvoice mapper, kept as an alias of the descriptor's generated mapper. */
+export const mapStripeInvoice = StripeInvoiceDescriptor.model.mapper;

@@ -14,6 +14,9 @@ import { ModuleACL } from "../../../common/decorators/module.decorator";
 import { CoreModuleId } from "../../../common/constants/core-module.ids";
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
 import { CacheService } from "../../../core/cache/services/cache.service";
+import { NoCache } from "../../../core/cache/interceptors/cache.interceptor";
+import { AdminJwtAuthGuard } from "../../../common/guards/jwt.auth.admin.guard";
+import { companyMeta } from "../../company/entities/company.meta";
 
 // On every route with both, @Roles sits above @CacheInvalidate, which replaces the method:
 // metadata set below it would land on the discarded original and never be enforced.
@@ -39,6 +42,26 @@ export class StripeSubscriptionController {
       companyId: req.user.companyId,
       query,
       status,
+    });
+
+    reply.send(response);
+  }
+
+  /** Platform administrator: one company's subscriptions, or with ?oneTime=true its old one-time purchases. */
+  @UseGuards(AdminJwtAuthGuard)
+  @Roles(RoleId.Administrator)
+  @Get(`${companyMeta.endpoint}/:companyId/${stripeSubscriptionMeta.endpoint}`)
+  @NoCache()
+  async listForCompanyAdmin(
+    @Res() reply: FastifyReply,
+    @Param("companyId") companyId: string,
+    @Query() query: any,
+    @Query("oneTime") oneTime?: string,
+  ) {
+    const response = await this.subscriptionService.listForCompanyAdmin({
+      companyId,
+      oneTime: oneTime === "true",
+      query,
     });
 
     reply.send(response);

@@ -22,6 +22,7 @@ import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
 
 import { CacheInvalidate } from "../../../common/decorators/cache-invalidate.decorator";
 import { AuthenticatedRequest } from "../../../common/interfaces/authenticated.request.interface";
+import { NoCache } from "../../../core/cache/interceptors/cache.interceptor";
 import { CacheService } from "../../../core/cache/services/cache.service";
 import { CompanyPostDTO } from "../../company/dtos/company.post.dto";
 import { CompanyPutDTO } from "../../company/dtos/company.put.dto";
@@ -42,6 +43,7 @@ export class CompanyController {
   @UseGuards(AdminJwtAuthGuard)
   @Roles(RoleId.Administrator)
   @Get(companyMeta.endpoint)
+  @NoCache()
   async fetchAllCompanies(
     @Req() request: AuthenticatedRequest,
     @Res() reply: FastifyReply,

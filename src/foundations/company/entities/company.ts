@@ -1,5 +1,5 @@
 import type { Entity } from "../../../common/abstracts/entity";
-import { defineEntity } from "../../../common/helpers/define-entity";
+import { convertFieldValue, defineEntity } from "../../../common/helpers/define-entity";
 import type { CreditWarningOffer } from "../../billing/interfaces/credit-warning.interface";
 import type { Feature } from "../../feature/entities/feature";
 import type { Module } from "../../module/entities/module.entity";
@@ -63,9 +63,21 @@ export type Company = Entity & {
   // Fiscal data
   fiscal_data?: string;
 
+  // Admin companies list only (CompanyRepository.find); undefined on every other read.
+  subscriptionPlan?: string;
+  subscriptionPlanName?: string;
+  subscriptionStatus?: string;
+  subscriptionNextAt?: string;
+
   feature: Feature[];
   module: Module[];
 };
+
+/** Reads a record column only when the query returned it, so other company reads stay unchanged. */
+function readSubscriptionColumn(params: { record?: any }, column: string): any {
+  if (!params.record?.has?.(column)) return undefined;
+  return params.record.get(column) ?? undefined;
+}
 
 /**
  * Company Entity Descriptor
@@ -124,6 +136,28 @@ export const CompanyDescriptor = defineEntity<Company>()({
     country: { type: "string" },
     country_code: { type: "string" },
     fiscal_data: { type: "string" },
+  },
+
+  // virtualFields, NOT computed: a computed entry reaches the payload only as meta,
+  // and these must be attributes. Filled only by the admin companies list query
+  // (CompanyRepository.find); no description, so the chatbot never sees them.
+  virtualFields: {
+    subscriptionPlan: {
+      compute: (params) => readSubscriptionColumn(params, "subscriptionPlan"),
+    },
+    subscriptionPlanName: {
+      compute: (params) => readSubscriptionColumn(params, "subscriptionPlanName"),
+    },
+    subscriptionStatus: {
+      compute: (params) => readSubscriptionColumn(params, "subscriptionStatus"),
+    },
+    subscriptionNextAt: {
+      compute: (params) => {
+        const converted = convertFieldValue(readSubscriptionColumn(params, "subscriptionNextAt"), "datetime");
+        if (converted === null || converted === undefined) return undefined;
+        return converted instanceof Date ? converted.toISOString() : new Date(converted).toISOString();
+      },
+    },
   },
 
   // Relationship definitions

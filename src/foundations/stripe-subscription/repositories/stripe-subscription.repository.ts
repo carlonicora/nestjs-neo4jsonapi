@@ -140,6 +140,67 @@ export class StripeSubscriptionRepository extends AbstractRepository<
     return this.neo4j.readMany(query);
   }
 
+  /**
+   * The subscriptions of one company for the platform administrator, unpaginated.
+   *
+   * The company comes from the URL (admin-only route) and is joined explicitly through its
+   * StripeCustomer, so subscriptions with no direct company edge are included. It is bound as
+   * `$adminCompanyId`, never `$companyId`: the administrator belongs to no company, and the CLS
+   * prefix of `initQuery()` must neither filter nor collide. `buildReturnStatement()` is not
+   * reused: its mandatory company and price matches would drop customer-only subscriptions and
+   * unpriced purchases. The returned columns keep its names, so the mapper works unchanged.
+   *
+   * @param params.companyId - the company to read
+   * @param params.oneTime - false: recurring subscriptions, current first; true: old one-time
+   *   purchases (active pi_ records with no invoice linked), newest first, priced or not
+   */
+  async findForCompanyAdmin(params: { companyId: string; oneTime: boolean }): Promise<StripeSubscription[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model, fetchAll: true });
+
+    query.queryParams = { ...query.queryParams, adminCompanyId: params.companyId };
+
+    const C = `${S}_${companyMeta.nodeName}`;
+    const CUSTOMER = `${S}_stripeCustomer`;
+    const PRICE = `${S}_stripePrice`;
+    const PRODUCT = `${S}_stripePrice_${stripeProductMeta.nodeName}`;
+
+    const modeClauses = params.oneTime
+      ? `
+      WHERE ${S}.stripeSubscriptionId STARTS WITH 'pi_'
+        AND ${S}.status = 'active'
+        AND NOT EXISTS { MATCH (:StripeInvoice)-[:FOR_SUBSCRIPTION]->(${S}) }
+        AND NOT EXISTS { MATCH (:StripeInvoice)-[:FOR_PURCHASE]->(${S}) }
+      OPTIONAL MATCH (${S})-[:USES_PRICE]->(${PRICE}:${stripePriceMeta.labelName})
+      OPTIONAL MATCH (${PRICE})-[:BELONGS_TO]->(${PRODUCT}:${stripeProductMeta.labelName})
+      `
+      : `
+      MATCH (${S})-[:USES_PRICE]->(${PRICE}:${stripePriceMeta.labelName})
+      WHERE ${PRICE}.priceType = 'recurring'
+      OPTIONAL MATCH (${PRICE})-[:BELONGS_TO]->(${PRODUCT}:${stripeProductMeta.labelName})
+      `;
+
+    const orderBy = params.oneTime
+      ? `ORDER BY ${S}.currentPeriodStart DESC`
+      : `ORDER BY CASE ${S}.status WHEN 'active' THEN 0 WHEN 'past_due' THEN 1 WHEN 'unpaid' THEN 2 WHEN 'trialing' THEN 3 ELSE 4 END ASC, ${S}.createdAt DESC`;
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (${S})-[:BELONGS_TO]->(${CUSTOMER}:${stripeCustomerMeta.labelName})-[:BELONGS_TO]->(:${companyMeta.labelName} {id: $adminCompanyId})
+      ${modeClauses}
+      OPTIONAL MATCH (${S})-[:BELONGS_TO]->(${C}:${companyMeta.labelName})
+      OPTIONAL MATCH (${S})-[:CREATED_BY]->(${S}_createdBy:${userMeta.labelName})
+      RETURN ${S},
+        ${C},
+        ${CUSTOMER},
+        ${PRICE},
+        ${PRODUCT},
+        ${S}_createdBy
+      ${orderBy}
+    `;
+
+    return this.neo4j.readMany(query);
+  }
+
   /** The subscription with this Stripe subscription id, or null. */
   async findByStripeSubscriptionId(params: { stripeSubscriptionId: string }): Promise<StripeSubscription | null> {
     const query = this.neo4j.initQuery({ serialiser: StripeSubscriptionDescriptor.model });

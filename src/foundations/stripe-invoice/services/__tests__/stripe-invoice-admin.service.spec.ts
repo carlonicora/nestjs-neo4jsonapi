@@ -27,7 +27,7 @@ vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
 });
 
 import { Test, TestingModule } from "@nestjs/testing";
-import { HttpException, HttpStatus } from "@nestjs/common";
+import { HttpException, HttpStatus, Logger } from "@nestjs/common";
 import Stripe from "stripe";
 import { StripeInvoiceAdminService } from "../stripe-invoice-admin.service";
 import { StripeInvoiceRepository } from "../../repositories/stripe-invoice.repository";
@@ -40,6 +40,7 @@ import { StripeCustomer } from "../../../stripe-customer/entities/stripe-custome
 import { StripeSubscription } from "../../../stripe-subscription/entities/stripe-subscription";
 import { StripePrice } from "../../../stripe-price/entities/stripe-price.entity";
 import { MOCK_INVOICE, TEST_IDS } from "../../../stripe/__tests__/fixtures/stripe.fixtures";
+import { StripeInvoiceDescriptor } from "../../entities/stripe-invoice";
 
 describe("StripeInvoiceAdminService", () => {
   let service: StripeInvoiceAdminService;
@@ -138,6 +139,9 @@ describe("StripeInvoiceAdminService", () => {
       findByStripeInvoiceId: vi.fn(),
       create: vi.fn(),
       updateByStripeInvoiceId: vi.fn(),
+      recordServiceLines: vi.fn().mockResolvedValue(undefined),
+      priceExists: vi.fn().mockResolvedValue(true),
+      findForCompanyAdmin: vi.fn(),
     };
 
     const mockStripeCustomerRepository = {
@@ -1050,6 +1054,169 @@ describe("StripeInvoiceAdminService", () => {
       );
 
       expect(stripeInvoiceApiService.getInvoice).toHaveBeenCalled();
+    });
+  });
+
+  describe("service lines", () => {
+    const planLine = (overrides: Record<string, unknown> = {}) => ({
+      id: "il_plan",
+      object: "line_item",
+      period: { start: 1_760_000_000, end: 1_762_592_000 },
+      pricing: { type: "price_details", price_details: { price: "price_monthly", product: "prod_1" } },
+      parent: { type: "subscription_item_details", subscription_item_details: { proration: false } },
+      ...overrides,
+    });
+
+    const stripeInvoiceWith = (overrides: Record<string, unknown> = {}): Stripe.Invoice =>
+      ({
+        ...MOCK_INVOICE,
+        id: TEST_IDS.invoiceId,
+        customer: TEST_IDS.customerId,
+        status: "paid",
+        total_excluding_tax: null,
+        parent: {
+          type: "subscription_details",
+          subscription_details: { subscription: TEST_IDS.subscriptionId },
+        },
+        lines: { object: "list", data: [planLine()], has_more: false, url: "/v1/invoices/x/lines" },
+        payments: {
+          object: "list",
+          data: [{ payment: { type: "payment_intent", payment_intent: "pi_1" } }],
+        },
+        ...overrides,
+      }) as unknown as Stripe.Invoice;
+
+    const PERIOD = {
+      servicePeriodStart: new Date(1_760_000_000 * 1000),
+      servicePeriodEnd: new Date(1_762_592_000 * 1000),
+    };
+
+    it("syncInvoiceFromStripe records service lines on create and on update", async () => {
+      stripeCustomerRepository.findByStripeCustomerId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(MOCK_DB_SUBSCRIPTION);
+      stripeInvoiceApiService.getInvoice.mockResolvedValue(stripeInvoiceWith());
+
+      invoiceRepository.findByStripeInvoiceId.mockResolvedValueOnce(null);
+      await service.syncInvoiceFromStripe({ stripeInvoiceId: TEST_IDS.invoiceId });
+
+      invoiceRepository.findByStripeInvoiceId.mockResolvedValueOnce(MOCK_DB_INVOICE);
+      await service.syncInvoiceFromStripe({ stripeInvoiceId: TEST_IDS.invoiceId });
+
+      expect(invoiceRepository.create).toHaveBeenCalledTimes(1);
+      expect(invoiceRepository.updateByStripeInvoiceId).toHaveBeenCalledTimes(1);
+      expect(invoiceRepository.recordServiceLines).toHaveBeenCalledTimes(2);
+      for (const [call] of invoiceRepository.recordServiceLines.mock.calls) {
+        expect(call).toEqual({
+          stripeInvoiceId: TEST_IDS.invoiceId,
+          ...PERIOD,
+          stripePriceId: "price_monthly",
+          purchaseSubscriptionId: undefined,
+          markChecked: true,
+        });
+      }
+      expect(invoiceRepository.create.mock.invocationCallOrder[0]).toBeLessThan(
+        invoiceRepository.recordServiceLines.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("recordServiceLinesFromStripe returns price-unknown and does not mark when the line price is not stored locally", async () => {
+      invoiceRepository.priceExists.mockResolvedValue(false);
+      const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      const result = await service.recordServiceLinesFromStripe(stripeInvoiceWith());
+
+      expect(invoiceRepository.priceExists).toHaveBeenCalledWith({ stripePriceId: "price_monthly" });
+      expect(invoiceRepository.recordServiceLines).toHaveBeenCalledWith({
+        stripeInvoiceId: TEST_IDS.invoiceId,
+        ...PERIOD,
+        stripePriceId: undefined,
+        purchaseSubscriptionId: undefined,
+        markChecked: false,
+      });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(TEST_IDS.invoiceId));
+      expect(result).toBe("price-unknown");
+      warn.mockRestore();
+    });
+
+    it("recordServiceLinesFromStripe marks an all-proration invoice checked without period or price", async () => {
+      const result = await service.recordServiceLinesFromStripe(
+        stripeInvoiceWith({
+          lines: {
+            object: "list",
+            data: [
+              planLine({
+                parent: { type: "subscription_item_details", subscription_item_details: { proration: true } },
+              }),
+            ],
+            has_more: false,
+            url: "/v1/invoices/x/lines",
+          },
+        }),
+      );
+
+      expect(invoiceRepository.priceExists).not.toHaveBeenCalled();
+      expect(invoiceRepository.recordServiceLines).toHaveBeenCalledWith({
+        stripeInvoiceId: TEST_IDS.invoiceId,
+        servicePeriodStart: undefined,
+        servicePeriodEnd: undefined,
+        stripePriceId: undefined,
+        purchaseSubscriptionId: undefined,
+        markChecked: true,
+      });
+      expect(result).toBe("recorded");
+    });
+
+    it("links a one-time invoice to its pi_ purchase", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue({
+        ...MOCK_DB_SUBSCRIPTION,
+        id: "purchase-node-1",
+      } as any);
+
+      const result = await service.recordServiceLinesFromStripe(stripeInvoiceWith({ parent: null }));
+
+      expect(subscriptionRepository.findByStripeSubscriptionId).toHaveBeenCalledWith({ stripeSubscriptionId: "pi_1" });
+      expect(invoiceRepository.recordServiceLines).toHaveBeenCalledWith(
+        expect.objectContaining({ purchaseSubscriptionId: "purchase-node-1", markChecked: true }),
+      );
+      expect(result).toBe("recorded");
+    });
+
+    it("does not link a one-time invoice whose pi_ purchase is not stored locally", async () => {
+      subscriptionRepository.findByStripeSubscriptionId.mockResolvedValue(null);
+
+      await service.recordServiceLinesFromStripe(stripeInvoiceWith({ parent: null }));
+
+      expect(invoiceRepository.recordServiceLines).toHaveBeenCalledWith(
+        expect.objectContaining({ purchaseSubscriptionId: undefined }),
+      );
+    });
+
+    it("listForCompanyAdmin returns an empty list without a Stripe customer", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(null);
+      jsonApiService.buildList.mockResolvedValue({ data: [] } as any);
+
+      const result = await service.listForCompanyAdmin({ companyId: "company-9", query: {} });
+
+      expect(stripeCustomerRepository.findByCompanyId).toHaveBeenCalledWith({ companyId: "company-9" });
+      expect(invoiceRepository.findForCompanyAdmin).not.toHaveBeenCalled();
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(StripeInvoiceDescriptor.model, [], expect.anything());
+      expect(result).toEqual({ data: [] });
+    });
+
+    it("listForCompanyAdmin lists the company's invoices", async () => {
+      stripeCustomerRepository.findByCompanyId.mockResolvedValue(MOCK_STRIPE_CUSTOMER);
+      invoiceRepository.findForCompanyAdmin.mockResolvedValue([MOCK_DB_INVOICE]);
+      jsonApiService.buildList.mockResolvedValue(MOCK_JSON_API_LIST_RESPONSE as any);
+
+      const result = await service.listForCompanyAdmin({ companyId: "company-9", query: {} });
+
+      expect(invoiceRepository.findForCompanyAdmin).toHaveBeenCalledWith({ companyId: "company-9" });
+      expect(jsonApiService.buildList).toHaveBeenCalledWith(
+        StripeInvoiceDescriptor.model,
+        [MOCK_DB_INVOICE],
+        expect.anything(),
+      );
+      expect(result).toBe(MOCK_JSON_API_LIST_RESPONSE);
     });
   });
 });

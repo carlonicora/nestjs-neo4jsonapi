@@ -1,68 +1,76 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { ClsService } from "nestjs-cls";
 import { JsonApiCursorInterface } from "../../../core";
-import { Neo4jService } from "../../../core/neo4j";
+import { AbstractRepository } from "../../../core/neo4j/abstracts/abstract.repository";
+import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
+import { SecurityService } from "../../../core/security/services/security.service";
+import { companyMeta } from "../../company/entities/company.meta";
 import { stripeCustomerMeta } from "../../stripe-customer/entities/stripe-customer.meta";
+import { stripePriceMeta } from "../../stripe-price/entities/stripe-price.meta";
+import { stripeProductMeta } from "../../stripe-product/entities/stripe-product.meta";
 import { stripeSubscriptionMeta } from "../../stripe-subscription/entities/stripe-subscription.meta";
+import { StripeInvoiceDescriptor } from "../entities/stripe-invoice";
 import { StripeInvoice, StripeInvoiceStatus } from "../entities/stripe-invoice.entity";
 import { stripeInvoiceMeta } from "../entities/stripe-invoice.meta";
-import { StripeInvoiceModel } from "../entities/stripe-invoice.model";
+
+const I = stripeInvoiceMeta.nodeName;
+
+export type StripeInvoiceCreateParams = {
+  stripeCustomerId: string;
+  subscriptionId?: string;
+  stripeInvoiceId: string;
+  stripeInvoiceNumber: string | null;
+  stripeHostedInvoiceUrl: string | null;
+  stripePdfUrl: string | null;
+  status: StripeInvoiceStatus;
+  currency: string;
+  amountDue: number;
+  amountPaid: number;
+  amountRemaining: number;
+  subtotal: number;
+  total: number;
+  tax: number | null;
+  periodStart: Date;
+  periodEnd: Date;
+  dueDate: Date | null;
+  paidAt: Date | null;
+  attemptCount: number;
+  attempted: boolean;
+};
 
 /**
  * StripeInvoiceRepository
  *
- * Neo4j repository for managing Invoice nodes and their relationships to BillingCustomer and Subscription nodes.
- * Handles invoice history storage with status tracking and relationships.
+ * Neo4j repository for StripeInvoice nodes:
+ * `(stripeInvoice)-[:BELONGS_TO]->(stripeCustomer)` and the optional
+ * `(stripeInvoice)-[:FOR_SUBSCRIPTION]->(stripeSubscription)`.
  *
- * Key Features:
- * - Automatic constraint creation for ID and Stripe invoice ID uniqueness
- * - Query invoices by ID, customer, subscription, or status
- * - Create and update operations with relationship management
- * - Support for Stripe v20 API invoice structure
- * - Sync operations for webhook data
- * - Tracking of payment status and amounts
- * - Optional subscription linkage for subscription invoices
- * - Hosted invoice URL and PDF storage
+ * Every read starts from `buildDefaultMatch()`: inside a request it is scoped to the caller's
+ * company through the invoice's Stripe customer (`tenancy: { via: "stripeCustomer" }`); jobs with
+ * no company in CLS (webhooks, notifications) reach every invoice through the `$companyId IS NULL`
+ * branch.
  *
- * @example
- * ```typescript
- * const invoice = await stripeInvoiceRepository.create({
- *   billingCustomerId: 'cust_123',
- *   subscriptionId: 'sub_456',
- *   stripeInvoiceId: 'in_stripe789',
- *   stripeInvoiceNumber: 'INV-2024-001',
- *   status: 'paid',
- *   currency: 'usd',
- *   amountDue: 2999,
- *   amountPaid: 2999,
- *   amountRemaining: 0,
- *   subtotal: 2999,
- *   total: 2999,
- *   tax: null,
- *   periodStart: new Date(),
- *   periodEnd: new Date(),
- *   paidAt: new Date(),
- *   attemptCount: 1,
- *   attempted: true
- * });
- * ```
+ * The customer-facing finders return the invoice column only, so neither the customer nor the
+ * subscription is ever mapped onto the entity (kept as it was before the descriptor conversion).
  */
 @Injectable()
-export class StripeInvoiceRepository implements OnModuleInit {
-  constructor(private readonly neo4j: Neo4jService) {}
+export class StripeInvoiceRepository extends AbstractRepository<
+  StripeInvoice,
+  typeof StripeInvoiceDescriptor.relationships
+> {
+  protected readonly descriptor = StripeInvoiceDescriptor;
 
-  /**
-   * Initialize repository constraints
-   *
-   * Creates unique constraints on module initialization.
-   */
+  constructor(neo4j: Neo4jService, securityService: SecurityService, clsService: ClsService) {
+    super(neo4j, securityService, clsService);
+  }
+
+  /** The inherited id constraint, plus the unique Stripe invoice id. */
   async onModuleInit() {
-    await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_id IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.id IS UNIQUE`,
-    });
+    await super.onModuleInit();
 
     await this.neo4j.writeOne({
-      query: `CREATE CONSTRAINT ${stripeInvoiceMeta.nodeName}_stripeInvoiceId IF NOT EXISTS FOR (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName}) REQUIRE ${stripeInvoiceMeta.nodeName}.stripeInvoiceId IS UNIQUE`,
+      query: `CREATE CONSTRAINT ${I}_stripeInvoiceId IF NOT EXISTS FOR (${I}:${stripeInvoiceMeta.labelName}) REQUIRE ${I}.stripeInvoiceId IS UNIQUE`,
     });
   }
 
@@ -70,37 +78,28 @@ export class StripeInvoiceRepository implements OnModuleInit {
    * Find invoices by billing customer ID
    *
    * @param params - Query parameters
-   * @param params.stripeCustomerId - Stripe customer identifier
-   * @param params.status - Optional filter by invoice status
-   * @param params.limit - Optional limit (default: 100)
-   * @returns Array of invoices ordered by creation date descending
+   * @param params.stripeCustomerId - internal StripeCustomer id
+   * @param params.status - accepted but not applied (kept as before the descriptor conversion)
+   * @param params.cursor - pagination cursor
+   * @returns Array of invoices, the page ordered by creation date descending
    */
   async findByStripeCustomerId(params: {
     stripeCustomerId: string;
     status?: StripeInvoiceStatus;
     cursor?: JsonApiCursorInterface;
   }): Promise<StripeInvoice[]> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel, cursor: params.cursor });
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model, cursor: params.cursor });
 
-    const whereParams: string[] = [];
-    if (params.status) {
-      query.queryParams.status = params.status;
-      whereParams.push(`${stripeInvoiceMeta.nodeName}.status = $status`);
-    }
+    query.queryParams = { ...query.queryParams, stripeCustomerId: params.stripeCustomerId };
 
-    const where = whereParams.length > 0 ? `AND ${whereParams.join(" AND ")}` : "";
-
-    query.queryParams.stripeCustomerId = params.stripeCustomerId;
-
-    query.query = `
-      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
-      OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
-      WHERE 1=1 ${where}
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (${I})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName} {id: $stripeCustomerId})
 
       {CURSOR}
 
-      RETURN ${stripeInvoiceMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
-      ORDER BY ${stripeInvoiceMeta.nodeName}.createdAt DESC
+      RETURN ${I}
+      ORDER BY ${I}.createdAt DESC
     `;
 
     return this.neo4j.readMany(query);
@@ -114,16 +113,14 @@ export class StripeInvoiceRepository implements OnModuleInit {
    * @returns Invoice if found, null otherwise
    */
   async findById(params: { id: string }): Promise<StripeInvoice | null> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model });
 
-    query.queryParams = {
-      id: params.id,
-    };
+    query.queryParams = { ...query.queryParams, searchValue: params.id };
 
-    query.query = `
-      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {id: $id})-[:BELONGS_TO]->(${stripeCustomerMeta.nodeName}:${stripeCustomerMeta.labelName})
-      OPTIONAL MATCH (${stripeInvoiceMeta.nodeName})-[:FOR_SUBSCRIPTION]->(${stripeSubscriptionMeta.nodeName}:${stripeSubscriptionMeta.labelName})
-      RETURN ${stripeInvoiceMeta.nodeName}, ${stripeCustomerMeta.nodeName}, ${stripeSubscriptionMeta.nodeName}
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      MATCH (${I})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName})
+      RETURN ${I}
     `;
 
     return this.neo4j.readOne(query);
@@ -137,15 +134,13 @@ export class StripeInvoiceRepository implements OnModuleInit {
    * @returns Invoice if found, null otherwise
    */
   async findByStripeInvoiceId(params: { stripeInvoiceId: string }): Promise<StripeInvoice | null> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model });
 
-    query.queryParams = {
-      stripeInvoiceId: params.stripeInvoiceId,
-    };
+    query.queryParams = { ...query.queryParams, searchValue: params.stripeInvoiceId };
 
-    query.query = `
-      MATCH (${stripeInvoiceMeta.nodeName}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
-      RETURN ${stripeInvoiceMeta.nodeName}
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "stripeInvoiceId" })}
+      RETURN ${I}
     `;
 
     return this.neo4j.readOne(query);
@@ -185,29 +180,18 @@ export class StripeInvoiceRepository implements OnModuleInit {
    * @param params.attempted - Whether payment was attempted
    * @returns Created Invoice
    */
-  async create(params: {
-    stripeCustomerId: string;
-    subscriptionId?: string;
-    stripeInvoiceId: string;
-    stripeInvoiceNumber: string | null;
-    stripeHostedInvoiceUrl: string | null;
-    stripePdfUrl: string | null;
-    status: StripeInvoiceStatus;
-    currency: string;
-    amountDue: number;
-    amountPaid: number;
-    amountRemaining: number;
-    subtotal: number;
-    total: number;
-    tax: number | null;
-    periodStart: Date;
-    periodEnd: Date;
-    dueDate: Date | null;
-    paidAt: Date | null;
-    attemptCount: number;
-    attempted: boolean;
-  }): Promise<StripeInvoice> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
+  async create(params: StripeInvoiceCreateParams): Promise<StripeInvoice>;
+  /** The inherited descriptor-driven create (kept callable, unused by the invoice sync). */
+  async create(params: { id: string; [key: string]: any }): Promise<void>;
+  async create(params: StripeInvoiceCreateParams | { id: string; [key: string]: any }): Promise<StripeInvoice | void> {
+    if (!("stripeInvoiceId" in params && "stripeCustomerId" in params)) {
+      return super.create(params as { id: string; [key: string]: any });
+    }
+    return this.createInvoice(params as StripeInvoiceCreateParams);
+  }
+
+  private async createInvoice(params: StripeInvoiceCreateParams): Promise<StripeInvoice> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model });
 
     const id = randomUUID();
 
@@ -307,7 +291,7 @@ export class StripeInvoiceRepository implements OnModuleInit {
     stripeHostedInvoiceUrl?: string;
     stripePdfUrl?: string;
   }): Promise<StripeInvoice> {
-    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceModel });
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model });
 
     const setParams: string[] = [`${stripeInvoiceMeta.nodeName}.updatedAt = datetime()`];
 
@@ -359,5 +343,169 @@ export class StripeInvoiceRepository implements OnModuleInit {
     `;
 
     return this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Records what an invoice was for (WYR-98): the covered period of its first non-proration line,
+   * the local price of that line (`FOR_PRICE`) and, for a one-time purchase, the `pi_`
+   * StripeSubscription record of that purchase (`FOR_PURCHASE`). An absent period clears it
+   * (all-proration invoice). `markChecked` sets `serviceLinesCheckedAt`, the backfill's marker.
+   *
+   * The ids come from Stripe on the worker (webhook sync, backfill), never from a client, and the
+   * worker has no company in CLS, so the related-node company check would be existence only.
+   *
+   * @param params.stripeInvoiceId - Stripe invoice id (in_...)
+   * @param params.servicePeriodStart - start of the covered period
+   * @param params.servicePeriodEnd - end of the covered period
+   * @param params.stripePriceId - Stripe price id of the line, only when stored locally
+   * @param params.purchaseSubscriptionId - internal id of the one-time purchase's StripeSubscription (`pi_` record)
+   * @param params.markChecked - set serviceLinesCheckedAt
+   */
+  async recordServiceLines(params: {
+    stripeInvoiceId: string;
+    servicePeriodStart?: Date;
+    servicePeriodEnd?: Date;
+    stripePriceId?: string;
+    purchaseSubscriptionId?: string;
+    markChecked: boolean;
+  }): Promise<void> {
+    // Resolve the related nodes from their Stripe ids, then run the relationship check that the
+    // generic writers run, before linking them by internal id.
+    const priceId = params.stripePriceId ? await this.findPriceId({ stripePriceId: params.stripePriceId }) : undefined;
+    const purchaseId = params.purchaseSubscriptionId;
+
+    await this.neo4j.validateRelatedNodes({
+      nodes: [
+        ...(priceId ? [{ id: priceId, label: stripePriceMeta.labelName }] : []),
+        ...(purchaseId ? [{ id: purchaseId, label: stripeSubscriptionMeta.labelName }] : []),
+      ],
+    });
+
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      stripeInvoiceId: params.stripeInvoiceId,
+      servicePeriodStart: params.servicePeriodStart?.toISOString() ?? null,
+      servicePeriodEnd: params.servicePeriodEnd?.toISOString() ?? null,
+      ...(priceId ? { priceId } : {}),
+      ...(purchaseId ? { purchaseId } : {}),
+    };
+
+    const markChecked = params.markChecked ? `SET ${I}.serviceLinesCheckedAt = datetime()` : ``;
+
+    // The previous price edge is replaced, so the invoice keeps one FOR_PRICE edge.
+    const priceLink = priceId
+      ? `
+      CALL {
+        WITH ${I}
+        MATCH (price:${stripePriceMeta.labelName} {id: $priceId})
+        OPTIONAL MATCH (${I})-[previous:FOR_PRICE]->(other:${stripePriceMeta.labelName})
+        WHERE other <> price
+        DELETE previous
+        MERGE (${I})-[:FOR_PRICE]->(price)
+      }`
+      : ``;
+
+    const purchaseLink = purchaseId
+      ? `
+      CALL {
+        WITH ${I}
+        MATCH (purchase:${stripeSubscriptionMeta.labelName} {id: $purchaseId})
+        MERGE (${I})-[:FOR_PURCHASE]->(purchase)
+      }`
+      : ``;
+
+    query.query += `
+      MATCH (${I}:${stripeInvoiceMeta.labelName} {stripeInvoiceId: $stripeInvoiceId})
+      SET ${I}.servicePeriodStart = CASE WHEN $servicePeriodStart IS NOT NULL THEN datetime($servicePeriodStart) ELSE null END,
+        ${I}.servicePeriodEnd = CASE WHEN $servicePeriodEnd IS NOT NULL THEN datetime($servicePeriodEnd) ELSE null END
+      ${markChecked}
+      ${priceLink}
+      ${purchaseLink}
+      RETURN ${I}
+    `;
+
+    await this.neo4j.writeOne(query);
+  }
+
+  /**
+   * Internal id of the local StripePrice with this Stripe price id, or undefined when it is not
+   * stored. StripePrice is not company-scoped, so the scalar read needs no company predicate.
+   */
+  private async findPriceId(params: { stripePriceId: string }): Promise<string | undefined> {
+    const ids = await this.neo4j.readScalars({
+      query: `
+        MATCH (price:${stripePriceMeta.labelName} {stripePriceId: $stripePriceId})
+        RETURN price.id AS id
+        LIMIT 1
+      `,
+      queryParams: { stripePriceId: params.stripePriceId },
+      map: (row) => String(row.id),
+    });
+    return ids[0];
+  }
+
+  /**
+   * Stripe ids of the invoices whose service lines were never read (the backfill's work list).
+   * Not paginated: it serves the worker backfill, never an endpoint.
+   */
+  async findWithoutServiceLines(): Promise<string[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model, fetchAll: true });
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      WHERE ${I}.serviceLinesCheckedAt IS NULL
+      RETURN ${I}
+      ORDER BY ${I}.createdAt ASC
+    `;
+
+    const invoices: StripeInvoice[] = await this.neo4j.readMany(query);
+    return invoices.map((invoice) => invoice.stripeInvoiceId);
+  }
+
+  /** Whether a StripePrice with this Stripe price id is stored locally. */
+  async priceExists(params: { stripePriceId: string }): Promise<boolean> {
+    const total = await this.neo4j.readCount(
+      `
+      MATCH (price:${stripePriceMeta.labelName} {stripePriceId: $stripePriceId})
+      RETURN count(price) AS total
+    `,
+      { stripePriceId: params.stripePriceId },
+    );
+
+    return total > 0;
+  }
+
+  /**
+   * Every non-draft invoice of a company, for the platform administrator (WYR-98): newest first
+   * by payment date (else period start), each with its recorded price and the price's product,
+   * and `forSubscription` (whether it has a FOR_SUBSCRIPTION edge). Not paginated.
+   *
+   * The route is admin-only and the administrator belongs to no company, so the company comes
+   * from the URL, bound as `$adminCompanyId` and joined explicitly through its Stripe customer
+   * after `buildDefaultMatch()` (which lets every row through when the caller has no CLS company).
+   *
+   * @param params.companyId - the company id from the URL
+   */
+  async findForCompanyAdmin(params: { companyId: string }): Promise<StripeInvoice[]> {
+    const query = this.neo4j.initQuery({ serialiser: StripeInvoiceDescriptor.model, fetchAll: true });
+
+    query.queryParams = { ...query.queryParams, adminCompanyId: params.companyId };
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (${I})-[:BELONGS_TO]->(:${stripeCustomerMeta.labelName})-[:BELONGS_TO]->(:${companyMeta.labelName} {id: $adminCompanyId})
+      WHERE ${I}.status <> 'draft'
+      WITH DISTINCT ${I}
+      OPTIONAL MATCH (${I})-[:FOR_PRICE]->(${I}_stripePrice:${stripePriceMeta.labelName})
+      OPTIONAL MATCH (${I}_stripePrice)-[:BELONGS_TO]->(${I}_stripePrice_${stripeProductMeta.nodeName}:${stripeProductMeta.labelName})
+      WITH ${I}, ${I}_stripePrice, ${I}_stripePrice_${stripeProductMeta.nodeName},
+        EXISTS { MATCH (${I})-[:FOR_SUBSCRIPTION]->(:${stripeSubscriptionMeta.labelName}) } AS forSubscription
+      ORDER BY coalesce(${I}.paidAt, ${I}.periodStart) DESC
+      RETURN ${I}, ${I}_stripePrice, ${I}_stripePrice_${stripeProductMeta.nodeName}, forSubscription
+    `;
+
+    return this.neo4j.readMany(query);
   }
 }

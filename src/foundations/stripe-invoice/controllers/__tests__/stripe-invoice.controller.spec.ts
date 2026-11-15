@@ -15,6 +15,13 @@ vi.mock("../../../../common/guards", () => ({
   },
 }));
 
+// The admin route imports the guard from its own file
+vi.mock("../../../../common/guards/jwt.auth.admin.guard", () => ({
+  AdminJwtAuthGuard: class MockAdminJwtAuthGuardFile {
+    canActivate = vi.fn().mockReturnValue(true);
+  },
+}));
+
 // Mock the barrel export to provide only what we need
 vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
   const actual = vi.importActual("@carlonicora/nestjs-neo4jsonapi");
@@ -31,6 +38,9 @@ vi.mock("@carlonicora/nestjs-neo4jsonapi", () => {
 });
 
 import { Test, TestingModule } from "@nestjs/testing";
+import { GUARDS_METADATA, PATH_METADATA } from "@nestjs/common/constants";
+import { AdminJwtAuthGuard as RealAdminJwtAuthGuard } from "../../../../common/guards/jwt.auth.admin.guard";
+import { RoleId } from "../../../../common/constants/system.roles";
 import { FastifyReply } from "fastify";
 import { StripeInvoiceController } from "../stripe-invoice.controller";
 import { StripeInvoiceAdminService } from "../../services/stripe-invoice-admin.service";
@@ -122,6 +132,7 @@ describe("StripeInvoiceController", () => {
       listInvoices: vi.fn(),
       getInvoice: vi.fn(),
       getUpcomingInvoice: vi.fn(),
+      listForCompanyAdmin: vi.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -303,6 +314,27 @@ describe("StripeInvoiceController", () => {
       adminService.getInvoice.mockRejectedValue(error);
 
       await expect(controller.getInvoice(req, mockReply, TEST_IDS.invoiceId)).rejects.toThrow(error);
+    });
+  });
+
+  describe("listForCompanyAdmin", () => {
+    const handler = StripeInvoiceController.prototype.listForCompanyAdmin;
+
+    it("is mounted under the company and admin-only, never cached", () => {
+      expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe("companies/:companyId/stripe-invoices");
+      expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([RealAdminJwtAuthGuard]);
+      expect(Reflect.getMetadata("roles", handler)).toEqual([RoleId.Administrator]);
+      expect(Reflect.getMetadata("no-cache", handler)).toBe(true);
+    });
+
+    it("forwards the URL company and the query", async () => {
+      adminService.listForCompanyAdmin.mockResolvedValue(MOCK_INVOICES_LIST_RESPONSE);
+      const query = { page: { size: 10 } };
+
+      await controller.listForCompanyAdmin(mockReply, "company-9", query);
+
+      expect(adminService.listForCompanyAdmin).toHaveBeenCalledWith({ companyId: "company-9", query });
+      expect(mockReply.send).toHaveBeenCalledWith(MOCK_INVOICES_LIST_RESPONSE);
     });
   });
 });
