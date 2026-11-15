@@ -1,3 +1,9 @@
+## [8.30.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.0...v8.30.1) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **billing:** recording an invoice's plan and period works on the database again, so the invoice backfill and the Stripe invoice webhook no longer fail; the admin companies list returns the plan's price name (nickname, else product name) in subscriptionPlanName for every plan, not only uncommon ones ([b059d97](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b059d97a9d0fc12c7ea2412dd04edcc2fa0625b3))
+
 ## [8.30.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.29.0...v8.30.0) (2026-11-15)
 
 ### 🚀 Features
