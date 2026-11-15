@@ -1,3 +1,9 @@
+## [8.29.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.28.1...v8.29.0) (2026-11-15)
+
+### 🚀 Features
+
+* **analytics:** admin analytics reports take an audience, visitors or users, instead of a section; a session counts as users when its account existed before the visit started, so a signup visit stays with visitors; the breakdown adds an exit dimension, ranks pages by page views and entry and exit pages by sessions; the daily roll-up is stored per audience, so one visitor is no longer counted twice on a summarised day; the retention cron flags the returning-user sessions of deleted users so they stay with users; the daily-uniques endpoint, entities and repository are removed ([6dd9cd8](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/6dd9cd8a00fff0dca72304bebf84ad94f4bead09))
+
 ## [8.28.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.28.0...v8.28.1) (2026-11-15)
 
 ### 🐛 Bug Fixes
