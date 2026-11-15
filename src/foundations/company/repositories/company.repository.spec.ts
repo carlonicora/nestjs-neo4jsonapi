@@ -562,7 +562,14 @@ describe("CompanyRepository", () => {
         "currentPrice.recurringInterval = 'year' AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN 'yearly'",
       );
       expect(query).toContain("ELSE 'other'");
-      expect(query).toContain("coalesce(currentPrice.nickname, currentProductName)");
+    });
+
+    it("returns the price name for every plan: nickname, else product name", async () => {
+      const query = await findQuery();
+      const nameCase = query.slice(query.indexOf("AS subscriptionPlan,"), query.indexOf("AS subscriptionPlanName"));
+      expect(nameCase).toContain("WHEN currentPrice IS NULL THEN null");
+      expect(nameCase).toContain("ELSE coalesce(currentPrice.nickname, currentProductName)");
+      expect(nameCase).not.toContain("recurringInterval");
     });
 
     // Shared Contracts > Status table: one case per row.

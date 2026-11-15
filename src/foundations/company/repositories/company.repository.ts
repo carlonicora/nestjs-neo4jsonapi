@@ -623,7 +623,6 @@ export class CompanyRepository extends AbstractRepository<Company, typeof Compan
         END AS subscriptionPlan,
         CASE
           WHEN currentPrice IS NULL THEN null
-          WHEN currentPrice.recurringInterval IN ['month', 'year'] AND coalesce(currentPrice.recurringIntervalCount, 1) = 1 THEN null
           ELSE coalesce(currentPrice.nickname, currentProductName)
         END AS subscriptionPlanName,
         CASE

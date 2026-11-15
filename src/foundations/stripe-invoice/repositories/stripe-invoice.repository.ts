@@ -421,6 +421,7 @@ export class StripeInvoiceRepository extends AbstractRepository<
       SET ${I}.servicePeriodStart = CASE WHEN $servicePeriodStart IS NOT NULL THEN datetime($servicePeriodStart) ELSE null END,
         ${I}.servicePeriodEnd = CASE WHEN $servicePeriodEnd IS NOT NULL THEN datetime($servicePeriodEnd) ELSE null END
       ${markChecked}
+      WITH ${I}
       ${priceLink}
       ${purchaseLink}
       RETURN ${I}
