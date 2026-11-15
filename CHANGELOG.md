@@ -1,3 +1,9 @@
+## [8.28.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.28.0...v8.28.1) (2026-11-15)
+
+### 🐛 Bug Fixes
+
+* **chunk:** a chunk job queued with no company, such as a how-to reindexed by a platform administrator, no longer runs the company AI and credit checks and is indexed; before, every such job failed on a Company lookup with no id ([1326d63](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/1326d6304ba78a9aecad267c372c3263ff15cdcf))
+
 ## [8.28.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.27.0...v8.28.0) (2026-11-14)
 
 ### 🚀 Features
