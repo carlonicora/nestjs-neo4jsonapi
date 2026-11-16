@@ -1,7 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
-import { HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorService } from "@nestjs/terminus";
 import { S3HealthIndicator } from "../indicators/s3.health";
 
 // Mock AWS SDK
@@ -27,6 +27,7 @@ describe("S3HealthIndicator", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         S3HealthIndicator,
+        { provide: HealthIndicatorService, useValue: new HealthIndicatorService() },
         {
           provide: ConfigService,
           useValue: mockConfigService,
@@ -186,7 +187,9 @@ describe("S3HealthIndicator", () => {
     it("fails when enabled with a malformed key", async () => {
       configService.get.mockReturnValue(encryptedConfig({ enabled: true, key: "k1:not-32-bytes" }));
 
-      await expect(indicator.isHealthy("storage")).rejects.toThrow(HealthCheckError);
+      const result = await indicator.isHealthy("storage");
+
+      expect(result.storage.status).toBe("down");
     });
   });
 });

@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach, type Mocked } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
-import { HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorService } from "@nestjs/terminus";
 import { RedisHealthIndicator } from "../indicators/redis.health";
 import { RedisClientStorageService } from "../../redis/services/redis.client.storage.service";
 
@@ -21,6 +21,7 @@ describe("RedisHealthIndicator", () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RedisHealthIndicator,
+        { provide: HealthIndicatorService, useValue: new HealthIndicatorService() },
         {
           provide: RedisClientStorageService,
           useValue: mockRedisService,
@@ -53,57 +54,45 @@ describe("RedisHealthIndicator", () => {
       });
     });
 
-    it("should throw HealthCheckError when not connected", async () => {
+    it("should return down status when not connected", async () => {
       redisService.isConnected.mockReturnValue(false);
 
-      try {
-        await indicator.isHealthy("redis");
-        expect.fail("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(HealthCheckError);
-        expect((error as HealthCheckError).causes).toEqual({
-          redis: {
-            status: "down",
-            message: "Redis client not connected",
-          },
-        });
-      }
+      const result = await indicator.isHealthy("redis");
+
+      expect(result).toEqual({
+        redis: {
+          status: "down",
+          message: "Redis client not connected",
+        },
+      });
     });
 
-    it("should throw HealthCheckError when ping fails", async () => {
+    it("should return down status when ping fails", async () => {
       redisService.isConnected.mockReturnValue(true);
       mockRedisClient.ping.mockRejectedValue(new Error("Connection lost"));
 
-      try {
-        await indicator.isHealthy("redis");
-        expect.fail("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(HealthCheckError);
-        expect((error as HealthCheckError).causes).toEqual({
-          redis: {
-            status: "down",
-            message: "Connection lost",
-          },
-        });
-      }
+      const result = await indicator.isHealthy("redis");
+
+      expect(result).toEqual({
+        redis: {
+          status: "down",
+          message: "Connection lost",
+        },
+      });
     });
 
-    it("should throw HealthCheckError when ping returns unexpected response", async () => {
+    it("should return down status when ping returns unexpected response", async () => {
       redisService.isConnected.mockReturnValue(true);
       mockRedisClient.ping.mockResolvedValue("UNEXPECTED");
 
-      try {
-        await indicator.isHealthy("redis");
-        expect.fail("Should have thrown");
-      } catch (error) {
-        expect(error).toBeInstanceOf(HealthCheckError);
-        expect((error as HealthCheckError).causes).toEqual({
-          redis: {
-            status: "down",
-            message: "Unexpected PING response: UNEXPECTED",
-          },
-        });
-      }
+      const result = await indicator.isHealthy("redis");
+
+      expect(result).toEqual({
+        redis: {
+          status: "down",
+          message: "Unexpected PING response: UNEXPECTED",
+        },
+      });
     });
 
     it("should handle timeout", async () => {
@@ -118,9 +107,16 @@ describe("RedisHealthIndicator", () => {
       // Fake clock: the indicator's 3s race timeout fires without waiting it out.
       vi.useFakeTimers();
       try {
-        const assertion = expect(indicator.isHealthy("redis")).rejects.toThrow(HealthCheckError);
+        const resultPromise = indicator.isHealthy("redis");
         await vi.advanceTimersByTimeAsync(3000);
-        await assertion;
+        const result = await resultPromise;
+
+        expect(result).toEqual({
+          redis: {
+            status: "down",
+            message: "Health check timeout",
+          },
+        });
       } finally {
         vi.useRealTimers();
       }

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorResult, HealthIndicatorService } from "@nestjs/terminus";
 import * as fs from "fs";
 import * as os from "os";
 
@@ -11,12 +11,16 @@ interface DiskStats {
 }
 
 @Injectable()
-export class DiskHealthIndicator extends HealthIndicator {
+export class DiskHealthIndicator {
   // Minimum free space threshold: 1GB or 10% of total, whichever is smaller
   private readonly MIN_FREE_BYTES = 1024 * 1024 * 1024; // 1GB
   private readonly MIN_FREE_PERCENTAGE = 10; // 10%
 
+  constructor(private readonly healthIndicatorService: HealthIndicatorService) {}
+
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
+    const indicator = this.healthIndicatorService.check(key);
+
     try {
       const stats = await this.getDiskStats();
 
@@ -26,19 +30,16 @@ export class DiskHealthIndicator extends HealthIndicator {
       const isHealthy = stats.free >= threshold;
 
       if (!isHealthy) {
-        throw new HealthCheckError(
-          "Disk space critically low",
-          this.getStatus(key, false, {
-            message: `Low disk space: ${this.formatBytes(stats.free)} free (${(100 - stats.usedPercentage).toFixed(1)}%)`,
-            total: this.formatBytes(stats.total),
-            free: this.formatBytes(stats.free),
-            used: this.formatBytes(stats.used),
-            usedPercentage: `${stats.usedPercentage.toFixed(1)}%`,
-          }),
-        );
+        return indicator.down({
+          message: `Low disk space: ${this.formatBytes(stats.free)} free (${(100 - stats.usedPercentage).toFixed(1)}%)`,
+          total: this.formatBytes(stats.total),
+          free: this.formatBytes(stats.free),
+          used: this.formatBytes(stats.used),
+          usedPercentage: `${stats.usedPercentage.toFixed(1)}%`,
+        });
       }
 
-      return this.getStatus(key, true, {
+      return indicator.up({
         message: "Disk space healthy",
         total: this.formatBytes(stats.total),
         free: this.formatBytes(stats.free),
@@ -46,16 +47,10 @@ export class DiskHealthIndicator extends HealthIndicator {
         usedPercentage: `${stats.usedPercentage.toFixed(1)}%`,
       });
     } catch (error) {
-      if (error instanceof HealthCheckError) {
-        throw error;
-      }
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      throw new HealthCheckError(
-        "Disk health check failed",
-        this.getStatus(key, false, {
-          message: errorMessage,
-        }),
-      );
+      return indicator.down({
+        message: errorMessage,
+      });
     }
   }
 

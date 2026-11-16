@@ -101,7 +101,7 @@ export class PptxService {
 
     try {
       const ast = await officeParser.parseOffice(pptxPath, { ignoreNotes: false });
-      return ast?.toText() || "";
+      return (ast ? (await ast.to("text")).value : "") || "";
     } catch (error) {
       console.error("💥 PPTX SERVICE - Error extracting PPTX content:", error);
       return "";

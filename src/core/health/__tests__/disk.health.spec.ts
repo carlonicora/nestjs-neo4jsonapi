@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
+import { HealthIndicatorService } from "@nestjs/terminus";
 import { DiskHealthIndicator } from "../indicators/disk.health";
 
 describe("DiskHealthIndicator", () => {
@@ -7,7 +8,7 @@ describe("DiskHealthIndicator", () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [DiskHealthIndicator],
+      providers: [DiskHealthIndicator, { provide: HealthIndicatorService, useValue: new HealthIndicatorService() }],
     }).compile();
 
     indicator = module.get<DiskHealthIndicator>(DiskHealthIndicator);

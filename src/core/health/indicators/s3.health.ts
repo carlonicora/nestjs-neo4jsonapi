@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorResult, HealthIndicatorService } from "@nestjs/terminus";
 import { HeadBucketCommand } from "@aws-sdk/client-s3";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { BaseConfigInterface, ConfigS3Interface } from "../../../config/interfaces";
@@ -8,19 +8,22 @@ import { parseS3CipherOptions } from "../../../foundations/s3/cipher/s3-cipher.c
 import { createS3Client } from "../../../foundations/s3/storage-client";
 
 @Injectable()
-export class S3HealthIndicator extends HealthIndicator {
+export class S3HealthIndicator {
   private readonly TIMEOUT_MS = 5000;
 
-  constructor(private readonly config: ConfigService<BaseConfigInterface>) {
-    super();
-  }
+  constructor(
+    private readonly config: ConfigService<BaseConfigInterface>,
+    private readonly healthIndicatorService: HealthIndicatorService,
+  ) {}
 
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
+    const indicator = this.healthIndicatorService.check(key);
+
     try {
       const s3Config = this.config.get<ConfigS3Interface>("s3");
 
       if (!s3Config || !s3Config.bucket) {
-        return this.getStatus(key, true, {
+        return indicator.up({
           message: "S3 not configured - skipping check",
         });
       }
@@ -46,19 +49,16 @@ export class S3HealthIndicator extends HealthIndicator {
 
       await Promise.race([checkPromise, timeoutPromise]);
 
-      return this.getStatus(key, true, {
+      return indicator.up({
         message: `${storageType} storage connection healthy`,
         storageType,
         encryption,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      throw new HealthCheckError(
-        "S3/Storage health check failed",
-        this.getStatus(key, false, {
-          message: errorMessage,
-        }),
-      );
+      return indicator.down({
+        message: errorMessage,
+      });
     }
   }
 

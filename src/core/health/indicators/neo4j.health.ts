@@ -1,16 +1,19 @@
 import { Injectable } from "@nestjs/common";
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorResult, HealthIndicatorService } from "@nestjs/terminus";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
 
 @Injectable()
-export class Neo4jHealthIndicator extends HealthIndicator {
+export class Neo4jHealthIndicator {
   private readonly TIMEOUT_MS = 3000;
 
-  constructor(private readonly neo4jService: Neo4jService) {
-    super();
-  }
+  constructor(
+    private readonly neo4jService: Neo4jService,
+    private readonly healthIndicatorService: HealthIndicatorService,
+  ) {}
 
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
+    const indicator = this.healthIndicatorService.check(key);
+
     try {
       // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -23,17 +26,14 @@ export class Neo4jHealthIndicator extends HealthIndicator {
       // Race between query and timeout
       await Promise.race([checkPromise, timeoutPromise]);
 
-      return this.getStatus(key, true, {
+      return indicator.up({
         message: "Neo4j connection healthy",
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      throw new HealthCheckError(
-        "Neo4j health check failed",
-        this.getStatus(key, false, {
-          message: errorMessage,
-        }),
-      );
+      return indicator.down({
+        message: errorMessage,
+      });
     }
   }
 }

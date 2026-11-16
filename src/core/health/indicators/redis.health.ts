@@ -1,16 +1,19 @@
 import { Injectable } from "@nestjs/common";
-import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from "@nestjs/terminus";
+import { HealthIndicatorResult, HealthIndicatorService } from "@nestjs/terminus";
 import { RedisClientStorageService } from "../../redis/services/redis.client.storage.service";
 
 @Injectable()
-export class RedisHealthIndicator extends HealthIndicator {
+export class RedisHealthIndicator {
   private readonly TIMEOUT_MS = 3000;
 
-  constructor(private readonly redisService: RedisClientStorageService) {
-    super();
-  }
+  constructor(
+    private readonly redisService: RedisClientStorageService,
+    private readonly healthIndicatorService: HealthIndicatorService,
+  ) {}
 
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
+    const indicator = this.healthIndicatorService.check(key);
+
     try {
       // Check if Redis client is connected
       const isConnected = this.redisService.isConnected();
@@ -37,17 +40,14 @@ export class RedisHealthIndicator extends HealthIndicator {
         throw new Error(`Unexpected PING response: ${result}`);
       }
 
-      return this.getStatus(key, true, {
+      return indicator.up({
         message: "Redis connection healthy",
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      throw new HealthCheckError(
-        "Redis health check failed",
-        this.getStatus(key, false, {
-          message: errorMessage,
-        }),
-      );
+      return indicator.down({
+        message: errorMessage,
+      });
     }
   }
 }

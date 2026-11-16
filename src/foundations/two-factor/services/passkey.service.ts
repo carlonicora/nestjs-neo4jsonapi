@@ -5,7 +5,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
   type AuthenticationResponseJSON,
-  type AuthenticatorTransportFuture,
+  type AuthenticatorTransport,
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialDescriptorJSON,
   type PublicKeyCredentialRequestOptionsJSON,
@@ -413,9 +413,9 @@ export class PasskeyService {
   /**
    * Parse transports JSON string into array.
    */
-  private parseTransports(transportsJson: string): AuthenticatorTransportFuture[] {
+  private parseTransports(transportsJson: string): AuthenticatorTransport[] {
     try {
-      return JSON.parse(transportsJson) as AuthenticatorTransportFuture[];
+      return JSON.parse(transportsJson) as AuthenticatorTransport[];
     } catch {
       return [];
     }
