@@ -1,3 +1,9 @@
+## [8.30.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.1...v8.30.2) (2026-11-16)
+
+### 🐛 Bug Fixes
+
+* **deps:** the library now builds on @nestjs/terminus 12, nestjs-cls 7, officeparser 8, @simplewebauthn/server 14, necord 7 and bullmq 6.7.6, and an app using it needs @nestjs/terminus 12 and nestjs-cls 7; a failing health check returns a down status instead of throwing, and the /health response body is unchanged; PPTX text extraction reads officeparser 8's text output ([8b062a0](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8b062a067661f50ccfd39f6bf88573aa43f0c26b))
+
 ## [8.30.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.0...v8.30.1) (2026-11-15)
 
 ### 🐛 Bug Fixes
