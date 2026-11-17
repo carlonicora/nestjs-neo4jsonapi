@@ -1,3 +1,9 @@
+## [8.30.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.2...v8.30.3) (2026-11-17)
+
+### 🐛 Bug Fixes
+
+* **deps:** the library runs on stripe 23.1.0, so Stripe calls use API version 2026-10-28.endive unless STRIPE_API_VERSION is set; Redoc is gone, since nestjs-redoc never ran on Fastify, so OpenApiOptions no longer takes enableRedoc or redocPath and only Swagger UI is served ([b33966e](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/b33966ef431d7026594bbe0180e3177ae583be27))
+
 ## [8.30.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.1...v8.30.2) (2026-11-16)
 
 ### 🐛 Bug Fixes
