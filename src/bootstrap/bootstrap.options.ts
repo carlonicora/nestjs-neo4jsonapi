@@ -235,15 +235,13 @@ export interface BootstrapOptions {
 
   /**
    * OpenAPI documentation configuration.
-   * When provided, sets up Swagger UI and/or Redoc documentation endpoints.
+   * When provided, sets up the Swagger UI documentation endpoint.
    *
    * @example
    * ```typescript
    * openApi: {
    *   enableSwagger: true,
    *   swaggerPath: '/api-docs',
-   *   enableRedoc: true,
-   *   redocPath: '/docs',
    *   title: 'My API',
    *   version: '1.0.0',
    * }
@@ -355,10 +353,6 @@ export interface OpenApiOptions {
   enableSwagger?: boolean;
   /** Path for Swagger UI (default: '/api-docs') */
   swaggerPath?: string;
-  /** Enable Redoc endpoint (default: false) */
-  enableRedoc?: boolean;
-  /** Path for Redoc (default: '/docs') */
-  redocPath?: string;
   /** API documentation title */
   title?: string;
   /** API documentation description */

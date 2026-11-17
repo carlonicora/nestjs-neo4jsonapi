@@ -127,6 +127,7 @@ export const MOCK_PRODUCT: Stripe.Product = {
   shippable: null,
   statement_descriptor: null,
   tax_code: null,
+  tax_details: null,
   type: "service",
   unit_label: null,
   updated: Math.floor(Date.now() / 1000),
@@ -184,6 +185,7 @@ export const MOCK_SUBSCRIPTION: Stripe.Subscription = {
   cancellation_details: {
     comment: null,
     feedback: null,
+    feedback_option: null,
     reason: null,
   },
   collection_method: "charge_automatically",
@@ -219,6 +221,7 @@ export const MOCK_SUBSCRIPTION: Stripe.Subscription = {
         created: Math.floor(Date.now() / 1000),
         current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
         current_period_start: Math.floor(Date.now() / 1000),
+        current_trial: null,
         discounts: [],
         metadata: {},
         plan: null,
@@ -255,6 +258,7 @@ export const MOCK_SUBSCRIPTION: Stripe.Subscription = {
   trial_end: null,
   trial_settings: {
     end_behavior: {
+      billing_cycle_anchor: null,
       missing_payment_method: "create_invoice",
     },
   },
@@ -265,6 +269,7 @@ export const MOCK_SUBSCRIPTION: Stripe.Subscription = {
 export const MOCK_PAYMENT_INTENT: Stripe.PaymentIntent = {
   id: TEST_IDS.paymentIntentId,
   object: "payment_intent",
+  allowed_payment_method_types: null,
   amount: 1000,
   amount_capturable: 0,
   amount_details: {
@@ -299,6 +304,7 @@ export const MOCK_PAYMENT_INTENT: Stripe.PaymentIntent = {
   payment_method_configuration_details: null,
   payment_method_options: {},
   payment_method_types: ["card"],
+  payment_record: null,
   processing: null,
   receipt_email: null,
   review: null,
@@ -316,6 +322,7 @@ export const MOCK_PAYMENT_INTENT: Stripe.PaymentIntent = {
 export const MOCK_SETUP_INTENT: Stripe.SetupIntent = {
   id: TEST_IDS.setupIntentId,
   object: "setup_intent",
+  allowed_payment_method_types: null,
   application: null,
   attach_to_self: false,
   automatic_payment_methods: null,
@@ -587,7 +594,9 @@ export const MOCK_DISPUTE: Stripe.Dispute = {
     has_evidence: false,
     past_due: false,
     submission_count: 0,
+    submission_method: "not_submitted",
   },
+  intended_submission_method: null,
   is_charge_refundable: true,
   livemode: false,
   metadata: {},

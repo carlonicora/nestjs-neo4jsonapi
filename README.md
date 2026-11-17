@@ -34,7 +34,7 @@ A comprehensive NestJS foundation package providing JSON:API compliant APIs, Neo
 - **AI Agents**: LangChain-powered agents including GraphRAG and DRIFT for knowledge extraction, summarization, and intelligent responses
 - **DRIFT Search**: Advanced semantic search using community detection and HyDE (Hypothetical Document Embedding)
 - **OAuth 2.0 Server**: RFC 6749/7636 compliant authorization server with PKCE support
-- **OpenAPI Documentation**: Auto-generated JSON:API compliant Swagger/Redoc documentation
+- **OpenAPI Documentation**: Auto-generated JSON:API compliant Swagger documentation
 - **Authentication**: JWT-based authentication with role-based access control
 - **Background Jobs**: BullMQ integration for async job processing
 - **WebSockets**: Real-time communication support
@@ -440,8 +440,6 @@ export function getOpenApiConfig(): OpenApiOptions {
   return {
     enableSwagger: isDevelopment || process.env.ENABLE_SWAGGER === "true",
     swaggerPath: "/api-docs",
-    enableRedoc: isDevelopment || process.env.ENABLE_REDOC === "true",
-    redocPath: "/docs",
     entityDescriptors: [...allEntityDescriptors],
     title: "My API",
     description: "RESTful API following JSON:API specification",
@@ -1125,8 +1123,6 @@ bootstrap({
   openApi: {
     enableSwagger: true,
     swaggerPath: '/api-docs',
-    enableRedoc: true,
-    redocPath: '/docs',
     title: 'My API',
     description: 'RESTful API following JSON:API specification',
     version: '1.0.0',
@@ -1149,8 +1145,6 @@ bootstrap({
 | ------------------- | ------- | ------------ | -------------------------------------- |
 | `enableSwagger`     | boolean | false        | Enable Swagger UI endpoint             |
 | `swaggerPath`       | string  | '/api-docs'  | Path for Swagger UI                    |
-| `enableRedoc`       | boolean | false        | Enable Redoc endpoint                  |
-| `redocPath`         | string  | '/docs'      | Path for Redoc                         |
 | `title`             | string  | -            | API documentation title                |
 | `description`       | string  | -            | API description (supports markdown)    |
 | `version`           | string  | -            | API version                            |

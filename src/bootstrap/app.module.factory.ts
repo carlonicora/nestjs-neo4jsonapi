@@ -169,7 +169,7 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // Offline support (opt-in, default off)
           ...(options.offline ? [OfflineModule.forRoot(options.offline)] : []),
 
-          // OpenAPI module for Swagger/Redoc documentation
+          // OpenAPI module for Swagger documentation
           OpenApiModule,
 
           // User's app-specific modules (MUST be before NecordModule so Necord can discover handlers)

@@ -232,7 +232,7 @@ function setupFastifyLoggingHook(app: NestFastifyApplication, loggingService: Ap
 }
 
 /**
- * Setup OpenAPI documentation (Swagger UI and/or Redoc)
+ * Setup OpenAPI documentation (Swagger UI)
  */
 async function setupOpenApiDocs(
   app: NestFastifyApplication,
@@ -240,7 +240,7 @@ async function setupOpenApiDocs(
   loggingService: AppLoggingService,
 ): Promise<void> {
   const openApiConfig = options.openApi;
-  if (!openApiConfig?.enableSwagger && !openApiConfig?.enableRedoc) {
+  if (!openApiConfig?.enableSwagger) {
     return;
   }
 
@@ -253,7 +253,6 @@ async function setupOpenApiDocs(
     license,
     licenseUrl,
     swaggerPath = "/api-docs",
-    redocPath = "/docs",
   } = openApiConfig;
 
   // Build OpenAPI document
@@ -320,21 +319,5 @@ async function setupOpenApiDocs(
       },
     });
     loggingService.log(`Swagger UI available at ${swaggerPath}`);
-  }
-
-  // Setup Redoc
-  if (openApiConfig.enableRedoc) {
-    try {
-      const { RedocModule } = await import("nestjs-redoc");
-      await RedocModule.setup(redocPath, app as any, document, {
-        title: title,
-        sortPropsAlphabetically: true,
-        hideDownloadButton: false,
-        hideHostname: false,
-      });
-      loggingService.log(`Redoc available at ${redocPath}`);
-    } catch {
-      loggingService.warn("Failed to setup Redoc. Make sure nestjs-redoc is installed.");
-    }
   }
 }

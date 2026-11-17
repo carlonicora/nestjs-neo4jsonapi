@@ -43,6 +43,7 @@ describe("StripeProductAdminService", () => {
     shippable: null,
     statement_descriptor: null,
     tax_code: null,
+    tax_details: null,
     type: "service",
     unit_label: null,
     updated: 1234567890,
