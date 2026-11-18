@@ -110,6 +110,12 @@ export { OperatorContext } from "./operator/contexts/operator.context";
 export type { OperatorCitation, OperatorContextState, OperatorFinalAnswer } from "./operator/contexts/operator.context";
 export { defaultOperatorSystemPrompt } from "./operator/prompts/operator.system.prompt";
 export {
+  OPERATOR_SKILLS_LIST_FRAMING,
+  OPERATOR_SKILLS_LOADED_FRAMING,
+  renderLoadedSkills,
+  renderSkillList,
+} from "./operator/prompts/operator.skills.prompt";
+export {
   GRAPH_NODE_SYSTEM_PROMPT_BASE,
   renderGraphNodeSystemPrompt,
   describeDomainLayer,
@@ -120,9 +126,15 @@ export {
 } from "./operator/services/operator.checkpointer.service";
 
 // Operator (tool layer)
-export { OPERATOR_TOOL_FILTER, OPERATOR_TOOLS } from "./operator/interfaces/operator.tool.interface";
+export {
+  OPERATOR_CAPABILITY_SELECTOR,
+  OPERATOR_TOOL_FILTER,
+  OPERATOR_TOOLS,
+} from "./operator/interfaces/operator.tool.interface";
 export type {
   OperatorActionProposal,
+  OperatorCapabilitySelection,
+  OperatorCapabilitySelector,
   OperatorChunkCitation,
   OperatorRetrievalContext,
   OperatorToolCallRecord,
@@ -135,3 +147,4 @@ export { SearchDocumentsTool } from "./operator/tools/search-documents.tool";
 export { SearchCommunitiesTool } from "./operator/tools/search-communities.tool";
 export { OperatorTestActionTool } from "./operator/tools/operator-test-action.tool";
 export { OperatorToolRegistry } from "./operator/tools/operator.tool.registry";
+export { LoadSkillTool } from "./operator/tools/load-skill.tool";

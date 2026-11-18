@@ -22,6 +22,12 @@ describe("AssistantMessageDescriptor", () => {
     expect(AssistantMessageDescriptor.isCompanyScoped).toBe(true);
   });
 
+  it("declares skillsUsed as a string array", () => {
+    const fields = AssistantMessageDescriptor.fields as Record<string, any>;
+    expect(fields.skillsUsed).toBeDefined();
+    expect(fields.skillsUsed.type).toBe("string[]");
+  });
+
   it("does NOT declare a name_embedding field", () => {
     const fields = AssistantMessageDescriptor.fields as Record<string, any>;
     expect(fields.name_embedding).toBeUndefined();

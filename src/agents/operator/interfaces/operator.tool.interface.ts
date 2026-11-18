@@ -1,5 +1,6 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { AssistantClientContext } from "../../../common/interfaces/assistant.client-context.interface";
+import type { AssistantSkillSummary } from "../../../common/interfaces/assistant.skill.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import { DataLimits } from "../../../common/types/data.limits";
 import { ToolCallRecord, UserContext } from "../../graph/tools/tool.factory";
@@ -123,3 +124,25 @@ export interface OperatorToolFilter {
 
 /** Optional DI token resolving to one OperatorToolFilter. */
 export const OPERATOR_TOOL_FILTER = Symbol("OPERATOR_TOOL_FILTER");
+
+export interface OperatorCapabilitySelection {
+  /** Skills listed to the Assistant this turn. */
+  skills: AssistantSkillSummary[];
+  /** Names of skills to load before the Assistant starts. */
+  preload: string[];
+  /** Tools offered this turn. */
+  tools: OperatorToolDefinition[];
+}
+
+/** Host hook: decides what applies to one operator turn. Unbound, everything is offered and nothing is preloaded. */
+export interface OperatorCapabilitySelector {
+  select(params: {
+    question: string;
+    skills: AssistantSkillSummary[];
+    tools: OperatorToolDefinition[];
+    ctx: OperatorRetrievalContext;
+  }): Promise<OperatorCapabilitySelection>;
+}
+
+/** Optional DI token resolving to one OperatorCapabilitySelector. */
+export const OPERATOR_CAPABILITY_SELECTOR = Symbol("OPERATOR_CAPABILITY_SELECTOR");

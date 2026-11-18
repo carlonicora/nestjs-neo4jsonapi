@@ -1,5 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import { BaseMessage } from "@langchain/core/messages";
+import type { AssistantLoadedSkill } from "../../../common/interfaces/assistant.skill.interface";
 import type { CallerAttributionState } from "../../common/usage-attribution";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
 import type { EntityReference } from "../../responder/interfaces/entity.reference.interface";
@@ -50,6 +51,22 @@ export const OperatorContext = Annotation.Root({
    * transition the AssistantAction to `failed` instead of `executed`.
    */
   actionError: Annotation<string | null>({ reducer: (_, b) => b, default: () => null }),
+  /**
+   * Skills loaded for this request, in load order: named by the user, preloaded
+   * by the selector, then loaded by the model through load_skill. Concatenated,
+   * dropping a name already present. Checkpointed, so a run resumed after an
+   * approval follows the text loaded before the pause and never reads it again.
+   */
+  loadedSkills: Annotation<AssistantLoadedSkill[]>({
+    reducer: (a, b) => {
+      const out = [...a];
+      for (const skill of b ?? []) {
+        if (!out.some((s) => s.name === skill.name)) out.push(skill);
+      }
+      return out;
+    },
+    default: () => [],
+  }),
 });
 
 /**
@@ -70,9 +87,13 @@ type OperatorAttributionState = Pick<CallerAttributionState, "scopeLabel" | "ass
 /**
  * Every channel added after the published state shape froze, declared OPTIONAL
  * for the reason above: a consumer's existing state literal must keep compiling.
- * `actionError` and `inlineEntityLinks` join the attribution pair here for exactly that reason.
+ * `actionError`, `inlineEntityLinks` and `loadedSkills` join the attribution pair here for exactly that reason.
  */
-type OperatorLateState = OperatorAttributionState & { actionError?: string | null; inlineEntityLinks?: boolean };
+type OperatorLateState = OperatorAttributionState & {
+  actionError?: string | null;
+  inlineEntityLinks?: boolean;
+  loadedSkills?: AssistantLoadedSkill[];
+};
 
 /**
  * The un-widened shape LangGraph itself hands to a node callback — every

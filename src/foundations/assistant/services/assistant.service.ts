@@ -40,6 +40,11 @@ import {
   isAssistantClientContext,
   parseAssistantClientContext,
 } from "../../../common/interfaces/assistant.client-context.interface";
+import {
+  ASSISTANT_SKILL_PROVIDER,
+  AssistantSkillProvider,
+  AssistantSkillSummary,
+} from "../../../common/interfaces/assistant.skill.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import {
   ASSISTANT_SEED_CONTEXT_PROVIDERS,
@@ -69,6 +74,7 @@ import { assistantMeta } from "../entities/assistant.meta";
 import { modelRegistry } from "../../../common/registries/registry";
 import { AssistantRepository } from "../repositories/assistant.repository";
 import { AssistantMentionExtractor, ExtractedMention } from "./assistant-mention.extractor";
+import { extractNamedSkills } from "./assistant-skill-name.extractor";
 import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
 /**
@@ -147,6 +153,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     @Optional()
     @Inject(ASSISTANT_USER_MESSAGE_LISTENER)
     private readonly userMessageListener?: AssistantUserMessageListener,
+    // Bound by the opt-in Skill module. Unbound, the operator gets no skills.
+    @Optional()
+    @Inject(ASSISTANT_SKILL_PROVIDER)
+    private readonly skillProvider?: AssistantSkillProvider,
   ) {
     super(jsonApiService, assistantRepository, clsService, AssistantDescriptor.model);
   }
@@ -536,6 +546,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       ctx,
       priorMessages: [],
       question: firstMessage,
+      questionText: plainText,
       pinned,
       assistantId,
       threadId,
@@ -594,7 +605,11 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       userModuleIds,
       boundContent: this.toBoundContent(contentScope),
     });
-    const { content: newMessage, pinned } = await this.resolveUserTurnInput({
+    const {
+      content: newMessage,
+      plainText,
+      pinned,
+    } = await this.resolveUserTurnInput({
       rawContent: params.newMessage,
       ctx,
     });
@@ -639,6 +654,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       ctx,
       priorMessages,
       question: newMessage,
+      questionText: plainText,
       pinned,
       assistantId: params.assistantId,
       threadId,
@@ -732,9 +748,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     // is `<assistantId>:<userMessageId>`. A failed read must not block the
     // approval — the resume proceeds without a client context.
     let clientContext: AssistantClientContext | undefined;
+    let startMessage: AssistantMessage | undefined;
     if (userMessageId) {
       try {
-        const startMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
+        startMessage = await this.assistantMessageRepo.findById({ id: userMessageId });
         clientContext = parseAssistantClientContext(startMessage?.clientContext);
       } catch (err) {
         this.assistantLogger.warn(
@@ -750,6 +767,12 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       assistantId,
       clientContext,
     });
+
+    // The list is collected again so the model can still load a skill after the
+    // pause; skills loaded before it live in the checkpoint. Nothing is named on
+    // resume, and the question is the stored message (mention links included):
+    // the plain text the run used is not stored.
+    const offeredSkills = await this.collectOfferedSkills({});
 
     let result: OperatorRunResult;
     try {
@@ -774,6 +797,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
         messages,
         dataLimits: await this.boundDataLimits(contentScope ?? {}, resumeCtx),
         inlineEntityLinks: this.inlineEntityLinks(),
+        ...(offeredSkills ? { offeredSkills, question: startMessage?.content ?? "" } : {}),
       });
     } catch (err) {
       // Expired or missing checkpoint (or any resume failure): the action can
@@ -1221,6 +1245,27 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * The active skills offered to an operator turn, or undefined when the turn
+   * gets none: no provider bound (the app has no Skill module), or a turn
+   * limited to a how-to page. A provider failure degrades to no skills with a
+   * warning, so a skill lookup can never fail a turn or an approval.
+   */
+  private async collectOfferedSkills(params: {
+    howToMode?: boolean;
+    limitToHowToId?: string;
+  }): Promise<AssistantSkillSummary[] | undefined> {
+    if (!this.skillProvider || params.howToMode || params.limitToHowToId) return undefined;
+    try {
+      return await this.skillProvider.listActive();
+    } catch (err) {
+      this.assistantLogger.warn(
+        `collectOfferedSkills: could not list the active skills — proceeding without skills: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * Runs a single operator turn. Builds the exact message list the responder
    * path builds ([hydration system message?, ...trimmed priors, question])
    * and invokes the checkpointed operator graph under `threadId`.
@@ -1237,6 +1282,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     limitToHowToId?: string;
     clientContext?: AssistantClientContext;
     userMessageId?: string;
+    /** The message as the user reads it (no mention links): where "/name" skill names are found. */
+    questionText: string;
   }): Promise<OperatorRunResult> {
     const now = new Date();
     this.clsService.set("assistantTurnContext", {
@@ -1267,7 +1314,19 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       clientContext: params.clientContext,
     });
 
+    const offeredSkills = await this.collectOfferedSkills({
+      howToMode: params.howToMode,
+      limitToHowToId: params.limitToHowToId,
+    });
+    const namedSkillNames = offeredSkills
+      ? extractNamedSkills(
+          params.questionText,
+          offeredSkills.map((s) => s.name),
+        )
+      : undefined;
+
     return await this.operator.run({
+      ...(offeredSkills ? { offeredSkills, namedSkillNames } : {}),
       companyId: params.ctx.companyId,
       userId: params.ctx.userId,
       userModuleIds: params.ctx.userModuleIds,
@@ -1321,6 +1380,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
             suggestedQuestions: result.questions,
             inputTokens: result.tokens.input,
             outputTokens: result.tokens.output,
+            skillsUsed: result.skillsUsed ?? [],
           },
           relationships: {
             assistant: { data: { type: assistantMeta.type, id: params.assistantId } },

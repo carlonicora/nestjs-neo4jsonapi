@@ -169,6 +169,18 @@ export interface BootstrapOptions {
   accountDeletion?: AccountDeletionModuleConfig;
 
   /**
+   * Assistant skills. Forwarded to `FoundationsModule.forRoot({ skill })`.
+   * OPT-IN: omitted, the Skill module is not mounted (no routes, no Skill
+   * permission section to seed) and the Assistant answers exactly as before.
+   *
+   * @example
+   * ```typescript
+   * skill: {}
+   * ```
+   */
+  skill?: Record<string, never>;
+
+  /**
    * Configuration for the email-automation feature module.
    * Forwarded to `FoundationsModule.forRoot({ emailAutomation })`, exactly like
    * `contentExtension` / `referral` / `userActivity` / `handbook` / `howTo` above —

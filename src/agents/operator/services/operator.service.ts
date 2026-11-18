@@ -1,10 +1,16 @@
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { BaseCheckpointSaver, Command, END, START, StateGraph, interrupt } from "@langchain/langgraph";
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { z } from "zod";
 import { AgentMessageType } from "../../../common/enums/agentmessage.type";
 import type { AssistantClientContext } from "../../../common/interfaces/assistant.client-context.interface";
+import {
+  ASSISTANT_SKILL_PROVIDER,
+  type AssistantLoadedSkill,
+  type AssistantSkillProvider,
+  type AssistantSkillSummary,
+} from "../../../common/interfaces/assistant.skill.interface";
 import { MessageInterface } from "../../../common/interfaces/message.interface";
 import type { AssistantSeedContext } from "../../../common/interfaces/seed.context.interface";
 import { modelRegistry } from "../../../common/registries/registry";
@@ -17,12 +23,22 @@ import { buildScopeAttribution } from "../../common/usage-attribution";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
 import type { EntityReference } from "../../responder/interfaces/entity.reference.interface";
 import { OperatorCitation, OperatorContext, OperatorContextState } from "../contexts/operator.context";
-import type {
-  OperatorRetrievalContext,
-  OperatorToolCallRecord,
-  OperatorToolDefinition,
+import {
+  OPERATOR_CAPABILITY_SELECTOR,
+  type OperatorCapabilitySelection,
+  type OperatorCapabilitySelector,
+  type OperatorRetrievalContext,
+  type OperatorToolCallRecord,
+  type OperatorToolDefinition,
 } from "../interfaces/operator.tool.interface";
+import {
+  OPERATOR_SKILLS_LIST_FRAMING,
+  OPERATOR_SKILLS_LOADED_FRAMING,
+  renderLoadedSkills,
+  renderSkillList,
+} from "../prompts/operator.skills.prompt";
 import { defaultOperatorSystemPrompt } from "../prompts/operator.system.prompt";
+import { LOAD_SKILL_TOOL_NAME, LoadSkillTool } from "../tools/load-skill.tool";
 import { OperatorToolRegistry } from "../tools/operator.tool.registry";
 import { OperatorCheckpointerService } from "./operator.checkpointer.service";
 
@@ -78,6 +94,8 @@ export type OperatorRunResult =
        * failed rather than executed.
        */
       actionError?: string;
+      /** Names of the skills the run loaded, in load order, without duplicates. */
+      skillsUsed: string[];
     }
   | {
       kind: "pending_approval";
@@ -127,6 +145,14 @@ export class OperatorService {
     private readonly toolRegistry: OperatorToolRegistry,
     private readonly checkpointer: OperatorCheckpointerService,
     private readonly configService: ConfigService<BaseConfigInterface>,
+    // Skills are opt-in: unbound, no list, no load_skill and an unchanged
+    // finalise call. All three are declared last and optional so existing
+    // positional constructions keep compiling.
+    @Optional() @Inject(ASSISTANT_SKILL_PROVIDER) private readonly skillProvider?: AssistantSkillProvider,
+    @Optional()
+    @Inject(OPERATOR_CAPABILITY_SELECTOR)
+    private readonly capabilitySelector?: OperatorCapabilitySelector,
+    @Optional() private readonly loadSkillTool?: LoadSkillTool,
   ) {
     const prompts = this.configService.get<ConfigPromptsInterface>("prompts");
     this.systemPrompt = prompts?.operator ?? defaultOperatorSystemPrompt;
@@ -159,8 +185,12 @@ export class OperatorService {
     clientContext?: AssistantClientContext;
     /** Id of the user message that started the turn; handed to the tool context. */
     userMessageId?: string;
+    /** Active skills offered this turn. Absent = no skills (the host has none bound). */
+    offeredSkills?: AssistantSkillSummary[];
+    /** Names of skills the user named with "/name"; loaded before the agent starts. */
+    namedSkillNames?: string[];
   }): Promise<OperatorRunResult> {
-    const app = await this.compileGraph(
+    const { app, skills } = await this.compileGraph(
       {
         companyId: params.companyId,
         userId: params.userId,
@@ -180,10 +210,25 @@ export class OperatorService {
       },
       params.seedContexts,
       params.inlineEntityLinks,
+      params.offeredSkills || params.namedSkillNames
+        ? { offered: params.offeredSkills ?? [], named: params.namedSkillNames ?? [], question: params.question }
+        : undefined,
     );
 
+    // Skills named by the user or preloaded by the selector are read once, here,
+    // and checkpointed: a resume after an approval never reads them again.
+    const loaded = await this.loadUpFront(skills.upFront);
+    const initialMessages = this.buildInitialMessages(params.messages, params.question);
+    if (loaded.length) {
+      const skillsMessage = new SystemMessage(OPERATOR_SKILLS_LOADED_FRAMING + "\n\n" + renderLoadedSkills(loaded));
+      // Directly after the hydration system message when there is one, otherwise first.
+      const at = initialMessages[0]?.getType() === "system" ? 1 : 0;
+      initialMessages.splice(at, 0, skillsMessage);
+    }
+
     const initialState: Partial<OperatorContextState> = {
-      messages: this.buildInitialMessages(params.messages, params.question),
+      messages: initialMessages,
+      loadedSkills: loaded,
       companyId: params.companyId,
       userId: params.userId,
       userModuleIds: params.userModuleIds,
@@ -232,7 +277,14 @@ export class OperatorService {
     clientContext?: AssistantClientContext;
     /** Id of the user message that started the turn; handed to the tool context. */
     userMessageId?: string;
+    /** Active skills offered again on resume, so the model can still load one. Absent = no skills. */
+    offeredSkills?: AssistantSkillSummary[];
+    /** The question that started the turn, for the capability selector. */
+    question?: string;
   }): Promise<OperatorRunResult> {
+    // Skills loaded before the pause live in the checkpoint: nothing is loaded
+    // here and no message is added.
+    //
     // The resumed run rebuilds its tools from this context, so the scope must
     // be supplied again — the frozen checkpoint does not carry the closures.
     // That includes the cost attribution: the operator's OWN calls read
@@ -240,7 +292,7 @@ export class OperatorService {
     // tools are rebuilt from this context alone, so without these two a resumed
     // unscoped turn would lose the thread fallback for its SUB-AGENT spend
     // while billing its own spend fine.
-    const app = await this.compileGraph(
+    const { app } = await this.compileGraph(
       {
         companyId: params.companyId,
         userId: params.userId,
@@ -258,6 +310,7 @@ export class OperatorService {
       },
       params.seedContexts,
       params.inlineEntityLinks,
+      params.offeredSkills ? { offered: params.offeredSkills, named: [], question: params.question ?? "" } : undefined,
     );
 
     const finalState = (await app.invoke(new Command({ resume: { approved: params.approved } }), {
@@ -272,6 +325,7 @@ export class OperatorService {
     ctx: OperatorRetrievalContext,
     seedContexts?: AssistantSeedContext[],
     inlineEntityLinks?: boolean,
+    skills?: { offered: AssistantSkillSummary[]; named: string[]; question: string },
   ) {
     const saver: BaseCheckpointSaver = await this.checkpointer.getSaver();
 
@@ -286,14 +340,25 @@ export class OperatorService {
     // the records new to each pass into checkpointed state. The array identity
     // is shared with the tool closures: push into it, never reassign it.
     const recorder: ToolCallRecord[] = [];
-    const definitions = this.toolRegistry.build(ctx, recorder);
+    const selection = await this.selectCapabilities(this.toolRegistry.build(ctx, recorder), ctx, recorder, skills);
+    const definitions = selection.tools;
     const toolMap = new Map<string, OperatorToolDefinition>(definitions.map((d) => [d.tool.name, d]));
     const tools = definitions.map((d) => d.tool);
+
+    // The skill list travels as an extra system prompt beside the seed block
+    // (decision P7), so it reaches the agent whichever main prompt the app supplies.
+    const skillsPrompt = selection.listed.length
+      ? OPERATOR_SKILLS_LIST_FRAMING + "\n\n" + renderSkillList(selection.listed)
+      : null;
 
     const workflow = new StateGraph(OperatorContext)
       .addNode("agent", async (state) => {
         const response = await this.llm.callStep({
-          systemPrompts: seedPrompt ? [this.systemPrompt, seedPrompt] : [this.systemPrompt],
+          systemPrompts: [
+            this.systemPrompt,
+            ...(seedPrompt ? [seedPrompt] : []),
+            ...(skillsPrompt ? [skillsPrompt] : []),
+          ],
           skipResponseLanguage: true,
           messages: state.messages,
           tools,
@@ -346,6 +411,8 @@ export class OperatorService {
         const ordered = [...calls.filter((c) => isDestructive(c.name)), ...calls.filter((c) => !isDestructive(c.name))];
 
         const toolMessages: ToolMessage[] = [];
+        /** Skills load_skill returned in this pass; the reducer drops names already loaded. */
+        const newlyLoaded: AssistantLoadedSkill[] = [];
         let destructiveHandled = false;
         /** Set on every pass that EXECUTED an approved destructive call: the error, or null. */
         let actionOutcome: { error: string | null } | undefined;
@@ -407,7 +474,18 @@ export class OperatorService {
           }
 
           try {
+            // The record this call pushes lands at this index. Success of a
+            // load_skill call is read from that record, never by parsing the
+            // returned text: it is company-written and may itself look like an error.
+            const recordIdx = recorder.length;
             const result = await definition.tool.invoke(call.args ?? {});
+            if (call.name === LOAD_SKILL_TOOL_NAME) {
+              const record = recorder[recordIdx];
+              const name = (call.args as { name?: unknown } | undefined)?.name;
+              if (record?.tool === LOAD_SKILL_TOOL_NAME && !record.error && typeof name === "string") {
+                newlyLoaded.push({ name, instructions: typeof result === "string" ? result : JSON.stringify(result) });
+              }
+            }
             // Only an APPROVED destructive call reaches this line (a denied one
             // continued above), so its outcome is the action's outcome. A write
             // tool reports a refusal as a returned `{ error }`, not a throw, so
@@ -440,6 +518,7 @@ export class OperatorService {
           // Written only by a pass that executed an approved destructive call, so
           // a read-only pass never clears (nor invents) an action's outcome.
           ...(actionOutcome ? { actionError: actionOutcome.error } : {}),
+          ...(newlyLoaded.length ? { loadedSkills: newlyLoaded } : {}),
         };
       })
       .addNode("finalise", async (state) => {
@@ -463,6 +542,12 @@ export class OperatorService {
         // of a run checkpointed before the channel existed.
         const linksOn = (state.inlineEntityLinks ?? inlineEntityLinks) === true;
 
+        // Changes only when a skill was loaded (decision P6): the loaded
+        // instructions travel as data through the {skills} placeholder, behind
+        // a static framing. With nothing loaded the call is exactly as before.
+        const loadedSkills = state.loadedSkills ?? [];
+        const skillsBlock = loadedSkills.length ? renderLoadedSkills(loadedSkills) : null;
+
         // The seed block reaches this step too: it is context the agent step answered from, so the
         // final reply may state its facts. Without it, a fact the seed gave would be reported as not
         // found. It travels as data through the {seed} placeholder; the system prompt stays static.
@@ -471,6 +556,7 @@ export class OperatorService {
             question: state.question,
             conversation: transcript,
             ...(seedPrompt ? { seed: seedPrompt } : {}),
+            ...(skillsBlock ? { skills: skillsBlock } : {}),
           },
           outputSchema: finalAnswerSchema,
           systemPrompts: [this.systemPrompt],
@@ -488,7 +574,8 @@ export class OperatorService {
               : "Produce the final reply: `answer` is the message for the user (built only from facts in the conversation above), `questions` is up to three short follow-up questions the user might ask next. " +
                 "If the conversation contains no tool results that answer the question, `answer` must say plainly that the information could not be found — do not guess and do not invent records. ") +
             "Never state that an action was performed (created, updated, deleted, executed) unless a tool result in the conversation confirms that exact action." +
-            (linksOn ? " " + OPERATOR_INLINE_LINKS_INSTRUCTION : ""),
+            (linksOn ? " " + OPERATOR_INLINE_LINKS_INSTRUCTION : "") +
+            (skillsBlock ? "\n\n" + OPERATOR_SKILLS_LOADED_FRAMING + "\n\n{skills}\n\n" : ""),
           metadata: { agent: "operator", node: "finalise", companyId: state.companyId },
           ...buildScopeAttribution({
             tokenUsageType: TokenUsageType.Operator,
@@ -531,7 +618,45 @@ export class OperatorService {
       .addEdge("tools", "agent")
       .addEdge("finalise", END);
 
-    return workflow.compile({ checkpointer: saver });
+    return {
+      app: workflow.compile({ checkpointer: saver }),
+      skills: { listed: selection.listed, upFront: selection.upFront },
+    };
+  }
+
+  /**
+   * What applies to this turn. Without a bound provider, or with no skills for
+   * the turn, the tools are exactly the registry's and nothing is listed. With
+   * one, the host selector (or the pass-through) picks the listed skills, the
+   * preloaded ones and the tools; load_skill is added after that, so no tool
+   * filter or selector removes it, whenever any skill may be loaded.
+   */
+  private async selectCapabilities(
+    built: OperatorToolDefinition[],
+    ctx: OperatorRetrievalContext,
+    recorder: ToolCallRecord[],
+    skills?: { offered: AssistantSkillSummary[]; named: string[]; question: string },
+  ): Promise<{ tools: OperatorToolDefinition[]; listed: AssistantSkillSummary[]; upFront: string[] }> {
+    const provider = this.skillProvider;
+    if (!provider || !skills || !this.loadSkillTool) return { tools: built, listed: [], upFront: [] };
+
+    const selection: OperatorCapabilitySelection = this.capabilitySelector
+      ? await this.capabilitySelector.select({ question: skills.question, skills: skills.offered, tools: built, ctx })
+      : { skills: skills.offered, preload: [], tools: built };
+
+    // Named by the user first, then preloaded by the selector.
+    const upFront = [...new Set([...skills.named, ...selection.preload])];
+    const allowed = [...new Set([...selection.skills.map((s) => s.name), ...upFront])];
+    const tools = [...selection.tools];
+    if (allowed.length) tools.push(this.loadSkillTool.build({ allowed, provider, recorder }));
+    return { tools, listed: selection.skills, upFront };
+  }
+
+  /** Reads the skills to load before the agent starts, kept in the order asked. */
+  private async loadUpFront(names: string[]): Promise<AssistantLoadedSkill[]> {
+    if (!names.length || !this.skillProvider) return [];
+    const loaded = await this.skillProvider.load({ names });
+    return names.map((name) => loaded.find((s) => s.name === name)).filter((s): s is AssistantLoadedSkill => !!s);
   }
 
   /**
@@ -658,6 +783,7 @@ export class OperatorService {
       toolCalls: finalState.toolCalls ?? [],
       tokens: finalState.tokens ?? { input: 0, output: 0 },
       ...(finalState.actionError ? { actionError: finalState.actionError } : {}),
+      skillsUsed: (finalState.loadedSkills ?? []).map((s) => s.name),
     };
   }
 }

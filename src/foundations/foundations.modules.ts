@@ -55,6 +55,7 @@ import { UserModule } from "./user/user.module";
 import { UserActivityModule } from "./user-activity/user-activity.module";
 import { UserActivityModuleConfig } from "./user-activity/interfaces/user-activity.config.interface";
 import { WaitlistModule } from "./waitlist/waitlist.module";
+import { SkillModule } from "./skill/skill.module";
 
 /**
  * Configuration options for FoundationsModule.
@@ -83,6 +84,12 @@ export interface FoundationsModuleConfig {
    * Omitted, no route, cron, queue, processor or login hook exists.
    */
   accountDeletion?: AccountDeletionModuleConfig;
+  /**
+   * Assistant skills. OPT-IN: mounted only when this key is present (`skill: {}`).
+   * Omitted, no skill route exists, the Assistant has no skills and no Skill
+   * permission section needs a seed.
+   */
+  skill?: Record<string, never>;
   /** Optional configuration for the email-automation feature module (the triggers the app declares) */
   emailAutomation?: EmailAutomationModuleConfig;
   /** Optional override for the analytics feature module (normally switched on by `ANALYTICS_ENABLED=true`) */
@@ -219,6 +226,8 @@ export class FoundationsModule {
       ...(config?.accountDeletion
         ? [{ classRef: AccountDeletionModule, factory: () => AccountDeletionModule.forRoot(config.accountDeletion) }]
         : []),
+      // Opt-in: mounted only when the app passes a `skill` config.
+      ...(config?.skill ? [{ classRef: SkillModule, factory: (): DynamicModule => ({ module: SkillModule }) }] : []),
     ].filter((entry) => !excluded.has(entry.classRef));
 
     return {

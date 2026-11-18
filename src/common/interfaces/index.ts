@@ -1,5 +1,6 @@
 export * from "./assistant.client-context.interface";
 export * from "./assistant.scope.interface";
+export * from "./assistant.skill.interface";
 export * from "./assistant.title.interface";
 export * from "./assistant.user-message.interface";
 export * from "./authenticated.request.interface";

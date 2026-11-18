@@ -39,6 +39,7 @@ export * from "./referral";
 export * from "./relevancy";
 export * from "./role";
 export * from "./s3";
+export * from "./skill";
 export * from "./stripe";
 export * from "./tokenusage";
 export * from "./two-factor";

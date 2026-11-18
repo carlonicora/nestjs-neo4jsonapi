@@ -17,6 +17,8 @@ export type AssistantMessage = Entity & {
   content: string;
   position: number;
   suggestedQuestions?: string[];
+  /** Assistant answers only: names of the skills the answer followed, as they were at the time. */
+  skillsUsed?: string[];
   inputTokens?: number;
   outputTokens?: number;
   trace?: string;
@@ -38,6 +40,7 @@ export const AssistantMessageDescriptor = defineEntity<AssistantMessage>()({
     content: { type: "string", required: true },
     position: { type: "number", required: true },
     suggestedQuestions: { type: "string[]" },
+    skillsUsed: { type: "string[]" },
     inputTokens: { type: "number" },
     outputTokens: { type: "number" },
     trace: { type: "string" },
