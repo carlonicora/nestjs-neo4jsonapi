@@ -1,3 +1,9 @@
+## [8.31.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.3...v8.31.0) (2026-11-18)
+
+### 🚀 Features
+
+* **skill:** apps that pass skill: {} get Assistant skills, named instructions a company writes for how the Assistant does one kind of work, and the platform Administrator writes global ones every company gets; companies list, create, edit, delete and switch skills off, and editing a global skill makes a company copy; the Administrator manages global skills on skills/global and any one company's skills on skills/companies/:companyId with the same rules as that company's administrators; the step-by-step Assistant sees the active skills, loads one with a load_skill tool when the request fits or when the user writes /name, follows it in its reply, and each answer stores the names it used in skillsUsed; an app that omits skill mounts nothing and its Assistant answers as before ([8098114](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/8098114cfe88f75532927f7bd67ca5e004cb21f8))
+
 ## [8.30.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.2...v8.30.3) (2026-11-17)
 
 ### 🐛 Bug Fixes
