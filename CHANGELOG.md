@@ -1,3 +1,9 @@
+## [8.32.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.31.0...v8.32.0) (2026-11-18)
+
+### 🚀 Features
+
+* **skill:** the step-by-step Assistant now uses skills the way Claude Code does: it sees only each skill's name and description, a skill's text reaches it only as the result of a load_skill call at any step, and /name adds that same call and result after the user's message; the Assistant's own last message is the answer for every run, and the final call only writes up to three follow-up questions, or the answer when the Assistant gave none; a skill loaded in a conversation stays for its later messages, read again by name from the company's active skills; reply style in the default operator prompt is a default a loaded skill can change, while facts, record ids, claimed actions and approvals stay fixed; OPERATOR_SKILLS_LOADED_FRAMING and renderLoadedSkills stay exported but are deprecated, and renderLoadedSkillResult is new ([3b2b197](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/3b2b197fd4f0d8f9a8f22bdab6b5c4bf298d00fe))
+
 ## [8.31.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.30.3...v8.31.0) (2026-11-18)
 
 ### 🚀 Features
