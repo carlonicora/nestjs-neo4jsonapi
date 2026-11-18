@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AssistantSkillProvider } from "../../../common/interfaces/assistant.skill.interface";
 import { ToolCallRecord, ToolFactory } from "../../graph/tools/tool.factory";
 import type { OperatorToolDefinition } from "../interfaces/operator.tool.interface";
+import { renderLoadedSkillResult } from "../prompts/operator.skills.prompt";
 
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 
@@ -16,7 +17,9 @@ const inputSchema = z.object({
 type LoadSkillRefusal = { error: string; allowed: string[] };
 
 /**
- * load_skill - returns the instructions of one skill the turn offers.
+ * load_skill - returns the instructions of one skill the turn offers, behind a
+ * one-line "is loaded, follow it" header (renderLoadedSkillResult). The result
+ * is the only place the skill's text reaches the conversation.
  *
  * Read-only and never approved. It loads only names in `allowed` (the listed
  * skills plus the ones the user named or the selector preloaded); any other
@@ -35,7 +38,7 @@ export class LoadSkillTool {
     const tool = new DynamicStructuredTool({
       name: LOAD_SKILL_TOOL_NAME,
       description:
-        "Load the instructions of one skill from the skills list. Call it before doing work a skill applies to, then follow the instructions it returns.",
+        "Load one skill from the skills list by its name. Call it when the request fits the skill, at any step, then follow the instructions it returns.",
       schema: inputSchema,
       func: async (input) => {
         const result = await this.invoke(input, params);
@@ -63,7 +66,7 @@ export class LoadSkillTool {
         if (!skill) {
           return { error: "The skill " + input.name + " is not available.", allowed: params.allowed };
         }
-        return skill.instructions;
+        return renderLoadedSkillResult(skill);
       },
       params.recorder,
     );

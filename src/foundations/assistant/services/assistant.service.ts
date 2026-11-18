@@ -769,7 +769,8 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     });
 
     // The list is collected again so the model can still load a skill after the
-    // pause; skills loaded before it live in the checkpoint. Nothing is named on
+    // pause; skills loaded before it (carried from earlier answers included) are
+    // load_skill messages in the checkpoint, so nothing is carried or named on
     // resume, and the question is the stored message (mention links included):
     // the plain text the run used is not stored.
     const offeredSkills = await this.collectOfferedSkills({});
@@ -1266,6 +1267,21 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * The skill names earlier answers of the thread used (`skillsUsed` on assistant
+   * messages), in order of first use, without duplicates.
+   */
+  private carriedSkillNames(priorMessages: AssistantMessage[]): string[] {
+    const names: string[] = [];
+    for (const message of priorMessages) {
+      if (message.role !== "assistant") continue;
+      for (const name of message.skillsUsed ?? []) {
+        if (typeof name === "string" && name && !names.includes(name)) names.push(name);
+      }
+    }
+    return names;
+  }
+
+  /**
    * Runs a single operator turn. Builds the exact message list the responder
    * path builds ([hydration system message?, ...trimmed priors, question])
    * and invokes the checkpointed operator graph under `threadId`.
@@ -1324,9 +1340,13 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
           offeredSkills.map((s) => s.name),
         )
       : undefined;
+    // A loaded skill stays for the rest of the conversation: the skills earlier
+    // answers used are handed on by name and read again through the company's
+    // provider, which leaves out any skill since removed or switched off.
+    const carriedSkillNames = offeredSkills ? this.carriedSkillNames(params.priorMessages) : undefined;
 
     return await this.operator.run({
-      ...(offeredSkills ? { offeredSkills, namedSkillNames } : {}),
+      ...(offeredSkills ? { offeredSkills, namedSkillNames, carriedSkillNames } : {}),
       companyId: params.ctx.companyId,
       userId: params.ctx.userId,
       userModuleIds: params.ctx.userModuleIds,

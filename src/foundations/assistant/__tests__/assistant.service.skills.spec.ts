@@ -70,7 +70,13 @@ function makePersistedAction() {
 
 describe("AssistantService — skills", () => {
   const buildSut = (
-    opts: { provider?: AssistantSkillProvider; runResult?: any; startMessageThrows?: boolean } = {},
+    opts: {
+      provider?: AssistantSkillProvider;
+      runResult?: any;
+      startMessageThrows?: boolean;
+      /** Thread history, newest first (the order findByRelated returns). */
+      history?: any[];
+    } = {},
   ) => {
     const operator = {
       run: vi.fn(async () => opts.runResult ?? COMPLETED_RESULT),
@@ -95,7 +101,7 @@ describe("AssistantService — skills", () => {
       linkCitations: vi.fn(async () => undefined),
       setTrace: vi.fn(async () => undefined),
       getNextPosition: vi.fn(async () => 0),
-      findByRelated: vi.fn(async () => []),
+      findByRelated: vi.fn(async () => opts.history ?? []),
       findById: vi.fn(async ({ id }: any) => {
         if (opts.startMessageThrows && id === "um-1") throw new Error("read failed");
         return makePersistedMessage({ id });
@@ -224,6 +230,43 @@ describe("AssistantService — skills", () => {
     expect(args.namedSkillNames).toEqual(["humanizer"]);
   });
 
+  it("carries the skills earlier answers used into a follow-up turn, in order of first use", async () => {
+    const provider = makeProvider();
+    const history = [
+      makePersistedMessage({ id: "m-4", role: "assistant", position: 3, skillsUsed: ["humanizer", "email"] }),
+      makePersistedMessage({ id: "m-3", role: "user", position: 2, skillsUsed: ["not-from-a-user"] }),
+      makePersistedMessage({ id: "m-2", role: "assistant", position: 1, skillsUsed: ["email"] }),
+      makePersistedMessage({ id: "m-1", role: "user", position: 0 }),
+    ];
+    const { service, operator } = buildSut({ provider, history });
+    await service.appendMessageOperator({
+      assistantId: "asst-1",
+      companyId: "c",
+      userId: "u",
+      newMessage: "and now the next one",
+    });
+
+    const args = operator.run.mock.calls[0][0];
+    expect(args.carriedSkillNames).toEqual(["email", "humanizer"]);
+    expect(args.namedSkillNames).toEqual([]);
+  });
+
+  it("carries nothing on a first message, and nothing without a provider", async () => {
+    const withProvider = buildSut({ provider: makeProvider() });
+    await withProvider.service.createWithFirstMessageOperator({ companyId: "c", userId: "u", firstMessage: "hello" });
+    expect(withProvider.operator.run.mock.calls[0][0].carriedSkillNames).toEqual([]);
+
+    const history = [makePersistedMessage({ id: "m-2", role: "assistant", skillsUsed: ["email"] })];
+    const withoutProvider = buildSut({ history });
+    await withoutProvider.service.appendMessageOperator({
+      assistantId: "asst-1",
+      companyId: "c",
+      userId: "u",
+      newMessage: "next",
+    });
+    expect(withoutProvider.operator.run.mock.calls[0][0]).not.toHaveProperty("carriedSkillNames");
+  });
+
   it.each([{ howToMode: true }, { limitToHowToId: "how-1" }])(
     "offers no skills in a how-to turn (%o)",
     async (mode) => {
@@ -235,6 +278,7 @@ describe("AssistantService — skills", () => {
       const args = operator.run.mock.calls[0][0];
       expect(args).not.toHaveProperty("offeredSkills");
       expect(args).not.toHaveProperty("namedSkillNames");
+      expect(args).not.toHaveProperty("carriedSkillNames");
     },
   );
 
@@ -258,6 +302,8 @@ describe("AssistantService — skills", () => {
     expect(args.offeredSkills).toEqual(ACTIVE);
     expect(args.question).toBe(makePersistedMessage().content);
     expect(args).not.toHaveProperty("namedSkillNames");
+    // Carried skills were placed in the checkpoint by the run; resume adds none.
+    expect(args).not.toHaveProperty("carriedSkillNames");
     expect(answerOf(createdMessages).data.attributes.skillsUsed).toEqual(["email"]);
   });
 

@@ -112,6 +112,7 @@ export { defaultOperatorSystemPrompt } from "./operator/prompts/operator.system.
 export {
   OPERATOR_SKILLS_LIST_FRAMING,
   OPERATOR_SKILLS_LOADED_FRAMING,
+  renderLoadedSkillResult,
   renderLoadedSkills,
   renderSkillList,
 } from "./operator/prompts/operator.skills.prompt";

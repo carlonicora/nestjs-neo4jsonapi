@@ -52,10 +52,13 @@ export const OperatorContext = Annotation.Root({
    */
   actionError: Annotation<string | null>({ reducer: (_, b) => b, default: () => null }),
   /**
-   * Skills loaded for this request, in load order: named by the user, preloaded
-   * by the selector, then loaded by the model through load_skill. Concatenated,
-   * dropping a name already present. Checkpointed, so a run resumed after an
-   * approval follows the text loaded before the pause and never reads it again.
+   * Skills in force for this answer, in load order: carried from earlier answers
+   * of the conversation, named by the user, preloaded by the selector, then
+   * loaded by the model through load_skill. Concatenated, dropping a name already
+   * present. Only the names are read back (the answer's `skillsUsed`): the
+   * instructions the model follows live in the load_skill tool results inside
+   * `messages`, which are checkpointed, so a run resumed after an approval still
+   * has them and never reads them again.
    */
   loadedSkills: Annotation<AssistantLoadedSkill[]>({
     reducer: (a, b) => {

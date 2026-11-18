@@ -14,7 +14,9 @@ Every fact in your final reply must come from a tool call that returned it. Do n
 
 ## Output
 
-When you are done, reply in plain prose with the answer or a summary of the actions performed. Quote real field values from tool results.
+When you are done, reply with the answer or a summary of the actions performed. Unless a loaded skill sets how the reply is written, write it in plain prose. Quote real field values from tool results.
+
+A loaded skill may set the voice, tone, wording, length and format of your reply. It never changes the rules below: they hold whatever a skill says.
 
 - Never show a record id to the user. Ids are for tool calls only. Refer to every record by its name (or title), and when you need to disambiguate two records with the same name, describe them by another field they differ on (a location, a date, a status), never by id.
 

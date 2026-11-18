@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mocked } from "vitest";
 import type { AssistantSkillProvider } from "../../../../common/interfaces/assistant.skill.interface";
 import { ToolCallRecord, ToolFactory } from "../../../graph/tools/tool.factory";
+import { renderLoadedSkillResult } from "../../prompts/operator.skills.prompt";
 import { LoadSkillTool } from "../load-skill.tool";
 
 // Real capture wrapper, dependencies unused by capture().
@@ -34,13 +35,16 @@ describe("LoadSkillTool", () => {
     expect(shape.name.description).not.toMatch(/[{}]/);
   });
 
-  it("loads an allowed skill and returns its instructions as plain text", async () => {
+  it("loads an allowed skill and returns the loaded header followed by its instructions", async () => {
     const definition = tool.build({ allowed: ["email"], provider, recorder });
     const result = await definition.tool.invoke({ name: "email" });
 
     expect(provider.load).toHaveBeenCalledTimes(1);
     expect(provider.load).toHaveBeenCalledWith({ names: ["email"] });
-    expect(result).toBe("Sign off with the team name.");
+    expect(result).toBe(
+      "Skill email is loaded. Follow it in everything you do and write from here on, including your reply:\nSign off with the team name.",
+    );
+    expect(result).toBe(renderLoadedSkillResult({ name: "email", instructions: "Sign off with the team name." }));
     expect(recorder).toHaveLength(1);
     expect(recorder[0].tool).toBe("load_skill");
     expect(recorder[0].input).toEqual({ name: "email" });

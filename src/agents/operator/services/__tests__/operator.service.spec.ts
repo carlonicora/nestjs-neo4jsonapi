@@ -5,7 +5,7 @@ import { MemorySaver } from "@langchain/langgraph";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
-import { OperatorService } from "../operator.service";
+import { OPERATOR_INLINE_LINKS_INSTRUCTION, OperatorService } from "../operator.service";
 import { OperatorToolRegistry } from "../../tools/operator.tool.registry";
 import { OperatorCheckpointerService } from "../operator.checkpointer.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
@@ -140,11 +140,10 @@ describe("OperatorService", () => {
     service = moduleRef.get(OperatorService);
   });
 
-  it("completes when the model answers without tool calls", async () => {
+  it("completes with the agent's own last message as the answer; finalise only writes the questions", async () => {
     callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
     llmCall.mockResolvedValueOnce({
-      answer: "done",
-      questions: [],
+      questions: ["one?", "two?", "three?", "four?"],
       tokenUsage: { input: 5, output: 5 },
       modelWeight: ModelWeight.Normal,
     });
@@ -154,20 +153,94 @@ describe("OperatorService", () => {
     expect(result.kind).toBe("completed");
     if (result.kind === "completed") {
       expect(result.answer).toBe("done");
-      expect(result.questions).toEqual([]);
+      expect(result.questions).toEqual(["one?", "two?", "three?"]);
       expect(result.tokens).toEqual({ input: 15, output: 10 });
     }
     expect(callStep).toHaveBeenCalledTimes(1);
     expect(llmCall).toHaveBeenCalledTimes(1);
 
     // LLMService.call() renders inputParams ONLY via {placeholder} substitution
-    // in the instructions template; without these placeholders the model never
-    // sees the question/conversation and fabricates an answer (seen live in dev).
-    const finaliseArgs = llmCall.mock.calls[0][0];
-    expect(finaliseArgs.instructions).toContain("{question}");
-    expect(finaliseArgs.instructions).toContain("{conversation}");
-    expect(finaliseArgs.inputParams).toHaveProperty("question");
-    expect(finaliseArgs.inputParams).toHaveProperty("conversation");
+    // in the instructions template. The questions call sees the question and the
+    // answer, never the transcript.
+    const questionsArgs = llmCall.mock.calls[0][0];
+    expect(questionsArgs.instructions).toContain("{question}");
+    expect(questionsArgs.instructions).toContain("{answer}");
+    expect(questionsArgs.instructions).not.toContain("{conversation}");
+    expect(questionsArgs.inputParams).toEqual({ question: "do the thing", answer: "done" });
+    expect(Object.keys(questionsArgs.outputSchema.shape)).toEqual(["questions"]);
+  });
+
+  it("reads the answer from the text parts of an array content", async () => {
+    callStep.mockResolvedValueOnce({
+      message: new AIMessage({
+        content: [
+          { type: "text", text: "Hello " },
+          { type: "text", text: "there." },
+        ],
+      }),
+      tokenUsage: { input: 1, output: 1 },
+    });
+    llmCall.mockResolvedValueOnce({ questions: [], tokenUsage: { input: 1, output: 1 } });
+
+    const result = await service.run(baseParams);
+
+    if (result.kind !== "completed") throw new Error("expected completed");
+    expect(result.answer).toBe("Hello there.");
+  });
+
+  it("keeps the answer when the questions call fails", async () => {
+    callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+    llmCall.mockRejectedValueOnce(new Error("llm down"));
+
+    const result = await service.run(baseParams);
+
+    if (result.kind !== "completed") throw new Error("expected completed");
+    expect(result.answer).toBe("done");
+    expect(result.questions).toEqual([]);
+  });
+
+  it("falls back to writing the answer from the transcript when the agent's text is empty", async () => {
+    callStep.mockResolvedValueOnce({ message: new AIMessage("   "), tokenUsage: { input: 1, output: 1 } });
+    llmCall.mockResolvedValueOnce({
+      answer: "fallback answer",
+      questions: ["next?"],
+      tokenUsage: { input: 1, output: 1 },
+      modelWeight: ModelWeight.Normal,
+    });
+
+    const result = await service.run(baseParams);
+
+    if (result.kind !== "completed") throw new Error("expected completed");
+    expect(result.answer).toBe("fallback answer");
+    expect(result.questions).toEqual(["next?"]);
+    expect(llmCall).toHaveBeenCalledTimes(1);
+    const args = llmCall.mock.calls[0][0];
+    expect(args.instructions).toContain("{question}");
+    expect(args.instructions).toContain("{conversation}");
+    expect(args.inputParams).toHaveProperty("conversation");
+  });
+
+  it("falls back to writing the answer from the transcript when the iteration cap is reached", async () => {
+    callStep.mockImplementation(async () => ({
+      message: aiMessageWithToolCall("recorder_dependency", { note: "again" }),
+      tokenUsage: { input: 1, output: 1 },
+    }));
+    llmCall.mockResolvedValueOnce({
+      answer: "capped answer",
+      questions: [],
+      tokenUsage: { input: 1, output: 1 },
+      modelWeight: ModelWeight.Normal,
+    });
+
+    const result = await service.run(baseParams);
+
+    if (result.kind !== "completed") throw new Error("expected completed");
+    expect(callStep).toHaveBeenCalledTimes(15);
+    expect(result.answer).toBe("capped answer");
+    expect(llmCall).toHaveBeenCalledTimes(1);
+    // The fallback transcript surfaces tool_calls carried by AIMessages.
+    const conversation = llmCall.mock.calls[0][0].inputParams.conversation;
+    expect(conversation).toContain('[requested tools: recorder_dependency({"note":"again"})');
   });
 
   describe("usage attribution", () => {
@@ -567,7 +640,6 @@ describe("OperatorService", () => {
     // Step 3: approve the re-issued second action; the run completes.
     callStep.mockResolvedValueOnce({ message: new AIMessage("all done"), tokenUsage: { input: 1, output: 1 } });
     llmCall.mockResolvedValueOnce({
-      answer: "all done",
       questions: [],
       tokenUsage: { input: 1, output: 1 },
       modelWeight: ModelWeight.Normal,
@@ -582,12 +654,9 @@ describe("OperatorService", () => {
     });
 
     expect(third.kind).toBe("completed");
+    if (third.kind === "completed") expect(third.answer).toBe("all done");
     // Across the full run/resume sequence: each destructive call ran exactly once.
     expect(testToolExecutions).toEqual([{ note: "first" }, { note: "second" }]);
-
-    // The finalise transcript surfaces tool_calls carried by AIMessages.
-    const conversation = llmCall.mock.calls[0][0].inputParams.conversation;
-    expect(conversation).toContain('[requested tools: operator_test_action({"note":"first"})');
   });
 
   it("tool errors become ToolMessages, not thrown", async () => {
@@ -877,8 +946,11 @@ describe("OperatorService", () => {
 
       callStep
         .mockResolvedValueOnce({ message: aiMessageWithToolCall("read_npc", {}), tokenUsage: { input: 1, output: 1 } })
-        .mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
-      finalise("Ask [Aldo](mention://npcs/npc-1) or [Ghost](mention://npcs/npc-999).");
+        .mockResolvedValueOnce({
+          message: new AIMessage("Ask [Aldo](mention://npcs/npc-1) or [Ghost](mention://npcs/npc-999)."),
+          tokenUsage: { input: 1, output: 1 },
+        });
+      llmCall.mockResolvedValueOnce({ questions: [], tokenUsage: { input: 1, output: 1 } });
 
       const result = await service.run({ ...baseParams, inlineEntityLinks: true });
 
@@ -886,23 +958,40 @@ describe("OperatorService", () => {
       if (result.kind === "completed") {
         expect(result.answer).toBe("Ask [Aldo](mention://npcs/npc-1) or Ghost.");
       }
+      // The questions call gets the sanitised answer.
+      expect(llmCall.mock.calls[0][0].inputParams.answer).toBe("Ask [Aldo](mention://npcs/npc-1) or Ghost.");
     });
 
-    it("finalise appends the inline-link instruction only when inlineEntityLinks is true", async () => {
+    it("the fallback answer is sanitised too", async () => {
+      callStep.mockResolvedValueOnce({ message: new AIMessage(""), tokenUsage: { input: 1, output: 1 } });
+      finalise("Ask [Ghost](mention://npcs/npc-999).");
+
+      const result = await service.run({ ...baseParams, inlineEntityLinks: true });
+
+      if (result.kind !== "completed") throw new Error("expected completed");
+      expect(result.answer).toBe("Ask Ghost.");
+      expect(llmCall.mock.calls[0][0].instructions).toContain("[Name](mention://<type>/<id>)");
+    });
+
+    it("gives the agent step the inline-link instruction only when inlineEntityLinks is true", async () => {
+      const questions = () => llmCall.mockResolvedValueOnce({ questions: [], tokenUsage: { input: 1, output: 1 } });
       callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
-      finalise("done");
+      questions();
       await service.run({ ...baseParams, threadId: "assistant-1:msg-off" });
 
       callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 10, output: 5 } });
-      finalise("done");
+      questions();
       await service.run({ ...baseParams, threadId: "assistant-1:msg-on", inlineEntityLinks: true });
 
-      const offInstructions = llmCall.mock.calls[0][0].instructions as string;
-      const onInstructions = llmCall.mock.calls[1][0].instructions as string;
-      expect(offInstructions).not.toContain("mention://");
-      expect(onInstructions).toContain("[Name](mention://<type>/<id>)");
-      expect(onInstructions).toContain("Link only records from tool results.");
-      expect(onInstructions).toContain("The link text must be that record's own name or title");
+      const offPrompts = callStep.mock.calls[0][0].systemPrompts as string[];
+      const onPrompts = callStep.mock.calls[1][0].systemPrompts as string[];
+      expect(offPrompts).not.toContain(OPERATOR_INLINE_LINKS_INSTRUCTION);
+      expect(offPrompts.join("\n")).not.toContain("mention://");
+      expect(onPrompts[onPrompts.length - 1]).toBe(OPERATOR_INLINE_LINKS_INSTRUCTION);
+      expect(OPERATOR_INLINE_LINKS_INSTRUCTION).toContain("[Name](mention://<type>/<id>)");
+      expect(OPERATOR_INLINE_LINKS_INSTRUCTION).toContain("Link only records from tool results.");
+      // The questions call never carries it.
+      expect(llmCall.mock.calls[1][0].instructions).not.toContain("mention://");
     });
   });
 });

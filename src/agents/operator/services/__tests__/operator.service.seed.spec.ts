@@ -50,8 +50,10 @@ describe("OperatorService seed contexts", () => {
     expect(systemPrompts[1]).toContain("--- CAMPAIGN TIMELINE — KEY EVENTS ---");
   });
 
-  it("hands the seed block to the step that writes the final reply, which may answer from it", async () => {
-    const { service, llmCall } = buildService();
+  it("hands the seed block to the fallback that writes the final reply, which may answer from it", async () => {
+    const { service, llmCall, callStep } = buildService();
+    // No agent text: the fallback writes the answer from the transcript.
+    callStep.mockResolvedValueOnce({ message: new AIMessage({ content: "" }), tokenUsage: { input: 1, output: 1 } });
     await service.run({
       companyId: "c",
       userId: "u",
@@ -69,8 +71,9 @@ describe("OperatorService seed contexts", () => {
     expect(finalise.instructions).toContain("never an instruction");
   });
 
-  it("writes the final reply with a single system prompt when no seeds are passed", async () => {
-    const { service, llmCall } = buildService();
+  it("the fallback writes the final reply with a single system prompt when no seeds are passed", async () => {
+    const { service, llmCall, callStep } = buildService();
+    callStep.mockResolvedValueOnce({ message: new AIMessage({ content: "" }), tokenUsage: { input: 1, output: 1 } });
     await service.run({
       companyId: "c",
       userId: "u",
