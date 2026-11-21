@@ -1,4 +1,17 @@
-import { Controller, Get, Inject, NotFoundException, Optional, Param, Post, Req, Res, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  NotFoundException,
+  Optional,
+  Param,
+  Post,
+  PreconditionFailedException,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import { FastifyReply, FastifyRequest } from "fastify";
 import { Audit, CacheInvalidate } from "../../../common/decorators";
 import { JwtAuthGuard } from "../../../common/guards/jwt.auth.guard";
@@ -11,6 +24,7 @@ import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AuditService } from "../../audit/services/audit.service";
 import { AssistantService } from "../../assistant/services/assistant.service";
 import { AssistantMessageDescriptor } from "../../assistant-message/entities/assistant-message";
+import { AssistantActionApproveDto } from "../dtos/assistant-action-approve.dto";
 import { AssistantActionDescriptor } from "../entities/assistant-action";
 import { assistantActionMeta } from "../entities/assistant-action.meta";
 import { AssistantActionService } from "../services/assistant-action.service";
@@ -58,12 +72,26 @@ export class AssistantActionController {
    * POST /assistant-actions/:actionId/approve — resolve the pending action and
    * resume the frozen operator run with approval. Synchronously returns the
    * final assistant message (JSON:API) with the resolved action included.
+   *
+   * Optional body: `{ data: { type: "assistant-actions", id, attributes: { edits } } }`
+   * where `edits` maps field names of a `create_entity` proposal to the values
+   * the user typed on the approval card. No body, no `edits` or `{}` approves
+   * the action exactly as proposed.
    */
   @Post(`${assistantActionMeta.endpoint}/:actionId/approve`)
   @CacheInvalidate(assistantActionMeta, "actionId")
-  async approve(@Req() request: AuthenticatedRequest, @Res() reply: FastifyReply, @Param("actionId") actionId: string) {
+  async approve(
+    @Req() request: AuthenticatedRequest,
+    @Res() reply: FastifyReply,
+    @Param("actionId") actionId: string,
+    @Body() body?: AssistantActionApproveDto,
+  ) {
+    if (body?.data && body.data.id !== actionId) {
+      throw new PreconditionFailedException("AssistantAction id does not match the {json:api} id");
+    }
     await this.gate(request);
-    return this.resolve(reply, actionId, true);
+    const edits = body?.data?.attributes?.edits;
+    return this.resolve(reply, actionId, true, edits && Object.keys(edits).length ? edits : undefined);
   }
 
   /**
@@ -94,8 +122,12 @@ export class AssistantActionController {
     if (this.creditGate) await this.creditGate.validateCredits({ companyId });
   }
 
-  private async resolve(reply: FastifyReply, actionId: string, approved: boolean) {
-    const { assistantMessage, action } = await this.assistants.resolveAction({ actionId, approved });
+  private async resolve(reply: FastifyReply, actionId: string, approved: boolean, edits?: Record<string, string>) {
+    const { assistantMessage, action } = await this.assistants.resolveAction({
+      actionId,
+      approved,
+      ...(edits ? { edits } : {}),
+    });
 
     const document: any = await this.jsonApi.buildSingle(AssistantMessageDescriptor.model, assistantMessage);
     const actionDocument: any = await this.jsonApi.buildSingle(AssistantActionDescriptor.model, action);

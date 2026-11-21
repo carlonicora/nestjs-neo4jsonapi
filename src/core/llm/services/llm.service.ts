@@ -770,6 +770,33 @@ export class LLMService {
   }
 
   /**
+   * Runs one provider request and, when it dies on its per-request timeout,
+   * RE-ISSUES IT ONCE through the same `invoke` — the same model instance, so
+   * its `openRouterEscalatingFetch` closure escalates on the second request and
+   * OpenRouter reroutes off the provider that went quiet. Neither LangChain's
+   * p-retry (it does not retry an abort) nor `runWithTransientRetry` (a timeout
+   * is not a transient network error) recovers this stall on their own.
+   *
+   * The deadline's own abort (`signal.aborted`) is NOT a stall: the whole call
+   * is over, so it passes through. Any other error, and a second timeout,
+   * propagate unchanged.
+   */
+  private async invokeWithStallReissue<R>(
+    invoke: () => Promise<R>,
+    options: { signal?: AbortSignal; attemptTimeoutMs: number; addWarning?: (msg: string) => void },
+  ): Promise<R> {
+    try {
+      return await invoke();
+    } catch (error) {
+      if (!isTimeoutError(error) || options.signal?.aborted) throw error;
+      const msg = `[LLMService] attempt timed out after ${Math.round(options.attemptTimeoutMs / 1000)}s — re-issuing with provider fallbacks escalated`;
+      console.warn(msg);
+      options.addWarning?.(msg);
+      return await invoke();
+    }
+  }
+
+  /**
    * Records token usage for cost/observability attribution. Never throws —
    * a persistence failure logs a warning and the LLM call continues, so
    * observability problems can't break the primary request path.
@@ -1486,15 +1513,24 @@ export class LLMService {
         iterationsUsed++;
         const iterationStartedAt = Date.now();
         // Call model with tools
-        let toolResponse: Awaited<ReturnType<typeof modelWithTools.invoke>>;
-        try {
-          toolResponse =
-            Object.keys(configOptions).length > 0
-              ? await modelWithTools.invoke(conversationMessages, configOptions)
-              : await modelWithTools.invoke(conversationMessages);
-        } catch (error) {
-          throw LLMService.normaliseEmptyResponseError(error);
-        }
+        // A stalled iteration is re-issued once on the same instance (see
+        // `invokeWithStallReissue`); only the answering response is recorded.
+        const toolResponse = await this.invokeWithStallReissue(
+          async () => {
+            try {
+              return Object.keys(configOptions).length > 0
+                ? await modelWithTools.invoke(conversationMessages, configOptions)
+                : await modelWithTools.invoke(conversationMessages);
+            } catch (error) {
+              throw LLMService.normaliseEmptyResponseError(error);
+            }
+          },
+          {
+            signal: bounds?.signal,
+            attemptTimeoutMs: bounds?.attemptTimeoutMs ?? params.timeout ?? 0,
+            addWarning,
+          },
+        );
 
         session.recordResponse({
           content: typeof (toolResponse as any).content === "string" ? (toolResponse as any).content : "",
@@ -1799,18 +1835,13 @@ export class LLMService {
       }
     };
 
-    let response: StructuredOutputResponse<T>;
-    try {
-      response = await invokeStructured();
-    } catch (error) {
-      // The deadline's own abort is NOT a stall to reroute around — it means the
-      // whole call is over, so let it through.
-      if (!isTimeoutError(error) || bounds?.signal?.aborted) throw error;
-      const msg = `[LLMService] attempt timed out after ${Math.round((bounds?.attemptTimeoutMs ?? 0) / 1000)}s — re-issuing with provider fallbacks escalated`;
-      console.warn(msg);
-      addWarning(msg);
-      response = await invokeStructured();
-    }
+    // The deadline's own abort is NOT a stall to reroute around — it means the
+    // whole call is over, so the helper lets it through.
+    const response: StructuredOutputResponse<T> = await this.invokeWithStallReissue(invokeStructured, {
+      signal: bounds?.signal,
+      attemptTimeoutMs: bounds?.attemptTimeoutMs ?? 0,
+      addWarning,
+    });
 
     // Extract token usage with type guard (includes tool iteration tokens)
     const raw = isValidRaw(response.raw) ? response.raw : undefined;
@@ -2960,6 +2991,8 @@ export class LLMService {
     // rate and over-bill every operator row. Credited exactly as `call()` and
     // `streamCall` credit theirs.
     let cached = 0;
+    // Stall re-issues, reported in the dump like `call()` reports its own.
+    const warnings: string[] = [];
     try {
       const baseModel = this.modelService.getLLM({
         temperature: params.temperature,
@@ -2975,10 +3008,17 @@ export class LLMService {
 
       session.startIteration("tool-loop", conversationMessages);
 
+      // A request that dies on its per-request timeout is re-issued once on the
+      // same instance (escalating the OpenRouter pin); the attempt's own signal
+      // being aborted means `runBounded`'s deadline fired, which is not retried.
       const response = (await this.runWithTransientRetry(label, attemptTimeoutMs, (signal) =>
-        modelWithTools.invoke(
-          conversationMessages,
-          params.metadata ? { metadata: params.metadata, signal } : { signal },
+        this.invokeWithStallReissue(
+          () =>
+            modelWithTools.invoke(
+              conversationMessages,
+              params.metadata ? { metadata: params.metadata, signal } : { signal },
+            ),
+          { signal, attemptTimeoutMs, addWarning: (w) => warnings.push(w) },
         ),
       )) as AIMessage;
 
@@ -3001,7 +3041,7 @@ export class LLMService {
       session.close({
         finalStatus: "success",
         totalTokens: { input, output, cached },
-        warnings: [],
+        warnings,
         parseFallbacks: [],
       });
 
@@ -3024,7 +3064,7 @@ export class LLMService {
         errorMessage: message,
         errorStack: stack,
         totalTokens: { input, output, cached },
-        warnings: [],
+        warnings,
         parseFallbacks: [],
       });
       await this.persistUsageOnFailure(

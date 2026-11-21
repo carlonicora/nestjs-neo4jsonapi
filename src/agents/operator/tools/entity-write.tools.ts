@@ -7,7 +7,7 @@ import { BlockNoteService } from "../../../core/blocknote/services/blocknote.ser
 import type { JsonApiDTOData } from "../../../core/neo4j/abstracts/abstract.service";
 import { CatalogEntity, CatalogRelationship } from "../../graph/interfaces/graph.catalog.interface";
 import { GraphCatalogService } from "../../graph/services/graph.catalog.service";
-import { convertRichtextFields, RICHTEXT_HINT } from "../../graph/services/richtext.write";
+import { convertRichtextFields, RICHTEXT_HINT, toStoredRichtext } from "../../graph/services/richtext.write";
 import { ScopeGuard } from "../../graph/services/scope.guard";
 import {
   isFieldWritable,
@@ -19,6 +19,8 @@ import {
 import { ToolCallRecord, ToolFactory, UserContext } from "../../graph/tools/tool.factory";
 import {
   OperatorActionProposal,
+  OperatorApprovalEdits,
+  OperatorEditableFieldKind,
   OperatorRetrievalContext,
   OperatorToolDefinition,
   ProposalRef,
@@ -226,6 +228,7 @@ export class EntityWriteTools {
         summarise: (args) => this.summariseCreate(args),
         present: (args) => this.presentCreate(args, ctx),
         validate: async (args) => this.rejection(await this.prepareCreate(args as unknown as CreateEntityInput, ctx)),
+        applyEdits: (args, edits) => this.applyCreateEdits(args, edits),
       },
       {
         tool: new DynamicStructuredTool({
@@ -858,11 +861,57 @@ export class EntityWriteTools {
       if (refs.length) relationships[name] = refs;
     }
 
+    const { attributes, editable } = await this.presentEditableAttributes(args, entity);
     return {
       type,
-      attributes: this.presentAttributes(args),
+      attributes,
       ...(Object.keys(relationships).length ? { relationships } : {}),
+      editable,
     };
+  }
+
+  /**
+   * The create proposal's attributes plus the fields the user may edit on the
+   * approval card: every string value of a field the catalog lets this caller
+   * write. A richtext field is presented as a serialised BlockNote document (the
+   * card edits it in a BlockNote editor); without the converter, or when the
+   * conversion fails, the raw string stays and the field is still richtext. The
+   * tool args are never touched.
+   */
+  private async presentEditableAttributes(
+    args: Record<string, unknown>,
+    entity: CatalogEntity | null | undefined,
+  ): Promise<{ attributes: Record<string, unknown>; editable: Record<string, OperatorEditableFieldKind> }> {
+    const attributes = this.presentAttributes(args);
+    const editable: Record<string, OperatorEditableFieldKind> = {};
+    if (!entity) return { attributes, editable };
+
+    const byName = new Map(entity.fields.map((field) => [field.name, field]));
+    for (const [name, value] of Object.entries(attributes)) {
+      const field = byName.get(name);
+      if (!field || typeof value !== "string" || !isFieldWritable(entity, name)) continue;
+      if (field.kind?.type !== "richtext") {
+        editable[name] = "text";
+        continue;
+      }
+      editable[name] = "richtext";
+      if (!this.blockNote) continue;
+      try {
+        attributes[name] = await toStoredRichtext(this.blockNote, value);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`create proposal: could not convert richtext field "${name}" to a document: ${message}`);
+      }
+    }
+    return { attributes, editable };
+  }
+
+  /**
+   * create_entity: the approval-card edits replace the matching `fields` values.
+   * Returns new args; type and relationships are carried over unchanged.
+   */
+  private applyCreateEdits(args: Record<string, unknown>, edits: OperatorApprovalEdits): Record<string, unknown> {
+    return { ...args, fields: { ...this.toValueMap(args.fields), ...edits } };
   }
 
   private async presentUpdate(args: Record<string, unknown>, ctx: UserContext): Promise<OperatorActionProposal> {

@@ -17,6 +17,26 @@ import { GraphCatalogService } from "../../../agents/graph/services/graph.catalo
 import { ScopeGuard } from "../../../agents/graph/services/scope.guard";
 import { UserModulesRepository } from "../../../agents/graph/repositories/user-modules.repository";
 import { parseBlockNoteDocument } from "../../../agents/graph/services/richtext.write";
+
+/**
+ * Whether an approval-card edit still holds text. A rich-text field arrives as a
+ * serialised BlockNote document, and an emptied editor still sends one (an
+ * empty paragraph), so its text runs and mentions are read instead of the raw string.
+ */
+function hasEditText(value: string): boolean {
+  const nodes = parseBlockNoteDocument(value);
+  if (!nodes) return value.trim() !== "";
+  const walk = (list: unknown[]): boolean =>
+    list.some((node) => {
+      if (!node || typeof node !== "object") return false;
+      const block = node as { type?: unknown; text?: unknown; content?: unknown; children?: unknown };
+      if (block.type === "mention") return true;
+      if (typeof block.text === "string" && block.text.trim() !== "") return true;
+      if (Array.isArray(block.content) && walk(block.content)) return true;
+      return Array.isArray(block.children) && walk(block.children);
+    });
+  return walk(nodes);
+}
 import { EntityReference } from "../../../agents/responder/interfaces/entity.reference.interface";
 import type { ToolCallRecord, UserContext } from "../../../agents/graph/tools/tool.factory";
 import type { UnifiedTrace } from "../../../agents/responder/interfaces/unified.trace.interface";
@@ -682,19 +702,83 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
   }
 
   /**
+   * Refuses approval-card edits the action cannot take, with a plain message:
+   * only a `create_entity` action, only fields the model proposed as text, only
+   * string values, and a field the model filled may not be emptied.
+   */
+  private checkApprovalEdits(action: AssistantAction, edits: Record<string, string>): Record<string, string> {
+    if (action.toolName !== "create_entity") {
+      throw new BadRequestException("Only a new record can be edited before approving.");
+    }
+    let fields: Record<string, unknown> = {};
+    try {
+      const args = JSON.parse(action.toolArgs ?? "{}") as { fields?: unknown };
+      if (args?.fields && typeof args.fields === "object" && !Array.isArray(args.fields)) {
+        fields = args.fields as Record<string, unknown>;
+      }
+    } catch {
+      throw new BadRequestException("This action cannot be edited.");
+    }
+    for (const [name, value] of Object.entries(edits)) {
+      if (!Object.prototype.hasOwnProperty.call(fields, name) || typeof fields[name] !== "string") {
+        throw new BadRequestException(`The field "${name}" cannot be edited on this action.`);
+      }
+      if (typeof value !== "string") {
+        throw new BadRequestException(`The new value of "${name}" must be text.`);
+      }
+      if ((fields[name] as string).trim() !== "" && !hasEditText(value)) {
+        throw new BadRequestException(`The field "${name}" cannot be left empty.`);
+      }
+    }
+    return edits;
+  }
+
+  /** Writes the approved, edited call back onto the action (toolArgs + proposal attributes). */
+  private async storeApprovedEdits(action: AssistantAction, edits: Record<string, string>): Promise<void> {
+    const args = JSON.parse(action.toolArgs) as Record<string, unknown>;
+    const toolArgs = JSON.stringify({ ...args, fields: { ...(args.fields as Record<string, unknown>), ...edits } });
+
+    let proposal: string | undefined;
+    if (action.proposal) {
+      try {
+        const parsed = JSON.parse(action.proposal) as Record<string, unknown>;
+        const attributes =
+          parsed.attributes && typeof parsed.attributes === "object"
+            ? (parsed.attributes as Record<string, unknown>)
+            : {};
+        proposal = JSON.stringify({ ...parsed, attributes: { ...attributes, ...edits } });
+      } catch {
+        this.assistantLogger.warn(`resolveAction: corrupt proposal JSON on action=${action.id} — kept as it was`);
+      }
+    }
+
+    await this.assistantActionRepo.updateApprovedCall({ id: action.id, toolArgs, ...(proposal ? { proposal } : {}) });
+  }
+
+  /**
    * Approve or deny a pending AssistantAction and resume the frozen operator
    * run. The status transition is guarded atomically in Cypher
    * (`resolveStatus`) BEFORE the resume so a double approve/deny loses with a
    * 409 and never re-executes the tool. The final assistant message is
    * appended at the current end of the thread (chatting may have continued)
    * and pushed over the websocket so any open chat updates live.
+   *
+   * `edits` (approve only): the values the user typed on a `create_entity`
+   * approval card. They are checked BEFORE the transition, so a bad edit is a
+   * 400 and the action stays pending; once approved, the stored toolArgs and
+   * proposal take the edited values and the resumed run writes them.
    */
-  async resolveAction(params: { actionId: string; approved: boolean }): Promise<{
+  async resolveAction(params: { actionId: string; approved: boolean; edits?: Record<string, string> }): Promise<{
     assistantMessage: AssistantMessage;
     action: AssistantAction;
   }> {
     const action = await this.assistantActionRepo.findById({ id: params.actionId });
     const resolvedTo: AssistantActionStatus = params.approved ? "approved" : "denied";
+
+    const edits =
+      params.approved && params.edits && Object.keys(params.edits).length
+        ? this.checkApprovalEdits(action, params.edits)
+        : undefined;
 
     const transitioned = await this.assistantActionRepo.resolveStatus({
       id: params.actionId,
@@ -704,6 +788,10 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
     if (!transitioned) {
       throw new ConflictException("This action has already been resolved or has expired.");
     }
+
+    // The stored call is the one that runs: a reload of the card shows the
+    // values the user approved, not the model's.
+    if (edits) await this.storeApprovedEdits(action, edits);
 
     const [assistantId, userMessageId] = action.threadId.split(":");
     const userId = this.clsService.get("userId");
@@ -780,6 +868,7 @@ export class AssistantService extends AbstractService<Assistant, typeof Assistan
       result = await this.operator.resume({
         threadId: action.threadId,
         approved: params.approved,
+        ...(edits ? { edits } : {}),
         companyId,
         userId,
         userModuleIds,

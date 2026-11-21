@@ -1,4 +1,4 @@
-import { ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AssistantService, MAX_MESSAGES_TO_LLM } from "../services/assistant.service";
 import { AssistantMentionExtractor } from "../services/assistant-mention.extractor";
@@ -144,6 +144,7 @@ describe("AssistantService — operator turns", () => {
     const assistantActionRepo = {
       findById: vi.fn(async ({ id }: any) => makePersistedAction({ id })),
       resolveStatus: vi.fn(async () => true),
+      updateApprovedCall: vi.fn(async () => true),
     } as any;
 
     const webSocketService = { sendMessageToUser: vi.fn(async () => undefined) } as any;
@@ -758,6 +759,127 @@ describe("AssistantService — operator turns", () => {
         expect.objectContaining({ userModuleIds: [], contentId: undefined, contentType: undefined }),
       );
       expect(result.assistantMessage.id).toBeDefined();
+    });
+  });
+
+  describe("resolveAction with approval edits", () => {
+    const createAction = (overrides: Partial<any> = {}) =>
+      makePersistedAction({
+        toolName: "create_entity",
+        toolArgs: JSON.stringify({
+          type: "npcs",
+          fields: { name: "Marcus", description: "# Old", rank: 3, title: "" },
+          relationships: { related: "npc-2" },
+        }),
+        proposal: JSON.stringify({
+          type: "npcs",
+          attributes: { name: "Marcus", description: "[doc]", rank: 3, title: "" },
+          editable: { name: "text", description: "richtext", title: "text" },
+        }),
+        ...overrides,
+      });
+
+    const refusals: Array<[string, Partial<any>, Record<string, unknown>]> = [
+      ["the action is not a create", { toolName: "update_entity" }, { name: "Zed" }],
+      ["a key the proposal does not have", {}, { nickname: "Zed" }],
+      ["a field whose original value is not a string", {}, { rank: "4" }],
+      ["a non-string value", {}, { name: 42 }],
+      ["a filled field emptied", {}, { name: "   " }],
+      [
+        "a filled rich-text field emptied (an empty paragraph document)",
+        {},
+        { description: JSON.stringify([{ id: "b1", type: "paragraph", props: {}, content: [], children: [] }]) },
+      ],
+    ];
+
+    for (const [label, overrides, edits] of refusals) {
+      it(`refuses ${label} with a 400 and leaves the action pending`, async () => {
+        const { service, operator, assistantActionRepo } = buildSut();
+        (assistantActionRepo.findById as any).mockResolvedValue(createAction(overrides));
+
+        await expect(
+          service.resolveAction({ actionId: "act-1", approved: true, edits: edits as Record<string, string> }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(assistantActionRepo.resolveStatus).not.toHaveBeenCalled();
+        expect(assistantActionRepo.updateApprovedCall).not.toHaveBeenCalled();
+        expect(operator.resume).not.toHaveBeenCalled();
+      });
+    }
+
+    it("lets an empty original field receive a value", async () => {
+      const { service, operator, assistantActionRepo } = buildSut();
+      (assistantActionRepo.findById as any).mockResolvedValue(createAction());
+      await service.resolveAction({ actionId: "act-1", approved: true, edits: { title: "Captain" } });
+      expect(operator.resume).toHaveBeenCalledWith(expect.objectContaining({ edits: { title: "Captain" } }));
+    });
+
+    it("stores the merged toolArgs and proposal after the transition, then resumes with the edits", async () => {
+      const { service, operator, assistantActionRepo } = buildSut();
+      (assistantActionRepo.findById as any).mockResolvedValue(createAction());
+      const edits = {
+        name: "Marcus the Bold",
+        description: '[{"type":"paragraph","content":[{"type":"text","text":"Bold."}]}]',
+      };
+
+      await service.resolveAction({ actionId: "act-1", approved: true, edits });
+
+      expect(assistantActionRepo.updateApprovedCall).toHaveBeenCalledTimes(1);
+      const stored = (assistantActionRepo.updateApprovedCall as any).mock.calls[0][0];
+      expect(stored.id).toBe("act-1");
+      expect(JSON.parse(stored.toolArgs)).toEqual({
+        type: "npcs",
+        fields: {
+          name: "Marcus the Bold",
+          description: '[{"type":"paragraph","content":[{"type":"text","text":"Bold."}]}]',
+          rank: 3,
+          title: "",
+        },
+        relationships: { related: "npc-2" },
+      });
+      expect(JSON.parse(stored.proposal)).toEqual({
+        type: "npcs",
+        attributes: {
+          name: "Marcus the Bold",
+          description: '[{"type":"paragraph","content":[{"type":"text","text":"Bold."}]}]',
+          rank: 3,
+          title: "",
+        },
+        editable: { name: "text", description: "richtext", title: "text" },
+      });
+
+      const transitionOrder = (assistantActionRepo.resolveStatus as any).mock.invocationCallOrder[0];
+      const storeOrder = (assistantActionRepo.updateApprovedCall as any).mock.invocationCallOrder[0];
+      const resumeOrder = (operator.resume as any).mock.invocationCallOrder[0];
+      expect(transitionOrder).toBeLessThan(storeOrder);
+      expect(storeOrder).toBeLessThan(resumeOrder);
+      expect(operator.resume).toHaveBeenCalledWith(expect.objectContaining({ approved: true, edits }));
+    });
+
+    it("no edits and {} behave exactly as today: nothing stored, resume without edits", async () => {
+      for (const edits of [undefined, {}]) {
+        const { service, operator, assistantActionRepo } = buildSut();
+        (assistantActionRepo.findById as any).mockResolvedValue(createAction());
+        await service.resolveAction({ actionId: "act-1", approved: true, ...(edits ? { edits } : {}) });
+        expect(assistantActionRepo.updateApprovedCall).not.toHaveBeenCalled();
+        expect((operator.resume as any).mock.calls[0][0]).not.toHaveProperty("edits");
+      }
+    });
+
+    it("a denial ignores edits", async () => {
+      const { service, operator, assistantActionRepo } = buildSut();
+      (assistantActionRepo.findById as any).mockResolvedValue(createAction({ toolName: "update_entity" }));
+      await service.resolveAction({ actionId: "act-1", approved: false, edits: { name: "Zed" } });
+      expect(assistantActionRepo.updateApprovedCall).not.toHaveBeenCalled();
+      expect((operator.resume as any).mock.calls[0][0]).not.toHaveProperty("edits");
+    });
+
+    it("marks the action failed when the edited call is refused by the tool", async () => {
+      const { service, assistantActionRepo } = buildSut({
+        resumeResult: { ...COMPLETED_RESULT, actionError: 'Field "name" on npcs expects string.' },
+      });
+      (assistantActionRepo.findById as any).mockResolvedValue(createAction());
+      await service.resolveAction({ actionId: "act-1", approved: true, edits: { name: "Zed" } });
+      expect(assistantActionRepo.resolveStatus).toHaveBeenCalledWith({ id: "act-1", from: "approved", to: "failed" });
     });
   });
 });

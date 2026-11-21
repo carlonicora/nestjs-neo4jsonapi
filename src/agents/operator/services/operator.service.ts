@@ -1,4 +1,5 @@
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { OperatorTurnAbort } from "../errors/operator-turn-abort.error";
 import { BaseCheckpointSaver, Command, END, START, StateGraph, interrupt } from "@langchain/langgraph";
 import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -20,6 +21,7 @@ import { LLMService } from "../../../core/llm/services/llm.service";
 import { TokenUsageType } from "../../../foundations/tokenusage/enums/tokenusage.type";
 import { sanitiseMentionLinks } from "../../common/inline-entity-links";
 import { buildScopeAttribution } from "../../common/usage-attribution";
+import { parseBlockNoteDocument } from "../../graph/services/richtext.write";
 import type { ToolCallRecord } from "../../graph/tools/tool.factory";
 import type { EntityReference } from "../../responder/interfaces/entity.reference.interface";
 import { OperatorCitation, OperatorContext, OperatorContextState } from "../contexts/operator.context";
@@ -27,6 +29,8 @@ import {
   OPERATOR_CAPABILITY_SELECTOR,
   type OperatorCapabilitySelection,
   type OperatorCapabilitySelector,
+  type OperatorApprovalEdits,
+  type OperatorEditableFieldKind,
   type OperatorRetrievalContext,
   type OperatorToolCallRecord,
   type OperatorToolDefinition,
@@ -100,6 +104,29 @@ interface OperatorInterruptPayload {
    */
   proposal?: Record<string, unknown>;
 }
+
+/** Value `resume()` hands back to the interrupted tools node. */
+interface OperatorResumeDecision {
+  approved: boolean;
+  /** Approval-card edits, present only when the user changed something. */
+  edits?: OperatorApprovalEdits;
+}
+
+/**
+ * The line prefixed to an edited call's ToolMessage, so the model knows the
+ * record was saved with the user's values and not its own. A text field names
+ * its new value; a rich-text field (a BlockNote document) is named only.
+ */
+export const renderApprovalEditsNote = (
+  edits: OperatorApprovalEdits,
+  editable?: Record<string, OperatorEditableFieldKind>,
+): string => {
+  const parts = Object.entries(edits).map(([name, value]) => {
+    const isRichtext = editable?.[name] === "richtext" || parseBlockNoteDocument(value) !== null;
+    return isRichtext ? name : `${name} = ${JSON.stringify(value)}`;
+  });
+  return `The user edited these fields before approving, and the record was saved with the edited values: ${parts.join(", ")}.`;
+};
 
 export type OperatorRunResult =
   | {
@@ -322,6 +349,12 @@ export class OperatorService {
     offeredSkills?: AssistantSkillSummary[];
     /** The question that started the turn, for the capability selector. */
     question?: string;
+    /**
+     * Approval-card edits (field name → new value) to apply to the approved
+     * call before it runs. Only a tool with `applyEdits` uses them; the caller
+     * has already checked them. Ignored on a denial.
+     */
+    edits?: OperatorApprovalEdits;
   }): Promise<OperatorRunResult> {
     // Skills loaded before the pause (carried, named, preloaded or self-loaded)
     // are load_skill messages in the checkpoint: nothing is loaded here and no
@@ -357,7 +390,11 @@ export class OperatorService {
         : undefined,
     );
 
-    const finalState = (await app.invoke(new Command({ resume: { approved: params.approved } }), {
+    // Edits travel only when there are some, so an approval without edits
+    // resumes with exactly the decision it always had.
+    const edits = params.approved && params.edits && Object.keys(params.edits).length ? params.edits : undefined;
+    const decision: OperatorResumeDecision = { approved: params.approved, ...(edits ? { edits } : {}) };
+    const finalState = (await app.invoke(new Command({ resume: decision }), {
       configurable: { thread_id: params.threadId },
       recursionLimit: RECURSION_LIMIT,
     })) as OperatorContextState;
@@ -479,6 +516,11 @@ export class OperatorService {
             continue;
           }
 
+          /** The args the tool runs with: the model's, or the approved call's with the user's edits. */
+          let invokeArgs: Record<string, unknown> = (call.args ?? {}) as Record<string, unknown>;
+          /** Set when the user's edits were applied: prefixed to the ToolMessage. */
+          let editsNote: string | undefined;
+
           if (definition.destructive) {
             if (destructiveHandled) {
               toolMessages.push(
@@ -519,10 +561,28 @@ export class OperatorService {
               summary: (await definition.summarise?.(toolArgs)) ?? `${call.name}(${JSON.stringify(toolArgs)})`,
               ...(proposal ? { proposal } : {}),
             };
-            const decision = interrupt(payload) as { approved: boolean };
+            const decision = interrupt(payload) as OperatorResumeDecision;
             if (!decision?.approved) {
               toolMessages.push(new ToolMessage({ content: "Action denied by the user.", tool_call_id: callId }));
               continue;
+            }
+
+            // Approval-card edits: merged by the tool's own hook and checked
+            // again, because the user's values never went through the pre-flight.
+            // The decision is the same on every replay, so this is deterministic.
+            const edits = decision.edits && Object.keys(decision.edits).length ? decision.edits : undefined;
+            if (edits && definition.applyEdits) {
+              const effectiveArgs = definition.applyEdits(toolArgs, edits);
+              const editRejection = await this.validateDestructive(definition, call.name, effectiveArgs);
+              if (editRejection) {
+                this.logger.warn(`operator tool "${call.name}" refused the user's edits: ${editRejection}`);
+                actionOutcome = { error: editRejection };
+                toolMessages.push(new ToolMessage({ content: `Tool error: ${editRejection}`, tool_call_id: callId }));
+                continue;
+              }
+              invokeArgs = effectiveArgs;
+              const editable = proposal?.editable as Record<string, OperatorEditableFieldKind> | undefined;
+              editsNote = renderApprovalEditsNote(edits, editable);
             }
           }
 
@@ -531,7 +591,7 @@ export class OperatorService {
             // load_skill call is read from that record, never by parsing the
             // returned text: it is company-written and may itself look like an error.
             const recordIdx = recorder.length;
-            const result = await definition.tool.invoke(call.args ?? {});
+            const result = await definition.tool.invoke(invokeArgs);
             if (call.name === LOAD_SKILL_TOOL_NAME) {
               const record = recorder[recordIdx];
               const name = (call.args as { name?: unknown } | undefined)?.name;
@@ -545,13 +605,16 @@ export class OperatorService {
             // without reading it back the AssistantAction would be marked
             // executed while nothing was written.
             if (definition.destructive) actionOutcome = { error: this.extractActionError(result) };
+            const resultText = typeof result === "string" ? result : JSON.stringify(result);
             toolMessages.push(
               new ToolMessage({
-                content: typeof result === "string" ? result : JSON.stringify(result),
+                content: editsNote ? `${editsNote}\n${resultText}` : resultText,
                 tool_call_id: callId,
               }),
             );
           } catch (err) {
+            // A tool that opts in ends the turn with the original error (see OperatorTurnAbort).
+            if (err instanceof OperatorTurnAbort) throw err.cause;
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn(`operator tool "${call.name}" failed: ${message}`);
             if (definition.destructive) actionOutcome = { error: message };

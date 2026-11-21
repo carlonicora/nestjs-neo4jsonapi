@@ -244,3 +244,43 @@ describe("AssistantActionRepository.findAllOverduePendingActions", () => {
     ]);
   });
 });
+
+describe("AssistantActionRepository.updateApprovedCall", () => {
+  const initQueryPrefix = "MATCH (company:Company {id: $companyId})\n";
+  let neo4j: any;
+  let securityService: any;
+  let repo: AssistantActionRepository;
+
+  beforeEach(() => {
+    neo4j = {
+      initQuery: vi.fn(() => ({ query: initQueryPrefix, queryParams: {} })),
+      writeOne: vi.fn(async () => ({ id: "act-1" })),
+    };
+    securityService = { userHasAccess: vi.fn((params: { validator: () => string }) => params.validator()) };
+    repo = new AssistantActionRepository(neo4j, securityService, { get: vi.fn() } as unknown as ClsService);
+  });
+
+  it("writes toolArgs and proposal as parameters, company-scoped and owner-guarded", async () => {
+    const updated = await repo.updateApprovedCall({ id: "act-1", toolArgs: '{"a":1}', proposal: '{"b":2}' });
+
+    expect(updated).toBe(true);
+    expect(neo4j.initQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ serialiser: AssistantActionDescriptor.model }),
+    );
+    const q = neo4j.writeOne.mock.calls[0][0];
+    const { nodeName, labelName } = assistantActionMeta;
+    expect(q.query.startsWith(initQueryPrefix)).toBe(true);
+    expect(q.query).toContain(`MATCH (${nodeName}:${labelName} {id: $searchValue})`);
+    expect(securityService.userHasAccess).toHaveBeenCalled();
+    expect(q.query).toContain(`SET ${nodeName}.toolArgs = $toolArgs`);
+    expect(q.query).toContain(`${nodeName}.proposal = coalesce($proposal, ${nodeName}.proposal)`);
+    expect(q.queryParams).toMatchObject({ searchValue: "act-1", toolArgs: '{"a":1}', proposal: '{"b":2}' });
+  });
+
+  it("keeps the stored proposal when none is given, and reports a miss", async () => {
+    neo4j.writeOne.mockResolvedValueOnce(null);
+    const updated = await repo.updateApprovedCall({ id: "act-1", toolArgs: "{}" });
+    expect(updated).toBe(false);
+    expect(neo4j.writeOne.mock.calls[0][0].queryParams.proposal).toBeNull();
+  });
+});

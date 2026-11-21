@@ -105,6 +105,7 @@ export { OperatorModule } from "./operator/operator.module";
 export { operatorMeta } from "./operator/entities/operator.meta";
 export { OperatorController } from "./operator/controllers/operator.controller";
 export { OperatorService } from "./operator/services/operator.service";
+export { OperatorTurnAbort } from "./operator/errors/operator-turn-abort.error";
 export type { OperatorRunResult } from "./operator/services/operator.service";
 export { OperatorContext } from "./operator/contexts/operator.context";
 export type { OperatorCitation, OperatorContextState, OperatorFinalAnswer } from "./operator/contexts/operator.context";
@@ -134,9 +135,11 @@ export {
 } from "./operator/interfaces/operator.tool.interface";
 export type {
   OperatorActionProposal,
+  OperatorApprovalEdits,
   OperatorCapabilitySelection,
   OperatorCapabilitySelector,
   OperatorChunkCitation,
+  OperatorEditableFieldKind,
   OperatorRetrievalContext,
   OperatorToolCallRecord,
   OperatorToolContribution,

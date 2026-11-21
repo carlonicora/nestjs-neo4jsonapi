@@ -5,7 +5,8 @@ import { MemorySaver } from "@langchain/langgraph";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
-import { OPERATOR_INLINE_LINKS_INSTRUCTION, OperatorService } from "../operator.service";
+import { OPERATOR_INLINE_LINKS_INSTRUCTION, OperatorService, renderApprovalEditsNote } from "../operator.service";
+import { OperatorTurnAbort } from "../../errors/operator-turn-abort.error";
 import { OperatorToolRegistry } from "../../tools/operator.tool.registry";
 import { OperatorCheckpointerService } from "../operator.checkpointer.service";
 import { LLMService } from "../../../../core/llm/services/llm.service";
@@ -30,6 +31,7 @@ describe("OperatorService", () => {
   let registryBuild: Mock;
   let testToolExecutions: Array<Record<string, unknown>>;
   let readToolExecutions: number;
+  let abortCause: unknown;
   let guardObservations: Array<"satisfied" | "blocked">;
 
   const baseParams = {
@@ -68,6 +70,15 @@ describe("OperatorService", () => {
       },
     });
 
+    const abortingReadTool = new DynamicStructuredTool({
+      name: "operator_aborting_read",
+      description: "Read-only tool that ends the turn.",
+      schema: z.object({ query: z.string().optional() }),
+      func: async () => {
+        throw new OperatorTurnAbort(abortCause);
+      },
+    });
+
     const definitions: OperatorToolDefinition[] = [
       {
         tool: destructiveTool,
@@ -79,6 +90,7 @@ describe("OperatorService", () => {
         }),
       },
       { tool: throwingReadTool, destructive: false },
+      { tool: abortingReadTool, destructive: false },
     ];
 
     // Like the real registry: tools are closures over the per-compile recorder.
@@ -436,6 +448,143 @@ describe("OperatorService", () => {
     });
   });
 
+  describe("approval edits", () => {
+    const DOC = JSON.stringify([{ id: "b1", type: "paragraph", props: {}, content: [], children: [] }]);
+
+    /** A create-like destructive tool: edits merge into `fields`; "bad" names are refused. */
+    const buildEditableTool = () => {
+      const executions: Array<Record<string, unknown>> = [];
+      const tool = new DynamicStructuredTool({
+        name: "operator_editable_action",
+        description: "Test-only editable destructive action.",
+        schema: z.object({ fields: z.record(z.string(), z.unknown()) }),
+        func: async (input: { fields: Record<string, unknown> }) => {
+          executions.push(input);
+          return JSON.stringify({ created: true });
+        },
+      });
+      const validate = vi.fn(async (args: Record<string, unknown>) =>
+        (args.fields as Record<string, unknown>)?.name === "bad" ? 'Field "name" is not acceptable.' : null,
+      );
+      registryBuild.mockImplementation(() => [
+        {
+          tool,
+          destructive: true,
+          summarise: () => "Create a record",
+          present: async (args: Record<string, unknown>) => ({
+            type: "npcs",
+            attributes: { ...(args.fields as Record<string, unknown>) },
+            editable: { name: "text", description: "richtext" },
+          }),
+          validate,
+          applyEdits: (args: Record<string, unknown>, edits: Record<string, string>) => ({
+            ...args,
+            fields: { ...(args.fields as Record<string, unknown>), ...edits },
+          }),
+        } satisfies OperatorToolDefinition,
+      ]);
+      return { executions, validate };
+    };
+
+    const approveWithEdits = async (
+      threadId: string,
+      toolName: string,
+      args: Record<string, unknown>,
+      edits: Record<string, string>,
+    ) => {
+      callStep.mockResolvedValueOnce({
+        message: aiMessageWithToolCall(toolName, args),
+        tokenUsage: { input: 1, output: 1 },
+      });
+      const first = await service.run({ ...baseParams, threadId });
+      expect(first.kind).toBe("pending_approval");
+
+      callStep.mockResolvedValueOnce({ message: new AIMessage("done"), tokenUsage: { input: 1, output: 1 } });
+      llmCall.mockResolvedValueOnce({
+        answer: "done",
+        questions: [],
+        tokenUsage: { input: 1, output: 1 },
+        modelWeight: ModelWeight.Normal,
+      });
+      const result = await service.resume({
+        threadId,
+        approved: true,
+        edits,
+        companyId: baseParams.companyId,
+        userId: baseParams.userId,
+        userModuleIds: baseParams.userModuleIds,
+      });
+      const toolMessage = callStep.mock.calls[callStep.mock.calls.length - 1][0].messages.find(
+        (m: unknown) => m instanceof ToolMessage,
+      ) as ToolMessage;
+      return { result, toolMessage };
+    };
+
+    it("runs the tool with the edited fields and tells the model which fields the user changed", async () => {
+      const { executions, validate } = buildEditableTool();
+
+      const { result, toolMessage } = await approveWithEdits(
+        "assistant-1:msg-edit",
+        "operator_editable_action",
+        { fields: { name: "Marcus", description: "# Old" } },
+        { name: "Zed", description: DOC },
+      );
+
+      expect(result.kind).toBe("completed");
+      if (result.kind === "completed") expect(result.actionError).toBeUndefined();
+      expect(executions).toEqual([{ fields: { name: "Zed", description: DOC } }]);
+      expect(validate).toHaveBeenLastCalledWith({ fields: { name: "Zed", description: DOC } });
+
+      const content = String(toolMessage.content);
+      expect(content.startsWith("The user edited these fields before approving")).toBe(true);
+      expect(content).toContain('name = "Zed"');
+      expect(content).toContain("description");
+      // A rich-text value is named, never dumped.
+      expect(content).not.toContain('"paragraph"');
+      expect(content).toContain(JSON.stringify({ created: true }));
+    });
+
+    it("refuses edited args that fail validation: nothing runs and the error is the action's", async () => {
+      const { executions } = buildEditableTool();
+
+      const { result, toolMessage } = await approveWithEdits(
+        "assistant-1:msg-edit-bad",
+        "operator_editable_action",
+        { fields: { name: "Marcus" } },
+        { name: "bad" },
+      );
+
+      expect(executions).toEqual([]);
+      expect(result.kind).toBe("completed");
+      if (result.kind === "completed") expect(result.actionError).toBe('Field "name" is not acceptable.');
+      expect(String(toolMessage.content)).toBe('Tool error: Field "name" is not acceptable.');
+    });
+
+    it("a destructive tool without applyEdits ignores edits and runs the model's args", async () => {
+      const { toolMessage } = await approveWithEdits(
+        "assistant-1:msg-edit-ignored",
+        "operator_test_action",
+        { note: "x" },
+        { note: "changed" },
+      );
+
+      expect(testToolExecutions).toEqual([{ note: "x" }]);
+      expect(String(toolMessage.content)).not.toContain("The user edited");
+    });
+
+    it("renderApprovalEditsNote lists text values and names rich-text fields only", () => {
+      expect(
+        renderApprovalEditsNote({ name: "Zed", description: "plain" }, { name: "text", description: "richtext" }),
+      ).toBe(
+        'The user edited these fields before approving, and the record was saved with the edited values: name = "Zed", description.',
+      );
+      // A BlockNote document is never dumped, even without the editable map.
+      expect(renderApprovalEditsNote({ notes: DOC })).toBe(
+        "The user edited these fields before approving, and the record was saved with the edited values: notes.",
+      );
+    });
+  });
+
   describe("actionError", () => {
     /** A destructive tool that REPORTS a refusal instead of throwing, like the write tools. */
     const buildRefusingTool = (result: string) => {
@@ -684,6 +833,18 @@ describe("OperatorService", () => {
     );
     expect(errorMessage).toBeDefined();
     expect(String(errorMessage.content)).toContain("boom");
+  });
+
+  it("a tool that throws OperatorTurnAbort ends the turn with its cause", async () => {
+    const cause = new Error("NO_CREDITS");
+    abortCause = cause;
+    callStep.mockResolvedValueOnce({
+      message: aiMessageWithToolCall("operator_aborting_read", { query: "q" }),
+      tokenUsage: { input: 1, output: 1 },
+    });
+
+    await expect(service.run(baseParams)).rejects.toBe(cause);
+    expect(callStep).toHaveBeenCalledTimes(1);
   });
 
   it("recorder persists across tool passes within one run (describe-before-read contract)", async () => {

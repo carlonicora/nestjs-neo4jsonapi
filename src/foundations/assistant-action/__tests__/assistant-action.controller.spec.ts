@@ -135,6 +135,46 @@ describe("AssistantActionController", () => {
       expect(keys).not.toContain("assistant-messages-m-9");
     });
 
+    it("no body approves exactly as today (no edits handed to the service)", async () => {
+      const send = vi.fn();
+      await ctl.approve(makeRequest(), { send } as any, "act-1", undefined);
+      expect(assistants.resolveAction.mock.calls[0][0]).toEqual({ actionId: "act-1", approved: true });
+    });
+
+    it("a body without edits, or with {} edits, approves exactly as today", async () => {
+      for (const attributes of [undefined, {}, { edits: {} }]) {
+        assistants.resolveAction.mockClear();
+        const send = vi.fn();
+        const body: any = {
+          data: { type: assistantActionMeta.endpoint, id: "act-1", ...(attributes ? { attributes } : {}) },
+        };
+        await ctl.approve(makeRequest(), { send } as any, "act-1", body);
+        expect(assistants.resolveAction.mock.calls[0][0]).toEqual({ actionId: "act-1", approved: true });
+      }
+    });
+
+    it("hands the edits of the body to the service", async () => {
+      const send = vi.fn();
+      const body: any = {
+        data: { type: assistantActionMeta.endpoint, id: "act-1", attributes: { edits: { name: "Zed" } } },
+      };
+      await ctl.approve(makeRequest(), { send } as any, "act-1", body);
+      expect(assistants.resolveAction).toHaveBeenCalledWith({
+        actionId: "act-1",
+        approved: true,
+        edits: { name: "Zed" },
+      });
+    });
+
+    it("refuses a body whose id does not match the route (412) and never resolves", async () => {
+      const send = vi.fn();
+      const body: any = {
+        data: { type: assistantActionMeta.endpoint, id: "act-2", attributes: { edits: { name: "Zed" } } },
+      };
+      await expect(ctl.approve(makeRequest(), { send } as any, "act-1", body)).rejects.toMatchObject({ status: 412 });
+      expect(assistants.resolveAction).not.toHaveBeenCalled();
+    });
+
     it("propagates errors from resolveAction (e.g. 409 on a lost race)", async () => {
       assistants.resolveAction.mockRejectedValueOnce(new Error("Conflict"));
       const send = vi.fn();

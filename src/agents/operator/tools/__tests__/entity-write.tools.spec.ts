@@ -699,6 +699,26 @@ describe("EntityWriteTools", () => {
   });
 
   describe("approval proposals resolve names and hide the scope", () => {
+    it("create marks only writable string fields editable", async () => {
+      const catalog = {
+        getAllChatEnabledEntities: () => [npcLimited],
+        getEntityDetail: (type: string) => (type === "npcs" ? npcLimited : null),
+      };
+      const definitions = new EntityWriteTools(
+        catalog as any,
+        { get: () => undefined } as any,
+        { isInScope: async () => true } as any,
+      ).buildDefinitions(ctx as any, []);
+      const create = definitions.find((d) => d.tool.name === "create_entity")!;
+
+      const proposal: any = await create.present!({
+        type: "npcs",
+        fields: { name: "Marcus", description: 7, tldr: "Generated.", unknown: "x" },
+      });
+
+      expect(proposal.editable).toEqual({ name: "text" });
+    });
+
     it("create resolves relationships and strips the scope relationship", async () => {
       const { byName } = buildResolvingTools();
       const proposal = await byName.get("create_entity")!.present!({
@@ -711,6 +731,7 @@ describe("EntityWriteTools", () => {
         type: "npcs",
         attributes: { name: "Marcus", description: "A guard." },
         relationships: { related: [{ id: ZOE, type: "npcs", label: "Zoe" }] },
+        editable: { name: "text", description: "text" },
       });
     });
 
@@ -736,7 +757,7 @@ describe("EntityWriteTools", () => {
         relationships: { campaign: "camp-1" },
       });
 
-      expect(proposal).toEqual({ type: "npcs", attributes: { name: "Marcus" } });
+      expect(proposal).toEqual({ type: "npcs", attributes: { name: "Marcus" }, editable: { name: "text" } });
     });
 
     it("update carries the resolved target and the raw attributes", async () => {
@@ -945,14 +966,67 @@ describe("EntityWriteTools — richtext fields", () => {
     expect(service.patchFromDTO.mock.calls[0][0].data.attributes.description).toBe("# Title");
   });
 
-  it("the create proposal keeps the model's markdown — the card renders text, not JSON", async () => {
+  it("the create proposal presents a richtext field as a BlockNote document, editable as richtext", async () => {
     const { byName } = buildRichtextTools();
+    const args = { type: "npcs", fields: { name: "Marcus", description: "# Title\n\nA paragraph." } };
+    const proposal: any = await byName.get("create_entity")!.present!(args);
+
+    const nodes = JSON.parse(proposal.attributes.description);
+    expect(nodes.map((node: any) => node.type)).toEqual(["heading", "paragraph"]);
+    expect(proposal.attributes.name).toBe("Marcus");
+    expect(proposal.editable).toEqual({ name: "text", description: "richtext" });
+    // The tool args are never touched.
+    expect(args.fields.description).toBe("# Title\n\nA paragraph.");
+  });
+
+  it("the create proposal keeps the raw string, still richtext, without a converter", async () => {
+    const { byName } = buildRichtextTools({ withConverter: false });
     const proposal: any = await byName.get("create_entity")!.present!({
       type: "npcs",
-      fields: { name: "Marcus", description: "# Title\n\nA paragraph." },
+      fields: { description: "# Title" },
     });
 
-    expect(proposal.attributes.description).toBe("# Title\n\nA paragraph.");
+    expect(proposal.attributes.description).toBe("# Title");
+    expect(proposal.editable).toEqual({ description: "richtext" });
+  });
+
+  it("the create proposal keeps the raw string, still richtext, when the conversion fails", async () => {
+    const { byName, tools } = buildRichtextTools();
+    vi.spyOn((tools as any).blockNote, "createFromMarkdown").mockRejectedValueOnce(new Error("parse failed"));
+    const proposal: any = await byName.get("create_entity")!.present!({
+      type: "npcs",
+      fields: { description: "# Title" },
+    });
+
+    expect(proposal.attributes.description).toBe("# Title");
+    expect(proposal.editable).toEqual({ description: "richtext" });
+  });
+
+  it("an update proposal has no editable map", async () => {
+    const { byName } = buildRichtextTools();
+    const proposal: any = await byName.get("update_entity")!.present!({
+      type: "npcs",
+      id: MARCUS,
+      fields: { name: "Zed" },
+    });
+
+    expect(proposal).not.toHaveProperty("editable");
+  });
+
+  it("create_entity merges approval edits into fields and leaves the rest of the args alone", () => {
+    const { byName } = buildRichtextTools();
+    const create = byName.get("create_entity")!;
+    const args = { type: "npcs", fields: { name: "Marcus", description: "# Old" }, relationships: { related: ZOE } };
+
+    expect(create.applyEdits!(args, { name: "Zed" })).toEqual({
+      type: "npcs",
+      fields: { name: "Zed", description: "# Old" },
+      relationships: { related: ZOE },
+    });
+    expect(args.fields.name).toBe("Marcus");
+    for (const name of ["update_entity", "delete_entity", "link_entities", "unlink_entities"]) {
+      expect(byName.get(name)!.applyEdits).toBeUndefined();
+    }
   });
 
   it("the update proposal keeps the model's markdown", async () => {

@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { z } from "zod";
+import { DynamicStructuredTool } from "@langchain/core/tools";
 import { LLMService, LLMTimeoutError } from "../llm.service";
 
 /**
@@ -479,5 +480,94 @@ describe("LLMService request bounds", () => {
 
     expect(await pending).toBeInstanceOf(LLMTimeoutError);
     expect(modelService.getLLM).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 40_000 }));
+  });
+});
+
+/**
+ * The tool loop used to have no stall recovery: an iteration that OpenRouter
+ * never answered died on its per-request timeout (`AbortError: Request was
+ * aborted.`), which neither LangChain's p-retry nor `runWithTransientRetry`
+ * retries, and the whole call failed with most of its deadline unused. Each
+ * iteration now gets the final structured step's once-only re-issue.
+ */
+describe("LLMService tool-loop stall re-issue", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const lookup = new DynamicStructuredTool({
+    name: "lookup",
+    description: "d",
+    schema: z.object({}),
+    func: async () => "",
+  });
+  const toolParams = { ...callParams, tools: [lookup] };
+  const stall = () => Object.assign(new Error("Request was aborted."), { name: "AbortError" });
+  const finalAnswer = () => ({
+    content: "",
+    tool_calls: [{ id: "c1", name: "final_answer", args: { ok: true } }],
+  });
+
+  it("re-issues a timed-out iteration once and records the warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const invoke = vi.fn().mockRejectedValueOnce(stall()).mockResolvedValueOnce(finalAnswer());
+    const { svc, modelService } = harness({ invoke });
+
+    const result = await svc.call(toolParams);
+
+    expect(result.ok).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(2);
+    // Same instance, so the OpenRouter pin escalates on the second request.
+    expect(modelService.getLLM).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/attempt timed out after 40s — re-issuing/));
+  });
+
+  it("fails when the re-issued iteration times out too", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const invoke = vi.fn().mockRejectedValue(stall());
+    const { svc } = harness({ invoke });
+
+    await expect(svc.call(toolParams)).rejects.toThrow(/Request was aborted/);
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-issue when the call's own deadline aborted the request", async () => {
+    // Like LangChain: the in-flight request rejects with an abort once its signal fires.
+    const invoke = vi.fn(
+      (_msgs?: unknown, options?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(stall()));
+        }),
+    );
+    const { svc } = harness({ invoke });
+
+    const pending = svc.call(toolParams).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(96_000);
+
+    expect(String((await pending).message)).toMatch(/exceeded its 95s deadline/);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-issue an iteration that failed for any other reason", async () => {
+    const invoke = vi.fn().mockRejectedValue(new Error("402 insufficient credits"));
+    const { svc } = harness({ invoke });
+
+    await expect(svc.call(toolParams)).rejects.toThrow(/insufficient credits/);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-issues a timed-out operator step (callStep) once", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const invoke = vi.fn().mockRejectedValueOnce(stall()).mockResolvedValueOnce({ content: "done", tool_calls: [] });
+    const { svc } = harness({ invoke });
+
+    const result = await svc.callStep({ systemPrompts: ["s"], messages: [], tools: [lookup] });
+
+    expect(result.message.content).toBe("done");
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

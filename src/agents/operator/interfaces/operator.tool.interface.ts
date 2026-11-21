@@ -40,7 +40,20 @@ export type OperatorActionProposal = {
   relationship?: string;
   /** link / unlink: the resolved targets. */
   targets?: ProposalRef[];
+  /**
+   * create: the attributes the user may edit on the approval card before
+   * approving, by field name. `"richtext"` fields are presented in `attributes`
+   * as a serialised BlockNote document string; `"text"` fields as plain text.
+   * Absent on update / delete / link / unlink.
+   */
+  editable?: Record<string, OperatorEditableFieldKind>;
 };
+
+/** How an editable proposal field is edited on the approval card. */
+export type OperatorEditableFieldKind = "text" | "richtext";
+
+/** Field edits the user made on the approval card, by field name. */
+export type OperatorApprovalEdits = Record<string, string>;
 
 export interface OperatorToolDefinition {
   tool: DynamicStructuredTool;
@@ -63,6 +76,13 @@ export interface OperatorToolDefinition {
    * run the same checks the execution path runs and write nothing itself.
    */
   validate?: (args: Record<string, unknown>) => Promise<string | null>;
+  /**
+   * Merges the user's approval-card edits into the tool args, returning NEW args
+   * (the input is never mutated). The operator runs `validate` again on the
+   * result and invokes the tool with it. A destructive tool without it ignores
+   * edits: the approval endpoint refuses edits for any tool but `create_entity`.
+   */
+  applyEdits?: (args: Record<string, unknown>, edits: OperatorApprovalEdits) => Record<string, unknown>;
 }
 
 /** Chunk citation pushed into the per-turn recorder by retrieval tools. */

@@ -79,6 +79,36 @@ export class AssistantActionRepository extends AbstractRepository<
   }
 
   /**
+   * Store the approved call as it will run: the tool args with the user's
+   * approval-card edits merged in, and the proposal the card renders on reload.
+   * Company scope via `buildDefaultMatch()`, owner-RBAC as in `resolveStatus`.
+   * `proposal` is left as it is when not given.
+   *
+   * Returns true when the action was found and updated.
+   */
+  async updateApprovedCall(params: { id: string; toolArgs: string; proposal?: string }): Promise<boolean> {
+    const { nodeName } = assistantActionMeta;
+    const query = this.neo4j.initQuery({ serialiser: AssistantActionDescriptor.model });
+    query.queryParams = {
+      ...query.queryParams,
+      searchValue: params.id,
+      toolArgs: params.toolArgs,
+      proposal: params.proposal ?? null,
+    };
+    query.query += `
+      ${this.buildDefaultMatch({ searchField: "id" })}
+      ${this.securityService.userHasAccess({ validator: () => this.buildUserHasAccess() })}
+      SET ${nodeName}.toolArgs = $toolArgs,
+          ${nodeName}.proposal = coalesce($proposal, ${nodeName}.proposal),
+          ${nodeName}.updatedAt = datetime()
+      WITH ${nodeName}
+      ${this.buildReturnStatement()}
+    `;
+    const updated = await this.neo4j.writeOne(query);
+    return !!updated;
+  }
+
+  /**
    * Cross-company sweep used by AssistantActionExpiryCron (runs outside any
    * request, so there is no CLS company context). Mirrors
    * CommunityRepository.findAllStaleCommunities(): the read returns
