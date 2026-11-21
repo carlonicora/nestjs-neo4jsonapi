@@ -1,3 +1,9 @@
+## [8.33.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.32.0...v8.33.0) (2026-11-21)
+
+### 🚀 Features
+
+* **assistant:** the approve endpoint of an Assistant action takes optional edits, the values the user typed on a create_entity approval card; it refuses edits to fields the model did not propose as text and the emptying of a filled field, and stores the edited call before the run resumes, so the record is written with the user's values; an operator tool can throw OperatorTurnAbort to end the turn with that error instead of handing the model a tool error; an LLM request that hits its per-request timeout is sent once more, so OpenRouter moves off the provider that went quiet ([f487010](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/f4870103954626e814c005a82b495ce6dba8307f))
+
 ## [8.32.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.31.0...v8.32.0) (2026-11-18)
 
 ### 🚀 Features
