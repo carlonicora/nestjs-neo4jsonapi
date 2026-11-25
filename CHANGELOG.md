@@ -1,3 +1,9 @@
+## [8.34.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.33.0...v8.34.0) (2026-11-25)
+
+### 🚀 Features
+
+* **worker:** a worker started with --mode=worker --label=<name> runs only the providers registered for that label, runs no cron jobs or start-up jobs, and logs into Discord only when BootstrapOptions.discord.label matches it; every @Cron now runs once per tick across all workers through a Redis lock tied to that tick; migrations wait for a start-up lock, and the RBAC sync and both Stripe backfills run on one worker only; RedisLockService locks are owned by their taker, renewed while their work runs and retried while Redis is unreachable at boot; adds JobRunService (finished markers, one-shot claims, stable usage ids), Neo4jService.writeScalars, an optional stable id on token usage, and a company-scoped DiscordUserService.findByUserIdForWorker ([849d7ce](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/849d7ce74b57fec38903e99f862f6ab234514a50))
+
 ## [8.33.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.32.0...v8.33.0) (2026-11-21)
 
 ### 🚀 Features
