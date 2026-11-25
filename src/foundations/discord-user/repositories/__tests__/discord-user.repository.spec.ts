@@ -133,6 +133,33 @@ describe("DiscordUserRepository", () => {
     });
   });
 
+  describe("findByUserIdInCompany", () => {
+    it("appends to initQuery, scopes the DiscordUser to the CLS company and keeps the user's id param apart", async () => {
+      const mockQuery = {
+        query: "MATCH (company:Company {id: $companyId})",
+        queryParams: { companyId: TEST_IDS.companyId },
+      };
+      neo4jService.initQuery.mockReturnValue(mockQuery);
+      neo4jService.readMany.mockResolvedValue([MOCK_DISCORD_USER]);
+
+      const result = await repository.findByUserIdInCompany({ userId: TEST_IDS.userId });
+
+      expect(mockQuery.query.startsWith("MATCH (company:Company {id: $companyId})")).toBe(true);
+      expect(mockQuery.query).toContain("WHERE $companyId IS NULL");
+      expect(mockQuery.query).toContain("MATCH (discorduser)-[:BELONGS_TO]-(company)");
+      expect(mockQuery.query).toContain("{ id: $userId })-[:HAS_DISCORD]->(discorduser)");
+      expect(mockQuery.queryParams).toEqual({ companyId: TEST_IDS.companyId, userId: TEST_IDS.userId });
+      expect(result).toEqual(MOCK_DISCORD_USER);
+    });
+
+    it("returns undefined when the user has no Discord account in the company", async () => {
+      neo4jService.initQuery.mockReturnValue(createMockQuery());
+      neo4jService.readMany.mockResolvedValue([]);
+
+      expect(await repository.findByUserIdInCompany({ userId: TEST_IDS.userId })).toBeUndefined();
+    });
+  });
+
   describe("inherited methods from AbstractRepository", () => {
     describe("find", () => {
       it("should find discord users with default ordering", async () => {

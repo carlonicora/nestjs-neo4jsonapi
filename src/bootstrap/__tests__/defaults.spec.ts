@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_TRUST_PROXY, resolveTrustProxy } from "../defaults";
+import { AppMode } from "../../common/decorators/conditional-service.decorator";
+import { DEFAULT_TRUST_PROXY, getAppLabel, getAppModeConfig, resolveTrustProxy } from "../defaults";
 
 describe("resolveTrustProxy", () => {
   afterEach(() => {
@@ -29,5 +30,57 @@ describe("resolveTrustProxy", () => {
     vi.stubEnv("TRUST_PROXY", "10.0.0.0/8,172.19.0.6");
 
     expect(resolveTrustProxy()).toBe("10.0.0.0/8,172.19.0.6");
+  });
+});
+
+describe("getAppLabel", () => {
+  const LABEL_ERROR = "--label is valid only with an explicit --mode=worker";
+
+  it("reads the label of an explicit worker", () => {
+    expect(getAppLabel(["node", "main", "--mode=worker", "--label=discord"])).toBe("discord");
+  });
+
+  it("returns undefined when no label is given", () => {
+    expect(getAppLabel(["node", "main", "--mode=worker"])).toBeUndefined();
+  });
+
+  it("throws for a label in API mode", () => {
+    expect(() => getAppLabel(["--mode=api", "--label=x"])).toThrow(LABEL_ERROR);
+  });
+
+  it("throws for a label with no mode", () => {
+    expect(() => getAppLabel(["--label=x"])).toThrow(LABEL_ERROR);
+  });
+
+  it("throws for a label with the --worker shorthand", () => {
+    expect(() => getAppLabel(["--worker", "--label=x"])).toThrow(LABEL_ERROR);
+  });
+
+  it("throws for an empty label", () => {
+    expect(() => getAppLabel(["--mode=worker", "--label="])).toThrow(LABEL_ERROR);
+  });
+});
+
+describe("getAppModeConfig", () => {
+  it("gives a labelled worker no cron jobs and carries the label", () => {
+    expect(getAppModeConfig(AppMode.WORKER, "discord")).toEqual({
+      mode: AppMode.WORKER,
+      enableControllers: false,
+      enableWorkers: true,
+      enableCronJobs: false,
+      label: "discord",
+    });
+  });
+
+  it("leaves an unlabelled worker unchanged", () => {
+    const config = getAppModeConfig(AppMode.WORKER);
+
+    expect(config).toEqual({
+      mode: AppMode.WORKER,
+      enableControllers: false,
+      enableWorkers: true,
+      enableCronJobs: true,
+    });
+    expect("label" in config).toBe(false);
   });
 });

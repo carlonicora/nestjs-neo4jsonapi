@@ -57,6 +57,32 @@ export class DiscordUserRepository extends AbstractRepository<DiscordUser, typeo
     return users[0];
   }
 
+  /**
+   * {@link findByUserId} limited to the company in CLS, for worker code. DiscordUser is
+   * company-scoped (its descriptor keeps the default `isCompanyScoped: true`; each account
+   * BELONGS_TO the linked user's own company), so the read goes through `buildDefaultMatch()`:
+   * a worker whose job carries another company's id gets undefined, not that company's account.
+   */
+  async findByUserIdInCompany(params: { userId: string }): Promise<DiscordUser | undefined> {
+    const { nodeName } = DiscordUserDescriptor.model;
+    const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
+
+    query.queryParams = {
+      ...query.queryParams,
+      userId: params.userId,
+    };
+
+    query.query += `
+      ${this.buildDefaultMatch()}
+      MATCH (:${userMeta.labelName} { id: $userId })-[:HAS_DISCORD]->(${nodeName})
+      ${this.buildReturnStatement()}
+      LIMIT 1
+    `;
+
+    const users = await this.neo4j.readMany(query);
+    return users[0];
+  }
+
   async findByDiscordId(params: { discordId: string }): Promise<DiscordUser> {
     const query = this.neo4j.initQuery({ serialiser: this.descriptor.model });
 

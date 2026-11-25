@@ -92,6 +92,12 @@ export interface TokenUsageRecorderInterface {
     model?: string;
     /** Provider that served the call. Same rule as `model`. */
     provider?: string;
+    /**
+     * Id of the usage record. A caller that may repeat the same call passes a
+     * stable id: the unique id constraint rejects the second write, so it is
+     * recorded and charged once. Omitted, a random UUID is used.
+     */
+    id?: string;
   }): Promise<void>;
 }
 

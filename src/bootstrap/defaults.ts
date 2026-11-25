@@ -19,10 +19,39 @@ export function getAppMode(): AppMode {
   return AppMode.API;
 }
 
+const LABEL_ERROR = "--label is valid only with an explicit --mode=worker";
+
 /**
- * Get the application mode configuration
+ * Get the worker label from command line arguments (`--label=<name>`).
+ * A label needs a non-empty value and an explicit `--mode=worker`; anything else throws.
+ * Returns undefined when no label is given.
  */
-export function getAppModeConfig(mode: AppMode): AppModeConfig {
+export function getAppLabel(argv: string[] = process.argv): string | undefined {
+  const labelArg = argv.find((arg) => arg.startsWith("--label="));
+  if (labelArg === undefined) return undefined;
+
+  const label = labelArg.slice("--label=".length);
+  if (!label || !argv.includes("--mode=worker")) throw new Error(LABEL_ERROR);
+
+  return label;
+}
+
+/**
+ * Get the application mode configuration.
+ * A labelled worker runs no cron jobs and carries its label.
+ */
+export function getAppModeConfig(mode: AppMode, label?: string): AppModeConfig {
+  if (label !== undefined && mode !== AppMode.WORKER) throw new Error(LABEL_ERROR);
+  if (label !== undefined) {
+    return {
+      mode: AppMode.WORKER,
+      enableControllers: false,
+      enableWorkers: true,
+      enableCronJobs: false,
+      label,
+    };
+  }
+
   switch (mode) {
     case AppMode.API:
       return {

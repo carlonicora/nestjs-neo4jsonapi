@@ -71,12 +71,13 @@ export class ModelManagerService implements OnApplicationBootstrap {
   }
 
   /**
-   * Check if running in worker mode.
+   * Check if running in an unlabelled worker, the one that loads every model.
+   * A labelled worker loads only the models marked `loadInApi`, like the API.
    * Defaults to worker mode if no app mode config (tests, standalone scripts).
    */
   private isWorkerMode(): boolean {
     if (!this.appModeConfig) return true;
-    return this.appModeConfig.mode === AppMode.WORKER;
+    return this.appModeConfig.mode === AppMode.WORKER && !this.appModeConfig.label;
   }
 
   /**

@@ -358,6 +358,31 @@ export class Neo4jService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * The write twin of `readScalars()`: runs the statement in a write session and returns each
+   * row of scalar columns through `map`, converted exactly as `readScalars()` converts them.
+   *
+   * For a write whose caller needs only a scalar back (did a guarded write land, the id it
+   * touched, a new counter value) and not a serialised entity: `writeOne()` needs a serialiser
+   * and a full return statement, whose required matches can drop a row the write already
+   * committed. Same scope rule as `readScalars()`: no company scope is added; seed with
+   * `initQuery()` and append after `buildDefaultMatch()`.
+   */
+  async writeScalars<T>(params: {
+    query: string;
+    queryParams?: Record<string, unknown>;
+    map: (row: Neo4jScalarRow) => T;
+  }): Promise<T[]> {
+    const result = await this.write(params.query, params.queryParams);
+    return result.records.map((record: any) => {
+      const row: Record<string, unknown> = {};
+      for (const [column, value] of Object.entries(record.toObject() as Record<string, unknown>)) {
+        row[column] = toScalar(value, column);
+      }
+      return params.map(row as Neo4jScalarRow);
+    });
+  }
+
+  /**
    * Build a count query from a data query by:
    * 1. Taking everything before {CURSOR}
    * 2. Removing ORDER BY clause

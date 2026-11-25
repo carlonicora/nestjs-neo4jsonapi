@@ -1,9 +1,10 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
+import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import * as fs from "fs";
 import { createRequire } from "module";
 import * as path from "path";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import { Neo4jService } from "../../neo4j/services/neo4j.service";
+import { RedisLockService } from "../../redis/services/redis.lock.service";
 import { S3Service } from "../../../foundations/s3/services/s3.service";
 import { MigrationInterface, MigrationModule, MigrationStep } from "../interfaces/migration.interface";
 
@@ -41,9 +42,22 @@ export class MigratorService implements OnModuleInit {
     protected readonly neo4jService: Neo4jService,
     protected readonly s3Service: S3Service,
     private readonly logger: AppLoggingService,
+    @Optional() private readonly redisLock?: RedisLockService,
   ) {}
 
+  /**
+   * With a lock service, one process at a time migrates: the others wait for the
+   * lock, then find nothing left to run. A failed migration still throws.
+   */
   async onModuleInit() {
+    if (!this.redisLock) {
+      await this.migrate();
+      return;
+    }
+    await this.redisLock.withLockWaiting(this.redisLock.scopedKey("startup:migrations"), 1800, () => this.migrate());
+  }
+
+  private async migrate(): Promise<void> {
     await this.createMigrationConstraints();
     await this.runMigrations();
   }

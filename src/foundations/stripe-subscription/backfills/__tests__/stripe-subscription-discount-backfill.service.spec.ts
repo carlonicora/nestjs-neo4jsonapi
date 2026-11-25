@@ -1,5 +1,6 @@
 import { HttpStatus } from "@nestjs/common";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mocked } from "vitest";
+import type { RedisLockService } from "../../../../core/redis/services/redis.lock.service";
 // Mock problematic modules before any imports
 vi.mock("../../../../foundations/chunker/chunker.module", () => ({
   ChunkerModule: class {},
@@ -245,5 +246,47 @@ describe("StripeSubscriptionDiscountBackfillService", () => {
     await vi.waitFor(() =>
       expect(logger.error).toHaveBeenCalledWith("Stripe subscription discount backfill aborted", expect.any(Error)),
     );
+  });
+
+  describe("start-up lock", () => {
+    const makeLock = (runFn: boolean) => ({
+      scopedKey: vi.fn<RedisLockService["scopedKey"]>((name) => `q:lock:${name}`),
+      withLock: vi.fn(async (_key, _ttl, fn) => (runFn ? fn() : null)),
+    });
+
+    const make = (lock: ReturnType<typeof makeLock>) =>
+      new StripeSubscriptionDiscountBackfillService(
+        stripeService as any,
+        api as any,
+        subscriptionRepository as any,
+        backfillRepository as any,
+        cls as any,
+        logger as any,
+        lock as unknown as RedisLockService,
+      );
+
+    it("runs through the startup:stripe-discount-backfill lock", async () => {
+      const lock = makeLock(true);
+
+      await make(lock).run();
+
+      expect(lock.withLock).toHaveBeenCalledWith(
+        "q:lock:startup:stripe-discount-backfill",
+        1800,
+        expect.any(Function),
+        { retryOnRedisError: true },
+      );
+      expect(subscriptionRepository.findAll).toHaveBeenCalled();
+    });
+
+    it("runs nothing and reports locked when another process holds the lock", async () => {
+      const lock = makeLock(false);
+
+      const result = await make(lock).run();
+
+      expect(result).toEqual({ skipped: "locked", total: 0, updated: 0, missing: 0, unreadable: 0, failed: 0 });
+      expect(cls.run).not.toHaveBeenCalled();
+      expect(subscriptionRepository.findAll).not.toHaveBeenCalled();
+    });
   });
 });

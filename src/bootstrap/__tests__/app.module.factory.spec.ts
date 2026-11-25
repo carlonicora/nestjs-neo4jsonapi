@@ -1,11 +1,16 @@
 import { DynamicModule, Type } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { ScheduleExplorer, ScheduleModule } from "@nestjs/schedule";
+import { NecordModule } from "necord";
+import { afterEach, describe, expect, it } from "vitest";
 import { AppMode, AppModeConfig } from "../../common/decorators/conditional-service.decorator";
+import { baseConfig } from "../../config";
+import { DiscordModule } from "../../foundations/discord/discord.module";
 import { FoundationsModule } from "../../foundations/foundations.modules";
 import { HowToPublicController } from "../../foundations/how-to/controllers/how-to.public.controller";
 import { HowToModule } from "../../foundations/how-to/how-to.module";
 import { BootstrapOptions } from "../bootstrap.options";
 import { createAppModule } from "../app.module.factory";
+import { LockedScheduleExplorer } from "../../core/schedule/locked-schedule.explorer";
 
 /**
  * The bootstrap → FoundationsModule seam.
@@ -77,5 +82,94 @@ describe("createAppModule — how-to public routes seam", () => {
 
   it("registers no FoundationsModule at all when foundations are disabled", () => {
     expect(foundations({ howTo: { publicRoutes: true }, foundations: { disabled: true } })).toBeUndefined();
+  });
+});
+
+const WORKER_MODE: AppModeConfig = {
+  mode: AppMode.WORKER,
+  enableControllers: false,
+  enableWorkers: true,
+  enableCronJobs: true,
+};
+
+const importsFor = (options: Partial<BootstrapOptions>, modeConfig: AppModeConfig): any[] => {
+  const moduleClass = createAppModule({ appModules: [], ...options } as BootstrapOptions) as any;
+  return (moduleClass.forRoot(modeConfig) as DynamicModule).imports ?? [];
+};
+
+const hasNecord = (imports: any[]): boolean => imports.some((entry: any) => entry?.module === NecordModule);
+const hasDiscordModule = (imports: any[]): boolean => imports.includes(DiscordModule);
+
+describe("createAppModule — Discord bot login", () => {
+  const originalToken = baseConfig.discord.token;
+
+  afterEach(() => {
+    baseConfig.discord.token = originalToken;
+  });
+
+  const cases: Array<{
+    name: string;
+    label?: string;
+    modeConfig: AppModeConfig;
+    token: string;
+    expected: boolean;
+  }> = [
+    { name: "no label option, unlabelled worker, token set", modeConfig: WORKER_MODE, token: "t", expected: true },
+    {
+      name: 'no label option, worker labelled "x", token set',
+      modeConfig: { ...WORKER_MODE, enableCronJobs: false, label: "x" },
+      token: "t",
+      expected: false,
+    },
+    { name: "no label option, API, token set", modeConfig: API_MODE, token: "t", expected: false },
+    {
+      name: 'label "discord", worker labelled "discord", token set',
+      label: "discord",
+      modeConfig: { ...WORKER_MODE, enableCronJobs: false, label: "discord" },
+      token: "t",
+      expected: true,
+    },
+    {
+      name: 'label "discord", unlabelled worker, token set',
+      label: "discord",
+      modeConfig: WORKER_MODE,
+      token: "t",
+      expected: false,
+    },
+    {
+      name: 'label "discord", worker labelled "discord", empty token',
+      label: "discord",
+      modeConfig: { ...WORKER_MODE, enableCronJobs: false, label: "discord" },
+      token: "",
+      expected: false,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(`${testCase.expected ? "imports" : "does not import"} Necord and DiscordModule: ${testCase.name}`, () => {
+      baseConfig.discord.token = testCase.token;
+      const options: Partial<BootstrapOptions> = testCase.label ? { discord: { label: testCase.label } } : {};
+
+      const imports = importsFor(options, testCase.modeConfig);
+
+      expect(hasNecord(imports)).toBe(testCase.expected);
+      expect(hasDiscordModule(imports)).toBe(testCase.expected);
+    });
+  }
+});
+
+describe("createAppModule — scheduler", () => {
+  it("imports the locked schedule module when cron jobs are enabled", () => {
+    const imports = importsFor({}, WORKER_MODE);
+    const schedule = imports.find((entry: any) => entry?.module === ScheduleModule);
+
+    expect(schedule).toBeDefined();
+    expect(schedule.providers).toContainEqual({ provide: ScheduleExplorer, useClass: LockedScheduleExplorer });
+  });
+
+  it("does not import the schedule module when cron jobs are disabled", () => {
+    const imports = importsFor({}, { ...WORKER_MODE, enableCronJobs: false, label: "x" });
+
+    expect(imports.some((entry: any) => entry?.module === ScheduleModule)).toBe(false);
   });
 });

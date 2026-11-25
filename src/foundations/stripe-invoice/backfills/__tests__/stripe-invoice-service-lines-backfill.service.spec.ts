@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mocked } from "vitest";
+import type { RedisLockService } from "../../../../core/redis/services/redis.lock.service";
 import Stripe from "stripe";
 import { StripeInvoiceServiceLinesBackfillService } from "../stripe-invoice-service-lines-backfill.service";
 
@@ -104,5 +105,47 @@ describe("StripeInvoiceServiceLinesBackfillService", () => {
     await vi.waitFor(() =>
       expect(logger.error).toHaveBeenCalledWith("Stripe invoice service lines backfill aborted", expect.any(Error)),
     );
+  });
+
+  describe("start-up lock", () => {
+    const makeLock = (runFn: boolean) => ({
+      scopedKey: vi.fn<RedisLockService["scopedKey"]>((name) => `q:lock:${name}`),
+      withLock: vi.fn(async (_key, _ttl, fn) => (runFn ? fn() : null)),
+    });
+
+    const make = (lock: ReturnType<typeof makeLock>) =>
+      new StripeInvoiceServiceLinesBackfillService(
+        stripeService as any,
+        api as any,
+        invoiceRepository as any,
+        adminService as any,
+        cls as any,
+        logger as any,
+        lock as unknown as RedisLockService,
+      );
+
+    it("runs through the startup:stripe-invoice-lines-backfill lock", async () => {
+      const lock = makeLock(true);
+
+      await make(lock).run();
+
+      expect(lock.withLock).toHaveBeenCalledWith(
+        "q:lock:startup:stripe-invoice-lines-backfill",
+        1800,
+        expect.any(Function),
+        { retryOnRedisError: true },
+      );
+      expect(invoiceRepository.findWithoutServiceLines).toHaveBeenCalled();
+    });
+
+    it("runs nothing and reports locked when another process holds the lock", async () => {
+      const lock = makeLock(false);
+
+      const result = await make(lock).run();
+
+      expect(result).toEqual({ skipped: "locked", total: 0, recorded: 0, priceUnknown: 0, failed: 0 });
+      expect(cls.run).not.toHaveBeenCalled();
+      expect(invoiceRepository.findWithoutServiceLines).not.toHaveBeenCalled();
+    });
   });
 });

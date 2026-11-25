@@ -332,6 +332,16 @@ export interface BootstrapOptions {
   mcp?: boolean;
 
   /**
+   * Discord bot configuration.
+   */
+  discord?: {
+    /**
+     * Label of the worker that logs into Discord. Unset: every unlabelled worker with a token logs in.
+     */
+    label?: string;
+  };
+
+  /**
    * Worker mode configuration.
    * Default undefined — no health server started (neural-erp behavior unchanged).
    */

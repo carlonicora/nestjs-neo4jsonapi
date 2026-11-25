@@ -18,6 +18,13 @@ import { ModelWeight } from "../../../core/llm/enums/model.weight";
 import { TOKEN_USAGE_RECORDED_EVENT, TokenUsageRecordedPayload } from "../events/tokenusage.events";
 import { JsonApiListDocument } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
 
+/** Neo4j's error code for a write rejected by a uniqueness (or other) constraint. */
+const CONSTRAINT_VALIDATION_FAILED = "Neo.ClientError.Schema.ConstraintValidationFailed";
+
+function isConstraintViolation(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === CONSTRAINT_VALIDATION_FAILED;
+}
+
 /**
  * Per-call cost rates, in euros per 1M tokens, belonging to the AI connection
  * that ACTUALLY served a call.
@@ -173,6 +180,12 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
     model?: string;
     /** Provider that served the call. Same rule as `model`. */
     provider?: string;
+    /**
+     * Id of the usage record. A caller that may repeat the same call passes a
+     * stable id: the unique id constraint rejects the second write, so it is
+     * recorded and charged once. Omitted, a random UUID is used.
+     */
+    id?: string;
   }): Promise<void> {
     const cost =
       params.costOverride ??
@@ -196,19 +209,29 @@ export class TokenUsageService extends AbstractService<TokenUsage, typeof TokenU
       if (params.applyMinimum !== false) credits = Math.max(creditsConfig.minCreditsPerRecord, credits);
     }
 
-    await this.tokenUsageRepository.create({
-      id: randomUUID(),
-      tokenUsageType: params.type,
-      inputTokens: params.tokens.input,
-      outputTokens: params.tokens.output,
-      cachedInputTokens: params.tokens.cached ?? 0,
-      cost: cost,
-      credits: credits,
-      model: model,
-      provider: provider,
-      relationshipId: params.relationshipId,
-      relationshipType: params.relationshipType,
-    });
+    try {
+      await this.tokenUsageRepository.create({
+        id: params.id ?? randomUUID(),
+        tokenUsageType: params.type,
+        inputTokens: params.tokens.input,
+        outputTokens: params.tokens.output,
+        cachedInputTokens: params.tokens.cached ?? 0,
+        cost: cost,
+        credits: credits,
+        model: model,
+        provider: provider,
+        relationshipId: params.relationshipId,
+        relationshipType: params.relationshipType,
+      });
+    } catch (error) {
+      // A caller-supplied id names one call: a second write of it is a repeat of
+      // a call already recorded and charged, not a persistence failure. Charge nothing.
+      if (params.id !== undefined && isConstraintViolation(error)) {
+        this.logger.debug(`Usage ${params.id} already recorded`);
+        return;
+      }
+      throw error;
+    }
 
     // Notify listeners (e.g. company balance deduction) that usage occurred.
     // Decoupled via the event bus so this foundation module never imports CompanyModule.

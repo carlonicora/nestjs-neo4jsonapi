@@ -19,6 +19,7 @@ import { MigratorService } from "../migrator.service";
 import { Neo4jService } from "../../../neo4j/services/neo4j.service";
 import { AppLoggingService } from "../../../logging/services/logging.service";
 import { S3Service } from "../../../../foundations/s3/services/s3.service";
+import { RedisLockService } from "../../../redis/services/redis.lock.service";
 
 describe("MigratorService", () => {
   let service: MigratorService;
@@ -573,6 +574,77 @@ describe("MigratorService", () => {
       // Assert
       expect(neo4jService.read).toHaveBeenCalledTimes(1);
       expect(neo4jService.read).toHaveBeenCalledWith(expect.stringContaining("MATCH (m:Migration)"), {});
+    });
+  });
+
+  describe("start-up lock", () => {
+    it("runs the migrations inside the startup:migrations lock", async () => {
+      const events: string[] = [];
+      const lock = {
+        scopedKey: vi.fn<RedisLockService["scopedKey"]>((name) => `q:lock:${name}`),
+        withLockWaiting: vi.fn(async (key, ttl, fn) => {
+          events.push(`lock ${key} ${ttl}`);
+          const result = await fn();
+          events.push("unlock");
+          return result;
+        }),
+      };
+      neo4jService.writeOne.mockImplementation(async () => {
+        events.push("constraint");
+        return null;
+      });
+      neo4jService.read.mockImplementation(async () => {
+        events.push("read");
+        return { records: [] };
+      });
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const locked = new MigratorService(
+        neo4jService,
+        { uploadBufferWithKey: vi.fn() } as unknown as S3Service,
+        logger,
+        lock as unknown as RedisLockService,
+      );
+      await locked.onModuleInit();
+
+      expect(lock.withLockWaiting).toHaveBeenCalledWith("q:lock:startup:migrations", 1800, expect.any(Function));
+      expect(events).toEqual(["lock q:lock:startup:migrations 1800", "constraint", "constraint", "read", "unlock"]);
+    });
+
+    it("still throws a failed migration out of onModuleInit inside the lock", async () => {
+      const lock = {
+        scopedKey: vi.fn<RedisLockService["scopedKey"]>((name) => `q:lock:${name}`),
+        withLockWaiting: vi.fn(async (_key, _ttl, fn) => fn()),
+      };
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      neo4jService.read.mockResolvedValue({ records: [] } as any);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readdirSync).mockReturnValue(["20231201_01.ts"] as any);
+
+      const locked = new MigratorService(
+        neo4jService,
+        { uploadBufferWithKey: vi.fn() } as unknown as S3Service,
+        logger,
+        lock as unknown as RedisLockService,
+      );
+
+      await expect(locked.onModuleInit()).rejects.toThrow();
+    });
+
+    it("runs the migrations as before when no lock service is given", async () => {
+      neo4jService.writeOne.mockResolvedValue(undefined);
+      neo4jService.read.mockResolvedValue({ records: [] } as any);
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const unlocked = new MigratorService(
+        neo4jService,
+        { uploadBufferWithKey: vi.fn() } as unknown as S3Service,
+        logger,
+      );
+      await unlocked.onModuleInit();
+
+      expect(neo4jService.writeOne).toHaveBeenCalledTimes(2);
+      expect(logger.log).toHaveBeenCalledWith("No migrations to run");
     });
   });
 });

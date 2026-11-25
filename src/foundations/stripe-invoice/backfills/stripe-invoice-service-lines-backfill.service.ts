@@ -1,6 +1,7 @@
-import { Injectable, OnApplicationBootstrap } from "@nestjs/common";
+import { Injectable, OnApplicationBootstrap, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { RedisLockService } from "../../../core/redis/services/redis.lock.service";
 import { StripeService } from "../../stripe/services/stripe.service";
 import { StripeInvoiceRepository } from "../repositories/stripe-invoice.repository";
 import { StripeInvoiceAdminService } from "../services/stripe-invoice-admin.service";
@@ -8,7 +9,7 @@ import { StripeInvoiceApiService } from "../services/stripe-invoice-api.service"
 
 export type StripeInvoiceServiceLinesBackfillResult = {
   /** Skipped without touching anything: Stripe off. */
-  skipped: "stripe-not-configured" | null;
+  skipped: "stripe-not-configured" | "locked" | null;
   total: number;
   /** Service lines written and the invoice marked checked. */
   recorded: number;
@@ -40,6 +41,7 @@ export class StripeInvoiceServiceLinesBackfillService implements OnApplicationBo
     private readonly stripeInvoiceAdminService: StripeInvoiceAdminService,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
+    @Optional() private readonly redisLock?: RedisLockService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -48,9 +50,20 @@ export class StripeInvoiceServiceLinesBackfillService implements OnApplicationBo
     });
   }
 
-  /** Repository queries read the request context, so the run gets an empty one. */
+  /**
+   * Repository queries read the request context, so the run gets an empty one.
+   * With a lock service, one process runs it; another one booting at the same time skips.
+   */
   async run(): Promise<StripeInvoiceServiceLinesBackfillResult> {
-    return this.cls.run(() => this.backfill());
+    if (!this.redisLock) return this.cls.run(() => this.backfill());
+
+    const result = await this.redisLock.withLock(
+      this.redisLock.scopedKey("startup:stripe-invoice-lines-backfill"),
+      1800,
+      () => this.cls.run(() => this.backfill()),
+      { retryOnRedisError: true },
+    );
+    return result ?? { skipped: "locked", total: 0, recorded: 0, priceUnknown: 0, failed: 0 };
   }
 
   private async backfill(): Promise<StripeInvoiceServiceLinesBackfillResult> {

@@ -1,6 +1,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach, MockedObject } from "vitest";
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigService } from "@nestjs/config";
+import { Logger } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { TokenUsageService } from "../tokenusage.service";
 import { TokenUsageRepository } from "../../repositories/tokenusage.repository";
@@ -401,6 +402,73 @@ describe("TokenUsageService", () => {
         cost: 0.025,
         credits: 0,
       });
+    });
+
+    it("creates the record with the caller's id when one is given", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+
+      await service.recordTokenUsage({
+        tokens: { input: 100, output: 50 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+        id: "fixed",
+      });
+
+      expect(tokenUsageRepository.create).toHaveBeenCalledWith(expect.objectContaining({ id: "fixed" }));
+    });
+
+    it("creates the record with a random UUID when no id is given", async () => {
+      tokenUsageRepository.create.mockResolvedValue(undefined);
+
+      await service.recordTokenUsage({
+        tokens: { input: 100, output: 50 },
+        type: TokenUsageType.Summariser,
+        relationshipId: TEST_IDS.relationshipId,
+        relationshipType: "Content",
+      });
+
+      const [created] = tokenUsageRepository.create.mock.calls[0] as [{ id: string }];
+      expect(created.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(created.id).not.toBe("fixed");
+    });
+
+    const constraintError = (): Error =>
+      Object.assign(new Error("Node already exists with label TokenUsage and property id"), {
+        code: "Neo.ClientError.Schema.ConstraintValidationFailed",
+      });
+    const usage = {
+      tokens: { input: 100, output: 50 },
+      type: TokenUsageType.Summariser,
+      relationshipId: TEST_IDS.relationshipId,
+      relationshipType: "Content",
+    };
+
+    it("a repeated caller-supplied id resolves, logs at debug and charges nothing", async () => {
+      tokenUsageRepository.create.mockRejectedValue(constraintError());
+      const debug = vi.spyOn(Logger.prototype, "debug").mockImplementation(() => undefined);
+
+      await expect(service.recordTokenUsage({ ...usage, id: "fixed" })).resolves.toBeUndefined();
+
+      expect(debug).toHaveBeenCalledWith("Usage fixed already recorded");
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, expect.anything());
+      debug.mockRestore();
+    });
+
+    it("a constraint error on a random id still rejects and charges nothing", async () => {
+      tokenUsageRepository.create.mockRejectedValue(constraintError());
+
+      await expect(service.recordTokenUsage(usage)).rejects.toThrow("Node already exists");
+
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, expect.anything());
+    });
+
+    it("any other create error with a caller-supplied id rejects and charges nothing", async () => {
+      tokenUsageRepository.create.mockRejectedValue(new Error("connection lost"));
+
+      await expect(service.recordTokenUsage({ ...usage, id: "fixed" })).rejects.toThrow("connection lost");
+
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(TOKEN_USAGE_RECORDED_EVENT, expect.anything());
     });
 
     it("does not throw when the event emit fails (best-effort)", async () => {

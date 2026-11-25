@@ -1,6 +1,12 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
-import { APP_MODE_TOKEN, createApiProvider, createWorkerProvider } from "../conditional-service.decorator";
+import {
+  APP_MODE_TOKEN,
+  AppMode,
+  AppModeConfig,
+  createApiProvider,
+  createWorkerProvider,
+} from "../conditional-service.decorator";
 
 const OPTIONAL_SEAM = Symbol("OPTIONAL_SEAM");
 
@@ -49,5 +55,45 @@ describe("createConditionalProvider — @Optional() propagation", () => {
 
     // Without self:paramtypes handling this would be Object (the erased type).
     expect(provider.inject[2]).not.toBe(Object);
+  });
+});
+
+class Plain {}
+
+const build = (provider: unknown, config: Partial<AppModeConfig>): unknown =>
+  (provider as { useFactory: (appMode: AppModeConfig) => unknown }).useFactory(config as AppModeConfig);
+
+describe("label rule", () => {
+  const unlabelledWorker = () => createWorkerProvider(Plain);
+  const labelledWorker = () => createWorkerProvider(Plain, "discord");
+  const api = () => createApiProvider(Plain);
+
+  describe("{ mode: API }", () => {
+    const config = { mode: AppMode.API };
+    it("createWorkerProvider(X) is null", () => expect(build(unlabelledWorker(), config)).toBeNull());
+    it('createWorkerProvider(X, "discord") is null', () => expect(build(labelledWorker(), config)).toBeNull());
+    it("createApiProvider(X) is an instance", () => expect(build(api(), config)).toBeInstanceOf(Plain));
+  });
+
+  describe("{ mode: WORKER }", () => {
+    const config = { mode: AppMode.WORKER };
+    it("createWorkerProvider(X) is an instance", () => expect(build(unlabelledWorker(), config)).toBeInstanceOf(Plain));
+    it('createWorkerProvider(X, "discord") is null', () => expect(build(labelledWorker(), config)).toBeNull());
+    it("createApiProvider(X) is null", () => expect(build(api(), config)).toBeNull());
+  });
+
+  describe('{ mode: WORKER, label: "discord" }', () => {
+    const config = { mode: AppMode.WORKER, label: "discord" };
+    it("createWorkerProvider(X) is null", () => expect(build(unlabelledWorker(), config)).toBeNull());
+    it('createWorkerProvider(X, "discord") is an instance', () =>
+      expect(build(labelledWorker(), config)).toBeInstanceOf(Plain));
+    it("createApiProvider(X) is null", () => expect(build(api(), config)).toBeNull());
+  });
+
+  describe('{ mode: WORKER, label: "other" }', () => {
+    const config = { mode: AppMode.WORKER, label: "other" };
+    it("createWorkerProvider(X) is null", () => expect(build(unlabelledWorker(), config)).toBeNull());
+    it('createWorkerProvider(X, "discord") is null', () => expect(build(labelledWorker(), config)).toBeNull());
+    it("createApiProvider(X) is null", () => expect(build(api(), config)).toBeNull());
   });
 });

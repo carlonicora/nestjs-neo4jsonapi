@@ -23,6 +23,7 @@ import { BootstrapOptions } from "./bootstrap.options";
 import {
   defaultFastifyOptions,
   defaultMultipartOptions,
+  getAppLabel,
   getAppMode,
   getAppModeConfig,
   resolveTrustProxy,
@@ -65,11 +66,12 @@ export async function bootstrap(options: BootstrapOptions): Promise<void> {
   // Increase max listeners for complex applications
   EventEmitter.defaultMaxListeners = 50;
 
-  const mode = getAppMode();
-  const modeConfig = getAppModeConfig(mode);
   const AppModule = createAppModule(options);
 
   try {
+    const mode = getAppMode();
+    const modeConfig = getAppModeConfig(mode, getAppLabel());
+
     if (mode === AppMode.WORKER) {
       await bootstrapWorker(AppModule, modeConfig, options);
     } else {

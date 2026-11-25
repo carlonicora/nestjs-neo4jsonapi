@@ -4,6 +4,7 @@ import { ClsService } from "nestjs-cls";
 import { RoleId } from "../../../common";
 import { CompanyRepository } from "../../company";
 import { UserRepository } from "../../user";
+import { DiscordUser } from "../entities/discord-user";
 import { DiscordUserRepository } from "../repositories/discord-user.repository";
 import { discordUser } from "../types/discord.user.type";
 import { shouldUseDiscordAvatar } from "../utils/discord-avatar";
@@ -53,6 +54,14 @@ export class DiscordUserService {
       name: params.userDetails.username,
       user: params.userId,
     });
+  }
+
+  /**
+   * Returns the user's Discord account entity, or undefined when the user never linked Discord, for
+   * worker code. Scoped to the company the worker put in CLS: DiscordUser is company-scoped.
+   */
+  async findByUserIdForWorker(params: { userId: string }): Promise<DiscordUser | undefined> {
+    return this.discordUserRepository.findByUserIdInCompany(params);
   }
 
   /**

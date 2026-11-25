@@ -17,6 +17,11 @@ export interface AppModeConfig {
   enableControllers: boolean;
   enableWorkers: boolean;
   enableCronJobs: boolean;
+  /**
+   * Label of a worker started with `--label=<name>`. A labelled worker runs only the
+   * providers registered with the same label; an unlabelled worker runs only unlabelled ones.
+   */
+  label?: string;
 }
 
 /**
@@ -52,15 +57,23 @@ function resolveInjectionTokens(
 }
 
 /**
- * Helper function to create conditional providers based on app mode
+ * Helper function to create conditional providers based on app mode.
+ *
+ * In worker mode the provider's `label` must equal the worker's label: an unlabelled
+ * provider runs only in an unlabelled worker, a labelled one only in a worker with that label.
  */
-export function createConditionalProvider<T>(ServiceClass: new (...args: any[]) => T, modes: AppMode[]): Provider {
+export function createConditionalProvider<T>(
+  ServiceClass: new (...args: any[]) => T,
+  modes: AppMode[],
+  label?: string,
+): Provider {
   const tokens = resolveInjectionTokens(ServiceClass);
 
   return {
     provide: ServiceClass,
     useFactory: (appMode: AppModeConfig, ...args: any[]) => {
       if (!modes.includes(appMode.mode)) return null;
+      if (appMode.mode === AppMode.WORKER && (appMode.label ?? undefined) !== (label ?? undefined)) return null;
 
       return new ServiceClass(...args);
     },
@@ -69,10 +82,16 @@ export function createConditionalProvider<T>(ServiceClass: new (...args: any[]) 
 }
 
 /**
- * Helper function to create providers that only run in worker mode
+ * Helper function to create providers that only run in worker mode.
+ * With a `label`, the provider runs only in a worker started with `--label=<label>`;
+ * without one, only in a worker started with no label.
+ *
+ * A labelled worker runs no cron jobs (`enableCronJobs` is false for it, see
+ * `getAppModeConfig`), so the `@Cron` methods of a labelled provider never fire.
+ * Put scheduled work on an unlabelled provider.
  */
-export function createWorkerProvider<T>(ServiceClass: new (...args: any[]) => T): Provider {
-  return createConditionalProvider(ServiceClass, [AppMode.WORKER]);
+export function createWorkerProvider<T>(ServiceClass: new (...args: any[]) => T, label?: string): Provider {
+  return createConditionalProvider(ServiceClass, [AppMode.WORKER], label);
 }
 
 /**

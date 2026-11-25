@@ -49,7 +49,7 @@ export { bootstrap } from "./bootstrap";
 export { BootstrapOptions, I18nOptions, OpenApiOptions } from "./bootstrap.options";
 
 // Re-export defaults (functions and constants)
-export { defaultFastifyOptions, defaultMultipartOptions, getAppMode, getAppModeConfig } from "./defaults";
+export { defaultFastifyOptions, defaultMultipartOptions, getAppLabel, getAppMode, getAppModeConfig } from "./defaults";
 
 // Raw body configuration for webhook routes
 export { RAW_BODY_ROUTES, setupRawBodyCapture } from "./raw-body.config";

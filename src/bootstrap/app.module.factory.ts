@@ -2,7 +2,6 @@ import { DynamicModule, Module, Type } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { EventEmitterModule } from "@nestjs/event-emitter";
-import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { GatewayIntentBits } from "discord.js";
 import { NecordModule } from "necord";
@@ -15,8 +14,9 @@ import { CustomThrottlerGuard } from "../common/guards/custom-throttler.guard";
 import { baseConfig, BaseConfigInterface, ConfigDiscordInterface, ConfigRateLimitInterface } from "../config";
 import { DiscordModule } from "../foundations/discord/discord.module";
 import { AppModeModule } from "../core/appmode/app.mode.module";
-import { AppModeConfig } from "../core/appmode/constants/app.mode.constant";
+import { AppMode, AppModeConfig } from "../core/appmode/constants/app.mode.constant";
 import { CoreModule } from "../core/core.module";
+import { createLockedScheduleModule } from "../core/schedule/locked-schedule.module";
 import { FoundationsModule } from "../foundations/foundations.modules";
 import { McpModule } from "../mcp/mcp.module";
 import { OfflineModule } from "../core/offline/offline.module";
@@ -124,8 +124,8 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
             ],
           }),
 
-          // Schedule module (only in worker mode for cron jobs)
-          ...(modeConfig.enableCronJobs ? [ScheduleModule.forRoot()] : []),
+          // Schedule module (only in worker mode for cron jobs); each @Cron tick takes a Redis lock
+          ...(modeConfig.enableCronJobs ? [createLockedScheduleModule()] : []),
 
           // Library's core infrastructure modules
           CoreModule.forRoot({
@@ -176,9 +176,12 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           // User's app-specific modules (MUST be before NecordModule so Necord can discover handlers)
           ...options.appModules,
 
-          // Discord bot (only in worker mode when token is configured)
+          // Discord bot (only in worker mode when token is configured). With `discord.label` only the
+          // worker carrying that label logs in; without it every unlabelled worker does.
           // IMPORTANT: Must be AFTER appModules so Necord can discover decorated handlers
-          ...(modeConfig.enableCronJobs && baseConfig.discord.token
+          ...(modeConfig.mode === AppMode.WORKER &&
+          baseConfig.discord.token &&
+          (options.discord?.label ? modeConfig.label === options.discord.label : !modeConfig.label)
             ? [
                 NecordModule.forRootAsync({
                   imports: [ConfigModule],

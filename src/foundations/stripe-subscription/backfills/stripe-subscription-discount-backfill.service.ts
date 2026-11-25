@@ -1,6 +1,7 @@
-import { HttpStatus, Injectable, OnApplicationBootstrap } from "@nestjs/common";
+import { HttpStatus, Injectable, OnApplicationBootstrap, Optional } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { RedisLockService } from "../../../core/redis/services/redis.lock.service";
 import { StripeError } from "../../stripe/errors/stripe.errors";
 import { StripeService } from "../../stripe/services/stripe.service";
 import { discountFromStripeSubscription } from "../entities/stripe-subscription.discount";
@@ -13,7 +14,7 @@ export const STRIPE_SUBSCRIPTION_DISCOUNT_BACKFILL_ID = "stripe-subscription-dis
 
 export type StripeSubscriptionDiscountBackfillResult = {
   /** Skipped without touching anything: Stripe off, or the marker already exists. */
-  skipped: "stripe-not-configured" | "already-completed" | null;
+  skipped: "stripe-not-configured" | "already-completed" | "locked" | null;
   total: number;
   /** Discount fields written (a discount, or null when Stripe says there is none). */
   updated: number;
@@ -49,6 +50,7 @@ export class StripeSubscriptionDiscountBackfillService implements OnApplicationB
     private readonly backfillRepository: StripeSubscriptionBackfillRepository,
     private readonly cls: ClsService,
     private readonly logger: AppLoggingService,
+    @Optional() private readonly redisLock?: RedisLockService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -57,9 +59,20 @@ export class StripeSubscriptionDiscountBackfillService implements OnApplicationB
     });
   }
 
-  /** Repository queries read the request context, so the run gets an empty one. */
+  /**
+   * Repository queries read the request context, so the run gets an empty one.
+   * With a lock service, one process runs it; another one booting at the same time skips.
+   */
   async run(): Promise<StripeSubscriptionDiscountBackfillResult> {
-    return this.cls.run(() => this.backfill());
+    if (!this.redisLock) return this.cls.run(() => this.backfill());
+
+    const result = await this.redisLock.withLock(
+      this.redisLock.scopedKey("startup:stripe-discount-backfill"),
+      1800,
+      () => this.cls.run(() => this.backfill()),
+      { retryOnRedisError: true },
+    );
+    return result ?? { skipped: "locked", total: 0, updated: 0, missing: 0, unreadable: 0, failed: 0 };
   }
 
   private async backfill(): Promise<StripeSubscriptionDiscountBackfillResult> {

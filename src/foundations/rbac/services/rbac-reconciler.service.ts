@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional, OnApplicationBootstrap } from "@nestjs/common";
 import { Neo4jService } from "../../../core/neo4j/services/neo4j.service";
 import { AppLoggingService } from "../../../core/logging/services/logging.service";
+import { RedisLockService } from "../../../core/redis/services/redis.lock.service";
 import { SystemRoles } from "../../../common/constants/system.roles";
 import { PERMISSIONS_ENFORCE, RBAC_MATRIX_TOKEN } from "../rbac.tokens";
 import type { RbacMatrix } from "../dsl/types";
@@ -40,6 +41,7 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
     @Optional() @Inject(RBAC_MATRIX_TOKEN) private readonly matrix: RbacMatrix | null,
     private readonly logger: AppLoggingService,
     @Optional() @Inject(PERMISSIONS_ENFORCE) private readonly enforce?: boolean,
+    @Optional() private readonly redisLock?: RedisLockService,
   ) {}
 
   /**
@@ -57,6 +59,17 @@ export class RbacReconcilerService implements OnApplicationBootstrap {
       return;
     }
 
+    if (!this.redisLock) {
+      await this.reconcile();
+      return;
+    }
+    // One process reconciles; another one booting at the same time skips.
+    await this.redisLock.withLock(this.redisLock.scopedKey("startup:rbac"), 600, () => this.reconcile(), {
+      retryOnRedisError: true,
+    });
+  }
+
+  private async reconcile(): Promise<void> {
     await this.preflight();
 
     const actual = await this.readActualState();

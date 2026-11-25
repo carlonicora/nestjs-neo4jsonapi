@@ -46,6 +46,11 @@ export interface AudioCallParams {
    */
   relationshipId?: string;
   relationshipType?: string;
+  /**
+   * Stable id for the usage record. A second call with the same id writes no
+   * second record and charges nothing.
+   */
+  usageId?: string;
 }
 
 export interface TranscriptionResult {
@@ -106,6 +111,11 @@ export interface DiarizeCallParams {
    */
   relationshipId?: string;
   relationshipType?: string;
+  /**
+   * Stable id for the usage record. A second call with the same id writes no
+   * second record and charges nothing.
+   */
+  usageId?: string;
 }
 
 /** One diarized speech segment. Times are SECONDS from the start of the file sent. */
@@ -538,7 +548,7 @@ export class AudioLLMService {
    * result stands.
    */
   private async persistUsage(
-    params: { tokenUsageType?: string; relationshipId?: string; relationshipType?: string },
+    params: { tokenUsageType?: string; relationshipId?: string; relationshipType?: string; usageId?: string },
     tokens: { input: number; output: number },
     audioSeconds?: number,
     providerCost?: number,
@@ -600,6 +610,7 @@ export class AudioLLMService {
         // recorder cannot infer the tier — name it explicitly.
         model: audio?.model,
         provider: audio?.provider,
+        ...(params.usageId ? { id: params.usageId } : {}),
       });
     } catch (err) {
       this.logger.warn(`Transcription usage persistence failed — continuing: ${String(err)}`);

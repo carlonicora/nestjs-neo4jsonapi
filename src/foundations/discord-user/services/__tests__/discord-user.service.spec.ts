@@ -42,6 +42,7 @@ describe("DiscordUserService", () => {
     create: vi.fn(),
     findByDiscordId: vi.fn(),
     findByUserId: vi.fn(),
+    findByUserIdInCompany: vi.fn(),
     linkToUser: vi.fn(),
     delete: vi.fn(),
   });
@@ -283,6 +284,18 @@ describe("DiscordUserService", () => {
       ).rejects.toThrow("Discord user creation failed");
     });
   });
+  describe("findByUserIdForWorker", () => {
+    it("reads through the company-scoped repository method, not the unscoped one", async () => {
+      discordUserRepository.findByUserIdInCompany.mockResolvedValue({ id: "du-1" } as DiscordUser);
+
+      const result = await service.findByUserIdForWorker({ userId: TEST_IDS.userId });
+
+      expect(discordUserRepository.findByUserIdInCompany).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(discordUserRepository.findByUserId).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: "du-1" });
+    });
+  });
+
   describe("link", () => {
     const details = { ...MOCK_DISCORD_USER, avatar: "https://cdn.discordapp.com/avatars/1/a.png" };
 

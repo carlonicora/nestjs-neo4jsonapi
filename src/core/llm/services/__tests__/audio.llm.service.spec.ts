@@ -663,6 +663,52 @@ describe("AudioLLMService", () => {
       expect(result.text).toBe("transcribed");
     });
 
+    it("passes usageId to the recorder as the record id", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+        usageId: "u1",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(expect.objectContaining({ id: "u1" }));
+    });
+
+    it("sends no id key when usageId is absent", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      const billed = await buildServiceWithRecorder();
+
+      await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+      });
+
+      const [recorded] = recordTokenUsage.mock.calls[0];
+      expect(recorded).not.toHaveProperty("id");
+    });
+
+    it("still resolves with the transcription when the recorder rejects a usageId call", async () => {
+      mockChatInvoke({ input: 10, output: 2 });
+      recordTokenUsage.mockRejectedValue(new Error("tokenusage_id already exists"));
+      const billed = await buildServiceWithRecorder();
+
+      const result = await billed.call({
+        audioPath: "/tmp/x.wav",
+        prompt: "p",
+        relationshipId: "session-1",
+        relationshipType: "Session",
+        usageId: "u1",
+      });
+
+      expect(result.text).toBe("transcribed");
+    });
+
     it("falls back to the module-local TokenUsageService when TOKEN_USAGE_RECORDER is unbound", async () => {
       mockChatInvoke({ input: 10, output: 2 });
       const billed = await buildServiceWithRecorder("class");
@@ -1151,6 +1197,28 @@ describe("AudioLLMService", () => {
           applyMinimum: false,
         }),
       );
+    });
+
+    it("passes usageId to the recorder as the record id", async () => {
+      const billed = await buildServiceWithRecorder();
+
+      await billed.diarize({
+        audioPath: tmpMp3,
+        relationshipId: "sess-1",
+        relationshipType: "sessions",
+        usageId: "u2",
+      });
+
+      expect(recordTokenUsage).toHaveBeenCalledWith(expect.objectContaining({ id: "u2" }));
+    });
+
+    it("sends no id key when usageId is absent", async () => {
+      const billed = await buildServiceWithRecorder();
+
+      await billed.diarize({ audioPath: tmpMp3, relationshipId: "sess-1", relationshipType: "sessions" });
+
+      const [recorded] = recordTokenUsage.mock.calls[0];
+      expect(recorded).not.toHaveProperty("id");
     });
 
     it("wraps a non-2xx response with the canonical prefix and records no usage", async () => {

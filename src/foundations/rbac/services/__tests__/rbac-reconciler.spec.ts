@@ -1,4 +1,5 @@
-import { vi, describe, it, expect } from "vitest";
+import { vi, describe, it, expect, type Mocked } from "vitest";
+import type { RedisLockService } from "../../../../core/redis/services/redis.lock.service";
 import { RbacReconcilerService } from "../rbac-reconciler.service";
 import { perm } from "../../dsl/perm";
 import type { RbacMatrix } from "../../dsl/types";
@@ -237,5 +238,58 @@ describe("RbacReconcilerService", () => {
     expect(service.read).not.toHaveBeenCalled();
     expect(service.executeInTransaction).not.toHaveBeenCalled();
     expect(logger.log).toHaveBeenCalledWith(expect.stringContaining("no matrix configured"));
+  });
+
+  describe("start-up lock", () => {
+    const makeLock = (runFn: boolean) => ({
+      scopedKey: vi.fn<RedisLockService["scopedKey"]>((name) => `q:lock:${name}`),
+      withLock: vi.fn(async (_key, _ttl, fn) => (runFn ? fn() : null)),
+    });
+
+    it("reconciles inside the startup:rbac lock", async () => {
+      const { db, service } = makeNeo4j({});
+      const lock = makeLock(true);
+      const reconciler = new RbacReconcilerService(
+        service as any,
+        matrix,
+        createMockLogger() as any,
+        undefined,
+        lock as unknown as RedisLockService,
+      );
+
+      await reconciler.onApplicationBootstrap();
+
+      expect(lock.withLock).toHaveBeenCalledWith("q:lock:startup:rbac", 600, expect.any(Function), {
+        retryOnRedisError: true,
+      });
+      expect(db.edges.length).toBeGreaterThan(0);
+    });
+
+    it("runs no query when another process holds the lock", async () => {
+      const { service } = makeNeo4j({});
+      const lock = makeLock(false);
+      const reconciler = new RbacReconcilerService(
+        service as any,
+        matrix,
+        createMockLogger() as any,
+        undefined,
+        lock as unknown as RedisLockService,
+      );
+
+      await reconciler.onApplicationBootstrap();
+
+      expect(service.read).not.toHaveBeenCalled();
+      expect(service.executeInTransaction).not.toHaveBeenCalled();
+    });
+
+    it("reconciles as before with no lock service", async () => {
+      const { db, service } = makeNeo4j({});
+      const reconciler = new RbacReconcilerService(service as any, matrix, createMockLogger() as any);
+
+      await reconciler.onApplicationBootstrap();
+
+      expect(service.executeInTransaction).toHaveBeenCalled();
+      expect(db.edges.length).toBeGreaterThan(0);
+    });
   });
 });
