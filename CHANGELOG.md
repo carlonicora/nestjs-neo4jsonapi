@@ -1,3 +1,9 @@
+## [8.34.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.0...v8.34.1) (2026-11-25)
+
+### 🐛 Bug Fixes
+
+* **build:** the build empties dist before compiling, so files whose source was deleted no longer stay in dist or reach a cached build ([5cfffc9](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/5cfffc955d94fd91622561c093847c7d905fac9d))
+
 ## [8.34.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.33.0...v8.34.0) (2026-11-25)
 
 ### 🚀 Features
