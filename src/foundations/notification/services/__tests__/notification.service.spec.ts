@@ -5,11 +5,14 @@ import { NotificationServices } from "../notification.service";
 import { NotificationRepository } from "../../repositories/notification.repository";
 import { Notification } from "../../entities/notification";
 import { JsonApiService } from "../../../../core/jsonapi/services/jsonapi.service";
+import { WebSocketService } from "../../../../core/websocket/services/websocket.service";
+import { NOTIFICATIONS_READ_EVENT } from "../notification.service";
 
 describe("NotificationServices", () => {
   let service: NotificationServices;
   let notificationRepository: MockedObject<NotificationRepository>;
   let jsonApiService: MockedObject<JsonApiService>;
+  let webSocketService: { sendMessageToUser: ReturnType<typeof vi.fn> };
 
   const TEST_IDS = {
     userId: "550e8400-e29b-41d4-a716-446655440000",
@@ -65,12 +68,14 @@ describe("NotificationServices", () => {
         { provide: NotificationRepository, useValue: createMockNotificationRepository() },
         { provide: JsonApiService, useValue: createMockJsonApiService() },
         { provide: ClsService, useValue: { get: vi.fn(), set: vi.fn(), has: vi.fn().mockReturnValue(false) } },
+        { provide: WebSocketService, useValue: { sendMessageToUser: vi.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
     service = module.get<NotificationServices>(NotificationServices);
     notificationRepository = module.get(NotificationRepository) as MockedObject<NotificationRepository>;
     jsonApiService = module.get(JsonApiService) as MockedObject<JsonApiService>;
+    webSocketService = module.get(WebSocketService) as any;
   });
 
   afterEach(() => {
@@ -192,6 +197,34 @@ describe("NotificationServices", () => {
   });
 
   describe("markAsRead", () => {
+    it("tells every open connection of the user which notifications were read", async () => {
+      const notificationIds = [TEST_IDS.notificationId1, TEST_IDS.notificationId2];
+      notificationRepository.markAsRead.mockResolvedValue(undefined);
+
+      await service.markAsRead({ userId: TEST_IDS.userId, notificationIds });
+
+      expect(webSocketService.sendMessageToUser).toHaveBeenCalledWith(TEST_IDS.userId, NOTIFICATIONS_READ_EVENT, {
+        ids: notificationIds,
+      });
+    });
+
+    it("sends nothing when no ids were marked", async () => {
+      notificationRepository.markAsRead.mockResolvedValue(undefined);
+
+      await service.markAsRead({ userId: TEST_IDS.userId, notificationIds: [] });
+
+      expect(webSocketService.sendMessageToUser).not.toHaveBeenCalled();
+    });
+
+    it("still succeeds when the websocket push fails", async () => {
+      notificationRepository.markAsRead.mockResolvedValue(undefined);
+      webSocketService.sendMessageToUser.mockRejectedValue(new Error("socket down"));
+
+      await expect(
+        service.markAsRead({ userId: TEST_IDS.userId, notificationIds: [TEST_IDS.notificationId1] }),
+      ).resolves.toBeUndefined();
+    });
+
     it("should mark notifications as read", async () => {
       // Arrange
       const notificationIds = [TEST_IDS.notificationId1, TEST_IDS.notificationId2];

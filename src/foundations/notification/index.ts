@@ -14,4 +14,4 @@ export {
   NotificationPatchListDTO,
 } from "./dtos/notification.patch.dto";
 export { NotificationRepository, NotificationTarget } from "./repositories/notification.repository";
-export { NotificationServices } from "./services/notification.service";
+export { NOTIFICATIONS_READ_EVENT, NotificationServices } from "./services/notification.service";

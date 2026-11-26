@@ -1,14 +1,22 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { ClsService } from "nestjs-cls";
 import { JsonApiPaginator } from "../../../core/jsonapi/serialisers/jsonapi.paginator";
 import { JsonApiService } from "../../../core/jsonapi/services/jsonapi.service";
 import { AbstractService } from "../../../core/neo4j/abstracts/abstract.service";
+import { WebSocketService } from "../../../core/websocket/services/websocket.service";
 import { Notification, NotificationDescriptor } from "../../notification/entities/notification";
 import { NotificationRepository } from "../../notification/repositories/notification.repository";
 import {
   JsonApiListDocument,
   JsonApiSingleDocument,
 } from "../../../core/jsonapi/interfaces/jsonapi.document.interface";
+
+/**
+ * Pushed to every open connection of the user after a mark-as-read, with the
+ * ids that were marked. Other tabs, browsers and devices drop their unread
+ * badge without reloading; the tab that marked them already knows.
+ */
+export const NOTIFICATIONS_READ_EVENT = "notifications:read";
 
 /**
  * `find`/`findById` are named `findForUser`/`findByIdForUser` — their required
@@ -26,11 +34,13 @@ import {
 @Injectable()
 export class NotificationServices extends AbstractService<Notification, typeof NotificationDescriptor.relationships> {
   protected readonly descriptor = NotificationDescriptor;
+  private readonly notificationLogger = new Logger(NotificationServices.name);
 
   constructor(
     builder: JsonApiService,
     private readonly notificationRepository: NotificationRepository,
     clsService: ClsService,
+    private readonly webSocketService: WebSocketService,
   ) {
     super(builder, notificationRepository, clsService, NotificationDescriptor.model);
   }
@@ -67,7 +77,19 @@ export class NotificationServices extends AbstractService<Notification, typeof N
   }
 
   async markAsRead(params: { userId: string; notificationIds: string[] }) {
-    return await this.notificationRepository.markAsRead(params);
+    await this.notificationRepository.markAsRead(params);
+    if (params.notificationIds.length === 0) return;
+
+    // The read is saved; a failed push only leaves other tabs stale until they reload.
+    try {
+      await this.webSocketService.sendMessageToUser(params.userId, NOTIFICATIONS_READ_EVENT, {
+        ids: params.notificationIds,
+      });
+    } catch (err) {
+      this.notificationLogger.warn(
+        `markAsRead: websocket push failed for user=${params.userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async archive(params: { notificationId: string }) {

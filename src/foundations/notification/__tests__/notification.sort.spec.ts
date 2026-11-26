@@ -25,6 +25,7 @@ describe("NotificationServices sort", () => {
       { buildList: vi.fn().mockResolvedValue({ data: [] }) } as any,
       repository as any,
       { get: vi.fn() } as any,
+      { sendMessageToUser: vi.fn() } as any,
     );
   });
 
