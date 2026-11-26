@@ -1,3 +1,9 @@
+## [8.34.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.1...v8.34.2) (2026-11-26)
+
+### 🐛 Bug Fixes
+
+* **notification:** marking notifications as read now sends a notifications:read event with the marked ids to every open connection of that user, so their other tabs, browsers and devices can clear the unread badge without reloading; a failed send leaves the read saved; NotificationServices takes WebSocketService as its fourth constructor argument, and NOTIFICATIONS_READ_EVENT is exported ([c6e1534](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/c6e1534b19e4341f3e70b88a83ac30904ba5d2d5))
+
 ## [8.34.1](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.0...v8.34.1) (2026-11-25)
 
 ### 🐛 Bug Fixes
