@@ -50,6 +50,7 @@ describe("NotificationServices", () => {
     archive: vi.fn(),
     createNotification: vi.fn(),
     createIdempotent: vi.fn(),
+    createIdempotentOrThrow: vi.fn(),
     delete: vi.fn(),
   });
 
@@ -292,6 +293,31 @@ describe("NotificationServices", () => {
 
       // Act & Assert
       await expect(service.archive({ notificationId: TEST_IDS.notificationId1 })).rejects.toThrow("Archive failed");
+    });
+  });
+
+  describe("createIdempotentOrThrow", () => {
+    const params = {
+      notificationType: "task_assigned",
+      userId: TEST_IDS.userId,
+      actorId: "actor",
+      targets: [{ id: "t1", label: "Task" }],
+      message: "Print the handouts",
+      actionUrl: "/tasks?task=t1",
+      idempotencyKey: "todos-j1-user",
+    };
+
+    it("delegates to the repository and returns its result", async () => {
+      notificationRepository.createIdempotentOrThrow.mockResolvedValue({ created: true, id: "n1" });
+
+      await expect(service.createIdempotentOrThrow(params)).resolves.toEqual({ created: true, id: "n1" });
+      expect(notificationRepository.createIdempotentOrThrow).toHaveBeenCalledWith(params);
+    });
+
+    it("propagates the repository's throw when nothing was written", async () => {
+      notificationRepository.createIdempotentOrThrow.mockRejectedValue(new Error("no row"));
+
+      await expect(service.createIdempotentOrThrow(params)).rejects.toThrow("no row");
     });
   });
 });

@@ -326,4 +326,13 @@ describe("PushService", () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe("findByUserId", () => {
+    it("returns the user's push subscriptions from the repository", async () => {
+      pushRepository.findByUserId.mockResolvedValue([MOCK_PUSH_ENTITY]);
+
+      await expect(service.findByUserId({ userId: "user-1" })).resolves.toEqual([MOCK_PUSH_ENTITY]);
+      expect(pushRepository.findByUserId).toHaveBeenCalledWith({ userId: "user-1" });
+    });
+  });
 });

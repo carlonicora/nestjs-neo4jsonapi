@@ -405,6 +405,24 @@ describe("UserService", () => {
     });
   });
 
+  describe("findRecordByUserId", () => {
+    it("returns the user record of the repository, not a JSON:API document", async () => {
+      userRepository.findByUserId.mockResolvedValue(MOCK_USER);
+
+      const result = await service.findRecordByUserId({ userId: TEST_IDS.userId });
+
+      expect(userRepository.findByUserId).toHaveBeenCalledWith({ userId: TEST_IDS.userId });
+      expect(jsonApiService.buildSingle).not.toHaveBeenCalled();
+      expect(result).toBe(MOCK_USER);
+    });
+
+    it("returns null when the user is not found", async () => {
+      userRepository.findByUserId.mockResolvedValue(null as any);
+
+      expect(await service.findRecordByUserId({ userId: TEST_IDS.userId })).toBeNull();
+    });
+  });
+
   describe("findOneForAdmin", () => {
     it("should find user for admin", async () => {
       userRepository.findOneForAdmin.mockResolvedValue(MOCK_USER);

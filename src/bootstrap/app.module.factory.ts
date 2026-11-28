@@ -25,6 +25,7 @@ import { RbacPermissionModule } from "../foundations/rbac/rbac-permission.module
 import { PERMISSIONS_ENFORCE } from "../foundations/rbac/rbac.tokens";
 import { OpenApiModule } from "../openapi/module/openapi.module";
 import { BootstrapOptions } from "./bootstrap.options";
+import { buildI18nLoaders } from "./i18n.directories";
 
 /**
  * Creates a dynamic AppModule based on bootstrap options.
@@ -35,7 +36,7 @@ import { BootstrapOptions } from "./bootstrap.options";
  * - Global configuration module
  * - Rate limiting via Throttler
  * - Request context via CLS
- * - i18n internationalization
+ * - i18n internationalization (app folder plus folders registered with registerI18nDirectory)
  * - Schedule module for cron jobs (Worker mode only)
  * - Library's CoreModule, FoundationsModule, and AgentsModule
  * - User's app-specific modules
@@ -110,13 +111,14 @@ export function createAppModule(options: BootstrapOptions): Type<any> {
           }),
 
           // i18n - optional with defaults
-          I18nModule.forRoot({
-            fallbackLanguage: options.i18n?.fallbackLanguage ?? "en",
-            logging: false,
-            loaderOptions: {
-              path: i18nPath,
-              watch: true,
-            },
+          I18nModule.forRootAsync({
+            imports: [],
+            // Built when Nest builds the app, after every package forRoot has registered its folder.
+            useFactory: () => ({
+              fallbackLanguage: options.i18n?.fallbackLanguage ?? "en",
+              logging: false,
+              loaders: buildI18nLoaders({ appPath: i18nPath, watch: true }),
+            }),
             resolvers: [
               { use: QueryResolver, options: ["lang", "locale", "l"] },
               new HeaderResolver(["x-language"]),

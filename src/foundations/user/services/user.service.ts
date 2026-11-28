@@ -213,6 +213,15 @@ export class UserService extends AbstractService<User, typeof UserDescriptor.rel
     );
   }
 
+  /**
+   * The user record (no JSON:API document), for worker code that needs a user's
+   * name, email or language: a processor calls this service, never the repository.
+   * Reads through the same company-scoped query as `findByUserId`.
+   */
+  async findRecordByUserId(params: { userId: string }): Promise<User | null> {
+    return (await this.userRepository.findByUserId({ userId: params.userId })) ?? null;
+  }
+
   async findOneForAdmin(params: { userId: string }): Promise<JsonApiSingleDocument> {
     return this.jsonApiService.buildSingle(
       this.model,

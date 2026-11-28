@@ -177,6 +177,111 @@ describe("CacheInvalidate decorator", () => {
     });
   });
 
+  describe("elements option", () => {
+    type El = { type: string; id: string };
+    let cacheService: {
+      invalidateByElement: ReturnType<typeof vi.fn>;
+      invalidateByType: ReturnType<typeof vi.fn>;
+      invalidateByElements: ReturnType<typeof vi.fn>;
+    };
+    let linked: El[];
+    let elements: Mock<(context: { controller: any; request: any }) => Promise<El[]>>;
+
+    beforeEach(() => {
+      cacheService = { invalidateByElement: vi.fn(), invalidateByType: vi.fn(), invalidateByElements: vi.fn() };
+      linked = [{ type: "projects", id: "p1" }];
+      elements = vi.fn(async () => [...linked]);
+    });
+
+    const build = () => {
+      class TestController {
+        constructor(public cacheService: any) {}
+
+        @Patch("tests/:entityId")
+        @CacheInvalidate(meta, "entityId", { elements: (context) => elements(context) })
+        async update(@Req() _req: any, @Res() _reply: any) {
+          // The write unlinks p1 and links p2.
+          linked = [{ type: "projects", id: "p2" }];
+          return "ok";
+        }
+
+        @Post("tests")
+        @CacheInvalidate(meta, undefined, { elements: (context) => elements(context) })
+        async create(@Req() _req: any, @Res() _reply: any) {
+          return "created";
+        }
+      }
+      return TestController;
+    };
+
+    it("invalidates the union of the elements before and after the write", async () => {
+      const Controller = build();
+      const controller = new Controller(cacheService);
+      const req = { params: { entityId: "e-1" } };
+
+      await expect(controller.update(req, {})).resolves.toBe("ok");
+
+      expect(elements).toHaveBeenCalledTimes(2);
+      expect(elements).toHaveBeenCalledWith({ controller, request: req });
+      expect(cacheService.invalidateByElement).toHaveBeenCalledWith("tests", "e-1");
+      expect(cacheService.invalidateByElements).toHaveBeenCalledWith([
+        { type: "projects", id: "p1" },
+        { type: "projects", id: "p2" },
+      ]);
+    });
+
+    it("lists an element reported twice once", async () => {
+      const Controller = build();
+      const controller = new Controller(cacheService);
+      linked = [{ type: "projects", id: "p2" }];
+
+      await controller.update({ params: { entityId: "e-1" } }, {});
+
+      expect(cacheService.invalidateByElements).toHaveBeenCalledWith([{ type: "projects", id: "p2" }]);
+    });
+
+    it("works without an id and still invalidates by type", async () => {
+      const Controller = build();
+      const controller = new Controller(cacheService);
+
+      await controller.create({ params: {} }, {});
+
+      expect(cacheService.invalidateByType).toHaveBeenCalledWith("tests");
+      expect(cacheService.invalidateByElements).toHaveBeenCalledWith([{ type: "projects", id: "p1" }]);
+    });
+
+    it("skips invalidateByElements when no element is reported", async () => {
+      const Controller = build();
+      const controller = new Controller(cacheService);
+      elements.mockResolvedValue([]);
+
+      await controller.create({ params: {} }, {});
+
+      expect(cacheService.invalidateByElements).not.toHaveBeenCalled();
+    });
+
+    it("needs @Req() even without an id", () => {
+      expect(() => {
+        class TestController {
+          @CacheInvalidate(meta, undefined, { elements: () => [] })
+          async create(@Res() _reply: any, @Body() _body: any) {}
+        }
+        return TestController;
+      }).toThrow("needs the request");
+    });
+
+    it("does not run the handler when the elements read before it fails", async () => {
+      const Controller = build();
+      const controller = new Controller(cacheService);
+      elements.mockRejectedValueOnce(new Error("read failed"));
+
+      await expect(controller.update({ params: { entityId: "e-1" } }, {})).rejects.toThrow("read failed");
+      // The handler would have changed the links: it never ran.
+      expect(linked).toEqual([{ type: "projects", id: "p1" }]);
+      expect(cacheService.invalidateByElement).not.toHaveBeenCalled();
+    });
+  });
+
   it.each([
     ["with an id", "entityId"],
     ["without an id", undefined],

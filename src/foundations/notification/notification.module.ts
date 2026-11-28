@@ -8,7 +8,7 @@ import { NotificationServices } from "./services/notification.service";
 @Module({
   controllers: [NotificationController],
   providers: [NotificationRepository, NotificationServices, NotificationDescriptor.model.serialiser],
-  exports: [NotificationRepository],
+  exports: [NotificationRepository, NotificationServices],
   imports: [],
 })
 export class NotificationModule implements OnModuleInit {

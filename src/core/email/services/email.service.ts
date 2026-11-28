@@ -9,6 +9,7 @@ import { BaseConfigInterface } from "../../../config/interfaces/base.config.inte
 import { ConfigAppInterface } from "../../../config/interfaces/config.app.interface";
 import { ConfigEmailInterface } from "../../../config/interfaces/config.email.interface";
 import { registerEmailTemplateHelpers } from "../email.helpers";
+import { getRegisteredEmailTemplateDirectories } from "../email.template.directories";
 import { AppLoggingService } from "../../logging/services/logging.service";
 import sendGridMail = require("@sendgrid/mail");
 
@@ -71,33 +72,27 @@ export class EmailService {
   }
 
   private loadTemplate(templateId: string, locale: string): string {
-    // Try app templates first (override)
-    const appTemplatePath = join(this.templateBasePath, locale, `${templateId}.hbs`);
-    const appFallbackPath = join(this.templateBasePath, this.defaultLocale, `${templateId}.hbs`);
-
-    // Try library templates as fallback (default). Library templates ship in
-    // English only, so the library fallback is always "en" regardless of the
-    // app's configured defaultLocale.
-    const libraryTemplatePath = join(this.libraryTemplateBasePath, locale, `${templateId}.hbs`);
-    const libraryFallbackPath = join(this.libraryTemplateBasePath, "en", `${templateId}.hbs`);
-
-    let templatePath: string | null = null;
-
-    // Check in order: app locale → app default-locale → library locale → library en
-    if (fs.existsSync(appTemplatePath)) {
-      templatePath = appTemplatePath;
-    } else if (locale !== this.defaultLocale && fs.existsSync(appFallbackPath)) {
-      templatePath = appFallbackPath;
-    } else if (fs.existsSync(libraryTemplatePath)) {
-      templatePath = libraryTemplatePath;
-    } else if (locale !== "en" && fs.existsSync(libraryFallbackPath)) {
-      templatePath = libraryFallbackPath;
-    }
+    // Check in order, first existing file wins: app locale → app default-locale →
+    // each registered package folder, in registration order (locale → default-locale) →
+    // library locale → library en. Library templates ship in English only, so the
+    // library fallback is always "en" regardless of the app's configured defaultLocale.
+    const fileName = `${templateId}.hbs`;
+    const folderCandidates = (base: string, fallbackLocale: string): string[] =>
+      locale === fallbackLocale
+        ? [join(base, locale, fileName)]
+        : [join(base, locale, fileName), join(base, fallbackLocale, fileName)];
+    const registered = getRegisteredEmailTemplateDirectories();
+    const candidates = [
+      ...folderCandidates(this.templateBasePath, this.defaultLocale),
+      ...registered.flatMap((dir) => folderCandidates(dir, this.defaultLocale)),
+      ...folderCandidates(this.libraryTemplateBasePath, "en"),
+    ];
+    const templatePath = candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 
     if (!templatePath) {
       throw new Error(
         `Template file not found for template "${templateId}" in locale "${locale}", app default "${this.defaultLocale}", or library default "en". ` +
-          `Checked app (${this.templateBasePath}) and library (${this.libraryTemplateBasePath}).`,
+          `Checked app (${this.templateBasePath}), registered (${registered.join(", ") || "none"}) and library (${this.libraryTemplateBasePath}).`,
       );
     }
 

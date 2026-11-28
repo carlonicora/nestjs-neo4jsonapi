@@ -1,7 +1,12 @@
 import { DynamicModule, Type } from "@nestjs/common";
 import { ScheduleExplorer, ScheduleModule } from "@nestjs/schedule";
 import { NecordModule } from "necord";
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { I18N_OPTIONS, I18N_RESOLVERS, I18nJsonLoader, I18nLoader, I18nModule } from "nestjs-i18n";
+import { tmpdir } from "os";
+import { join } from "path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearRegisteredI18nDirectories, registerI18nDirectory } from "../i18n.directories";
 import { AppMode, AppModeConfig } from "../../common/decorators/conditional-service.decorator";
 import { baseConfig } from "../../config";
 import { DiscordModule } from "../../foundations/discord/discord.module";
@@ -171,5 +176,63 @@ describe("createAppModule — scheduler", () => {
     const imports = importsFor({}, { ...WORKER_MODE, enableCronJobs: false, label: "x" });
 
     expect(imports.some((entry: any) => entry?.module === ScheduleModule)).toBe(false);
+  });
+});
+
+describe("createAppModule — i18n folders", () => {
+  let root: string;
+  let loaders: I18nLoader[] = [];
+  const pkgData = { title: "Package title" };
+
+  const i18nEntry = (options: Partial<BootstrapOptions>) =>
+    generatedImports(options).find((entry: any) => entry?.module === I18nModule) as DynamicModule;
+  const providerFor = (entry: DynamicModule, token: unknown): any =>
+    (entry.providers ?? []).find((p: any) => p?.provide === token);
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "app-i18n-"));
+    mkdirSync(join(root, "app", "en"), { recursive: true });
+    writeFileSync(join(root, "app", "en", "common.json"), JSON.stringify({ hello: "Hello" }));
+    mkdirSync(join(root, "pkg", "en"), { recursive: true });
+    writeFileSync(join(root, "pkg", "en", "todos.json"), JSON.stringify(pkgData));
+    mkdirSync(join(root, "pkg2"));
+    clearRegisteredI18nDirectories();
+  });
+
+  afterEach(async () => {
+    clearRegisteredI18nDirectories();
+    await Promise.all(loaders.map((l: any) => l.onModuleDestroy?.()));
+    loaders = [];
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("builds no loader while the module tree is assembled", () => {
+    registerI18nDirectory(join(root, "pkg"));
+
+    i18nEntry({ i18n: { path: join(root, "app") } });
+
+    expect(() => registerI18nDirectory(join(root, "pkg2"))).not.toThrow();
+  });
+
+  it("hands nestjs-i18n the registered folders and the app folder, app last", async () => {
+    registerI18nDirectory(join(root, "pkg"));
+
+    const options = await providerFor(
+      i18nEntry({ i18n: { path: join(root, "app"), fallbackLanguage: "it" } }),
+      I18N_OPTIONS,
+    ).useFactory();
+    loaders = options.loaders;
+
+    expect(loaders).toHaveLength(2);
+    for (const loader of loaders) expect(loader).toBeInstanceOf(I18nJsonLoader);
+    expect(options.fallbackLanguage).toBe("it");
+    expect(options.logging).toBe(false);
+    expect(await loaders[0].load()).toEqual({ en: { todos: pkgData } });
+  });
+
+  it("keeps the three language resolvers", () => {
+    const entry = i18nEntry({ i18n: { path: join(root, "app") } });
+
+    expect(providerFor(entry, I18N_RESOLVERS).useValue).toHaveLength(3);
   });
 });

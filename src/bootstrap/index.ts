@@ -48,6 +48,9 @@ export { createAppModule } from "./app.module.factory";
 export { bootstrap } from "./bootstrap";
 export { BootstrapOptions, I18nOptions, OpenApiOptions } from "./bootstrap.options";
 
+// Extra i18n folders registered by packages
+export { registerI18nDirectory } from "./i18n.directories";
+
 // Re-export defaults (functions and constants)
 export { defaultFastifyOptions, defaultMultipartOptions, getAppLabel, getAppMode, getAppModeConfig } from "./defaults";
 

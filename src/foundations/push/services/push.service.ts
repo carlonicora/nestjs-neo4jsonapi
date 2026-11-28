@@ -37,6 +37,11 @@ export class PushService {
       });
   }
 
+  /** The user's push subscriptions, for worker code that calls this service rather than the repository. */
+  async findByUserId(params: { userId: string }): Promise<Push[]> {
+    return this.pushRepository.findByUserId({ userId: params.userId });
+  }
+
   async sendNotification(params: {
     pushSubscriptions: Push[];
     title: string;

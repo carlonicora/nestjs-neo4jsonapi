@@ -67,6 +67,10 @@ import * as Handlebars from "handlebars";
 import { join, sep } from "path";
 import { AppLoggingService } from "../../../logging/services/logging.service";
 import { EmailService } from "../email.service";
+import {
+  clearRegisteredEmailTemplateDirectories,
+  registerEmailTemplateDirectory,
+} from "../../email.template.directories";
 import sendGridMail = require("@sendgrid/mail");
 
 describe("EmailService", () => {
@@ -738,6 +742,97 @@ describe("EmailService", () => {
 
       expect(mockSendMail.mock.calls[0][0]).not.toHaveProperty("replyTo");
       expect(mockSendMail.mock.calls[0][0]).not.toHaveProperty("headers");
+    });
+  });
+  describe("registered package template folders", () => {
+    const appDir = join(process.cwd(), "templates", "email");
+    const pkgA = "/pkg/a/templates/email";
+    const pkgB = "/pkg/b/templates/email";
+    const libDir = join("core", "email", "templates");
+    const libIt = join(libDir, "it", "taskAssigned.hbs");
+    const appPartial = (p: string) => p.startsWith(appDir) && (p.endsWith("header.hbs") || p.endsWith("footer.hbs"));
+    const readPaths = () => vi.mocked(fs.readFileSync).mock.calls.map((c) => String(c[0]));
+    const existing = (paths: string[]) =>
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => paths.includes(String(p)) || appPartial(String(p)));
+
+    afterEach(() => clearRegisteredEmailTemplateDirectories());
+
+    it("uses a registered folder when the app has no such template", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      existing([join(pkgA, "it", "taskAssigned.hbs")]);
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      expect(readPaths()).toContain(join(pkgA, "it", "taskAssigned.hbs"));
+    });
+
+    it("the app's template wins over a registered folder", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      existing([join(appDir, "it", "taskAssigned.hbs"), join(pkgA, "it", "taskAssigned.hbs")]);
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      expect(readPaths()).toContain(join(appDir, "it", "taskAssigned.hbs"));
+      expect(readPaths()).not.toContain(join(pkgA, "it", "taskAssigned.hbs"));
+    });
+
+    it("a registered folder wins over the library's own", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      vi.mocked(fs.existsSync).mockImplementation(
+        (p: any) =>
+          String(p) === join(pkgA, "it", "taskAssigned.hbs") || String(p).includes(libIt) || appPartial(String(p)),
+      );
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      expect(readPaths()).toContain(join(pkgA, "it", "taskAssigned.hbs"));
+      expect(readPaths().some((p) => p.includes(libDir))).toBe(false);
+    });
+
+    it("registered folders are searched in registration order", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      registerEmailTemplateDirectory(pkgB);
+      existing([join(pkgA, "it", "taskAssigned.hbs"), join(pkgB, "it", "taskAssigned.hbs")]);
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      expect(readPaths()).toContain(join(pkgA, "it", "taskAssigned.hbs"));
+      expect(readPaths()).not.toContain(join(pkgB, "it", "taskAssigned.hbs"));
+    });
+
+    it("falls back to the default locale inside a registered folder before the next folder", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      registerEmailTemplateDirectory(pkgB);
+      existing([join(pkgA, "en", "taskAssigned.hbs"), join(pkgB, "fr", "taskAssigned.hbs")]);
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "fr");
+
+      expect(readPaths()).toContain(join(pkgA, "en", "taskAssigned.hbs"));
+      expect(readPaths()).not.toContain(join(pkgB, "fr", "taskAssigned.hbs"));
+    });
+
+    it("header and footer partials never come from a registered folder", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      await service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      const partialFromPackage = readPaths().some(
+        (p) =>
+          p.startsWith("/pkg/") &&
+          (p.endsWith("header.hbs") || p.endsWith("footer.hbs") || p.endsWith("unsubscribe.hbs")),
+      );
+      expect(partialFromPackage).toBe(false);
+    });
+
+    it("names the registered folders when no template exists", async () => {
+      registerEmailTemplateDirectory(pkgA);
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => !String(p).endsWith("taskAssigned.hbs"));
+
+      const sending = service.sendEmail("taskAssigned", { to: "user@example.com" }, "it");
+
+      await expect(sending).rejects.toThrow('Template file not found for template "taskAssigned"');
+      await expect(sending).rejects.toThrow(pkgA);
     });
   });
 });

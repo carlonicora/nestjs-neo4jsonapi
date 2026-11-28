@@ -76,6 +76,17 @@ export class NotificationServices extends AbstractService<Notification, typeof N
     );
   }
 
+  /**
+   * Creates the notification once per idempotency key (see the repository's
+   * `createIdempotentOrThrow`). For worker code, which calls this service rather
+   * than the repository.
+   */
+  async createIdempotentOrThrow(
+    params: Parameters<NotificationRepository["createIdempotentOrThrow"]>[0],
+  ): Promise<{ created: boolean; id: string }> {
+    return this.notificationRepository.createIdempotentOrThrow(params);
+  }
+
   async markAsRead(params: { userId: string; notificationIds: string[] }) {
     await this.notificationRepository.markAsRead(params);
     if (params.notificationIds.length === 0) return;

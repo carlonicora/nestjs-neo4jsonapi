@@ -13,3 +13,6 @@ export * from "./services/email.service";
 
 // Template helpers
 export * from "./email.helpers";
+
+// Extra template folders registered by packages
+export { registerEmailTemplateDirectory } from "./email.template.directories";
