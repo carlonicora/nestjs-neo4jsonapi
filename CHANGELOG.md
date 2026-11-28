@@ -1,3 +1,9 @@
+## [8.35.0](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.3...v8.35.0) (2026-11-28)
+
+### 🚀 Features
+
+* **packages:** a package module can register its own email-template folder (registerEmailTemplateDirectory) and API translations folder (registerI18nDirectory) from its forRoot; EmailService looks in the app's folder, then the package folders, then the library's, and the app's translation keys win over a package's; I18nModule is built with forRootAsync so the registered folders load; adds UserService.findRecordByUserId, NotificationServices.createIdempotentOrThrow (NotificationModule now exports NotificationServices) and PushService.findByUserId, so worker code calls services instead of repositories; @CacheInvalidate takes an optional elements resolver, and the records it returns before and after the write are invalidated too ([ec2da3d](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/ec2da3d0a76a94b7881898ed077d19415f8cdd83))
+
 ## [8.34.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.2...v8.34.3) (2026-11-28)
 
 ### 🐛 Bug Fixes
