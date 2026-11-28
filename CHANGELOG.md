@@ -1,3 +1,9 @@
+## [8.34.3](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.2...v8.34.3) (2026-11-28)
+
+### 🐛 Bug Fixes
+
+* **neo4j:** Neo4jScalarRow now types a column holding a list of maps, as readScalars returns for a collected list, including null entries ([fe44afb](https://github.com/carlonicora/nestjs-neo4jsonapi/commit/fe44afb96ea41a6dd83714b1a0a995b326ac63a3))
+
 ## [8.34.2](https://github.com/carlonicora/nestjs-neo4jsonapi/compare/v8.34.1...v8.34.2) (2026-11-26)
 
 ### 🐛 Bug Fixes
