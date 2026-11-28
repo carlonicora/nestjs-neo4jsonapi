@@ -63,10 +63,11 @@ const relatedNodePredicate = (alias: string, rule: RelatedNodeRule): string => {
 /**
  * One row of a scalar read (`Neo4jService.readScalars`): the record's columns as plain values.
  * Driver integers are numbers (an integer outside the safe range throws), a Date is `YYYY-MM-DD`,
- * a DateTime is UTC ISO text with millisecond precision, lists and maps converted the same way.
+ * a DateTime is UTC ISO text with millisecond precision, lists and maps converted the same way
+ * (a collected list of maps is a list of rows; a CASE ... ELSE null entry stays null).
  */
 export type Neo4jScalarRow = {
-  [column: string]: string | number | boolean | null | string[] | number[] | Neo4jScalarRow;
+  [column: string]: string | number | boolean | null | string[] | number[] | Neo4jScalarRow | (Neo4jScalarRow | null)[];
 };
 
 /**
